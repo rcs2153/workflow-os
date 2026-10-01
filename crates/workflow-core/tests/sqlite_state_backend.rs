@@ -13,8 +13,8 @@ use workflow_core::{
     run_durable_state_conformance, ActorId, CorrelationId, DurableStateBackendKind,
     DurableStateCapability, DurableStateConformanceFixture, DurableStateConformanceOutcome,
     DurableStateSchemaPosture, DurableStateSupport, DurableStateTransactionKind, EventId,
-    EventLogStore, EventSequenceNumber, IdempotencyKey, SchemaVersion, SpecContentHash,
-    SqliteStateBackend, StateBackend, Timestamp, WorkflowId, WorkflowRunEvent,
+    EventLogStore, EventSequenceNumber, IdempotencyKey, RunSnapshotStore, SchemaVersion,
+    SpecContentHash, SqliteStateBackend, StateBackend, Timestamp, WorkflowId, WorkflowRunEvent,
     WorkflowRunEventKind, WorkflowRunId, WorkflowVersion,
 };
 
@@ -109,7 +109,7 @@ fn sqlite_backend_passes_common_conformance_without_overclaiming() {
     );
     assert_eq!(
         contract.schema().adapter_schema_version(),
-        Some(2),
+        Some(3),
         "SQLite schema version is explicit"
     );
     assert_eq!(
@@ -180,6 +180,46 @@ fn sqlite_backend_reopens_with_ordered_events_and_wal_posture() {
 }
 
 #[test]
+fn sqlite_event_append_projects_snapshot_atomically_and_rejects_stale_overwrite() {
+    let fixture = Fixture::new();
+    fixture
+        .backend
+        .append_event(&fixture.created)
+        .expect("created event");
+    let created_snapshot = fixture
+        .backend
+        .load_snapshot(&fixture.created.run_id)
+        .expect("load projected snapshot")
+        .expect("created snapshot");
+    assert_eq!(created_snapshot.last_sequence_number.get(), 1);
+
+    fixture
+        .backend
+        .append_event(&fixture.validated)
+        .expect("validated event");
+    let validated_snapshot = fixture
+        .backend
+        .load_snapshot(&fixture.created.run_id)
+        .expect("load projected snapshot")
+        .expect("validated snapshot");
+    assert_eq!(validated_snapshot.last_sequence_number.get(), 2);
+
+    let error = fixture
+        .backend
+        .save_snapshot(&created_snapshot)
+        .expect_err("stale snapshot cannot overwrite event-derived state");
+    assert_eq!(error.code(), "state.sqlite.snapshot.history_mismatch");
+    assert_eq!(
+        fixture
+            .backend
+            .load_snapshot(&fixture.created.run_id)
+            .expect("load unchanged snapshot")
+            .expect("snapshot"),
+        validated_snapshot
+    );
+}
+
+#[test]
 fn sqlite_backend_serializes_competing_event_appends() {
     let fixture = Fixture::new();
     fixture
@@ -225,7 +265,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
     let secret = "secret-schema-token-marker";
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 3)
+        .pragma_update(None, "user_version", 4)
         .expect("set newer schema");
     drop(connection);
 
@@ -238,7 +278,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 2)
+        .pragma_update(None, "user_version", 3)
         .expect("restore schema version");
     connection
         .execute(
@@ -258,7 +298,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 }
 
 #[test]
-fn sqlite_backend_requires_and_performs_explicit_v1_to_v2_upgrade() {
+fn sqlite_backend_requires_explicit_v1_to_v2_then_v2_to_v3_upgrades() {
     let fixture = Fixture::new();
     fixture
         .backend
@@ -269,9 +309,13 @@ fn sqlite_backend_requires_and_performs_explicit_v1_to_v2_upgrade() {
     let required = SqliteStateBackend::open(&fixture.path).expect_err("upgrade is explicit");
     assert_eq!(required.code(), "state.sqlite.schema.upgrade_required");
 
+    let _v2 = SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(&fixture.path)
+        .expect("upgrade exact V1 database");
+    let v3_required = SqliteStateBackend::open(&fixture.path).expect_err("V3 upgrade is explicit");
+    assert_eq!(v3_required.code(), "state.sqlite.schema.upgrade_required");
     let upgraded =
-        SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(&fixture.path)
-            .expect("upgrade exact V1 database");
+        SqliteStateBackend::upgrade_authorized_execution_continuity_v2_to_v3(&fixture.path)
+            .expect("upgrade exact empty-continuity V2 database");
     let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
     assert_eq!(
         reopened
@@ -292,11 +336,11 @@ fn sqlite_backend_requires_and_performs_explicit_v1_to_v2_upgrade() {
             |row| row.get(0),
         )
         .expect("trusted time singleton");
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     assert_eq!(trusted_time_rows, 1);
 
-    SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(&fixture.path)
-        .expect("upgrade is idempotent for exact V2");
+    SqliteStateBackend::upgrade_authorized_execution_continuity_v2_to_v3(&fixture.path)
+        .expect("upgrade is idempotent for exact V3");
     assert_eq!(
         upgraded
             .read_events(&fixture.created.run_id)
@@ -334,6 +378,8 @@ fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
             .expect("concurrent upgrader converges on exact V2");
     }
 
+    SqliteStateBackend::upgrade_authorized_execution_continuity_v2_to_v3(&fixture.path)
+        .expect("finish explicit V3 upgrade");
     let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
     assert_eq!(
         reopened
@@ -352,7 +398,7 @@ fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
             |row| row.get(0),
         )
         .expect("trusted time singleton");
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     assert_eq!(trusted_time_rows, 1);
 }
 
@@ -392,6 +438,45 @@ fn sqlite_backend_v1_upgrade_fails_closed_and_rolls_back() {
         .expect("continuity table absence");
     assert_eq!(version, 1);
     assert_eq!(continuity_table_count, 0);
+}
+
+#[test]
+fn sqlite_backend_v2_to_v3_upgrade_rejects_unprojected_continuity_history() {
+    let fixture = Fixture::new();
+    downgrade_fixture_to_v2(&fixture.path);
+    let connection = Connection::open(&fixture.path).expect("open V2 fixture");
+    connection
+        .pragma_update(None, "foreign_keys", false)
+        .expect("disable foreign keys for legacy corruption fixture");
+    connection
+        .execute(
+            "INSERT INTO continuity_operations
+             (operation_id,receipt_id,operation_kind,request_commitment,request_json,
+              operation_commitment,disposition,request_window_id,request_yield_generation_id,
+              rejection_commitment,rejection_kind,trusted_time_source_kind,
+              trusted_time_provenance_commitment,trusted_time_epoch_id,observed_seconds,
+              observed_nanos,trusted_time_commitment,rejection_json,committed_seconds,
+              committed_nanos)
+             VALUES ('operation/legacy','receipt/legacy','register_yield','request','{}',
+                     'operation','committed_security_rejection','window/legacy','yield/legacy',
+                     'rejection','time_expired','core_injected_clock_v1','provenance','epoch',
+                     1,0,'trusted','{}',1,0)",
+            [],
+        )
+        .expect("seed one legacy continuity operation");
+    drop(connection);
+
+    let error = SqliteStateBackend::upgrade_authorized_execution_continuity_v2_to_v3(&fixture.path)
+        .expect_err("legacy continuity history requires explicit projection migration");
+    assert_eq!(
+        error.code(),
+        "state.sqlite.schema.upgrade_legacy_projection_required"
+    );
+    let connection = Connection::open(&fixture.path).expect("inspect rolled-back V2 fixture");
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("schema version");
+    assert_eq!(version, 2);
 }
 
 #[test]
@@ -525,6 +610,9 @@ fn sqlite_backend_health_rejects_relational_identity_drift() {
     let drifted_run_id = WorkflowRunId::new("run-sqlite-relational-drift").expect("drifted run id");
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
+        .pragma_update(None, "foreign_keys", false)
+        .expect("disable foreign keys for corruption injection");
+    connection
         .execute(
             "UPDATE events SET run_id = ?1 WHERE event_id = ?2",
             params![drifted_run_id.as_str(), fixture.created.event_id.as_str()],
@@ -536,11 +624,14 @@ fn sqlite_backend_health_rejects_relational_identity_drift() {
         .backend
         .read_events(&drifted_run_id)
         .expect_err("relational identity drift rejected during authoritative read");
-    let health = fixture.backend.health_check().expect("health result");
+    let health_error = fixture
+        .backend
+        .health_check()
+        .expect_err("foreign-key drift requires schema recovery");
 
     assert_eq!(read_error.code(), "state.sqlite.record.identity_mismatch");
-    assert!(!health.healthy);
-    assert!(!format!("{health:?}").contains(fixture.path.to_string_lossy().as_ref()));
+    assert_eq!(health_error.code(), "state.sqlite.schema.recovery_required");
+    assert!(!format!("{health_error:?}").contains(fixture.path.to_string_lossy().as_ref()));
 }
 
 fn spawn_append(
@@ -571,6 +662,16 @@ fn downgrade_fixture_to_v1(path: &Path) {
     connection
         .execute_batch(
             "PRAGMA foreign_keys = OFF;
+             DROP TABLE continuity_projection_bindings;
+             DROP INDEX events_full_identity;
+             ALTER TABLE snapshots RENAME TO snapshots_v3;
+             CREATE TABLE snapshots (
+    run_id TEXT PRIMARY KEY,
+    payload TEXT NOT NULL
+);
+             INSERT INTO snapshots (run_id, payload)
+             SELECT run_id, payload FROM snapshots_v3;
+             DROP TABLE snapshots_v3;
              DROP TABLE continuity_operations;
              DROP TABLE continuity_directives;
              DROP TABLE continuity_waits;
@@ -586,4 +687,30 @@ fn downgrade_fixture_to_v1(path: &Path) {
              PRAGMA user_version = 1;",
         )
         .expect("construct exact V1 fixture");
+}
+
+fn downgrade_fixture_to_v2(path: &Path) {
+    let connection = Connection::open(path).expect("open fixture for V2 downgrade");
+    connection
+        .execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             DROP TABLE continuity_projection_bindings;
+             DROP INDEX events_full_identity;
+             DROP INDEX continuity_windows_run_identity;
+             ALTER TABLE snapshots RENAME TO snapshots_v3;
+             CREATE TABLE snapshots (
+    run_id TEXT PRIMARY KEY,
+    payload TEXT NOT NULL
+);
+             INSERT INTO snapshots (run_id, payload)
+             SELECT run_id, payload FROM snapshots_v3;
+             DROP TABLE snapshots_v3;
+             UPDATE schema_metadata
+             SET schema_version = 2,
+                 migration_state = 'ready',
+                 checksum = 'sha256:2a4c27713b3637989cfafce0ba68bb8444293edd6ce2557affc218ea13b7b1a5'
+             WHERE singleton = 1;
+             PRAGMA user_version = 2;",
+        )
+        .expect("construct exact V2 fixture");
 }

@@ -14235,11 +14235,11 @@ where
         approval_proof_marker_capable: true,
     };
 
-    let decision_result;
-    let local_check_result_reference;
-    if approval.approval.decision == ApprovalDecisionKind::Denied {
+    let (decision_result, local_check_result_reference) = if approval.approval.decision
+        == ApprovalDecisionKind::Denied
+    {
         let registration = core_owned_authoritative_local_check_runtime_fact_source_registration()?;
-        decision_result =
+        let decision_result =
             decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt_capability(
                 executor,
                 immutable_bundle_store,
@@ -14253,7 +14253,7 @@ where
                 },
                 &validation_capability,
             )?;
-        local_check_result_reference = None;
+        (decision_result, None)
     } else {
         let evaluated_at = Timestamp::now_utc();
         let material = reassess_selected_project_validation_runtime_fact_source(
@@ -14299,7 +14299,7 @@ where
         report.local_check_result_references.push(stable_reference);
         let registration = material.bridge.registration().clone();
         let source = material.bridge.source().clone();
-        decision_result =
+        let decision_result =
             decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt_capability(
                 executor,
                 immutable_bundle_store,
@@ -14313,8 +14313,8 @@ where
                 },
                 &validation_capability,
             )?;
-        local_check_result_reference = Some(reference);
-    }
+        (decision_result, Some(reference))
+    };
 
     let (decision, authority_receipt) = decision_result.into_parts();
     if !decision.run().snapshot.status.is_terminal() {

@@ -988,10 +988,8 @@ fn classify_unknown_entry(path: &Path, findings: &mut Vec<StateMigrationCompatib
         );
         return;
     }
-    let empty_directory = metadata.is_dir()
-        && fs::read_dir(path)
-            .ok()
-            .is_some_and(|mut entries| entries.next().is_none());
+    let empty_directory =
+        metadata.is_dir() && fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_none());
     push_finding(
         findings,
         if empty_directory {

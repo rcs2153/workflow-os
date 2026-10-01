@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use rusqlite::{
-    params, Connection, Error as SqliteError, ErrorCode, OpenFlags, OptionalExtension,
+    params, Connection, Error as SqliteError, ErrorCode, OpenFlags, OptionalExtension, Transaction,
     TransactionBehavior,
 };
 use serde::de::DeserializeOwned;
@@ -28,23 +28,28 @@ use crate::{
     DurableStateTransactionKind, DurableStateTransactionSupport, EventLogStore, IdempotencyKey,
     IdempotencyResult, IdempotencyStore, IdempotencyWrite, LockLease, LockStore, PolicyAuditRecord,
     PolicyAuditStore, ProjectId, ProjectStateRecord, ProjectStateStore, RunSnapshotStore,
-    SideEffectId, SideEffectRecord, SideEffectRecordStore, StateBackend, StateMigrationAttempt,
-    StateMigrationDigest, StateMigrationImporterTransactionVersion, StateMigrationPlan,
-    StateMigrationRecordCount, StateMigrationWriterCompatibility,
+    SideEffectId, SideEffectRecord, SideEffectRecordStore, SpecContentHash, StateBackend,
+    StateMigrationAttempt, StateMigrationDigest, StateMigrationImporterTransactionVersion,
+    StateMigrationPlan, StateMigrationRecordCount, StateMigrationWriterCompatibility,
     StateMigrationWriterProtocolVersion, Timestamp, WorkReportArtifactRecord,
     WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactStore, WorkReportId, WorkflowId,
     WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
 };
 
-const ADAPTER_SCHEMA_VERSION: u32 = 2;
-const PREVIOUS_ADAPTER_SCHEMA_VERSION: u32 = 1;
-const PREVIOUS_SCHEMA_CHECKSUM: &str = "workflow-os-sqlite-state-v1";
-const PREVIOUS_SCHEMA_MANIFEST_DIGEST: &str =
+const ADAPTER_SCHEMA_VERSION: u32 = 3;
+const PREVIOUS_ADAPTER_SCHEMA_VERSION: u32 = 2;
+const LEGACY_ADAPTER_SCHEMA_VERSION: u32 = 1;
+const LEGACY_SCHEMA_CHECKSUM: &str = "workflow-os-sqlite-state-v1";
+const LEGACY_SCHEMA_MANIFEST_DIGEST: &str =
     "8a35e6cb79e4908f93738e4e7320ca177a93643d7e8411b640bac81ec3c3ff96";
-const SCHEMA_CHECKSUM: &str =
+const PREVIOUS_SCHEMA_CHECKSUM: &str =
     "sha256:2a4c27713b3637989cfafce0ba68bb8444293edd6ce2557affc218ea13b7b1a5";
-const SCHEMA_MANIFEST_DIGEST: &str =
+const PREVIOUS_SCHEMA_MANIFEST_DIGEST: &str =
     "2a4c27713b3637989cfafce0ba68bb8444293edd6ce2557affc218ea13b7b1a5";
+const SCHEMA_CHECKSUM: &str =
+    "sha256:6f460484d9034f04952b3ab1dbed307861460fa3b7f027eb7fb7229c31eac1b0";
+const SCHEMA_MANIFEST_DIGEST: &str =
+    "6f460484d9034f04952b3ab1dbed307861460fa3b7f027eb7fb7229c31eac1b0";
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(2);
 
 const BASE_SCHEMA: &str = r"
@@ -138,6 +143,8 @@ CREATE TABLE migration_metadata (
 ";
 
 const CONTINUITY_SCHEMA_V2: &str = include_str!("sqlite_continuity_schema_v2.sql");
+const CONTINUITY_PROJECTION_SCHEMA_V3: &str =
+    include_str!("sqlite_continuity_projection_schema_v3.sql");
 const CONTINUITY_CLOCK_PROVENANCE: &str =
     "77efdb5ae4c8696d8573d816a52dce594793b1749471a98cc58a85fc8129e50f";
 const CONTINUITY_CLOCK_EPOCH: &str = "epoch/sqlite-local-live-state/1";
@@ -300,6 +307,93 @@ impl SqliteStateBackend {
                     "SQLite state schema metadata could not be read",
                 )
             })?;
+        if version == PREVIOUS_ADAPTER_SCHEMA_VERSION {
+            validate_v2_upgrade_eligibility(&transaction)?;
+            transaction.commit().map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "schema.upgrade_failed",
+                    "SQLite state schema upgrade could not commit",
+                )
+            })?;
+            return Ok(backend);
+        }
+        if version != LEGACY_ADAPTER_SCHEMA_VERSION {
+            return Err(sqlite_state_error(
+                "schema.incompatible",
+                "SQLite state schema version is not supported",
+            ));
+        }
+        validate_v1_upgrade_eligibility(&transaction)?;
+        transaction
+            .execute_batch(CONTINUITY_SCHEMA_V2)
+            .and_then(|()| {
+                initialize_continuity_trusted_time(&transaction)?;
+                transaction.execute(
+                    "UPDATE schema_metadata
+                     SET schema_version = ?1, checksum = ?2
+                     WHERE singleton = 1",
+                    params![PREVIOUS_ADAPTER_SCHEMA_VERSION, PREVIOUS_SCHEMA_CHECKSUM],
+                )?;
+                Ok(())
+            })
+            .and_then(|()| {
+                transaction.pragma_update(None, "user_version", PREVIOUS_ADAPTER_SCHEMA_VERSION)
+            })
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "schema.upgrade_failed",
+                    "SQLite state schema upgrade failed",
+                )
+            })?;
+        validate_v2_upgrade_eligibility(&transaction)?;
+        transaction.commit().map_err(|error| {
+            map_sqlite_error(
+                error,
+                "schema.upgrade_failed",
+                "SQLite state schema upgrade could not commit",
+            )
+        })?;
+        Ok(backend)
+    }
+
+    /// Explicitly upgrades one exact ready V2 database to the additive V3
+    /// continuity event/state projection schema.
+    ///
+    /// V2 databases containing committed continuity operations fail closed:
+    /// the upgrade does not fabricate historical projection events.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error for incompatible, nonempty legacy
+    /// projection history, invalid event history, or interrupted upgrades.
+    pub fn upgrade_authorized_execution_continuity_v2_to_v3(
+        database_path: impl Into<PathBuf>,
+    ) -> Result<Self, WorkflowOsError> {
+        let backend = Self {
+            database_path: database_path.into(),
+            busy_timeout: DEFAULT_BUSY_TIMEOUT,
+        };
+        let mut connection = backend.existing_connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "schema.upgrade_failed",
+                    "SQLite state schema upgrade could not start",
+                )
+            })?;
+        let version: u32 = transaction
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "schema.read_failed",
+                    "SQLite state schema metadata could not be read",
+                )
+            })?;
         if version == ADAPTER_SCHEMA_VERSION {
             validate_schema_metadata(&transaction)?;
             transaction.commit().map_err(|error| {
@@ -317,20 +411,32 @@ impl SqliteStateBackend {
                 "SQLite state schema version is not supported",
             ));
         }
-        validate_v1_upgrade_eligibility(&transaction)?;
+        validate_v2_upgrade_eligibility(&transaction)?;
+        if table_count(&transaction, "continuity_operations")? != 0 {
+            return Err(sqlite_state_error(
+                "schema.upgrade_legacy_projection_required",
+                "SQLite V2 continuity history cannot be projected automatically",
+            ));
+        }
+        validate_continuity_security_state(&transaction)?;
         transaction
-            .execute_batch(CONTINUITY_SCHEMA_V2)
-            .and_then(|()| {
-                initialize_continuity_trusted_time(&transaction)?;
-                transaction.execute(
-                    "UPDATE schema_metadata
-                     SET schema_version = ?1, checksum = ?2
-                     WHERE singleton = 1",
-                    params![ADAPTER_SCHEMA_VERSION, SCHEMA_CHECKSUM],
-                )?;
-                Ok(())
-            })
-            .and_then(|()| transaction.pragma_update(None, "user_version", ADAPTER_SCHEMA_VERSION))
+            .execute_batch(CONTINUITY_PROJECTION_SCHEMA_V3)
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "schema.upgrade_failed",
+                    "SQLite state schema upgrade failed",
+                )
+            })?;
+        migrate_v3_snapshots(&transaction)?;
+        transaction
+            .execute(
+                "UPDATE schema_metadata
+                 SET schema_version = ?1, checksum = ?2
+                 WHERE singleton = 1",
+                params![ADAPTER_SCHEMA_VERSION, SCHEMA_CHECKSUM],
+            )
+            .and_then(|_| transaction.pragma_update(None, "user_version", ADAPTER_SCHEMA_VERSION))
             .map_err(|error| {
                 map_sqlite_error(
                     error,
@@ -642,6 +748,20 @@ impl SqliteStateBackend {
                         "state migration destination could not be initialized",
                     )
                 })?;
+            transaction
+                .execute_batch(CONTINUITY_PROJECTION_SCHEMA_V3)
+                .map_err(|_| {
+                    migration_runtime_error(
+                        "destination.initialize_failed",
+                        "state migration destination could not be initialized",
+                    )
+                })?;
+            migrate_v3_snapshots(&transaction).map_err(|_| {
+                migration_runtime_error(
+                    "destination.initialize_failed",
+                    "state migration destination could not be initialized",
+                )
+            })?;
             initialize_continuity_trusted_time(&transaction).map_err(|_| {
                 migration_runtime_error(
                     "destination.initialize_failed",
@@ -832,15 +952,10 @@ impl SqliteStateBackend {
 
         for (run_id, events) in events_by_run {
             let run = WorkflowRun::rehydrate(&events).map_err(|_| import_failed())?;
-            transaction
-                .execute(
-                    "INSERT INTO snapshots (run_id, payload) VALUES (?1, ?2)",
-                    params![
-                        run_id.as_str(),
-                        encode_json(&run.snapshot, "migration snapshot")?
-                    ],
-                )
-                .map_err(|_| import_failed())?;
+            if run.snapshot.identity.run_id != run_id {
+                return Err(import_failed());
+            }
+            write_snapshot_payload(&transaction, &run.snapshot).map_err(|_| import_failed())?;
             for approval in run
                 .snapshot
                 .approval_requests
@@ -1304,6 +1419,16 @@ impl SqliteStateBackend {
                             "SQLite state schema could not be initialized",
                         )
                     })?;
+                transaction
+                    .execute_batch(CONTINUITY_PROJECTION_SCHEMA_V3)
+                    .map_err(|error| {
+                        map_sqlite_error(
+                            error,
+                            "schema.initialize_failed",
+                            "SQLite state schema could not be initialized",
+                        )
+                    })?;
+                migrate_v3_snapshots(&transaction)?;
                 initialize_continuity_trusted_time(&transaction).map_err(|error| {
                     map_sqlite_error(
                         error,
@@ -1344,11 +1469,18 @@ impl SqliteStateBackend {
                 })?;
                 Ok(())
             }
-            PREVIOUS_ADAPTER_SCHEMA_VERSION => {
+            LEGACY_ADAPTER_SCHEMA_VERSION => {
                 validate_v1_upgrade_eligibility(connection)?;
                 Err(sqlite_state_error(
                     "schema.upgrade_required",
                     "SQLite state schema requires an explicit continuity upgrade",
+                ))
+            }
+            PREVIOUS_ADAPTER_SCHEMA_VERSION => {
+                validate_v2_upgrade_eligibility(connection)?;
+                Err(sqlite_state_error(
+                    "schema.upgrade_required",
+                    "SQLite state schema requires an explicit continuity projection upgrade",
                 ))
             }
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(connection),
@@ -1523,12 +1655,6 @@ impl SqliteStateBackend {
 
 impl EventLogStore for SqliteStateBackend {
     fn append_event(&self, event: &WorkflowRunEvent) -> Result<(), WorkflowOsError> {
-        let sequence_number = i64::try_from(event.sequence_number.get()).map_err(|_| {
-            sqlite_state_error(
-                "event.sequence_invalid",
-                "SQLite event sequence is outside the supported range",
-            )
-        })?;
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -1539,55 +1665,7 @@ impl EventLogStore for SqliteStateBackend {
                     "SQLite event transaction could not start",
                 )
             })?;
-        if row_exists(
-            &transaction,
-            "SELECT 1 FROM events WHERE event_id = ?1",
-            event.event_id.as_str(),
-        )? {
-            return Err(state_error(
-                "state.event.duplicate_id",
-                "duplicate event ID",
-            ));
-        }
-        if transaction
-            .query_row(
-                "SELECT 1 FROM events WHERE run_id = ?1 AND sequence_number = ?2",
-                params![event.run_id.as_str(), sequence_number],
-                |_| Ok(()),
-            )
-            .optional()
-            .map_err(|error| {
-                map_sqlite_error(
-                    error,
-                    "read.failed",
-                    "SQLite event history could not be read",
-                )
-            })?
-            .is_some()
-        {
-            return Err(state_error(
-                "state.event.duplicate_sequence",
-                "duplicate event sequence",
-            ));
-        }
-        let history = Self::read_events_with_connection(&transaction, &event.run_id)?;
-        validate_append_against_history(&history, event)?;
-        let payload = encode_json(event, "event")?;
-        transaction
-            .execute(
-                "INSERT INTO events
-                 (event_id, run_id, sequence_number, payload)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    event.event_id.as_str(),
-                    event.run_id.as_str(),
-                    sequence_number,
-                    payload
-                ],
-            )
-            .map_err(|error| {
-                map_sqlite_error(error, "write.failed", "SQLite event could not be written")
-            })?;
+        append_event_and_project_snapshot(&transaction, event)?;
         transaction.commit().map_err(|error| {
             map_sqlite_error(
                 error,
@@ -1607,13 +1685,59 @@ impl EventLogStore for SqliteStateBackend {
 
 impl RunSnapshotStore for SqliteStateBackend {
     fn save_snapshot(&self, snapshot: &WorkflowRunSnapshot) -> Result<(), WorkflowOsError> {
-        upsert_payload(
-            &self.connection()?,
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "write.failed",
+                    "SQLite snapshot transaction could not start",
+                )
+            })?;
+        let history = Self::read_events_with_connection(&transaction, &snapshot.identity.run_id)?;
+        let derived = WorkflowRun::rehydrate(&history)?.snapshot;
+        if &derived != snapshot {
+            return Err(sqlite_state_error(
+                "snapshot.history_mismatch",
+                "SQLite snapshot does not match durable event history",
+            ));
+        }
+        let existing: Option<WorkflowRunSnapshot> = read_optional_payload(
+            &transaction,
             "snapshots",
             "run_id",
             snapshot.identity.run_id.as_str(),
-            &encode_json(snapshot, "snapshot")?,
-        )
+            "snapshot",
+        )?;
+        if let Some(existing) = existing {
+            if existing == *snapshot {
+                transaction.commit().map_err(|error| {
+                    map_sqlite_error(
+                        error,
+                        "write.failed",
+                        "SQLite snapshot transaction could not commit",
+                    )
+                })?;
+                return Ok(());
+            }
+            if existing.last_sequence_number.next() != snapshot.last_sequence_number
+                || existing.identity != snapshot.identity
+            {
+                return Err(sqlite_state_error(
+                    "snapshot.stale",
+                    "SQLite snapshot update is stale or non-contiguous",
+                ));
+            }
+        }
+        write_snapshot_payload(&transaction, snapshot)?;
+        transaction.commit().map_err(|error| {
+            map_sqlite_error(
+                error,
+                "write.failed",
+                "SQLite snapshot transaction could not commit",
+            )
+        })
     }
 
     fn load_snapshot(
@@ -1638,6 +1762,132 @@ impl RunSnapshotStore for SqliteStateBackend {
         }
         Ok(snapshot)
     }
+}
+
+fn append_event_and_project_snapshot(
+    transaction: &Transaction<'_>,
+    event: &WorkflowRunEvent,
+) -> Result<WorkflowRunSnapshot, WorkflowOsError> {
+    let sequence_number = i64::try_from(event.sequence_number.get()).map_err(|_| {
+        sqlite_state_error(
+            "event.sequence_invalid",
+            "SQLite event sequence is outside the supported range",
+        )
+    })?;
+    if row_exists(
+        transaction,
+        "SELECT 1 FROM events WHERE event_id = ?1",
+        event.event_id.as_str(),
+    )? {
+        return Err(state_error(
+            "state.event.duplicate_id",
+            "duplicate event ID",
+        ));
+    }
+    if transaction
+        .query_row(
+            "SELECT 1 FROM events WHERE run_id = ?1 AND sequence_number = ?2",
+            params![event.run_id.as_str(), sequence_number],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| {
+            map_sqlite_error(
+                error,
+                "read.failed",
+                "SQLite event history could not be read",
+            )
+        })?
+        .is_some()
+    {
+        return Err(state_error(
+            "state.event.duplicate_sequence",
+            "duplicate event sequence",
+        ));
+    }
+    let mut history = SqliteStateBackend::read_events_with_connection(transaction, &event.run_id)?;
+    validate_append_against_history(&history, event)?;
+    if let Some(existing) = read_optional_payload::<WorkflowRunSnapshot>(
+        transaction,
+        "snapshots",
+        "run_id",
+        event.run_id.as_str(),
+        "snapshot",
+    )? {
+        let prior = WorkflowRun::rehydrate(&history)?.snapshot;
+        if existing != prior {
+            return Err(sqlite_state_error(
+                "snapshot.history_mismatch",
+                "SQLite snapshot does not match durable event history",
+            ));
+        }
+    }
+    transaction
+        .execute(
+            "INSERT INTO events
+             (event_id, run_id, sequence_number, payload)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                event.event_id.as_str(),
+                event.run_id.as_str(),
+                sequence_number,
+                encode_json(event, "event")?
+            ],
+        )
+        .map_err(|error| {
+            map_sqlite_error(error, "write.failed", "SQLite event could not be written")
+        })?;
+    history.push(event.clone());
+    let snapshot = WorkflowRun::rehydrate(&history)?.snapshot;
+    write_snapshot_payload(transaction, &snapshot)?;
+    Ok(snapshot)
+}
+
+fn write_snapshot_payload(
+    transaction: &Transaction<'_>,
+    snapshot: &WorkflowRunSnapshot,
+) -> Result<(), WorkflowOsError> {
+    let payload = encode_json(snapshot, "snapshot")?;
+    let commitment = snapshot_commitment(&payload);
+    let sequence_number = i64::try_from(snapshot.last_sequence_number.get()).map_err(|_| {
+        sqlite_state_error(
+            "snapshot.sequence_invalid",
+            "SQLite snapshot sequence is outside the supported range",
+        )
+    })?;
+    transaction
+        .execute(
+            "INSERT INTO snapshots
+             (run_id, last_sequence_number, last_event_id, snapshot_commitment, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(run_id) DO UPDATE SET
+               last_sequence_number = excluded.last_sequence_number,
+               last_event_id = excluded.last_event_id,
+               snapshot_commitment = excluded.snapshot_commitment,
+               payload = excluded.payload",
+            params![
+                snapshot.identity.run_id.as_str(),
+                sequence_number,
+                snapshot.last_event_id.as_str(),
+                commitment.as_str(),
+                payload
+            ],
+        )
+        .map_err(|error| {
+            map_sqlite_error(
+                error,
+                "write.failed",
+                "SQLite snapshot could not be written",
+            )
+        })?;
+    Ok(())
+}
+
+fn snapshot_commitment(payload: &str) -> SpecContentHash {
+    let mut hasher = Sha256::new();
+    hasher.update(b"workflow-os/run-snapshot/v1\0");
+    hasher.update(payload.as_bytes());
+    SpecContentHash::from_bytes(hasher.finalize())
 }
 
 impl IdempotencyStore for SqliteStateBackend {
@@ -2441,7 +2691,69 @@ fn initialize_continuity_trusted_time(connection: &Connection) -> Result<(), rus
     Ok(())
 }
 
+fn migrate_v3_snapshots(transaction: &Transaction<'_>) -> Result<(), WorkflowOsError> {
+    let mut statement = transaction
+        .prepare("SELECT run_id, payload FROM snapshots_v2 ORDER BY run_id")
+        .map_err(|_| schema_recovery_required())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|_| schema_recovery_required())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| schema_recovery_required())?;
+    drop(statement);
+
+    for (run_id, payload) in rows {
+        let snapshot: WorkflowRunSnapshot = decode_json(&payload, "snapshot")?;
+        if snapshot.identity.run_id.as_str() != run_id {
+            return Err(schema_recovery_required());
+        }
+        let history = SqliteStateBackend::read_events_with_connection(
+            transaction,
+            &snapshot.identity.run_id,
+        )?;
+        let derived = WorkflowRun::rehydrate(&history)?.snapshot;
+        if derived != snapshot {
+            return Err(schema_recovery_required());
+        }
+        write_snapshot_payload(transaction, &snapshot)?;
+    }
+    transaction
+        .execute("DROP TABLE snapshots_v2", [])
+        .map_err(|_| schema_recovery_required())?;
+    Ok(())
+}
+
 fn validate_v1_upgrade_eligibility(connection: &Connection) -> Result<(), WorkflowOsError> {
+    let metadata = connection
+        .query_row(
+            "SELECT schema_version, migration_state, checksum
+             FROM schema_metadata WHERE singleton = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, u32>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| schema_recovery_required())?;
+    if metadata
+        != Some((
+            LEGACY_ADAPTER_SCHEMA_VERSION,
+            "ready".to_owned(),
+            LEGACY_SCHEMA_CHECKSUM.to_owned(),
+        ))
+    {
+        return Err(schema_recovery_required());
+    }
+    validate_schema_manifest(connection, LEGACY_SCHEMA_MANIFEST_DIGEST)
+}
+
+fn validate_v2_upgrade_eligibility(connection: &Connection) -> Result<(), WorkflowOsError> {
     let metadata = connection
         .query_row(
             "SELECT schema_version, migration_state, checksum

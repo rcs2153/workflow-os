@@ -1,10 +1,11 @@
 use std::collections::BTreeSet;
+use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    LocalStateBackend, PostgresStateBackend, SqliteStateBackend, WorkflowOsError,
-    WorkflowOsErrorKind,
+    EventId, EventSequenceNumber, LocalStateBackend, PostgresStateBackend, SpecContentHash,
+    SqliteStateBackend, WorkflowOsError, WorkflowOsErrorKind,
 };
 
 macro_rules! bounded_string_enum_deserialize {
@@ -131,6 +132,463 @@ impl AuthorizedExecutionContinuityOperationKind {
     pub const fn all() -> &'static [Self] {
         &Self::ALL
     }
+}
+
+/// Version of the event-safe continuity projection payload.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorizedExecutionContinuityProjectionVersion {
+    /// Initial closed projection vocabulary.
+    V1,
+}
+
+bounded_string_enum_deserialize!(
+    AuthorizedExecutionContinuityProjectionVersion,
+    "authorized execution continuity projection version is invalid",
+    { "v1" => AuthorizedExecutionContinuityProjectionVersion::V1 }
+);
+
+/// Durable disposition recorded by a continuity projection event.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorizedExecutionContinuityProjectionDisposition {
+    /// The requested continuity transition committed.
+    Applied,
+    /// A bounded security rejection committed without granting authority.
+    SecurityRejected,
+}
+
+bounded_string_enum_deserialize!(
+    AuthorizedExecutionContinuityProjectionDisposition,
+    "authorized execution continuity projection disposition is invalid",
+    {
+        "applied" => AuthorizedExecutionContinuityProjectionDisposition::Applied,
+        "security_rejected" => AuthorizedExecutionContinuityProjectionDisposition::SecurityRejected
+    }
+);
+
+/// Closed applied-result vocabulary for continuity projection events.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorizedExecutionContinuityProjectionResultKind {
+    /// One yield and its bounded waits were registered.
+    YieldRegistered,
+    /// One typed wait transitioned.
+    WaitTransitioned,
+    /// One directive was consumed and an attempt started.
+    DirectiveConsumed,
+    /// One ordinary attempt outcome was recorded.
+    AttemptOutcomeRecorded,
+    /// One ambiguous attempt was moved to recovery-required posture.
+    AmbiguousAttemptRecovered,
+}
+
+bounded_string_enum_deserialize!(
+    AuthorizedExecutionContinuityProjectionResultKind,
+    "authorized execution continuity projection result kind is invalid",
+    {
+        "yield_registered" => AuthorizedExecutionContinuityProjectionResultKind::YieldRegistered,
+        "wait_transitioned" => AuthorizedExecutionContinuityProjectionResultKind::WaitTransitioned,
+        "directive_consumed" => AuthorizedExecutionContinuityProjectionResultKind::DirectiveConsumed,
+        "attempt_outcome_recorded" => AuthorizedExecutionContinuityProjectionResultKind::AttemptOutcomeRecorded,
+        "ambiguous_attempt_recovered" => AuthorizedExecutionContinuityProjectionResultKind::AmbiguousAttemptRecovered
+    }
+);
+
+/// Closed event-safe class for a committed continuity security rejection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorizedExecutionContinuityProjectionRejectionKind {
+    /// Trusted time regressed.
+    TimeRegressed,
+    /// Trusted time provenance was not accepted.
+    TimeUntrusted,
+    /// Trusted time epoch did not match the live instance.
+    TimeEpochMismatch,
+    /// The execution window had expired.
+    TimeExpired,
+}
+
+bounded_string_enum_deserialize!(
+    AuthorizedExecutionContinuityProjectionRejectionKind,
+    "authorized execution continuity projection rejection kind is invalid",
+    {
+        "time_regressed" => AuthorizedExecutionContinuityProjectionRejectionKind::TimeRegressed,
+        "time_untrusted" => AuthorizedExecutionContinuityProjectionRejectionKind::TimeUntrusted,
+        "time_epoch_mismatch" => AuthorizedExecutionContinuityProjectionRejectionKind::TimeEpochMismatch,
+        "time_expired" => AuthorizedExecutionContinuityProjectionRejectionKind::TimeExpired
+    }
+);
+
+/// Event-safe cursor used by a continuity projection payload.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AuthorizedExecutionContinuityProjectionCursor {
+    sequence_number: EventSequenceNumber,
+    event_id: EventId,
+}
+
+impl AuthorizedExecutionContinuityProjectionCursor {
+    /// Creates an event-safe projection cursor.
+    #[must_use]
+    pub const fn new(sequence_number: EventSequenceNumber, event_id: EventId) -> Self {
+        Self {
+            sequence_number,
+            event_id,
+        }
+    }
+
+    /// Returns the event sequence.
+    #[must_use]
+    pub const fn sequence_number(&self) -> EventSequenceNumber {
+        self.sequence_number
+    }
+
+    /// Returns the event identity.
+    #[must_use]
+    pub const fn event_id(&self) -> &EventId {
+        &self.event_id
+    }
+}
+
+/// Closed, bounded payload for one committed continuity projection.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct AuthorizedExecutionContinuityProjectionEvent {
+    version: AuthorizedExecutionContinuityProjectionVersion,
+    operation_kind: AuthorizedExecutionContinuityOperationKind,
+    disposition: AuthorizedExecutionContinuityProjectionDisposition,
+    result_kind: Option<AuthorizedExecutionContinuityProjectionResultKind>,
+    rejection_kind: Option<AuthorizedExecutionContinuityProjectionRejectionKind>,
+    operation_id: String,
+    receipt_id: String,
+    projection_commitment: SpecContentHash,
+    expected_input_cursor: AuthorizedExecutionContinuityProjectionCursor,
+    committed_result_cursor: AuthorizedExecutionContinuityProjectionCursor,
+    target_id: String,
+    target_revision: u64,
+}
+
+/// Validated fields for constructing a continuity projection event.
+pub(crate) struct AuthorizedExecutionContinuityProjectionEventDefinition {
+    pub(crate) operation_kind: AuthorizedExecutionContinuityOperationKind,
+    pub(crate) disposition: AuthorizedExecutionContinuityProjectionDisposition,
+    pub(crate) result_kind: Option<AuthorizedExecutionContinuityProjectionResultKind>,
+    pub(crate) rejection_kind: Option<AuthorizedExecutionContinuityProjectionRejectionKind>,
+    pub(crate) operation_id: String,
+    pub(crate) receipt_id: String,
+    pub(crate) projection_commitment: SpecContentHash,
+    pub(crate) expected_input_cursor: AuthorizedExecutionContinuityProjectionCursor,
+    pub(crate) committed_result_cursor: AuthorizedExecutionContinuityProjectionCursor,
+    pub(crate) target_id: String,
+    pub(crate) target_revision: u64,
+}
+
+impl AuthorizedExecutionContinuityProjectionEvent {
+    pub(crate) fn new(
+        definition: AuthorizedExecutionContinuityProjectionEventDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        validate_projection_reference(&definition.operation_id)?;
+        validate_projection_reference(&definition.receipt_id)?;
+        validate_projection_reference(&definition.target_id)?;
+        if definition.target_revision == 0
+            || definition.expected_input_cursor.sequence_number().next()
+                != definition.committed_result_cursor.sequence_number()
+            || definition.expected_input_cursor.event_id()
+                == definition.committed_result_cursor.event_id()
+        {
+            return Err(projection_model_error("event.invalid"));
+        }
+        match definition.disposition {
+            AuthorizedExecutionContinuityProjectionDisposition::Applied
+                if projection_result_matches_operation(
+                    definition.operation_kind,
+                    definition.result_kind,
+                ) && definition.rejection_kind.is_none() => {}
+            AuthorizedExecutionContinuityProjectionDisposition::SecurityRejected
+                if definition.result_kind.is_none() && definition.rejection_kind.is_some() => {}
+            _ => return Err(projection_model_error("event.invalid")),
+        }
+        Ok(Self {
+            version: AuthorizedExecutionContinuityProjectionVersion::V1,
+            operation_kind: definition.operation_kind,
+            disposition: definition.disposition,
+            result_kind: definition.result_kind,
+            rejection_kind: definition.rejection_kind,
+            operation_id: definition.operation_id,
+            receipt_id: definition.receipt_id,
+            projection_commitment: definition.projection_commitment,
+            expected_input_cursor: definition.expected_input_cursor,
+            committed_result_cursor: definition.committed_result_cursor,
+            target_id: definition.target_id,
+            target_revision: definition.target_revision,
+        })
+    }
+
+    /// Returns the operation kind.
+    #[must_use]
+    pub const fn operation_kind(&self) -> AuthorizedExecutionContinuityOperationKind {
+        self.operation_kind
+    }
+
+    /// Returns the committed disposition.
+    #[must_use]
+    pub const fn disposition(&self) -> AuthorizedExecutionContinuityProjectionDisposition {
+        self.disposition
+    }
+
+    /// Returns the applied-result kind, when applied.
+    #[must_use]
+    pub const fn result_kind(&self) -> Option<AuthorizedExecutionContinuityProjectionResultKind> {
+        self.result_kind
+    }
+
+    /// Returns the committed rejection kind, when rejected.
+    #[must_use]
+    pub const fn rejection_kind(
+        &self,
+    ) -> Option<AuthorizedExecutionContinuityProjectionRejectionKind> {
+        self.rejection_kind
+    }
+
+    /// Returns the projection commitment.
+    #[must_use]
+    pub const fn projection_commitment(&self) -> &SpecContentHash {
+        &self.projection_commitment
+    }
+
+    /// Returns the expected pre-operation cursor.
+    #[must_use]
+    pub const fn expected_input_cursor(&self) -> &AuthorizedExecutionContinuityProjectionCursor {
+        &self.expected_input_cursor
+    }
+
+    /// Returns the committed projection-event cursor.
+    #[must_use]
+    pub const fn committed_result_cursor(&self) -> &AuthorizedExecutionContinuityProjectionCursor {
+        &self.committed_result_cursor
+    }
+
+    /// Returns the stable continuity operation identifier projected by this event.
+    #[must_use]
+    pub fn operation_id(&self) -> &str {
+        &self.operation_id
+    }
+
+    /// Returns the stable continuity receipt identifier bound to this event.
+    #[must_use]
+    pub fn receipt_id(&self) -> &str {
+        &self.receipt_id
+    }
+
+    /// Returns the bounded identity of the projected continuity target.
+    #[must_use]
+    pub fn target_id(&self) -> &str {
+        &self.target_id
+    }
+
+    /// Returns the committed target revision.
+    #[must_use]
+    pub const fn target_revision(&self) -> u64 {
+        self.target_revision
+    }
+}
+
+impl fmt::Debug for AuthorizedExecutionContinuityProjectionEvent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthorizedExecutionContinuityProjectionEvent")
+            .field("version", &self.version)
+            .field("operation_kind", &self.operation_kind)
+            .field("disposition", &self.disposition)
+            .field("result_kind", &self.result_kind)
+            .field("rejection_kind", &self.rejection_kind)
+            .field("target_revision", &self.target_revision)
+            .field("binding", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Event-derived inspection cache for the latest continuity projection.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct AuthorizedExecutionContinuityProjectionSnapshot {
+    operation_kind: AuthorizedExecutionContinuityOperationKind,
+    disposition: AuthorizedExecutionContinuityProjectionDisposition,
+    receipt_id: String,
+    projection_commitment: SpecContentHash,
+    committed_result_cursor: AuthorizedExecutionContinuityProjectionCursor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthorizedExecutionContinuityProjectionSnapshotWire {
+    operation_kind: AuthorizedExecutionContinuityOperationKind,
+    disposition: AuthorizedExecutionContinuityProjectionDisposition,
+    receipt_id: String,
+    projection_commitment: SpecContentHash,
+    committed_result_cursor: AuthorizedExecutionContinuityProjectionCursor,
+}
+
+impl<'de> Deserialize<'de> for AuthorizedExecutionContinuityProjectionSnapshot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = AuthorizedExecutionContinuityProjectionSnapshotWire::deserialize(deserializer)?;
+        validate_projection_reference(&wire.receipt_id)
+            .map_err(|_| serde::de::Error::custom("continuity projection snapshot is invalid"))?;
+        Ok(Self {
+            operation_kind: wire.operation_kind,
+            disposition: wire.disposition,
+            receipt_id: wire.receipt_id,
+            projection_commitment: wire.projection_commitment,
+            committed_result_cursor: wire.committed_result_cursor,
+        })
+    }
+}
+
+impl AuthorizedExecutionContinuityProjectionSnapshot {
+    pub(crate) fn from_event(event: &AuthorizedExecutionContinuityProjectionEvent) -> Self {
+        Self {
+            operation_kind: event.operation_kind,
+            disposition: event.disposition,
+            receipt_id: event.receipt_id.clone(),
+            projection_commitment: event.projection_commitment.clone(),
+            committed_result_cursor: event.committed_result_cursor.clone(),
+        }
+    }
+
+    /// Returns the operation kind.
+    #[must_use]
+    pub const fn operation_kind(&self) -> AuthorizedExecutionContinuityOperationKind {
+        self.operation_kind
+    }
+
+    /// Returns the committed disposition.
+    #[must_use]
+    pub const fn disposition(&self) -> AuthorizedExecutionContinuityProjectionDisposition {
+        self.disposition
+    }
+
+    /// Returns the bounded receipt identity cached from the projection event.
+    #[must_use]
+    pub fn receipt_id(&self) -> &str {
+        &self.receipt_id
+    }
+
+    /// Returns the projection commitment.
+    #[must_use]
+    pub const fn projection_commitment(&self) -> &SpecContentHash {
+        &self.projection_commitment
+    }
+
+    /// Returns the committed projection cursor.
+    #[must_use]
+    pub const fn committed_result_cursor(&self) -> &AuthorizedExecutionContinuityProjectionCursor {
+        &self.committed_result_cursor
+    }
+}
+
+impl fmt::Debug for AuthorizedExecutionContinuityProjectionSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthorizedExecutionContinuityProjectionSnapshot")
+            .field("operation_kind", &self.operation_kind)
+            .field("disposition", &self.disposition)
+            .field("binding", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthorizedExecutionContinuityProjectionEventWire {
+    version: AuthorizedExecutionContinuityProjectionVersion,
+    operation_kind: AuthorizedExecutionContinuityOperationKind,
+    disposition: AuthorizedExecutionContinuityProjectionDisposition,
+    result_kind: Option<AuthorizedExecutionContinuityProjectionResultKind>,
+    rejection_kind: Option<AuthorizedExecutionContinuityProjectionRejectionKind>,
+    operation_id: String,
+    receipt_id: String,
+    projection_commitment: SpecContentHash,
+    expected_input_cursor: AuthorizedExecutionContinuityProjectionCursor,
+    committed_result_cursor: AuthorizedExecutionContinuityProjectionCursor,
+    target_id: String,
+    target_revision: u64,
+}
+
+impl<'de> Deserialize<'de> for AuthorizedExecutionContinuityProjectionEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        const MESSAGE: &str = "authorized execution continuity projection event is invalid";
+        let wire = AuthorizedExecutionContinuityProjectionEventWire::deserialize(deserializer)
+            .map_err(|_| serde::de::Error::custom(MESSAGE))?;
+        if wire.version != AuthorizedExecutionContinuityProjectionVersion::V1 {
+            return Err(serde::de::Error::custom(MESSAGE));
+        }
+        Self::new(AuthorizedExecutionContinuityProjectionEventDefinition {
+            operation_kind: wire.operation_kind,
+            disposition: wire.disposition,
+            result_kind: wire.result_kind,
+            rejection_kind: wire.rejection_kind,
+            operation_id: wire.operation_id,
+            receipt_id: wire.receipt_id,
+            projection_commitment: wire.projection_commitment,
+            expected_input_cursor: wire.expected_input_cursor,
+            committed_result_cursor: wire.committed_result_cursor,
+            target_id: wire.target_id,
+            target_revision: wire.target_revision,
+        })
+        .map_err(|_| serde::de::Error::custom(MESSAGE))
+    }
+}
+
+fn validate_projection_reference(value: &str) -> Result<(), WorkflowOsError> {
+    let lowercase = value.to_ascii_lowercase();
+    if value.is_empty()
+        || value.len() > 128
+        || !value.is_ascii()
+        || value.chars().any(char::is_whitespace)
+        || ["secret", "token", "authorization", "private_key", "bearer"]
+            .iter()
+            .any(|needle| lowercase.contains(needle))
+    {
+        return Err(projection_model_error("event.invalid"));
+    }
+    Ok(())
+}
+
+fn projection_result_matches_operation(
+    operation: AuthorizedExecutionContinuityOperationKind,
+    result: Option<AuthorizedExecutionContinuityProjectionResultKind>,
+) -> bool {
+    matches!(
+        (operation, result),
+        (
+            AuthorizedExecutionContinuityOperationKind::RegisterYield,
+            Some(AuthorizedExecutionContinuityProjectionResultKind::YieldRegistered)
+        ) | (
+            AuthorizedExecutionContinuityOperationKind::TransitionWait,
+            Some(AuthorizedExecutionContinuityProjectionResultKind::WaitTransitioned)
+        ) | (
+            AuthorizedExecutionContinuityOperationKind::ConsumeDirective,
+            Some(AuthorizedExecutionContinuityProjectionResultKind::DirectiveConsumed)
+        ) | (
+            AuthorizedExecutionContinuityOperationKind::RecordAttemptOutcome,
+            Some(AuthorizedExecutionContinuityProjectionResultKind::AttemptOutcomeRecorded)
+        ) | (
+            AuthorizedExecutionContinuityOperationKind::RecoverAmbiguousAttempt,
+            Some(AuthorizedExecutionContinuityProjectionResultKind::AmbiguousAttemptRecovered)
+        )
+    )
+}
+
+fn projection_model_error(suffix: &'static str) -> WorkflowOsError {
+    WorkflowOsError::new(
+        WorkflowOsErrorKind::Validation,
+        format!("authorized_execution_continuity_projection.{suffix}"),
+        "authorized execution continuity projection is invalid",
+    )
 }
 
 /// Declared support for one continuity operation.
@@ -548,10 +1006,12 @@ pub(crate) mod internal {
 
     use crate::{
         ActorId, AuthorizedExecutionAttemptId, AuthorizedExecutionAttemptOutcome,
-        AuthorizedExecutionWaitConditionId, AuthorizedExecutionWakeTriggerKind,
-        AuthorizedExecutionWindowId, AuthorizedExecutionYieldReason, EventId, EventSequenceNumber,
-        ImmutableRunBundleBinding, SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowOsError,
-        WorkflowOsErrorKind, WorkflowRunId,
+        AuthorizedExecutionContinuityProjectionCursor,
+        AuthorizedExecutionContinuityProjectionEvent, AuthorizedExecutionWaitConditionId,
+        AuthorizedExecutionWakeTriggerKind, AuthorizedExecutionWindowId,
+        AuthorizedExecutionYieldReason, EventId, EventSequenceNumber, ImmutableRunBundleBinding,
+        SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowOsErrorKind,
+        WorkflowRunId,
     };
 
     use super::AuthorizedExecutionContinuityOperationKind;
@@ -1197,6 +1657,38 @@ pub(crate) mod internal {
         pub(crate) expected_receipt_id: ContinuityReceiptId,
     }
 
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+    pub(crate) struct ContinuityProjectionBinding {
+        pub(crate) event: AuthorizedExecutionContinuityProjectionEvent,
+        pub(crate) snapshot_commitment: SpecContentHash,
+    }
+
+    impl fmt::Debug for ContinuityProjectionBinding {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter
+                .debug_struct("ContinuityProjectionBinding")
+                .field("operation_kind", &self.event.operation_kind())
+                .field("disposition", &self.event.disposition())
+                .field("binding", &"[REDACTED]")
+                .finish_non_exhaustive()
+        }
+    }
+
+    pub(crate) struct ProjectedContinuityResult<T> {
+        pub(crate) result: T,
+        pub(crate) binding: ContinuityProjectionBinding,
+    }
+
+    pub(crate) struct ReconciledProjectedContinuityResult {
+        pub(crate) disposition: CommittedOperationDisposition,
+        pub(crate) binding: ContinuityProjectionBinding,
+    }
+
+    pub(crate) enum ProjectedContinuityReconciliationResult {
+        DurablyCommitted(Box<ReconciledProjectedContinuityResult>),
+        ConfirmedAbsent,
+    }
+
     #[derive(Clone, Eq, PartialEq)]
     pub(crate) enum ContinuityReconciliationResult {
         DurablyCommitted(Box<CommittedOperationDisposition>),
@@ -1236,6 +1728,98 @@ pub(crate) mod internal {
         ) -> Result<AuthoritativeContinuationDisposition, WorkflowOsError>;
     }
 
+    pub(crate) trait AuthorizedExecutionContinuityProjectionStore {
+        fn register_yield_projected(
+            &self,
+            request: RegisterYieldRequest<'_>,
+        ) -> Result<ProjectedContinuityResult<RegisterYieldResult>, WorkflowOsError>;
+
+        fn transition_wait_projected(
+            &self,
+            request: TransitionWaitRequest<'_>,
+        ) -> Result<ProjectedContinuityResult<MutationResult>, WorkflowOsError>;
+
+        fn consume_directive_projected(
+            &self,
+            request: ConsumeDirectiveRequest,
+        ) -> Result<ProjectedContinuityResult<ConsumeDirectiveResult>, WorkflowOsError>;
+
+        fn record_attempt_outcome_projected(
+            &self,
+            request: RecordAttemptOutcomeRequest<'_>,
+        ) -> Result<ProjectedContinuityResult<MutationResult>, WorkflowOsError>;
+
+        fn recover_ambiguous_attempt_projected(
+            &self,
+            request: RecoverAmbiguousAttemptRequest,
+        ) -> Result<ProjectedContinuityResult<MutationResult>, WorkflowOsError>;
+
+        fn reconcile_projected_operation(
+            &self,
+            request: &ReconcileOperationRequest,
+        ) -> Result<ProjectedContinuityReconciliationResult, WorkflowOsError>;
+    }
+
+    macro_rules! unsupported_projection_store {
+        ($backend:ty) => {
+            impl AuthorizedExecutionContinuityProjectionStore for $backend {
+                fn register_yield_projected(
+                    &self,
+                    _request: RegisterYieldRequest<'_>,
+                ) -> Result<ProjectedContinuityResult<RegisterYieldResult>, WorkflowOsError> {
+                    Err(projection_unsupported())
+                }
+
+                fn transition_wait_projected(
+                    &self,
+                    _request: TransitionWaitRequest<'_>,
+                ) -> Result<ProjectedContinuityResult<MutationResult>, WorkflowOsError> {
+                    Err(projection_unsupported())
+                }
+
+                fn consume_directive_projected(
+                    &self,
+                    _request: ConsumeDirectiveRequest,
+                ) -> Result<ProjectedContinuityResult<ConsumeDirectiveResult>, WorkflowOsError>
+                {
+                    Err(projection_unsupported())
+                }
+
+                fn record_attempt_outcome_projected(
+                    &self,
+                    _request: RecordAttemptOutcomeRequest<'_>,
+                ) -> Result<ProjectedContinuityResult<MutationResult>, WorkflowOsError> {
+                    Err(projection_unsupported())
+                }
+
+                fn recover_ambiguous_attempt_projected(
+                    &self,
+                    _request: RecoverAmbiguousAttemptRequest,
+                ) -> Result<ProjectedContinuityResult<MutationResult>, WorkflowOsError> {
+                    Err(projection_unsupported())
+                }
+
+                fn reconcile_projected_operation(
+                    &self,
+                    _request: &ReconcileOperationRequest,
+                ) -> Result<ProjectedContinuityReconciliationResult, WorkflowOsError> {
+                    Err(projection_unsupported())
+                }
+            }
+        };
+    }
+
+    unsupported_projection_store!(crate::LocalStateBackend);
+    unsupported_projection_store!(crate::PostgresStateBackend);
+
+    fn projection_unsupported() -> WorkflowOsError {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::Unsupported,
+            "authorized_execution_continuity_projection.unsupported",
+            "atomic authorized execution continuity projection is unsupported by this backend",
+        )
+    }
+
     pub(crate) trait AuthorizedExecutionContinuityReconciler {
         fn reconcile_operation(
             &self,
@@ -1272,6 +1856,82 @@ pub(crate) mod internal {
         for (index, field) in fields.iter().enumerate() {
             frame(&mut hasher, &format!("field-{index}"), field);
         }
+        SpecContentHash::from_bytes(hasher.finalize())
+    }
+
+    pub(crate) struct ProjectionCommitmentInput<'a> {
+        pub(crate) workflow_id: &'a WorkflowId,
+        pub(crate) run_id: &'a WorkflowRunId,
+        pub(crate) operation_kind: AuthorizedExecutionContinuityOperationKind,
+        pub(crate) operation_id: &'a ContinuityOperationId,
+        pub(crate) request_commitment: &'a SpecContentHash,
+        pub(crate) receipt_id: &'a ContinuityReceiptId,
+        pub(crate) disposition: &'a str,
+        pub(crate) target_id: &'a str,
+        pub(crate) target_revision: u64,
+        pub(crate) expected_input: &'a ContinuityCursor,
+        pub(crate) committed_result: &'a AuthorizedExecutionContinuityProjectionCursor,
+    }
+
+    pub(crate) fn projection_commitment(input: &ProjectionCommitmentInput<'_>) -> SpecContentHash {
+        let mut hasher = Sha256::new();
+        frame(&mut hasher, "version", "v1");
+        frame(
+            &mut hasher,
+            "domain",
+            "workflow-os/authorized-execution-continuity/projection/v1",
+        );
+        frame(&mut hasher, "workflow_id", input.workflow_id.as_str());
+        frame(&mut hasher, "run_id", input.run_id.as_str());
+        frame(
+            &mut hasher,
+            "operation_kind",
+            match input.operation_kind {
+                AuthorizedExecutionContinuityOperationKind::RegisterYield => "register_yield",
+                AuthorizedExecutionContinuityOperationKind::TransitionWait => "transition_wait",
+                AuthorizedExecutionContinuityOperationKind::ConsumeDirective => "consume_directive",
+                AuthorizedExecutionContinuityOperationKind::RecordAttemptOutcome => {
+                    "record_attempt_outcome"
+                }
+                AuthorizedExecutionContinuityOperationKind::RecoverAmbiguousAttempt => {
+                    "recover_ambiguous_attempt"
+                }
+            },
+        );
+        frame(&mut hasher, "operation_id", input.operation_id.as_str());
+        frame(
+            &mut hasher,
+            "request_commitment",
+            input.request_commitment.as_str(),
+        );
+        frame(&mut hasher, "receipt_id", input.receipt_id.as_str());
+        frame(&mut hasher, "disposition", input.disposition);
+        frame(&mut hasher, "target_id", input.target_id);
+        frame(
+            &mut hasher,
+            "target_revision",
+            &input.target_revision.to_string(),
+        );
+        frame(
+            &mut hasher,
+            "expected_sequence",
+            &input.expected_input.sequence_number.get().to_string(),
+        );
+        frame(
+            &mut hasher,
+            "expected_event_id",
+            input.expected_input.event_id.as_str(),
+        );
+        frame(
+            &mut hasher,
+            "result_sequence",
+            &input.committed_result.sequence_number().get().to_string(),
+        );
+        frame(
+            &mut hasher,
+            "result_event_id",
+            input.committed_result.event_id().as_str(),
+        );
         SpecContentHash::from_bytes(hasher.finalize())
     }
 

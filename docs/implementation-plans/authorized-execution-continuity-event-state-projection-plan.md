@@ -1,6 +1,6 @@
 # Authorized Execution Continuity Event And State Projection Plan
 
-Status: accepted after focused maintainer and security blocker-fix review
+Status: implemented; blocker fix accepted
 
 ## 1. Executive Summary
 
