@@ -278,8 +278,7 @@ impl HostedPrincipalBinding {
     pub fn allows(&self, project_id: &ProjectId, capability: HostedProjectCapability) -> bool {
         self.grants
             .binary_search_by(|grant| grant.project_id.cmp(project_id))
-            .ok()
-            .is_some_and(|index| self.grants[index].allows(capability))
+            .is_ok_and(|index| self.grants[index].allows(capability))
     }
 }
 
