@@ -208,6 +208,10 @@ pub struct WorkflowRunSnapshot {
     /// Latest event-safe continuity projection cache, when recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_continuity_projection: Option<crate::AuthorizedExecutionContinuityProjectionSnapshot>,
+    /// Latest event-safe operational opening projection cache, when recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_operational_opening_projection:
+        Option<crate::OperationalExecutionWindowOpeningProjectionSnapshot>,
 }
 
 impl WorkflowRunSnapshot {
@@ -227,6 +231,7 @@ impl WorkflowRunSnapshot {
             governance_assessment_binding: None,
             governance_disclosure_surface_acceptances: Vec::new(),
             last_continuity_projection: None,
+            last_operational_opening_projection: None,
         }
     }
 
@@ -298,6 +303,13 @@ impl WorkflowRunSnapshot {
             WorkflowRunEventKind::AuthorizedExecutionContinuityProjected(projection) => {
                 self.last_continuity_projection = Some(
                     crate::AuthorizedExecutionContinuityProjectionSnapshot::from_event(projection),
+                );
+            }
+            WorkflowRunEventKind::OperationalExecutionWindowOpened(projection) => {
+                self.last_operational_opening_projection = Some(
+                    crate::OperationalExecutionWindowOpeningProjectionSnapshot::from_event(
+                        projection,
+                    ),
                 );
             }
             WorkflowRunEventKind::RunCreated { .. }
@@ -435,6 +447,8 @@ pub enum WorkflowRunEventKindName {
     GovernanceDisclosureSurfaceAccepted,
     /// `AuthorizedExecutionContinuityProjected`.
     AuthorizedExecutionContinuityProjected,
+    /// `OperationalExecutionWindowOpened`.
+    OperationalExecutionWindowOpened,
     /// `HookInvocationRequested`.
     HookInvocationRequested,
     /// `HookInvocationEvaluated`.
@@ -548,6 +562,8 @@ pub enum WorkflowRunEventKind {
     AuthorizedExecutionContinuityProjected(
         Box<crate::AuthorizedExecutionContinuityProjectionEvent>,
     ),
+    /// One operational execution window and its first attempt were opened atomically.
+    OperationalExecutionWindowOpened(Box<crate::OperationalExecutionWindowOpeningProjectionEvent>),
     /// Hook invocation was requested as model-only event vocabulary.
     HookInvocationRequested(Box<AgentHarnessHookWorkflowEvent>),
     /// Hook invocation was evaluated as model-only event vocabulary.
@@ -601,6 +617,9 @@ impl WorkflowRunEventKind {
             }
             Self::AuthorizedExecutionContinuityProjected(_) => {
                 WorkflowRunEventKindName::AuthorizedExecutionContinuityProjected
+            }
+            Self::OperationalExecutionWindowOpened(_) => {
+                WorkflowRunEventKindName::OperationalExecutionWindowOpened
             }
             Self::HookInvocationRequested(_) => WorkflowRunEventKindName::HookInvocationRequested,
             Self::HookInvocationEvaluated(_) => WorkflowRunEventKindName::HookInvocationEvaluated,
@@ -1085,6 +1104,26 @@ impl StateTransition {
                 from,
                 to: from,
                 event_kind: WorkflowRunEventKindName::AuthorizedExecutionContinuityProjected,
+            });
+        }
+        if matches!(
+            event_kind,
+            WorkflowRunEventKind::OperationalExecutionWindowOpened(_)
+        ) {
+            if !matches!(
+                from,
+                WorkflowRunStatus::Running | WorkflowRunStatus::Retrying
+            ) {
+                return Err(invalid_transition(
+                    from,
+                    WorkflowRunEventKindName::OperationalExecutionWindowOpened,
+                    "operational execution-window opening is not valid from current status",
+                ));
+            }
+            return Ok(Self {
+                from,
+                to: from,
+                event_kind: WorkflowRunEventKindName::OperationalExecutionWindowOpened,
             });
         }
         Self::for_event(from, event_kind.name())
@@ -1741,6 +1780,7 @@ impl WorkflowRunEvent {
                 | WorkflowRunEventKind::GovernanceAssessmentBound(_)
                 | WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(_)
                 | WorkflowRunEventKind::AuthorizedExecutionContinuityProjected(_)
+                | WorkflowRunEventKind::OperationalExecutionWindowOpened(_)
         )
     }
 }

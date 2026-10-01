@@ -45,6 +45,8 @@ mod local_check_declaration;
 mod local_check_declaration_set;
 mod local_check_execution_binding;
 mod observability;
+#[allow(dead_code)]
+mod operational_execution_window_opening;
 mod policy;
 mod postgres_state;
 mod project;
@@ -69,6 +71,8 @@ mod sqlite_state;
 mod state;
 mod state_migration;
 mod timestamp;
+#[allow(dead_code)]
+mod trusted_host_supervisor;
 mod typed_handoff;
 mod validation;
 mod work_report;
@@ -354,6 +358,13 @@ pub use immutable_run_bundle_store::{
     StoredImmutableRunBundle,
 };
 pub use loader::{load_project, LoadedSpec, ProjectBundle, ProjectLoadResult};
+pub use operational_execution_window_opening::{
+    OperationalExecutionOperationBinding, OperationalExecutionWindowOpeningOperationId,
+    OperationalExecutionWindowOpeningProjectionCursor,
+    OperationalExecutionWindowOpeningProjectionEvent,
+    OperationalExecutionWindowOpeningProjectionSnapshot,
+    OperationalExecutionWindowOpeningReceiptId, OperationalExecutionWindowOpeningVersion,
+};
 pub use policy::{
     Action, Capability, ConservativePolicyEngine, PolicyDecision, PolicyEffect,
     PolicyEffectParseError, PolicyEffectSet, PolicyEvaluationContext, PolicyViolation,

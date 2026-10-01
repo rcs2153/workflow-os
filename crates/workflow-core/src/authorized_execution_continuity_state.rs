@@ -1833,6 +1833,14 @@ pub(crate) mod internal {
         ) -> Result<ContinuityInstanceEligibility, WorkflowOsError>;
     }
 
+    pub(crate) trait AuthorizedExecutionAttemptDispatchValidator {
+        fn attempt_dispatch_is_current(
+            &self,
+            capability: &AttemptUseCapability,
+            expected_window_binding: &ExpectedWindowBinding,
+        ) -> Result<bool, WorkflowOsError>;
+    }
+
     #[derive(Clone, Eq, PartialEq)]
     pub(crate) struct ReferenceContinuityState {
         pub(crate) trusted_time: TrustedTimeSecurityRecord,

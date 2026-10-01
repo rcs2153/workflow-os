@@ -367,8 +367,68 @@ current queue when they contain historical `next phase` language.
    window to exactly `invoke_current_step_skill`. See the [plan
    review](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_TRUSTED_HOST_SUPERVISOR_PLAN_REVIEW.md).
    The next implementation phase is the separately versioned operational
-   opening capability only; injected host invocation remains behind a second
-   focused review.
+   opening capability only; that opening-only phase is now implemented for
+   explicit local SQLite state. Core derives opening authorization inside one
+   registered current-authority same-call use, atomically creates an
+   `executing` window and first `started` attempt, projects one bounded runtime
+   event/snapshot, and supports exact replay and fresh-connection
+   reconciliation. The accepted five-operation continuity contract remains
+   closed, pre-opening continuity state is not assigned invented authority,
+   and filesystem/PostgreSQL support remains unavailable. See the [opening
+   implementation report](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_OPENING_REPORT.md).
+   Focused maintainer/security review found blocker-level gaps in request-
+   commitment completeness, expected snapshot binding, serialized projection
+   integrity, concurrent-opener/cursor-contention proof, and commit-fault
+   proof. See the [opening review](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_OPENING_REVIEW.md).
+   The bounded opening blocker fix is now implemented. Request commitment V2
+   binds the receipt, actor, immutable run bundle, expected event cursor and
+   snapshot, authority and Core-governance commitments, expiry, attempt budget,
+   trusted-time observation/provenance/epoch, and exact operation binding.
+   Opening projection V2 uses validated deserialization and recomputes its
+   canonical commitment. Concurrent opener, generic-event cursor contention,
+   and before/during/after commit-fault tests prove one-winner and
+   reconciliation-only recovery without returning authority on ambiguity. See
+   the [blocker-fix
+   report](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_OPENING_BLOCKER_FIX_REPORT.md).
+   Focused maintainer/security re-review accepts the repaired opening boundary
+   with non-blocking test-harness and future snapshot-wire follow-ups. The
+   complete request and snapshot binding, validated event reconstruction,
+   one-winner contention behavior, and no-capability ambiguity posture are
+   sufficient for the next private slice. See the [blocker-fix
+   review](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_OPENING_BLOCKER_FIX_REVIEW.md).
+   The one-shot injected local trusted-host supervisor from the accepted plan
+   is now implemented as a private Core boundary. It consumes only an opening
+   or resumed attempt capability, validates the exact
+   `invoke_current_step_skill` binding, calls one injected executor once,
+   records one bounded outcome or turn-boundary yield through the accepted
+   projected continuity operations, and returns the current Core-derived
+   disposition. The focused local proof opens the first attempt, records a
+   turn-boundary yield, derives `ResumeNow`, consumes one directive, invokes an
+   existing local `SkillHandler`, records success, and proves that supervisor
+   success does not complete the workflow run. Focused maintainer/security
+   review found blockers in one-use dispatch authority, complete immutable
+   invocation and executor binding, ambiguous result-persistence
+   reconciliation, and the closed result/fault regression matrix. The bounded
+   blocker fix now consumes attempt authority by value, validates current
+   dispatchability before executor entry, binds every invocation field and an
+   explicit executor identity before authority issuance, reconciles ambiguous
+   projected writes through a fresh connection, and covers the closed result,
+   replay, substitution, yield, and fault matrix. See the
+   [supervisor review](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_TRUSTED_HOST_SUPERVISOR_REVIEW.md).
+   See also the [supervisor blocker-fix
+   report](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_TRUSTED_HOST_SUPERVISOR_BLOCKER_FIX_REPORT.md).
+   Focused maintainer/security re-review accepts the repaired private one-shot
+   boundary with non-blocking follow-ups. Owned capability transfer, fresh
+   durable dispatchability validation, complete invocation/executor binding,
+   exact reconciliation, and the closed regression matrix are sufficient for
+   one conforming injected caller. The review also makes the next boundary
+   explicit: dispatchability is currently a read, not an atomic reservation.
+   See the [supervisor blocker-fix
+   review](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_TRUSTED_HOST_SUPERVISOR_BLOCKER_FIX_REVIEW.md).
+   The next P0 phase is a bounded atomic dispatch-reservation slice before any
+   repeated supervisor loop. Repeated scheduling, provider mutation,
+   OpenShell, nested harnesses, automatic approval, public runtime
+   configuration, CLI, SDK, and schema exposure remain blocked.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport

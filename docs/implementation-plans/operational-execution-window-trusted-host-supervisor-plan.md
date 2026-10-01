@@ -1,5 +1,17 @@
 # Operational Execution Window And Trusted-Host Supervisor Plan
 
+Implementation status: the opening-only phase and the first one-shot injected
+local trusted-host supervisor slice are implemented. The private supervisor
+consumes an opening or resumed attempt capability, validates the exact local
+skill binding, invokes one injected executor once, persists one bounded
+outcome or yield through the accepted projected continuity APIs, and returns
+Core's current disposition. The focused proof covers first-attempt yield,
+`ResumeNow`, directive-bound resume, local skill success, and no fabricated
+workflow completion. Repeated scheduling, model turns, automatic approvals,
+provider execution, OpenShell, nested harnesses, public configuration, CLI,
+SDK, and schema exposure remain unimplemented pending focused
+maintainer/security review.
+
 ## 1. Executive Summary
 
 Workflow OS can now preserve yielded authorized work durably, derive a current
