@@ -354,7 +354,21 @@ current queue when they contain historical `next phase` language.
    zero-write guarantees. See the [blocker-fix
    review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_EVENT_STATE_PROJECTION_BLOCKER_FIX_REVIEW.md).
    Operational window opening and one local injected trusted-host supervisor
-   vertical slice are now the next separate P0 runtime boundary.
+   vertical slice are now the next separate P0 runtime boundary. The boundary
+   is specified in the [Operational Execution Window And Trusted-Host
+   Supervisor Plan](docs/implementation-plans/operational-execution-window-trusted-host-supervisor-plan.md).
+   The plan requires Core to commit an exact window and first started attempt
+   before a one-shot injected host may invoke work; the host cannot construct
+   authority, approve gates, fabricate completion, or create model turns. See
+   the [planning report](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_TRUSTED_HOST_SUPERVISOR_PLAN_REPORT.md).
+   Focused maintainer/security review accepts the plan after incorporating
+   corrections that prohibit caller-authored opening authority, preserve the
+   accepted closed five-operation continuity contract, and bind the first
+   window to exactly `invoke_current_step_skill`. See the [plan
+   review](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_TRUSTED_HOST_SUPERVISOR_PLAN_REVIEW.md).
+   The next implementation phase is the separately versioned operational
+   opening capability only; injected host invocation remains behind a second
+   focused review.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
