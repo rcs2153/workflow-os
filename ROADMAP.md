@@ -432,7 +432,11 @@ current queue when they contain historical `next phase` language.
    [planning report](docs/concepts/ATOMIC_DISPATCH_RESERVATION_PLAN_REPORT.md).
    The plan requires one atomic winner, never reconstructs authority from
    durable replay or ambiguous commit reconciliation, and keeps the result,
-   yield, and recovery operation set closed. Focused plan review is next.
+   yield, and recovery operation set closed. Its [focused maintainer/security
+   review](docs/concepts/ATOMIC_DISPATCH_RESERVATION_PLAN_REVIEW.md) found one
+   planning blocker: dispatch admission needs an exact append-only event and
+   atomic projection contract before implementation. A bounded planning fix is
+   next.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
