@@ -281,7 +281,7 @@ fn missing_required_output_is_allowed_when_outputs_are_not_required() {
     input.require_outputs = false;
 
     let result = invoke_agent_harness_hook(input).expect("before hook output can be absent");
-    assert!(result.output_references().is_empty());
+    assert_eq!(result.output_references().len(), 0);
 }
 
 #[test]
@@ -318,7 +318,7 @@ fn absent_optional_references_do_not_fabricate_citations() {
     input.supplemental_references.clear();
 
     let result = invoke_agent_harness_hook(input).expect("valid without optional refs");
-    assert!(result.supplemental_references().is_empty());
+    assert_eq!(result.supplemental_references().len(), 0);
 }
 
 #[test]
@@ -875,11 +875,11 @@ fn runtime_hook_execution_does_not_fabricate_optional_references() {
     })
     .expect("valid runtime hook result without optional references");
 
-    assert!(result
-        .invocation_result()
-        .supplemental_references()
-        .is_empty());
-    assert!(result.audit_record().supplemental_references().is_empty());
+    assert_eq!(
+        result.invocation_result().supplemental_references().len(),
+        0
+    );
+    assert_eq!(result.audit_record().supplemental_references().len(), 0);
 }
 
 #[test]

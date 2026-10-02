@@ -359,7 +359,7 @@ project:
         }
         other => panic!("expected file target, got {other:?}"),
     }
-    assert!(evidence.metadata.entries().is_empty());
+    assert_eq!(evidence.metadata.entries().len(), 0);
 }
 
 #[test]
@@ -383,7 +383,7 @@ project:
         .iter()
         .find(|diagnostic| diagnostic.code() == "yaml.parse")
         .expect("yaml parse diagnostic");
-    assert!(yaml.evidence_references().is_empty());
+    assert_eq!(yaml.evidence_references().len(), 0);
 
     let secret_project = TestProject::new("secret-no-evidence");
     secret_project.write(
@@ -411,7 +411,7 @@ config_overlays:
         .iter()
         .find(|diagnostic| diagnostic.code() == "spec.secret_disallowed")
         .expect("secret diagnostic");
-    assert!(secret.evidence_references().is_empty());
+    assert_eq!(secret.evidence_references().len(), 0);
 }
 
 #[test]

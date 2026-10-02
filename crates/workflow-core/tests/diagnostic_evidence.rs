@@ -73,7 +73,7 @@ fn diagnostic() -> Diagnostic {
 fn diagnostic_without_evidence_behaves_as_before() {
     let diagnostic = diagnostic();
 
-    assert!(diagnostic.evidence_references().is_empty());
+    assert_eq!(diagnostic.evidence_references().len(), 0);
     assert_eq!(
         diagnostic.to_string(),
         "workflows/request.workflow.yml:12:5 $.steps: error[validation.workflow.step_missing]: workflow must declare at least one step"
@@ -129,7 +129,7 @@ fn diagnostic_rejects_invalid_evidence_reference() {
         .expect_err("invalid evidence rejected");
 
     assert_eq!(error.code(), "evidence.scope.validation_reference_required");
-    assert!(diagnostic.evidence_references().is_empty());
+    assert_eq!(diagnostic.evidence_references().len(), 0);
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn diagnostic_multiple_attachment_fails_atomically_when_one_reference_is_invalid
         .expect_err("invalid evidence rejects whole batch");
 
     assert_eq!(error.code(), "evidence.scope.validation_reference_required");
-    assert!(diagnostic.evidence_references().is_empty());
+    assert_eq!(diagnostic.evidence_references().len(), 0);
 }
 
 #[test]
@@ -268,7 +268,7 @@ fn diagnostic_rejects_command_output_evidence() {
         .expect_err("command output evidence rejected");
 
     assert_eq!(error.code(), "diagnostic.evidence.kind_unsupported");
-    assert!(diagnostic.evidence_references().is_empty());
+    assert_eq!(diagnostic.evidence_references().len(), 0);
 }
 
 #[test]
@@ -297,7 +297,7 @@ fn diagnostic_rejects_adapter_evidence_kinds() {
             .expect_err("adapter evidence kind rejected");
 
         assert_eq!(error.code(), "diagnostic.evidence.kind_unsupported");
-        assert!(diagnostic.evidence_references().is_empty());
+        assert_eq!(diagnostic.evidence_references().len(), 0);
     }
 }
 
@@ -330,7 +330,7 @@ fn diagnostic_rejects_other_future_evidence_kinds() {
             .expect_err("future evidence kind rejected");
 
         assert_eq!(error.code(), "diagnostic.evidence.kind_unsupported");
-        assert!(diagnostic.evidence_references().is_empty());
+        assert_eq!(diagnostic.evidence_references().len(), 0);
     }
 }
 
@@ -355,7 +355,7 @@ fn diagnostic_rejects_unsupported_evidence_scope() {
         .expect_err("release evidence scope rejected");
 
     assert_eq!(error.code(), "diagnostic.evidence.scope_unsupported");
-    assert!(diagnostic.evidence_references().is_empty());
+    assert_eq!(diagnostic.evidence_references().len(), 0);
 }
 
 #[test]

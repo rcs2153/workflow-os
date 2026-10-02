@@ -650,7 +650,7 @@ fn side_effect_boundary_accepts_source_read_only_without_output_directories() {
         boundary.allowed_effects(),
         [LocalCheckSideEffectKind::SourceReadOnly]
     );
-    assert!(boundary.permitted_output_directories().is_empty());
+    assert_eq!(boundary.permitted_output_directories().len(), 0);
     assert_eq!(boundary.network_policy(), LocalCheckNetworkPolicy::Disabled);
 }
 
@@ -735,7 +735,7 @@ fn local_check_contract_exposes_fine_grained_source_read_only_boundary() {
         contract.side_effect_boundary().allowed_effects(),
         [LocalCheckSideEffectKind::SourceReadOnly]
     );
-    assert!(contract.permitted_output_directories().is_empty());
+    assert_eq!(contract.permitted_output_directories().len(), 0);
 }
 
 #[test]
@@ -1534,7 +1534,7 @@ fn local_check_registration_none_profile_registers_no_handlers() {
     let profile = LocalCheckRegistrationProfile::none();
 
     assert_eq!(profile.mode(), LocalCheckRegistrationMode::None);
-    assert!(profile.planned_handlers().is_empty());
+    assert_eq!(profile.planned_handlers().len(), 0);
     assert!(format!("{profile:?}").contains("planned_handler_count: 0"));
 }
 

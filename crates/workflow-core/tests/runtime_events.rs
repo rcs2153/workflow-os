@@ -280,9 +280,7 @@ fn legacy_snapshot_without_governance_binding_remains_readable() {
         .expect("legacy snapshot reads");
 
     assert!(snapshot.governance_assessment_binding.is_none());
-    assert!(snapshot
-        .governance_disclosure_surface_acceptances
-        .is_empty());
+    assert_eq!(snapshot.governance_disclosure_surface_acceptances.len(), 0);
 }
 
 #[test]
@@ -622,9 +620,9 @@ fn hook_events_rehydrate_as_state_preserving_from_running() {
 
     assert_eq!(snapshot.status, WorkflowRunStatus::Running);
     assert_eq!(snapshot.last_sequence_number.get(), 5);
-    assert!(snapshot.skill_invocations.is_empty());
-    assert!(snapshot.approval_requests.is_empty());
-    assert!(snapshot.policy_decisions.is_empty());
+    assert_eq!(snapshot.skill_invocations.len(), 0);
+    assert_eq!(snapshot.approval_requests.len(), 0);
+    assert_eq!(snapshot.policy_decisions.len(), 0);
 }
 
 #[test]
@@ -835,9 +833,9 @@ fn side_effect_events_rehydrate_as_state_preserving_from_running() {
 
     assert_eq!(snapshot.status, WorkflowRunStatus::Running);
     assert_eq!(snapshot.last_sequence_number.get(), 6);
-    assert!(snapshot.skill_invocations.is_empty());
-    assert!(snapshot.approval_requests.is_empty());
-    assert!(snapshot.policy_decisions.is_empty());
+    assert_eq!(snapshot.skill_invocations.len(), 0);
+    assert_eq!(snapshot.approval_requests.len(), 0);
+    assert_eq!(snapshot.policy_decisions.len(), 0);
 }
 
 #[test]

@@ -826,10 +826,12 @@ fn approval_enumeration_includes_unresolved_but_never_crosses_project() {
             .len(),
         1
     );
-    assert!(store
-        .list_project_approval_routes_for_approval(&beta, &run_id(), &approval_reference, 10,)
-        .expect("cross-project list")
-        .is_empty());
+    assert_eq!(
+        store
+            .list_project_approval_routes_for_approval(&beta, &run_id(), &approval_reference, 10,)
+            .expect("cross-project list"),
+        []
+    );
 }
 
 #[test]

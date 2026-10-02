@@ -1,4 +1,5 @@
 #![allow(clippy::expect_used)]
+#![allow(clippy::assert_is_empty)]
 
 //! Read-only filesystem state migration inventory contract tests.
 

@@ -823,9 +823,9 @@ mod tests {
         );
         assert_eq!(result.consumption().projections().len(), 2);
         assert_eq!(result.consumption().satisfactions().len(), 2);
-        assert!(!result.authority_source_hash().as_str().is_empty());
-        assert!(!result.reference_source_hash().as_str().is_empty());
-        assert!(!result.fact_set_hash().as_str().is_empty());
+        assert_ne!(result.authority_source_hash().as_str(), "");
+        assert_ne!(result.reference_source_hash().as_str(), "");
+        assert_ne!(result.fact_set_hash().as_str(), "");
         assert_eq!(result.evaluated_at(), timestamp("2026-07-26T10:30:00Z"));
         assert_eq!(
             result.assessment_hash().as_str(),

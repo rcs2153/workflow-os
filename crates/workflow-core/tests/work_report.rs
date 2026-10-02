@@ -1144,8 +1144,8 @@ fn approval_proof_marker_citation_helper_preserves_marker_free_compatibility() {
 
     assert_eq!(result.proof_marker_decision_count(), 0);
     assert_eq!(result.marker_free_decision_count(), 1);
-    assert!(result.approval_decision_citations().is_empty());
-    assert!(result.workflow_event_citations().is_empty());
+    assert_eq!(result.approval_decision_citations().len(), 0);
+    assert_eq!(result.workflow_event_citations().len(), 0);
 }
 
 #[test]
@@ -1624,14 +1624,14 @@ fn terminal_report_default_does_not_derive_approval_proof_marker_citations() {
         .iter()
         .find(|section| section.kind() == WorkReportSectionKind::Approvals)
         .expect("approvals section");
-    assert!(approvals.citations().is_empty());
+    assert_eq!(approvals.citations().len(), 0);
 
     let work_performed = report
         .sections()
         .iter()
         .find(|section| section.kind() == WorkReportSectionKind::WorkPerformed)
         .expect("work performed section");
-    assert!(work_performed.citations().is_empty());
+    assert_eq!(work_performed.citations().len(), 0);
 }
 
 #[test]
@@ -1726,7 +1726,7 @@ fn terminal_report_workflow_event_proof_marker_citation_is_optional() {
         .iter()
         .find(|section| section.kind() == WorkReportSectionKind::WorkPerformed)
         .expect("work performed section");
-    assert!(work_performed_without_event.citations().is_empty());
+    assert_eq!(work_performed_without_event.citations().len(), 0);
 
     let mut with_event = terminal_generation_input(&run);
     with_event.workflow_event_ids.clear();
@@ -1774,7 +1774,7 @@ fn terminal_report_marker_free_approval_compatible_when_marker_not_required() {
         .iter()
         .find(|section| section.kind() == WorkReportSectionKind::Approvals)
         .expect("approvals section");
-    assert!(approvals.citations().is_empty());
+    assert_eq!(approvals.citations().len(), 0);
 }
 
 #[test]
@@ -3821,7 +3821,7 @@ fn github_pr_comment_report_artifact_integration_helper_requires_event_when_conf
     let artifacts = backend
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
-    assert!(artifacts.is_empty());
+    assert_eq!(artifacts.len(), 0);
 }
 
 #[test]
@@ -3924,7 +3924,7 @@ fn github_pr_comment_provider_event_proof_gate_rejects_missing_event_before_writ
     let artifacts = backend
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
-    assert!(artifacts.is_empty());
+    assert_eq!(artifacts.len(), 0);
 }
 
 #[test]
@@ -4378,7 +4378,7 @@ fn github_pr_comment_report_artifact_integration_helper_requires_approval_linkag
     let artifacts = backend
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
-    assert!(artifacts.is_empty());
+    assert_eq!(artifacts.len(), 0);
 }
 
 #[test]
@@ -4527,7 +4527,7 @@ fn governance_gated_artifact_write_missing_projection_fails_before_write_without
     let artifacts = artifact_store
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
-    assert!(artifacts.is_empty());
+    assert_eq!(artifacts.len(), 0);
 }
 
 #[test]
@@ -4576,7 +4576,7 @@ fn governance_gated_artifact_write_marker_free_projection_policy_fails_before_wr
     let artifacts = artifact_store
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
-    assert!(artifacts.is_empty());
+    assert_eq!(artifacts.len(), 0);
 }
 
 #[test]
@@ -4677,7 +4677,7 @@ fn report_artifact_write_integration_helper_requires_github_event_before_write()
     let artifacts = backend
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
-    assert!(artifacts.is_empty());
+    assert_eq!(artifacts.len(), 0);
 }
 
 #[test]
@@ -4716,7 +4716,7 @@ fn report_artifact_write_integration_helper_requires_approval_linkage_before_wri
     let artifacts = backend
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
-    assert!(artifacts.is_empty());
+    assert_eq!(artifacts.len(), 0);
 }
 
 #[test]
@@ -4775,7 +4775,7 @@ fn github_pr_comment_report_artifact_write_composition_rejects_missing_citation_
     let artifacts = backend
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
-    assert!(artifacts.is_empty());
+    assert_eq!(artifacts.len(), 0);
 }
 
 #[test]
@@ -4820,7 +4820,7 @@ fn github_pr_comment_report_artifact_write_composition_rejects_approval_linkage_
     let artifacts = backend
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
-    assert!(artifacts.is_empty());
+    assert_eq!(artifacts.len(), 0);
 }
 
 #[test]
@@ -4865,7 +4865,7 @@ fn github_pr_comment_report_artifact_write_composition_maps_identity_mismatch() 
     let artifacts = backend
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
-    assert!(artifacts.is_empty());
+    assert_eq!(artifacts.len(), 0);
 }
 
 #[test]
@@ -4902,7 +4902,7 @@ fn github_pr_comment_report_artifact_write_composition_requires_accepted_event_b
     let artifacts = backend
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
-    assert!(artifacts.is_empty());
+    assert_eq!(artifacts.len(), 0);
 }
 
 #[test]
@@ -5655,8 +5655,8 @@ fn missing_unavailable_references_become_not_available_section_text() {
         validation.summary(),
         Some("No validation diagnostic, local check result, or agent harness hook references were supplied.")
     );
-    assert!(approvals.citations().is_empty());
-    assert!(validation.citations().is_empty());
+    assert_eq!(approvals.citations().len(), 0);
+    assert_eq!(validation.citations().len(), 0);
 }
 
 #[test]
@@ -6267,7 +6267,7 @@ fn generated_report_without_typed_handoffs_preserves_operator_handoff_text() {
         handoff_section.summary(),
         Some("No operator handoff notes were supplied.")
     );
-    assert!(handoff_section.citations().is_empty());
+    assert_eq!(handoff_section.citations().len(), 0);
 }
 
 #[test]
@@ -6303,7 +6303,7 @@ fn side_effects_section_is_present_as_unsupported() {
             "No write side effects are supported; side effects are none, skipped, or unsupported."
         )
     );
-    assert!(side_effects.citations().is_empty());
+    assert_eq!(side_effects.citations().len(), 0);
 }
 
 #[test]
@@ -6572,10 +6572,12 @@ fn side_effect_discovery_helper_does_not_mutate_run_or_write_artifacts() {
 
     assert_eq!(run, before);
     assert_eq!(run.events.len(), before.events.len());
-    assert!(backend
-        .list_work_report_artifacts(&run.snapshot.identity.run_id)
-        .expect("artifact list succeeds")
-        .is_empty());
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run.snapshot.identity.run_id)
+            .expect("artifact list succeeds"),
+        []
+    );
     assert_eq!(
         report.generation_context().run_id,
         run.snapshot.identity.run_id

@@ -211,7 +211,7 @@ fn complete_fact_set_derives_queries_and_round_trips() {
 
     assert_eq!(value.query_set().queries().len(), 2);
     assert_eq!(value.availability_records().len(), 2);
-    assert!(value.grants().is_empty());
+    assert_eq!(value.grants(), []);
     assert_eq!(
         value.fact_set_hash().as_str(),
         "ca724e50983d9fbccc1ded97e958466fe0b86e303bd57d7c68608dc5e0f16af3"

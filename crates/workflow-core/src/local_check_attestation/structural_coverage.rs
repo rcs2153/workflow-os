@@ -1761,7 +1761,7 @@ observability_requirements:
         let result = evaluate_local_check_structural_coverage(&authoritative, &[])
             .expect("authoritative empty coverage");
 
-        assert!(authoritative.obligations().is_empty());
+        assert_eq!(authoritative.obligations(), []);
         assert_eq!(
             result.disposition(),
             LocalCheckGovernanceStructuralCoverageDisposition::Satisfied

@@ -230,14 +230,18 @@ fn exclusive_migration_guard_blocks_adapter_telemetry_writers() {
             .to_string()
             .contains(parent.to_string_lossy().as_ref()));
     }
-    assert!(backend
-        .read_adapter_audit_records(&run_id)
-        .expect("audit records")
-        .is_empty());
-    assert!(backend
-        .read_adapter_observability_records(&run_id)
-        .expect("observability records")
-        .is_empty());
+    assert_eq!(
+        backend
+            .read_adapter_audit_records(&run_id)
+            .expect("audit records"),
+        []
+    );
+    assert_eq!(
+        backend
+            .read_adapter_observability_records(&run_id)
+            .expect("observability records"),
+        []
+    );
 
     drop(guard);
     backend
@@ -557,7 +561,7 @@ fn adapter_invocation_record_rejects_invalid_evidence_reference() {
         .expect_err("invalid evidence rejected");
 
     assert_eq!(error.code(), "evidence.scope.adapter_id_required");
-    assert!(audit_record.evidence_references().is_empty());
+    assert_eq!(audit_record.evidence_references().len(), 0);
 }
 
 #[test]
@@ -576,7 +580,7 @@ fn adapter_invocation_multiple_attachment_fails_atomically_when_one_reference_is
         .expect_err("invalid evidence rejects whole batch");
 
     assert_eq!(error.code(), "evidence.scope.adapter_id_required");
-    assert!(audit_record.evidence_references().is_empty());
+    assert_eq!(audit_record.evidence_references().len(), 0);
 }
 
 #[test]
@@ -596,7 +600,7 @@ fn adapter_invocation_rejects_non_adapter_evidence_kind() {
         .expect_err("wrong evidence kind rejected");
 
     assert_eq!(error.code(), "adapter.evidence.kind_unsupported");
-    assert!(audit_record.evidence_references().is_empty());
+    assert_eq!(audit_record.evidence_references().len(), 0);
 }
 
 #[test]
@@ -629,7 +633,7 @@ fn adapter_runtime_audit_record_rejects_invalid_evidence_reference() {
         .expect_err("invalid evidence rejected");
 
     assert_eq!(error.code(), "evidence.scope.adapter_id_required");
-    assert!(record.evidence_references().is_empty());
+    assert_eq!(record.evidence_references().len(), 0);
 }
 
 #[test]
@@ -644,7 +648,7 @@ fn public_field_mutation_after_prior_validation_cannot_bypass_attachment_validat
         .expect_err("mutated evidence is revalidated");
 
     assert_eq!(error.code(), "evidence.scope.adapter_kind_required");
-    assert!(record.evidence_references().is_empty());
+    assert_eq!(record.evidence_references().len(), 0);
 }
 
 #[test]

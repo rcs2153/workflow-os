@@ -5307,7 +5307,7 @@ mod tests {
             assert!(fixture.store.consume_directive(request).is_err());
             assert_eq!(fixture.store.snapshot().windows, before.windows);
             assert_eq!(fixture.store.snapshot().attempts, before.attempts);
-            assert!(fixture.store.snapshot().operations.is_empty());
+            assert_eq!(fixture.store.snapshot().operations.len(), 0);
         }
 
         let fixture = Fixture::yielded(false);

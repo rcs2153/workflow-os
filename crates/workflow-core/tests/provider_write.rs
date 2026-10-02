@@ -724,7 +724,7 @@ fn sandbox_readiness_all_gates_satisfied_allows_without_mutation_authority() {
         result.decision(),
         ProviderWriteSandboxReadinessDecision::AllowedForSandbox
     );
-    assert!(result.issues().is_empty());
+    assert_eq!(result.issues().len(), 0);
     assert!(!result.retry_blocked());
     assert!(!result.operator_action_required());
     assert!(!result.provider_call_allowed());
@@ -1101,7 +1101,7 @@ fn proposed_side_effect_record_composes_from_fixture_response() {
     );
     assert_eq!(record.references().len(), 3);
     assert!(record.outcome_reference().is_none());
-    assert!(record.reason_codes().is_empty());
+    assert_eq!(record.reason_codes().len(), 0);
 }
 
 #[test]
@@ -1136,7 +1136,7 @@ fn proposed_side_effect_record_maps_allowed_policy_without_approval() {
         record.authority().decision,
         SideEffectAuthorityDecision::AllowedByPolicy
     );
-    assert!(record.authority().approval_references.is_empty());
+    assert_eq!(record.authority().approval_references.len(), 0);
 }
 
 #[test]
@@ -3968,7 +3968,7 @@ fn lookup_http_client_classifies_github_statuses() {
 
         assert_eq!(response.outcome(), expected_outcome);
         assert_eq!(response.provider_error_code(), Some(expected_code));
-        assert!(response.observations().is_empty());
+        assert_eq!(response.observations().len(), 0);
         assert_eq!(probe.calls(), 1);
     }
 }

@@ -303,7 +303,7 @@ fn attempted_completed_and_failed_events_remain_unsupported_for_first_discovery_
 
     let result = discover_side_effect_references(&input).expect("discovery succeeds");
 
-    assert!(result.references().is_empty());
+    assert_eq!(result.references().len(), 0);
     assert_eq!(result.unsupported_event_count(), 3);
 }
 

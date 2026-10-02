@@ -394,9 +394,12 @@ fn hook_audit_projection_does_not_emit_dedicated_hook_records_or_observability()
         .expect("records generic audit event");
 
     assert_eq!(sink.events().len(), 1);
-    assert!(sink.policy_records().is_empty());
-    assert!(sink.adapter_records().is_empty());
-    assert!(ObservabilityEvent::from_workflow_event(&event, "workflow-core.test").is_empty());
+    assert_eq!(sink.policy_records().len(), 0);
+    assert_eq!(sink.adapter_records().len(), 0);
+    assert_eq!(
+        ObservabilityEvent::from_workflow_event(&event, "workflow-core.test").len(),
+        0
+    );
 }
 
 #[test]
@@ -557,7 +560,10 @@ fn side_effect_audit_projection_does_not_emit_dedicated_records_or_observability
         .expect("records generic audit event");
 
     assert_eq!(sink.events().len(), 1);
-    assert!(sink.policy_records().is_empty());
-    assert!(sink.adapter_records().is_empty());
-    assert!(ObservabilityEvent::from_workflow_event(&event, "workflow-core.test").is_empty());
+    assert_eq!(sink.policy_records().len(), 0);
+    assert_eq!(sink.adapter_records().len(), 0);
+    assert_eq!(
+        ObservabilityEvent::from_workflow_event(&event, "workflow-core.test").len(),
+        0
+    );
 }

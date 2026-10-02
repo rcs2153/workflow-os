@@ -561,10 +561,12 @@ mod tests {
             availability(&contract, CapabilityAvailability::Available),
         )
         .expect("source");
-        assert!(query(&source_without_grants, &binding, &contract)
-            .expect("fact set")
-            .grants()
-            .is_empty());
+        assert_eq!(
+            query(&source_without_grants, &binding, &contract)
+                .expect("fact set")
+                .grants(),
+            []
+        );
     }
 
     #[test]

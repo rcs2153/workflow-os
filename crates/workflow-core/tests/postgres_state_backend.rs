@@ -958,13 +958,15 @@ fn prove_hosted_project_resource_binding(backend: &PostgresStateBackend, config:
             .expect("list project A catalog"),
         vec![version]
     );
-    assert!(restarted
-        .list_hosted_project_catalog_versions(&HostedProjectScope::new(
-            OrganizationId::new("organization/test").expect("organization"),
-            ProjectId::new("project/b").expect("project"),
-        ))
-        .expect("list project B catalog")
-        .is_empty());
+    assert_eq!(
+        restarted
+            .list_hosted_project_catalog_versions(&HostedProjectScope::new(
+                OrganizationId::new("organization/test").expect("organization"),
+                ProjectId::new("project/b").expect("project"),
+            ))
+            .expect("list project B catalog"),
+        []
+    );
 }
 
 #[test]
@@ -980,7 +982,7 @@ fn restored_postgresql_database_passes_integrity_rehearsal() {
     assert!(initialized.healthy());
     assert!(!initialized.recovery_required());
     let plan = backend.plan_projection_rebuild().expect("restored plan");
-    assert!(!plan.run_ids().is_empty());
+    assert_ne!(plan.run_ids().len(), 0);
     let result = backend
         .rebuild_projections(&plan)
         .expect("restored projection rebuild");
@@ -1286,10 +1288,12 @@ fn prove_fenced_leases(backend: &PostgresStateBackend) {
         })
         .expect_err("expired holder cannot commit");
     assert_eq!(stale_error.code(), "postgres_state.lease.stale");
-    assert!(backend
-        .read_events(&events[0].run_id)
-        .expect("stale fence leaves no event")
-        .is_empty());
+    assert_eq!(
+        backend
+            .read_events(&events[0].run_id)
+            .expect("stale fence leaves no event"),
+        []
+    );
     backend
         .release_fenced_lease(&takeover)
         .expect("takeover lease releases");
@@ -2283,7 +2287,7 @@ fn prove_authoritative_projection_and_shared_consumer(backend: &PostgresStateBac
 
 fn prove_projection_rebuild(backend: &PostgresStateBackend) {
     let plan = backend.plan_projection_rebuild().expect("rebuild plan");
-    assert!(!plan.run_ids().is_empty());
+    assert_ne!(plan.run_ids().len(), 0);
     let result = backend
         .rebuild_projections(&plan)
         .expect("projection rebuild");

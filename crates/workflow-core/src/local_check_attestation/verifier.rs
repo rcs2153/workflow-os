@@ -871,7 +871,7 @@ mod tests {
             accepted.immutable_run_bundle(),
             &fixture.stored_bundle.manifest().run_binding()
         );
-        assert!(!fixture.stored_bundle.definition_records().is_empty());
+        assert_ne!(fixture.stored_bundle.definition_records().len(), 0);
         assert_eq!(
             accepted.proof_fingerprint().as_str(),
             "1e30df3ab6665557fccca17eabaee45742adac18b88663f2027787a9b875b1aa"
