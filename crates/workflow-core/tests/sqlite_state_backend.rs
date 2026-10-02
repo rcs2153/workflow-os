@@ -454,7 +454,9 @@ fn sqlite_backend_v1_upgrade_fails_closed_and_rolls_back() {
 #[test]
 fn sqlite_backend_v2_to_v3_upgrade_rejects_unprojected_continuity_history() {
     let fixture = Fixture::new();
-    downgrade_fixture_to_v2(&fixture.path);
+    downgrade_fixture_to_v1(&fixture.path);
+    SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(&fixture.path)
+        .expect("construct exact V2 fixture through the supported upgrade");
     let connection = Connection::open(&fixture.path).expect("open V2 fixture");
     connection
         .pragma_update(None, "foreign_keys", false)
@@ -493,7 +495,11 @@ fn sqlite_backend_v2_to_v3_upgrade_rejects_unprojected_continuity_history() {
 #[test]
 fn sqlite_backend_v3_to_v4_upgrade_refuses_preopening_continuity_state() {
     let fixture = Fixture::new();
-    downgrade_fixture_to_v3(&fixture.path);
+    downgrade_fixture_to_v1(&fixture.path);
+    SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(&fixture.path)
+        .expect("construct exact V2 fixture through the supported upgrade");
+    SqliteStateBackend::upgrade_authorized_execution_continuity_v2_to_v3(&fixture.path)
+        .expect("construct exact V3 fixture through the supported upgrade");
     let connection = Connection::open(&fixture.path).expect("open V3 fixture");
     connection
         .pragma_update(None, "foreign_keys", false)
@@ -740,51 +746,4 @@ fn downgrade_fixture_to_v1(path: &Path) {
              PRAGMA user_version = 1;",
         )
         .expect("construct exact V1 fixture");
-}
-
-fn downgrade_fixture_to_v2(path: &Path) {
-    let connection = Connection::open(path).expect("open fixture for V2 downgrade");
-    connection
-        .execute_batch(
-            "PRAGMA foreign_keys = OFF;
-             DROP TABLE operational_opening_projection_bindings;
-             DROP TABLE operational_opening_attempts;
-             DROP TABLE operational_opening_operations;
-             DROP TABLE continuity_projection_bindings;
-             DROP INDEX events_full_identity;
-             DROP INDEX continuity_windows_run_identity;
-             ALTER TABLE snapshots RENAME TO snapshots_v3;
-             CREATE TABLE snapshots (
-    run_id TEXT PRIMARY KEY,
-    payload TEXT NOT NULL
-);
-             INSERT INTO snapshots (run_id, payload)
-             SELECT run_id, payload FROM snapshots_v3;
-             DROP TABLE snapshots_v3;
-             UPDATE schema_metadata
-             SET schema_version = 2,
-                 migration_state = 'ready',
-                 checksum = 'sha256:2a4c27713b3637989cfafce0ba68bb8444293edd6ce2557affc218ea13b7b1a5'
-             WHERE singleton = 1;
-             PRAGMA user_version = 2;",
-        )
-        .expect("construct exact V2 fixture");
-}
-
-fn downgrade_fixture_to_v3(path: &Path) {
-    let connection = Connection::open(path).expect("open fixture for V3 downgrade");
-    connection
-        .execute_batch(
-            "PRAGMA foreign_keys = OFF;
-             DROP TABLE operational_opening_projection_bindings;
-             DROP TABLE operational_opening_attempts;
-             DROP TABLE operational_opening_operations;
-             UPDATE schema_metadata
-             SET schema_version = 3,
-                 migration_state = 'ready',
-                 checksum = 'sha256:6f460484d9034f04952b3ab1dbed307861460fa3b7f027eb7fb7229c31eac1b0'
-             WHERE singleton = 1;
-             PRAGMA user_version = 3;",
-        )
-        .expect("construct exact V3 fixture");
 }
