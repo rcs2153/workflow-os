@@ -454,7 +454,19 @@ current queue when they contain historical `next phase` language.
    and current rehydrated run snapshot. The private one-shot slice is accepted.
    The next P0 phase is bounded trusted-host redispatch-loop planning over the
    accepted execution-window, directive, supervisor, and reservation
-   boundaries.
+   boundaries. That planning phase is documented in the [Bounded Trusted-Host
+   Redispatch Loop
+   Plan](docs/implementation-plans/bounded-trusted-host-redispatch-loop-plan.md)
+   and [planning
+   report](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_PLAN_REPORT.md).
+   The plan keeps Core authoritative for every iteration: only a freshly
+   derived `ResumeNow` may consume a fresh directive, commit a one-winner
+   dispatch reservation, and invoke one injected executor. Typed wait,
+   blocked, terminal, ambiguous, corrupt, and security-rejected posture stop
+   the loop without fabricated progress. A finite host budget is explicit
+   process posture and must not masquerade as workflow completion or wait.
+   The next phase is a focused maintainer/security review of the plan before
+   any loop implementation.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
