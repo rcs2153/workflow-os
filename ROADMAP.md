@@ -475,8 +475,12 @@ current queue when they contain historical `next phase` language.
    non-authorizing operation identities. The correction is documented in the
    [blocker-fix
    report](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_PLAN_BLOCKER_FIX_REPORT.md).
-   The next phase is a focused blocker-fix review before any loop
-   implementation.
+   The focused
+   [blocker-fix review](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_PLAN_BLOCKER_FIX_REVIEW.md)
+   accepts both corrections. The next P0 phase is the private local SQLite
+   bounded redispatch-loop implementation, followed by a focused
+   maintainer/security review before any provider, sandbox, nested-harness,
+   public-config, CLI, SDK, or hosted integration.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
