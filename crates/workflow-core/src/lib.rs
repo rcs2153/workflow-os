@@ -17,6 +17,7 @@ mod current_authority_proportional_governance;
 mod current_authority_source;
 mod definitions;
 mod diagnostic;
+mod dispatch_reservation;
 mod durable_state_contract;
 mod error;
 mod evidence;

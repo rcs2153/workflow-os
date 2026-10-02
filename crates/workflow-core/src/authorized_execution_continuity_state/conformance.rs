@@ -338,6 +338,7 @@ impl<B: ContinuityConformanceBackend> ContinuityConformanceFixture<B> {
             authority_commitment: window.authority_commitment.clone(),
             window_binding_commitment: window_binding_commitment(&self.binding()),
             consume_operation_id: attempt.consume_operation_id.clone(),
+            dispatch_reservation: None,
         }
     }
 
@@ -507,6 +508,7 @@ impl<B: ContinuityConformanceBackend> ContinuityConformanceFixture<B> {
             cursor: self.cursor.clone(),
             attempt_id: self.attempt_id.clone(),
             expected_attempt_revision: attempt.revision,
+            dispatch_reservation: None,
         };
         request.request_commitment = expected_recovery_commitment(&request);
         request

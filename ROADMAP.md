@@ -440,7 +440,15 @@ current queue when they contain historical `next phase` language.
    reservation-bound outcome/yield/recovery inputs, and module-private
    capability construction. The [focused fix
    review](docs/concepts/ATOMIC_DISPATCH_RESERVATION_PLAN_BLOCKER_FIX_REVIEW.md)
-   accepted the plan. The private SQLite one-winner implementation is next.
+   accepted the plan. The private SQLite one-winner implementation is now
+   complete and documented in the [Atomic Dispatch Reservation Implementation
+   Report](docs/concepts/ATOMIC_DISPATCH_RESERVATION_IMPLEMENTATION_REPORT.md).
+   One immediate transaction admits exactly one caller, appends and projects
+   one payload-free admission event, returns non-reconstructable in-memory
+   authority only after an unambiguous commit, binds outcome/yield/recovery
+   writes to that admission, and withholds authority on replay or ambiguous
+   commit reconciliation. A focused maintainer/security implementation review
+   is next.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

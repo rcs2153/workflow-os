@@ -1531,6 +1531,8 @@ pub(crate) mod internal {
         pub(crate) authority_commitment: SpecContentHash,
         pub(crate) window_binding_commitment: SpecContentHash,
         pub(crate) consume_operation_id: ContinuityOperationId,
+        pub(crate) dispatch_reservation:
+            Option<crate::dispatch_reservation::DispatchReservationBinding>,
     }
 
     impl fmt::Debug for AttemptUseCapability {
@@ -1611,6 +1613,8 @@ pub(crate) mod internal {
         pub(crate) cursor: ContinuityCursor,
         pub(crate) attempt_id: AuthorizedExecutionAttemptId,
         pub(crate) expected_attempt_revision: ContinuityRevision,
+        pub(crate) dispatch_reservation:
+            Option<crate::dispatch_reservation::DispatchReservationBinding>,
     }
 
     #[derive(Clone, Eq, PartialEq)]
@@ -2108,6 +2112,10 @@ pub(crate) mod internal {
             yield_reason_code(request.reason).to_owned(),
             request.waits.len().to_string(),
         ];
+        append_dispatch_reservation_binding(
+            &mut fields,
+            request.attempt_capability.dispatch_reservation.as_ref(),
+        );
         let mut waits = request.waits.clone();
         waits.sort_by(|left, right| {
             left.condition_id
@@ -2242,55 +2250,97 @@ pub(crate) mod internal {
     pub(crate) fn expected_attempt_outcome_commitment(
         request: &RecordAttemptOutcomeRequest<'_>,
     ) -> SpecContentHash {
+        let mut fields = vec![
+            request.receipt_id.as_str().to_owned(),
+            request.window_id.as_str().to_owned(),
+            request.expected_window_revision.get().to_string(),
+            window_binding_commitment(&request.expected_window_binding)
+                .as_str()
+                .to_owned(),
+            request.attempt_id.as_str().to_owned(),
+            request.expected_attempt_revision.get().to_string(),
+            request.attempt_capability.attempt_id.as_str().to_owned(),
+            request.attempt_capability.window_id.as_str().to_owned(),
+            request.attempt_capability.window_revision.get().to_string(),
+            request
+                .attempt_capability
+                .cursor
+                .sequence_number
+                .get()
+                .to_string(),
+            request
+                .attempt_capability
+                .cursor
+                .event_id
+                .as_str()
+                .to_owned(),
+            request
+                .attempt_capability
+                .subject_actor_id
+                .as_str()
+                .to_owned(),
+            request
+                .attempt_capability
+                .authority_commitment
+                .as_str()
+                .to_owned(),
+            request
+                .attempt_capability
+                .window_binding_commitment
+                .as_str()
+                .to_owned(),
+            request
+                .attempt_capability
+                .consume_operation_id
+                .as_str()
+                .to_owned(),
+            attempt_outcome_code(request.outcome).to_owned(),
+        ];
+        append_dispatch_reservation_binding(
+            &mut fields,
+            request.attempt_capability.dispatch_reservation.as_ref(),
+        );
         request_commitment(
             "workflow-os/authorized-execution-continuity/attempt-outcome/v1",
             &request.operation_id,
-            &[
-                request.receipt_id.as_str(),
-                request.window_id.as_str(),
-                &request.expected_window_revision.get().to_string(),
-                window_binding_commitment(&request.expected_window_binding).as_str(),
-                request.attempt_id.as_str(),
-                &request.expected_attempt_revision.get().to_string(),
-                request.attempt_capability.attempt_id.as_str(),
-                request.attempt_capability.window_id.as_str(),
-                &request.attempt_capability.window_revision.get().to_string(),
-                &request
-                    .attempt_capability
-                    .cursor
-                    .sequence_number
-                    .get()
-                    .to_string(),
-                request.attempt_capability.cursor.event_id.as_str(),
-                request.attempt_capability.subject_actor_id.as_str(),
-                request.attempt_capability.authority_commitment.as_str(),
-                request
-                    .attempt_capability
-                    .window_binding_commitment
-                    .as_str(),
-                request.attempt_capability.consume_operation_id.as_str(),
-                attempt_outcome_code(request.outcome),
-            ],
+            &fields.iter().map(String::as_str).collect::<Vec<_>>(),
         )
     }
 
     pub(crate) fn expected_recovery_commitment(
         request: &RecoverAmbiguousAttemptRequest,
     ) -> SpecContentHash {
+        let mut fields = vec![
+            request.receipt_id.as_str().to_owned(),
+            request.window_id.as_str().to_owned(),
+            request.expected_window_revision.get().to_string(),
+            window_binding_commitment(&request.expected_window_binding)
+                .as_str()
+                .to_owned(),
+            request.cursor.sequence_number.get().to_string(),
+            request.cursor.event_id.as_str().to_owned(),
+            request.attempt_id.as_str().to_owned(),
+            request.expected_attempt_revision.get().to_string(),
+        ];
+        append_dispatch_reservation_binding(&mut fields, request.dispatch_reservation.as_ref());
         request_commitment(
             "workflow-os/authorized-execution-continuity/recover-ambiguous/v1",
             &request.operation_id,
-            &[
-                request.receipt_id.as_str(),
-                request.window_id.as_str(),
-                &request.expected_window_revision.get().to_string(),
-                window_binding_commitment(&request.expected_window_binding).as_str(),
-                &request.cursor.sequence_number.get().to_string(),
-                request.cursor.event_id.as_str(),
-                request.attempt_id.as_str(),
-                &request.expected_attempt_revision.get().to_string(),
-            ],
+            &fields.iter().map(String::as_str).collect::<Vec<_>>(),
         )
+    }
+
+    fn append_dispatch_reservation_binding(
+        fields: &mut Vec<String>,
+        binding: Option<&crate::dispatch_reservation::DispatchReservationBinding>,
+    ) {
+        if let Some(binding) = binding {
+            fields.push("present".to_owned());
+            fields.push(binding.receipt_id.as_str().to_owned());
+            fields.push(binding.reservation_commitment.as_str().to_owned());
+            fields.push(binding.admission_cursor.sequence_number().get().to_string());
+            fields.push(binding.admission_cursor.event_id().as_str().to_owned());
+        }
     }
 
     pub(crate) fn operation_commitment(
@@ -4066,6 +4116,7 @@ mod tests {
                         &request.expected_window_binding,
                     ),
                     consume_operation_id,
+                    dispatch_reservation: None,
                 },
             })
         }
@@ -4832,6 +4883,7 @@ mod tests {
             cursor: fixture.cursor.clone(),
             attempt_id,
             expected_attempt_revision: attempt.revision,
+            dispatch_reservation: None,
         };
         request.request_commitment = expected_recovery_commitment(&request);
         request
@@ -4839,6 +4891,203 @@ mod tests {
 
     fn timestamp(value: &str) -> Timestamp {
         Timestamp::parse_rfc3339(value).expect("timestamp")
+    }
+
+    #[test]
+    fn absent_dispatch_reservation_preserves_legacy_request_commitments() {
+        let fixture = Fixture::yielded(false);
+        let authority = fixture.authority_capability();
+        let consumed = fixture
+            .store
+            .consume_directive(consume_request(
+                &fixture,
+                &authority,
+                "consume/legacy-commitment",
+                "attempt/continuity-reference/legacy-commitment",
+                timestamp("2026-08-15T12:01:00Z"),
+            ))
+            .expect("consume");
+        let capability = match consumed {
+            ConsumeDirectiveResult::Consumed { capability, .. } => capability,
+            ConsumeDirectiveResult::ExactReplay(_) => panic!("first call is not replay"),
+            ConsumeDirectiveResult::SecurityRejected(_) => panic!("first call is not rejected"),
+        };
+        assert!(capability.dispatch_reservation.is_none());
+
+        let yield_request = register_yield_request(
+            &fixture,
+            &capability,
+            "yield/legacy-commitment",
+            "yield/continuity-reference/legacy-commitment",
+        );
+        let legacy_yield_fields = vec![
+            yield_request.receipt_id.as_str().to_owned(),
+            yield_request.window_id.as_str().to_owned(),
+            yield_request.expected_window_revision.get().to_string(),
+            window_binding_commitment(&yield_request.expected_window_binding)
+                .as_str()
+                .to_owned(),
+            yield_request.cursor.sequence_number.get().to_string(),
+            yield_request.cursor.event_id.as_str().to_owned(),
+            yield_request.attempt_id.as_str().to_owned(),
+            yield_request
+                .attempt_capability
+                .consume_operation_id
+                .as_str()
+                .to_owned(),
+            yield_request
+                .attempt_capability
+                .window_id
+                .as_str()
+                .to_owned(),
+            yield_request
+                .attempt_capability
+                .window_revision
+                .get()
+                .to_string(),
+            yield_request
+                .attempt_capability
+                .cursor
+                .sequence_number
+                .get()
+                .to_string(),
+            yield_request
+                .attempt_capability
+                .cursor
+                .event_id
+                .as_str()
+                .to_owned(),
+            yield_request
+                .attempt_capability
+                .subject_actor_id
+                .as_str()
+                .to_owned(),
+            yield_request
+                .attempt_capability
+                .authority_commitment
+                .as_str()
+                .to_owned(),
+            yield_request
+                .attempt_capability
+                .window_binding_commitment
+                .as_str()
+                .to_owned(),
+            yield_request.generation_id.as_str().to_owned(),
+            "turn_boundary".to_owned(),
+            yield_request.waits.len().to_string(),
+        ];
+        assert_eq!(
+            yield_request.request_commitment,
+            request_commitment(
+                "workflow-os/authorized-execution-continuity/register-yield/v1",
+                &yield_request.operation_id,
+                &legacy_yield_fields
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            )
+        );
+
+        let outcome_request =
+            attempt_outcome_request(&fixture, &capability, "outcome/legacy-commitment");
+        let legacy_outcome_fields = vec![
+            outcome_request.receipt_id.as_str().to_owned(),
+            outcome_request.window_id.as_str().to_owned(),
+            outcome_request.expected_window_revision.get().to_string(),
+            window_binding_commitment(&outcome_request.expected_window_binding)
+                .as_str()
+                .to_owned(),
+            outcome_request.attempt_id.as_str().to_owned(),
+            outcome_request.expected_attempt_revision.get().to_string(),
+            outcome_request
+                .attempt_capability
+                .attempt_id
+                .as_str()
+                .to_owned(),
+            outcome_request
+                .attempt_capability
+                .window_id
+                .as_str()
+                .to_owned(),
+            outcome_request
+                .attempt_capability
+                .window_revision
+                .get()
+                .to_string(),
+            outcome_request
+                .attempt_capability
+                .cursor
+                .sequence_number
+                .get()
+                .to_string(),
+            outcome_request
+                .attempt_capability
+                .cursor
+                .event_id
+                .as_str()
+                .to_owned(),
+            outcome_request
+                .attempt_capability
+                .subject_actor_id
+                .as_str()
+                .to_owned(),
+            outcome_request
+                .attempt_capability
+                .authority_commitment
+                .as_str()
+                .to_owned(),
+            outcome_request
+                .attempt_capability
+                .window_binding_commitment
+                .as_str()
+                .to_owned(),
+            outcome_request
+                .attempt_capability
+                .consume_operation_id
+                .as_str()
+                .to_owned(),
+            "succeeded".to_owned(),
+        ];
+        assert_eq!(
+            outcome_request.request_commitment,
+            request_commitment(
+                "workflow-os/authorized-execution-continuity/attempt-outcome/v1",
+                &outcome_request.operation_id,
+                &legacy_outcome_fields
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            )
+        );
+
+        let recovery_request = recovery_request(
+            &fixture,
+            capability.attempt_id.clone(),
+            "recovery/legacy-commitment",
+        );
+        let legacy_recovery_fields = [
+            recovery_request.receipt_id.as_str().to_owned(),
+            recovery_request.window_id.as_str().to_owned(),
+            recovery_request.expected_window_revision.get().to_string(),
+            window_binding_commitment(&recovery_request.expected_window_binding)
+                .as_str()
+                .to_owned(),
+            recovery_request.cursor.sequence_number.get().to_string(),
+            recovery_request.cursor.event_id.as_str().to_owned(),
+            recovery_request.attempt_id.as_str().to_owned(),
+            recovery_request.expected_attempt_revision.get().to_string(),
+        ];
+        assert_eq!(
+            recovery_request.request_commitment,
+            request_commitment(
+                "workflow-os/authorized-execution-continuity/recover-ambiguous/v1",
+                &recovery_request.operation_id,
+                &legacy_recovery_fields
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            )
+        );
     }
 
     #[test]
@@ -5275,6 +5524,7 @@ mod tests {
             cursor: ambiguous.cursor.clone(),
             attempt_id,
             expected_attempt_revision: ContinuityRevision::new(1).expect("revision"),
+            dispatch_reservation: None,
         };
         recovery.request_commitment = expected_recovery_commitment(&recovery);
         ambiguous
@@ -6754,6 +7004,7 @@ mod tests {
             cursor: stale_cursor,
             attempt_id,
             expected_attempt_revision: ContinuityRevision::new(1).expect("revision"),
+            dispatch_reservation: None,
         };
         request.request_commitment = expected_recovery_commitment(&request);
         fixture

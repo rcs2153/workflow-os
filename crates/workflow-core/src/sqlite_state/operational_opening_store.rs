@@ -627,12 +627,15 @@ mod tests {
         expected_consume_directive_commitment, trusted_time_observation, window_binding_commitment,
         AuthorityUseCapability, AuthorizedExecutionContinuityProjectionStore,
         ConsumeDirectiveRequest, ConsumeDirectiveResult, ContinuityCursor, ContinuityDirectiveId,
-        ContinuityOperationId, ContinuityReceiptId, ContinuityRevision,
-        ContinuityTrustedTimeEpochId, ContinuityYieldGenerationId, TrustedTimeSourceKind,
+        ContinuityOperationId, ContinuityReceiptId, ContinuityTrustedTimeEpochId,
+        ContinuityYieldGenerationId, TrustedTimeSourceKind,
     };
     use crate::operational_execution_window_opening::{
         operation_binding_commitment, trusted_host_invocation_commitment,
         OperationalExecutionWindowOpeningAuthorization,
+    };
+    use crate::sqlite_state::dispatch_reservation_store::{
+        inject_dispatch_commit_fault, InjectedDispatchCommitFault,
     };
     use crate::trusted_host_supervisor::{
         inject_supervisor_persistence_fault, supervise_one_local_skill_attempt,
@@ -1532,6 +1535,15 @@ mod tests {
             sequence_number: yielded_run.snapshot.last_sequence_number,
             event_id: yielded_run.snapshot.last_event_id.clone(),
         };
+        let yielded_connection = fixture.backend.connection().expect("SQLite connection");
+        let yielded_state =
+            crate::sqlite_state::continuity_codec::load_snapshot(&yielded_connection)
+                .expect("continuity snapshot");
+        let yielded_window_revision = yielded_state
+            .windows
+            .get(&opened_window_id)
+            .expect("yielded window")
+            .revision;
         let mut resumed_binding = opened_expected_binding;
         resumed_binding.cursor = yielded_cursor.clone();
         let consume_operation_id =
@@ -1548,14 +1560,14 @@ mod tests {
             ))
             .expect("directive"),
             window_id: opened_window_id.clone(),
-            expected_window_revision: ContinuityRevision::new(2).expect("revision"),
+            expected_window_revision: yielded_window_revision,
             expected_window_binding: resumed_binding.clone(),
             generation_id,
             cursor: yielded_cursor.clone(),
             expected_waits: Vec::new(),
             authority_capability: AuthorityUseCapability {
                 window_id: opened_window_id,
-                window_revision: ContinuityRevision::new(2).expect("revision"),
+                window_revision: yielded_window_revision,
                 generation_id: ContinuityYieldGenerationId::new("yield/supervisor-proof/1")
                     .expect("generation"),
                 cursor: yielded_cursor,
@@ -1622,7 +1634,7 @@ mod tests {
         );
         let final_run = fixture.backend.rehydrate_run(&fixture.run_id).expect("run");
         assert_eq!(final_run.snapshot.status, WorkflowRunStatus::Running);
-        assert_eq!(final_run.events.len(), 7);
+        assert_eq!(final_run.events.len(), 9);
     }
 
     #[test]
@@ -1797,7 +1809,7 @@ mod tests {
         .expect_err("stale attempt must not dispatch");
         assert_eq!(
             error.code(),
-            "trusted_host_supervisor.attempt_not_dispatchable"
+            "dispatch_reservation.attempt_not_dispatchable"
         );
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
@@ -1912,5 +1924,140 @@ mod tests {
             }
             assert_eq!(calls.load(Ordering::Relaxed), 1);
         }
+    }
+
+    #[test]
+    fn dispatch_reservation_failure_prevents_executor_entry() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/dispatch-before", 1);
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        inject_dispatch_commit_fault(InjectedDispatchCommitFault::Before);
+        let error = supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/dispatch-before")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/dispatch-before").expect("receipt"),
+                yield_generation: None,
+            },
+        })
+        .expect_err("uncommitted reservation must fail closed");
+        assert_eq!(error.code(), "dispatch_reservation.write_failed");
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            fixture
+                .backend
+                .read_events(&fixture.run_id)
+                .expect("events")
+                .len(),
+            4
+        );
+    }
+
+    #[test]
+    fn ambiguous_dispatch_commit_never_reissues_executor_capability() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/dispatch-after", 1);
+        let replay = clone_opened_capability(&capability);
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        inject_dispatch_commit_fault(InjectedDispatchCommitFault::After);
+        let input = skill_input(&fixture);
+        let error = supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &executor,
+            skill_input: input.clone(),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/dispatch-after")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/dispatch-after").expect("receipt"),
+                yield_generation: None,
+            },
+        })
+        .expect_err("ambiguous committed reservation must withhold capability");
+        assert_eq!(
+            error.code(),
+            "trusted_host_supervisor.dispatch_capability_unavailable"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+        let replay_error = supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(replay),
+            executor: &executor,
+            skill_input: input,
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/dispatch-after")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/dispatch-after").expect("receipt"),
+                yield_generation: None,
+            },
+        })
+        .expect_err("exact replay must not mint a second capability");
+        assert_eq!(
+            replay_error.code(),
+            "trusted_host_supervisor.attempt_already_admitted"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            fixture
+                .backend
+                .read_events(&fixture.run_id)
+                .expect("events")
+                .len(),
+            5
+        );
+    }
+
+    #[test]
+    fn concurrent_dispatchers_enter_executor_exactly_once() {
+        let fixture = Fixture::new();
+        let first = open_supervisor_attempt(&fixture, "opening/concurrent-dispatch", 1);
+        let second = clone_opened_capability(&first);
+        let barrier = Arc::new(Barrier::new(2));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut workers = Vec::new();
+        for capability in [first, second] {
+            let backend = fixture.backend.clone();
+            let input = skill_input(&fixture);
+            let barrier = Arc::clone(&barrier);
+            let calls = Arc::clone(&calls);
+            workers.push(std::thread::spawn(move || {
+                barrier.wait();
+                let executor = CountingExecutor { calls: &calls };
+                supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+                    backend: &backend,
+                    capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+                    executor: &executor,
+                    skill_input: input,
+                    persistence: TrustedHostSupervisorPersistenceInput {
+                        operation: ContinuityOperationId::new("operation/concurrent-dispatch")
+                            .expect("operation"),
+                        receipt: ContinuityReceiptId::new("receipt/concurrent-dispatch")
+                            .expect("receipt"),
+                        yield_generation: None,
+                    },
+                })
+            }));
+        }
+        let results = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("worker"))
+            .collect::<Vec<_>>();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let loser = results
+            .iter()
+            .find_map(|result| result.as_ref().err())
+            .expect("one loser");
+        assert_eq!(
+            loser.code(),
+            "trusted_host_supervisor.attempt_already_admitted"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 }

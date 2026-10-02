@@ -68,6 +68,10 @@ impl ContinuityClock for SystemContinuityClock {
     }
 }
 
+pub(super) fn observe_continuity_trusted_time() -> Result<TrustedTimeObservation, WorkflowOsError> {
+    SystemContinuityClock.observe()
+}
+
 #[derive(Clone)]
 struct SqliteContinuityStore {
     backend: SqliteStateBackend,
@@ -124,6 +128,10 @@ impl SqliteContinuityStore {
         window_id: &crate::AuthorizedExecutionWindowId,
         expected_cursor: &ContinuityCursor,
         request_envelope: &RequestEnvelope,
+        dispatch_reservation: Option<(
+            &crate::AuthorizedExecutionAttemptId,
+            &crate::dispatch_reservation::DispatchReservationBinding,
+        )>,
         mutation: F,
     ) -> Result<(CommittedOperationDisposition, bool), WorkflowOsError>
     where
@@ -145,6 +153,13 @@ impl SqliteContinuityStore {
                 )
             })?;
         let mut state = super::continuity_codec::load_snapshot(&transaction)?;
+        if let Some((attempt_id, binding)) = dispatch_reservation {
+            super::dispatch_reservation_store::validate_dispatch_reservation_binding(
+                &transaction,
+                attempt_id,
+                binding,
+            )?;
+        }
 
         if let Some(existing) = state.operations.get(operation_id) {
             if existing.operation_kind != kind
@@ -375,6 +390,11 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
             &request.window_id,
             &request.cursor,
             &envelope,
+            request
+                .attempt_capability
+                .dispatch_reservation
+                .as_ref()
+                .map(|binding| (&request.attempt_id, binding)),
             |state, observed_at, write_cursor| {
                 let window = state.windows.get(&request.window_id).ok_or_else(corrupt)?;
                 validate_window(
@@ -539,6 +559,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
             &request.window_id,
             &request.cursor,
             &envelope,
+            None,
             |state, observed_at, _write_cursor| {
                 let window = state.windows.get(&request.window_id).ok_or_else(corrupt)?;
                 validate_window(
@@ -667,6 +688,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
             &request.window_id,
             &request.cursor,
             &envelope,
+            None,
             |state, observed_at, write_cursor| {
                 let window = state.windows.get(&request.window_id).ok_or_else(corrupt)?;
                 validate_window(
@@ -843,6 +865,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
                         authority_commitment: authority,
                         window_binding_commitment: window_binding_commitment(&capability_binding),
                         consume_operation_id,
+                        dispatch_reservation: None,
                     },
                 })
             }
@@ -876,6 +899,11 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
             &request.window_id,
             &request.attempt_capability.cursor,
             &envelope,
+            request
+                .attempt_capability
+                .dispatch_reservation
+                .as_ref()
+                .map(|binding| (&request.attempt_id, binding)),
             |state, observed_at, _write_cursor| {
                 validate_attempt_request(
                     state,
@@ -937,6 +965,10 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
             &request.window_id,
             &request.cursor,
             &envelope,
+            request
+                .dispatch_reservation
+                .as_ref()
+                .map(|binding| (&request.attempt_id, binding)),
             |state, observed_at, _write_cursor| {
                 let window = state.windows.get(&request.window_id).ok_or_else(corrupt)?;
                 validate_window(
@@ -3035,6 +3067,7 @@ mod conformance_backend {
                 authority_commitment: window.authority_commitment.clone(),
                 window_binding_commitment: window_binding_commitment(&binding(f)),
                 consume_operation_id: attempt.consume_operation_id.clone(),
+                dispatch_reservation: None,
             }
         }
         fn authority_capability(f: &Fixture) -> AuthorityUseCapability {
@@ -3205,6 +3238,7 @@ mod conformance_backend {
                 cursor: f.cursor.clone(),
                 attempt_id: f.attempt_id.clone(),
                 expected_attempt_revision: attempt.revision,
+                dispatch_reservation: None,
             };
             request.request_commitment = expected_recovery_commitment(&request);
             request
@@ -4428,6 +4462,7 @@ mod conformance_backend {
                 cursor: g.cursor.clone(),
                 attempt_id: g.attempt_id.clone(),
                 expected_attempt_revision: ContinuityRevision::new(1).expect("revision"),
+                dispatch_reservation: None,
             };
             recover.request_commitment = expected_recovery_commitment(&recover);
             assert!(matches!(
@@ -4489,6 +4524,7 @@ mod conformance_backend {
                         authority_commitment: window.authority_commitment.clone(),
                         window_binding_commitment: window_binding_commitment(&binding),
                         consume_operation_id: attempt.consume_operation_id.clone(),
+                        dispatch_reservation: None,
                     };
                     let mut request = RegisterYieldRequest {
                         operation_id: ContinuityOperationId::new("operation/sqlite-race")

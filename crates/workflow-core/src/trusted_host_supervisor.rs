@@ -6,12 +6,17 @@ use std::cell::Cell;
 use crate::authorized_execution_continuity_state::internal::{
     expected_attempt_outcome_commitment, expected_recovery_commitment,
     expected_register_yield_commitment, AttemptUseCapability, AuthoritativeContinuationDisposition,
-    AuthorizedExecutionAttemptDispatchValidator, AuthorizedExecutionContinuityProjectionStore,
-    AuthorizedExecutionContinuityStore, CommittedOperationDisposition, ContinuityOperationId,
-    ContinuityReceiptId, ContinuityRevision, ContinuityYieldGenerationId, ExpectedWindowBinding,
-    MutationResult, ProjectedContinuityReconciliationResult, ReconcileOperationRequest,
+    AuthorizedExecutionContinuityProjectionStore, AuthorizedExecutionContinuityStore,
+    CommittedOperationDisposition, ContinuityOperationId, ContinuityReceiptId,
+    ContinuityYieldGenerationId, ExpectedWindowBinding, MutationResult,
+    ProjectedContinuityReconciliationResult, ReconcileOperationRequest,
     RecordAttemptOutcomeRequest, RecoverAmbiguousAttemptRequest, RegisterYieldRequest,
     RegisterYieldResult,
+};
+use crate::dispatch_reservation::{
+    request_commitment as dispatch_request_commitment, DispatchReservationOperationId,
+    DispatchReservationOutcome, DispatchReservationReceiptId, DispatchReservationRequest,
+    DispatchReservationStore,
 };
 use crate::operational_execution_window_opening::{
     operation_binding_commitment, trusted_host_invocation_commitment,
@@ -151,6 +156,12 @@ struct SupervisorCapability {
     operation_binding_commitment: SpecContentHash,
 }
 
+struct UnreservedSupervisorCapability {
+    capability: AttemptUseCapability,
+    expected_window_binding: ExpectedWindowBinding,
+    operation_binding_commitment: SpecContentHash,
+}
+
 pub(crate) fn supervise_one_local_skill_attempt(
     input: TrustedHostSupervisorInput<'_>,
 ) -> Result<TrustedHostSupervisorResult, WorkflowOsError> {
@@ -161,16 +172,50 @@ pub(crate) fn supervise_one_local_skill_attempt(
         &capability.expected_window_binding,
         &capability.operation_binding_commitment,
     )?;
-    if !input
+    let invocation_commitment = trusted_host_invocation_commitment(
+        &input.skill_input,
+        &input.executor.binding_commitment(),
+    );
+    let mut reservation_request = DispatchReservationRequest {
+        operation_id: DispatchReservationOperationId::new(input.persistence.operation.as_str())?,
+        receipt_id: DispatchReservationReceiptId::new(input.persistence.receipt.as_str())?,
+        request_commitment: SpecContentHash::from_text("pending dispatch reservation"),
+        capability: capability.capability,
+        expected_window_binding: capability.expected_window_binding,
+        operation_binding_commitment: capability.operation_binding_commitment,
+        invocation_commitment,
+        executor_commitment: input.executor.binding_commitment(),
+    };
+    reservation_request.request_commitment = dispatch_request_commitment(&reservation_request);
+    let capability = match input
         .backend
-        .attempt_dispatch_is_current(&capability.capability, &capability.expected_window_binding)?
+        .reserve_attempt_dispatch(reservation_request)?
     {
-        return Err(supervisor_error(
-            WorkflowOsErrorKind::InvalidState,
-            "attempt_not_dispatchable",
-            "trusted-host attempt authority is not dispatchable",
-        ));
-    }
+        DispatchReservationOutcome::Admitted { capability, .. } => {
+            let parts = capability.into_parts();
+            SupervisorCapability {
+                capability: parts.attempt_capability,
+                expected_window_binding: parts.expected_window_binding,
+                operation_binding_commitment: parts.operation_binding_commitment,
+            }
+        }
+        DispatchReservationOutcome::AlreadyAdmitted { receipt } => {
+            let _binding = receipt.into_binding();
+            return Err(supervisor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "attempt_already_admitted",
+                "trusted-host attempt was already admitted",
+            ));
+        }
+        DispatchReservationOutcome::CommittedButCapabilityUnavailable { receipt } => {
+            let _binding = receipt.into_binding();
+            return Err(supervisor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "dispatch_capability_unavailable",
+                "trusted-host dispatch authority is unavailable",
+            ));
+        }
+    };
 
     let execution = input.executor.execute(&TrustedHostAttemptExecutionContext {
         skill_input: &input.skill_input,
@@ -216,9 +261,9 @@ pub(crate) fn supervise_one_local_skill_attempt(
 
 fn normalize_capability(
     capability: TrustedHostSupervisorAttemptCapability,
-) -> SupervisorCapability {
+) -> UnreservedSupervisorCapability {
     match capability {
-        TrustedHostSupervisorAttemptCapability::Opened(opened) => SupervisorCapability {
+        TrustedHostSupervisorAttemptCapability::Opened(opened) => UnreservedSupervisorCapability {
             capability: AttemptUseCapability {
                 attempt_id: opened.attempt_id.clone(),
                 subject_actor_id: opened.subject_actor_id.clone(),
@@ -228,6 +273,7 @@ fn normalize_capability(
                 authority_commitment: opened.authority_commitment.clone(),
                 window_binding_commitment: opened.window_binding_commitment.clone(),
                 consume_operation_id: opened.consume_operation_id.clone(),
+                dispatch_reservation: None,
             },
             expected_window_binding: opened.expected_window_binding,
             operation_binding_commitment: opened.operation_binding_commitment,
@@ -236,7 +282,7 @@ fn normalize_capability(
             capability,
             expected_window_binding,
             operation_binding_commitment,
-        } => SupervisorCapability {
+        } => UnreservedSupervisorCapability {
             capability: AttemptUseCapability {
                 attempt_id: capability.attempt_id,
                 subject_actor_id: capability.subject_actor_id,
@@ -246,6 +292,7 @@ fn normalize_capability(
                 authority_commitment: capability.authority_commitment,
                 window_binding_commitment: capability.window_binding_commitment,
                 consume_operation_id: capability.consume_operation_id,
+                dispatch_reservation: None,
             },
             expected_window_binding: *expected_window_binding,
             operation_binding_commitment,
@@ -339,7 +386,7 @@ fn persist_outcome(
         expected_window_revision: capability.capability.window_revision,
         expected_window_binding: capability.expected_window_binding.clone(),
         attempt_id: capability.capability.attempt_id.clone(),
-        expected_attempt_revision: ContinuityRevision::new(1)?,
+        expected_attempt_revision: capability.capability.window_revision,
         attempt_capability: &capability.capability,
         outcome,
     };
@@ -393,7 +440,8 @@ fn persist_ambiguous(
         expected_window_binding: capability.expected_window_binding.clone(),
         cursor: capability.capability.cursor.clone(),
         attempt_id: capability.capability.attempt_id.clone(),
-        expected_attempt_revision: ContinuityRevision::new(1)?,
+        expected_attempt_revision: capability.capability.window_revision,
+        dispatch_reservation: capability.capability.dispatch_reservation.clone(),
     };
     request.request_commitment = expected_recovery_commitment(&request);
     let reconciliation = ReconcileOperationRequest {

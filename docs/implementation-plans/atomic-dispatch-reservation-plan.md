@@ -1,5 +1,12 @@
 # Atomic Dispatch Reservation Plan
 
+> Implementation status: the private SQLite atomic dispatch-reservation slice
+> is implemented. See [Atomic Dispatch Reservation Implementation
+> Report](../concepts/ATOMIC_DISPATCH_RESERVATION_IMPLEMENTATION_REPORT.md).
+> Repeated scheduling, provider execution, OpenShell, nested harnesses,
+> automatic approval, public runtime configuration, CLI, SDK, and schema
+> exposure remain unimplemented.
+
 ## 1. Executive Summary
 
 The accepted one-shot trusted-host supervisor validates that an exact started
@@ -18,8 +25,8 @@ provider execution, OpenShell, nested harnesses, automatic approval, public
 runtime configuration, CLI, SDK, schema exposure, hosted behavior, or another
 provider mutation family.
 
-This document plans the phase only. It does not implement dispatch
-reservation.
+This document defined the implementation boundary. The bounded private slice
+is now implemented without broadening the non-goals below.
 
 ## 2. Problem Statement
 
