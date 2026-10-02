@@ -447,8 +447,14 @@ current queue when they contain historical `next phase` language.
    one payload-free admission event, returns non-reconstructable in-memory
    authority only after an unambiguous commit, binds outcome/yield/recovery
    writes to that admission, and withholds authority on replay or ambiguous
-   commit reconciliation. A focused maintainer/security implementation review
-   is next.
+   commit reconciliation. The focused maintainer/security
+   [implementation review](docs/concepts/ATOMIC_DISPATCH_RESERVATION_IMPLEMENTATION_REVIEW.md)
+   found and fixed one blocker: replay and downstream use now cross-check the
+   relational reservation, durable admission event, point-in-time projection,
+   and current rehydrated run snapshot. The private one-shot slice is accepted.
+   The next P0 phase is bounded trusted-host redispatch-loop planning over the
+   accepted execution-window, directive, supervisor, and reservation
+   boundaries.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
