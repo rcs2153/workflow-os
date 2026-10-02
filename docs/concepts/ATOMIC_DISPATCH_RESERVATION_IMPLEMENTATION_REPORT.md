@@ -141,6 +141,10 @@ Focused coverage proves:
 - admission does not fabricate workflow completion;
 - continuity result, yield, and recovery writes require the reservation
   binding;
+- replay and downstream use cross-check relational reservation rows, the
+  durable admission event, point-in-time projection, and current rehydrated
+  run snapshot;
+- snapshot commitment tampering blocks downstream persistence and replay;
 - legacy yield, outcome, and recovery request commitments remain unchanged
   when no dispatch reservation binding is present;
 - runtime event ordering and rehydrated projection remain deterministic;
@@ -153,7 +157,7 @@ Passed during implementation:
 
 - `cargo fmt --all --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo test -p workflow-core --lib` (`347 passed`)
+- `cargo test -p workflow-core --lib` (`348 passed` after review blocker fix)
 - focused operational-opening and supervisor module tests (`23 passed`)
 - `cargo test -p workflow-core --test authorized_execution_continuity --test authorized_execution_continuity_state_contract --test sqlite_state_backend` (`36 passed`)
 - `npm run check:docs`
@@ -184,11 +188,12 @@ the authoritative complete workspace proof and must pass before merge.
 
 ## 12. Recommended Next Phase
 
-Perform a **focused maintainer/security review of the atomic dispatch
-reservation implementation**. Review the one-winner transaction, replay and
-ambiguity posture, event/projection integrity, reservation-bound downstream
-mutations, migration, privacy, and regression matrix before any repeated
-supervisor loop or scheduler work.
+The focused maintainer/security review is complete in [Atomic Dispatch
+Reservation Implementation
+Review](ATOMIC_DISPATCH_RESERVATION_IMPLEMENTATION_REVIEW.md). The review found
+and fixed a missing snapshot-integrity cross-check, then accepted the private
+slice. The next phase should plan a bounded trusted-host redispatch loop over
+the accepted reservation boundary.
 
 ## 13. Governed Phase Record
 

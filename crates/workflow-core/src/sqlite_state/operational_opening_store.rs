@@ -1374,6 +1374,32 @@ mod tests {
         }
     }
 
+    struct SnapshotTamperingExecutor<'a> {
+        calls: &'a AtomicUsize,
+        database_path: &'a PathBuf,
+    }
+
+    impl TrustedHostAttemptExecutor for SnapshotTamperingExecutor<'_> {
+        fn binding_commitment(&self) -> SpecContentHash {
+            supervisor_executor_binding()
+        }
+
+        fn execute(
+            &self,
+            _context: &TrustedHostAttemptExecutionContext<'_>,
+        ) -> TrustedHostAttemptExecutionResult {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            Connection::open(self.database_path)
+                .expect("tamper connection")
+                .execute(
+                    "UPDATE snapshots SET snapshot_commitment=?1",
+                    rusqlite::params![SpecContentHash::from_text("tampered snapshot").as_str()],
+                )
+                .expect("tamper snapshot commitment");
+            TrustedHostAttemptExecutionResult::TerminalFailure
+        }
+    }
+
     #[derive(Clone, Copy)]
     enum FixedExecutionResult {
         Succeeded,
@@ -2012,6 +2038,54 @@ mod tests {
                 .len(),
             5
         );
+    }
+
+    #[test]
+    fn snapshot_projection_tampering_blocks_downstream_persistence_and_replay() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/snapshot-tamper", 1);
+        let replay = clone_opened_capability(&capability);
+        let calls = AtomicUsize::new(0);
+        let error = supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &SnapshotTamperingExecutor {
+                calls: &calls,
+                database_path: &fixture.path,
+            },
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/snapshot-tamper")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/snapshot-tamper").expect("receipt"),
+                yield_generation: None,
+            },
+        })
+        .expect_err("tampered snapshot must block downstream persistence");
+        assert_eq!(
+            error.code(),
+            "trusted_host_supervisor.outcome_not_committed"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+
+        let replay_error = supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(replay),
+            executor: &CountingExecutor { calls: &calls },
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/snapshot-tamper")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/snapshot-tamper").expect("receipt"),
+                yield_generation: None,
+            },
+        })
+        .expect_err("tampered snapshot must block replay");
+        assert_eq!(
+            replay_error.code(),
+            "dispatch_reservation.recovery_required"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 
     #[test]

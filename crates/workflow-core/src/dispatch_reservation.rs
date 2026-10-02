@@ -225,6 +225,10 @@ impl DispatchAdmissionProjectionEvent {
     pub(crate) const fn committed_result_cursor(&self) -> &DispatchAdmissionProjectionCursor {
         &self.committed_result_cursor
     }
+
+    pub(crate) const fn expected_input_cursor(&self) -> &DispatchAdmissionProjectionCursor {
+        &self.expected_input_cursor
+    }
 }
 
 impl TryFrom<DispatchAdmissionProjectionEventWire> for DispatchAdmissionProjectionEvent {

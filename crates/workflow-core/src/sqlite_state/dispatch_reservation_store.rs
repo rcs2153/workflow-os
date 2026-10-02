@@ -17,7 +17,8 @@ use crate::dispatch_reservation::{
     DispatchReservationRequest, DispatchReservationStore,
 };
 use crate::{
-    IdempotencyKey, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
+    IdempotencyKey, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunSnapshot,
 };
 
 use super::continuity_codec::timestamp_parts;
@@ -80,10 +81,10 @@ impl DispatchReservationStore for SqliteStateBackend {
                     "dispatch reservation identity was reused with different content",
                 ));
             }
+            validate_existing_projection(&transaction, &record, &binding)?;
             transaction
                 .commit()
                 .map_err(|_| storage_error("commit_failed"))?;
-            validate_existing_projection(&record, &binding)?;
             return Ok(DispatchReservationOutcome::AlreadyAdmitted {
                 receipt: replay_receipt(&record, &binding),
             });
@@ -352,39 +353,174 @@ fn read_existing(
     connection: &rusqlite::Connection,
     operation_id: &str,
 ) -> Result<Option<(DispatchReservationRecord, ProjectionBinding)>, WorkflowOsError> {
-    let record = connection
+    let record_row = connection
         .query_row(
-            "SELECT record_json FROM dispatch_reservations WHERE operation_id=?1",
+            "SELECT operation_id,receipt_id,attempt_id,window_id,request_commitment,
+                    reservation_commitment,result_event_id,result_sequence,record_json
+             FROM dispatch_reservations WHERE operation_id=?1",
             params![operation_id],
-            |row| row.get::<_, String>(0),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, String>(8)?,
+                ))
+            },
         )
         .optional()
         .map_err(|_| storage_error("read_failed"))?;
-    let Some(record) = record else {
+    let Some(record_row) = record_row else {
         return Ok(None);
     };
-    let binding = connection
+    let binding_row = connection
         .query_row(
-            "SELECT binding_json FROM dispatch_reservation_projection_bindings WHERE operation_id=?1",
+            "SELECT operation_id,receipt_id,projection_commitment,snapshot_commitment,binding_json
+             FROM dispatch_reservation_projection_bindings WHERE operation_id=?1",
             params![operation_id],
-            |row| row.get::<_, String>(0),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
         )
         .optional()
         .map_err(|_| storage_error("read_failed"))?
         .ok_or_else(corrupt)?;
-    Ok(Some((
-        serde_json::from_str(&record).map_err(|_| corrupt())?,
-        serde_json::from_str(&binding).map_err(|_| corrupt())?,
-    )))
+    let record: DispatchReservationRecord =
+        serde_json::from_str(&record_row.8).map_err(|_| corrupt())?;
+    let binding: ProjectionBinding = serde_json::from_str(&binding_row.4).map_err(|_| corrupt())?;
+    let sequence = i64::try_from(
+        binding
+            .event
+            .committed_result_cursor()
+            .sequence_number()
+            .get(),
+    )
+    .map_err(|_| corrupt())?;
+    if record_row.0 != record.operation_id.as_str()
+        || record_row.1 != record.receipt_id.as_str()
+        || record_row.2 != record.attempt_id.as_str()
+        || record_row.3 != record.window_id.as_str()
+        || record_row.4 != record.request_commitment.as_str()
+        || record_row.5 != record.reservation_commitment.as_str()
+        || record_row.6 != binding.event.committed_result_cursor().event_id().as_str()
+        || record_row.7 != sequence
+        || binding_row.0 != record.operation_id.as_str()
+        || binding_row.1 != record.receipt_id.as_str()
+        || binding_row.2 != binding.event.projection_commitment().as_str()
+        || binding_row.3 != binding.snapshot_commitment.as_str()
+    {
+        return Err(corrupt());
+    }
+    Ok(Some((record, binding)))
 }
 
 fn validate_existing_projection(
+    connection: &rusqlite::Connection,
     record: &DispatchReservationRecord,
     binding: &ProjectionBinding,
 ) -> Result<(), WorkflowOsError> {
     if binding.event.receipt_id() != &record.receipt_id
         || binding.event.attempt_id() != &record.attempt_id
         || binding.event.reservation_commitment() != &record.reservation_commitment
+    {
+        return Err(corrupt());
+    }
+    let durable_event_payload = connection
+        .query_row(
+            "SELECT payload FROM events WHERE event_id=?1",
+            params![binding.event.committed_result_cursor().event_id().as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|_| storage_error("read_failed"))?
+        .ok_or_else(corrupt)?;
+    let durable_event: WorkflowRunEvent =
+        serde_json::from_str(&durable_event_payload).map_err(|_| corrupt())?;
+    let durable_projection = match &durable_event.kind {
+        WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(value) => value.as_ref(),
+        _ => return Err(corrupt()),
+    };
+    if durable_projection != &binding.event
+        || durable_event.sequence_number
+            != binding.event.committed_result_cursor().sequence_number()
+        || durable_event.event_id != *binding.event.committed_result_cursor().event_id()
+    {
+        return Err(corrupt());
+    }
+
+    let history =
+        SqliteStateBackend::read_events_with_connection(connection, &durable_event.run_id)
+            .map_err(|_| corrupt())?;
+    let result_index = usize::try_from(
+        binding
+            .event
+            .committed_result_cursor()
+            .sequence_number()
+            .get()
+            .checked_sub(1)
+            .ok_or_else(corrupt)?,
+    )
+    .map_err(|_| corrupt())?;
+    let expected_index = usize::try_from(
+        binding
+            .event
+            .expected_input_cursor()
+            .sequence_number()
+            .get()
+            .checked_sub(1)
+            .ok_or_else(corrupt)?,
+    )
+    .map_err(|_| corrupt())?;
+    let expected_event = history.get(expected_index).ok_or_else(corrupt)?;
+    let result_event = history.get(result_index).ok_or_else(corrupt)?;
+    if expected_event.event_id != *binding.event.expected_input_cursor().event_id()
+        || result_event != &durable_event
+    {
+        return Err(corrupt());
+    }
+
+    let projected_snapshot = WorkflowRun::rehydrate(&history[..=result_index])?.snapshot;
+    if projected_snapshot.last_dispatch_admission_projection
+        != Some(
+            crate::dispatch_reservation::DispatchAdmissionProjectionSnapshot::from_event(
+                &binding.event,
+            ),
+        )
+        || snapshot_commitment(&encode_json(&projected_snapshot, "snapshot")?)
+            != binding.snapshot_commitment
+    {
+        return Err(corrupt());
+    }
+
+    let current_row: (i64, String, String, String) = connection
+        .query_row(
+            "SELECT last_sequence_number,last_event_id,snapshot_commitment,payload
+             FROM snapshots WHERE run_id=?1",
+            params![durable_event.run_id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .map_err(|_| corrupt())?;
+    let current_snapshot: WorkflowRunSnapshot =
+        super::decode_json(&current_row.3, "snapshot").map_err(|_| corrupt())?;
+    let derived_snapshot = WorkflowRun::rehydrate(&history)?.snapshot;
+    let current_sequence =
+        i64::try_from(current_snapshot.last_sequence_number.get()).map_err(|_| corrupt())?;
+    if current_snapshot != derived_snapshot
+        || current_row.0 != current_sequence
+        || current_row.1 != current_snapshot.last_event_id.as_str()
+        || current_row.2
+            != snapshot_commitment(&encode_json(&current_snapshot, "snapshot")?).as_str()
     {
         return Err(corrupt());
     }
@@ -403,7 +539,7 @@ fn reconcile_committed_reservation(
             if record.request_commitment == *request_commitment
                 && record.receipt_id == *receipt_id =>
         {
-            validate_existing_projection(&record, &binding)?;
+            validate_existing_projection(&connection, &record, &binding)?;
             Ok(
                 DispatchReservationOutcome::CommittedButCapabilityUnavailable {
                     receipt: replay_receipt(&record, &binding),
@@ -435,51 +571,20 @@ pub(super) fn validate_dispatch_reservation_binding(
     attempt_id: &crate::AuthorizedExecutionAttemptId,
     supplied: &DispatchReservationBinding,
 ) -> Result<(), WorkflowOsError> {
-    let stored = connection
+    let operation_id = connection
         .query_row(
-            "SELECT r.receipt_id,r.reservation_commitment,r.result_event_id,r.result_sequence,
-                    r.record_json,p.binding_json,e.payload
-             FROM dispatch_reservations r
-             JOIN dispatch_reservation_projection_bindings p ON p.operation_id=r.operation_id
-             JOIN events e ON e.event_id=r.result_event_id
-             WHERE r.attempt_id=?1",
+            "SELECT operation_id FROM dispatch_reservations WHERE attempt_id=?1",
             params![attempt_id.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                ))
-            },
+            |row| row.get::<_, String>(0),
         )
         .optional()
         .map_err(|_| storage_error("read_failed"))?
         .ok_or_else(dispatch_binding_missing)?;
-    let (receipt, commitment, event_id, sequence, record_json, binding_json, event_json) = stored;
-    let record: DispatchReservationRecord =
-        serde_json::from_str(&record_json).map_err(|_| corrupt())?;
-    let projection: ProjectionBinding =
-        serde_json::from_str(&binding_json).map_err(|_| corrupt())?;
-    let event: WorkflowRunEvent = serde_json::from_str(&event_json).map_err(|_| corrupt())?;
-    let sequence = u64::try_from(sequence).map_err(|_| corrupt())?;
-    let event_projection = match &event.kind {
-        WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(value) => value.as_ref(),
-        _ => return Err(corrupt()),
-    };
+    let (record, projection) = read_existing(connection, &operation_id)?.ok_or_else(corrupt)?;
+    validate_existing_projection(connection, &record, &projection)?;
     if record.attempt_id != *attempt_id
         || record.receipt_id != supplied.receipt_id
         || record.reservation_commitment != supplied.reservation_commitment
-        || receipt != supplied.receipt_id.as_str()
-        || commitment != supplied.reservation_commitment.as_str()
-        || event_id != supplied.admission_cursor.event_id().as_str()
-        || sequence != supplied.admission_cursor.sequence_number().get()
-        || event.event_id != *supplied.admission_cursor.event_id()
-        || event.sequence_number != supplied.admission_cursor.sequence_number()
-        || projection.event != *event_projection
         || projection.event.receipt_id() != &supplied.receipt_id
         || projection.event.attempt_id() != attempt_id
         || projection.event.reservation_commitment() != &supplied.reservation_commitment
