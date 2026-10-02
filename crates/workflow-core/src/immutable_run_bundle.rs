@@ -1586,7 +1586,7 @@ mod tests {
             ImmutableRunBundleHandlerPosture::HostedProviderBound,
             ImmutableRunBundleHandlerPosture::Unavailable,
         ] {
-            assert!(!handler_posture_label(posture).is_empty());
+            assert_ne!(handler_posture_label(posture), "");
         }
     }
 

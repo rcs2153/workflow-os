@@ -2302,7 +2302,7 @@ mod tests {
             )
             .expect("omission is represented");
 
-            assert!(outcome.results().is_empty());
+            assert_eq!(outcome.results(), []);
             assert_eq!(outcome.fact().posture(), expected);
             assert_eq!(outcome.fact().missing_count(), 1);
             assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 0);
@@ -2335,7 +2335,7 @@ mod tests {
         )
         .expect("canonical empty declarations are authoritative");
 
-        assert!(outcome.results().is_empty());
+        assert_eq!(outcome.results(), []);
         assert_eq!(
             outcome.fact().posture(),
             crate::GovernanceWorkloadEvidenceCheckPosture::Satisfied

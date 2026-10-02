@@ -201,7 +201,7 @@ fn reference_only_projection_returns_authorized_stable_identity_without_metadata
 
     assert_eq!(projection.candidates().len(), 1);
     assert_eq!(projection.entries().len(), 1);
-    assert!(projection.gaps().is_empty());
+    assert_eq!(projection.gaps().len(), 0);
     assert_eq!(
         projection.entries()[0].access_level(),
         GovernedContextAccessLevel::ReferenceOnly
@@ -387,7 +387,7 @@ fn unavailable_unknown_missing_and_independent_context_produce_bounded_gaps() {
         .map(workflow_core::GovernedContextProjectionGap::reason)
         .collect::<Vec<_>>();
 
-    assert!(projection.entries().is_empty());
+    assert_eq!(projection.entries().len(), 0);
     for expected in [
         GovernedContextProjectionGapReason::Unavailable,
         GovernedContextProjectionGapReason::UnknownAvailability,

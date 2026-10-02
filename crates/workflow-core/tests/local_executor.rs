@@ -1,4 +1,5 @@
 #![allow(clippy::expect_used)]
+#![allow(clippy::assert_is_empty)]
 //! Behavior tests for the first minimal local executor.
 
 use std::cell::{Cell, RefCell};
@@ -2264,7 +2265,7 @@ fn executor_adjacent_projection_persistence_skips_or_rejects_marker_free_decisio
     .expect("marker-free decision is skipped by default");
     assert_eq!(skipped.persisted_count(), 0);
     assert_eq!(skipped.skipped_marker_free_count(), 1);
-    assert!(store.list().expect("projection records list").is_empty());
+    assert_eq!(store.list().expect("projection records list").len(), 0);
 
     let err = persist_approval_proof_marker_projections_for_run(
         ApprovalProofMarkerProjectionPersistenceInput {
@@ -4290,7 +4291,7 @@ fn current_runtime_fact_source_failure_is_non_leaking_and_starts_no_run() {
     assert!(!rendered.contains("bearer-secret-marker"));
     assert!(!rendered.contains("sk-live-secret-marker"));
     assert_eq!(calls.get(), 0);
-    assert!(backend.read_events(&run_id).expect("events").is_empty());
+    assert_eq!(backend.read_events(&run_id).expect("events").len(), 0);
     assert_eq!(source.calls.get(), 1);
 }
 
@@ -5452,7 +5453,7 @@ fn governance_decision_authority_receipt_store_missing_and_denial_are_empty() {
         ApprovalDecisionKind::Denied,
     );
     assert!(denied.authority_receipt().is_none());
-    assert!(store.records.borrow().is_empty());
+    assert_eq!(store.records.borrow().len(), 0);
 }
 
 fn authority_receipt_artifact(
@@ -5523,7 +5524,7 @@ fn work_report_artifact_authority_receipt_integrity_fails_closed_when_missing() 
     );
     assert!(!error.to_string().contains(receipt.receipt_id().as_str()));
     assert!(!format!("{error:?}").contains(receipt.receipt_id().as_str()));
-    assert!(store.records.borrow().is_empty());
+    assert_eq!(store.records.borrow().len(), 0);
 }
 
 #[test]
@@ -5617,7 +5618,7 @@ fn work_report_artifact_authority_receipt_integrity_ignores_other_citations() {
     assert_eq!(result.resolved_authority_receipt_count(), 0);
     assert_eq!(result.missing_authority_receipt_count(), 0);
     assert_eq!(result.duplicate_authority_receipt_citation_count(), 0);
-    assert!(store.records.borrow().is_empty());
+    assert_eq!(store.records.borrow().len(), 0);
 }
 
 fn only_authority_receipt_record_file(root: &Path) -> PathBuf {
@@ -6517,7 +6518,7 @@ fn selected_approval_envelope_defers_aggregate_grant_then_closes_authored_gate()
         check_reference.result_id().as_str(),
         "caller-supplied/not-authoritative"
     );
-    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(receipt_store.records.borrow().len(), 0);
     assert!(projection_store
         .list()
         .expect("projections list")
@@ -6675,7 +6676,7 @@ fn selected_approval_envelope_aggregate_denial_reports_without_rerunning_check()
         result.approval_proof_marker_gate(),
         LocalSelectedProjectValidationArtifactGateResult::Satisfied
     );
-    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(receipt_store.records.borrow().len(), 0);
     assert_eq!(artifact_store.writes.get(), 1);
     assert_eq!(
         projection_store.list().expect("projection records").len(),
@@ -6801,7 +6802,7 @@ fn selected_approval_envelope_authored_denial_closes_without_rerunning_check() {
         result.approval_proof_marker_gate(),
         LocalSelectedProjectValidationArtifactGateResult::Satisfied
     );
-    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(receipt_store.records.borrow().len(), 0);
     assert_eq!(artifact_store.writes.get(), 1);
     assert_eq!(
         projection_store.list().expect("projection records").len(),
@@ -7179,7 +7180,7 @@ fn authority_receipt_artifact_decision_composition_denial_writes_nothing() {
         result.posture(),
         LocalGovernanceAuthorityReceiptArtifactWritePosture::NotApplicable
     );
-    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(receipt_store.records.borrow().len(), 0);
     assert_eq!(artifact_store.writes.get(), 0);
 }
 
@@ -7237,7 +7238,7 @@ fn authority_receipt_artifact_decision_composition_missing_proof_precedes_source
         "approval_presentation_enforcement.proof_missing"
     );
     assert_eq!(failing_source.calls.get(), 0);
-    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(receipt_store.records.borrow().len(), 0);
     assert_eq!(artifact_store.writes.get(), 0);
     assert_eq!(
         backend
@@ -7320,7 +7321,7 @@ fn authority_receipt_artifact_decision_composition_report_failure_preserves_term
     );
     assert!(result.authority_receipt().is_some());
     assert!(result.report_generation_error().is_some());
-    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(receipt_store.records.borrow().len(), 0);
     assert_eq!(artifact_store.writes.get(), 0);
     assert!(!format!("{result:?}").contains(secret));
 }
@@ -7446,7 +7447,7 @@ fn authority_receipt_artifact_composition_denial_writes_nothing() {
         result.posture(),
         LocalGovernanceAuthorityReceiptArtifactWritePosture::NotApplicable
     );
-    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(receipt_store.records.borrow().len(), 0);
     assert_eq!(artifact_store.writes.get(), 0);
     assert!(result.persistence_error().is_none());
 }
@@ -7479,7 +7480,7 @@ fn authority_receipt_artifact_composition_report_failure_writes_nothing() {
         result.posture(),
         LocalGovernanceAuthorityReceiptArtifactWritePosture::ReportUnavailable
     );
-    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(receipt_store.records.borrow().len(), 0);
     assert_eq!(artifact_store.writes.get(), 0);
     assert!(result.report_generation_error().is_some());
     assert!(!format!("{result:?}").contains(secret));
@@ -8389,7 +8390,7 @@ fn core_owned_authoritative_visible_route_requires_delivery_capability() {
     );
     assert_eq!(runner.call_count(), 1);
     assert_eq!(skill_calls.get(), 0);
-    assert!(backend.read_events(&run_id).expect("events").is_empty());
+    assert_eq!(backend.read_events(&run_id).expect("events").len(), 0);
 }
 
 #[test]
@@ -8541,7 +8542,7 @@ fn core_owned_authoritative_route_rejects_multi_step_before_check_or_run_state()
     );
     assert_eq!(runner.call_count(), 0);
     assert_eq!(skill_calls.get(), 0);
-    assert!(backend.read_events(&run_id).expect("events").is_empty());
+    assert_eq!(backend.read_events(&run_id).expect("events").len(), 0);
     assert!(!store.root().join(run_id.as_str()).exists());
 }
 
@@ -8584,7 +8585,7 @@ fn core_owned_authoritative_report_fails_closed_on_failed_same_call_check() {
     );
     assert_eq!(runner.call_count(), 1);
     assert_eq!(skill_calls.get(), 0);
-    assert!(backend.read_events(&run_id).expect("events").is_empty());
+    assert_eq!(backend.read_events(&run_id).expect("events").len(), 0);
 }
 
 #[test]
@@ -8878,7 +8879,7 @@ fn selected_project_validation_report_adapter_preflights_duplicates_and_redacts_
         "executor.authoritative_local_check.report_consumer.duplicate_reference"
     );
     assert_eq!(runner.call_count(), 0);
-    assert!(backend.read_events(&run_id).expect("events").is_empty());
+    assert_eq!(backend.read_events(&run_id).expect("events").len(), 0);
 }
 
 // Caller-authored authority report and approval tests retired with the preview API surface.
@@ -9522,7 +9523,7 @@ fn execute_with_explicit_before_skill_hook_appends_events_in_order() {
         .collect();
     assert!(audit_event_types.contains(&WorkflowRunEventKindName::HookInvocationRequested));
     assert!(audit_event_types.contains(&WorkflowRunEventKindName::HookInvocationEvaluated));
-    assert!(observability.adapter_events().is_empty());
+    assert_eq!(observability.adapter_events().len(), 0);
     assert!(backend
         .list_work_report_artifacts(&run.snapshot.identity.run_id)
         .expect("report artifacts listed")
@@ -10409,7 +10410,7 @@ fn unknown_required_before_skill_checkpoint_step_fails_before_run_creation_witho
     assert!(!request_debug.contains("missing-governed-step"));
     assert!(request_debug.contains("required_step_count: 1"));
     assert_eq!(calls.get(), 0);
-    assert!(events.is_empty());
+    assert_eq!(events.len(), 0);
 }
 
 #[test]
@@ -12065,7 +12066,7 @@ fn before_skill_hook_policy_denial_appends_no_hook_events() {
         .iter()
         .any(|diagnostic| diagnostic.code() == "validation.policy.external_write_unsupported"));
     assert_eq!(calls.get(), 0);
-    assert!(backend.read_events(&run_id).expect("events").is_empty());
+    assert_eq!(backend.read_events(&run_id).expect("events").len(), 0);
 }
 
 #[test]
@@ -13169,7 +13170,7 @@ fn execute_with_report_absent_references_remain_not_available_text() {
         .iter()
         .find(|section| section.kind() == WorkReportSectionKind::OperatorHandoffNotes)
         .expect("operator handoff section");
-    assert!(handoff_section.citations().is_empty());
+    assert_eq!(handoff_section.citations().len(), 0);
 }
 
 #[test]
@@ -13236,7 +13237,7 @@ fn report_generation_failure_emits_no_report_audit_or_observability_events() {
     assert!(error.code().contains("secret_like"));
     assert_eq!(audit.events().len(), result.run().events.len());
     assert!(audit.policy_records().len() >= 2);
-    assert!(audit.adapter_records().is_empty());
+    assert_eq!(audit.adapter_records().len(), 0);
     let run_event_ids: Vec<_> = result
         .run()
         .events
@@ -13244,12 +13245,12 @@ fn report_generation_failure_emits_no_report_audit_or_observability_events() {
         .map(|event| &event.event_id)
         .collect();
     let observability_events = observability.events();
-    assert!(!observability_events.is_empty());
+    assert_ne!(observability_events.len(), 0);
     assert!(observability_events.iter().all(|event| event
         .event_id
         .as_ref()
         .is_some_and(|event_id| run_event_ids.contains(&event_id))));
-    assert!(observability.adapter_events().is_empty());
+    assert_eq!(observability.adapter_events().len(), 0);
 }
 
 #[test]
@@ -15845,8 +15846,8 @@ fn execute_with_report_runs_before_report_hook_and_cites_result() {
             | WorkflowRunEventKindName::HookInvocationEvaluated
     )));
     assert_eq!(audit.events().len(), result.run().events.len());
-    assert!(audit.adapter_records().is_empty());
-    assert!(observability.adapter_events().is_empty());
+    assert_eq!(audit.adapter_records().len(), 0);
+    assert_eq!(observability.adapter_events().len(), 0);
     assert!(backend
         .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
         .expect("report artifacts listed")
@@ -15899,8 +15900,8 @@ fn execute_with_report_required_before_report_hook_missing_fails_report_only() {
             | WorkflowRunEventKindName::HookInvocationEvaluated
     )));
     assert_eq!(audit.events().len(), result.run().events.len());
-    assert!(audit.adapter_records().is_empty());
-    assert!(observability.adapter_events().is_empty());
+    assert_eq!(audit.adapter_records().len(), 0);
+    assert_eq!(observability.adapter_events().len(), 0);
     assert!(backend
         .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
         .expect("report artifacts listed")
@@ -16019,8 +16020,8 @@ fn execute_with_report_discovers_before_report_hook_disclosure_ids() {
             | WorkflowRunEventKindName::HookInvocationEvaluated
     )));
     assert_eq!(audit.events().len(), result.run().events.len());
-    assert!(audit.adapter_records().is_empty());
-    assert!(observability.adapter_events().is_empty());
+    assert_eq!(audit.adapter_records().len(), 0);
+    assert_eq!(observability.adapter_events().len(), 0);
     assert!(backend
         .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
         .expect("report artifacts listed")
@@ -16215,8 +16216,8 @@ fn execute_with_report_before_report_hook_failure_preserves_run_and_events() {
         .expect("events read");
     assert_eq!(events, result.run().events);
     assert_eq!(audit.events().len(), result.run().events.len());
-    assert!(audit.adapter_records().is_empty());
-    assert!(observability.adapter_events().is_empty());
+    assert_eq!(audit.adapter_records().len(), 0);
+    assert_eq!(observability.adapter_events().len(), 0);
     assert!(backend
         .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
         .expect("report artifacts listed")
@@ -19328,7 +19329,7 @@ observability_requirements:
     let events = backend.read_events(&run_id).expect("events are read");
 
     assert_eq!(error.code(), "executor.project.invalid");
-    assert!(events.is_empty());
+    assert_eq!(events.len(), 0);
 }
 
 #[test]
@@ -19358,7 +19359,7 @@ fn external_adapter_skill_is_rejected_without_side_effects() {
         .diagnostics()
         .iter()
         .any(|diagnostic| diagnostic.code() == "validation.policy.external_write_unsupported"));
-    assert!(events.is_empty());
+    assert_eq!(events.len(), 0);
     assert_eq!(calls.get(), 0);
 }
 
@@ -19384,7 +19385,7 @@ fn kill_switch_prevents_new_execution() {
     let events = backend.read_events(&run_id).expect("events are read");
 
     assert_eq!(error.code(), "policy.deny.kill_switch");
-    assert!(events.is_empty());
+    assert_eq!(events.len(), 0);
     assert_eq!(calls.get(), 0);
 }
 
@@ -21105,7 +21106,7 @@ fn retry_exhaustion_fails_without_escalation_policy() {
         .events
         .iter()
         .any(|event| matches!(event.kind, WorkflowRunEventKind::RetryExhausted(_))));
-    assert!(run.snapshot.escalations.is_empty());
+    assert_eq!(run.snapshot.escalations.len(), 0);
 }
 
 #[test]
@@ -21252,7 +21253,7 @@ fn escalation_context_includes_required_fields() {
         "local/echo"
     );
     assert_eq!(escalation.last_error, "test.skill.transient");
-    assert!(!escalation.suggested_next_action.is_empty());
+    assert_ne!(escalation.suggested_next_action.len(), 0);
 }
 
 #[test]
@@ -21440,7 +21441,7 @@ fn denied_start_policy_decision_is_durably_audited_without_creating_run() {
     let events = backend.read_events(&run_id).expect("events are read");
 
     assert_eq!(error.code(), "policy.deny.kill_switch");
-    assert!(events.is_empty());
+    assert_eq!(events.len(), 0);
     let denied = records
         .iter()
         .find(|record| record.scope == PolicyAuditScope::PreRun)
@@ -21517,7 +21518,7 @@ fn skill_policy_deny_is_durably_audited() {
         .diagnostics()
         .iter()
         .any(|diagnostic| diagnostic.code() == "validation.policy.external_write_unsupported"));
-    assert!(records.is_empty());
+    assert_eq!(records.len(), 0);
 }
 
 #[test]
@@ -21829,7 +21830,7 @@ fn retry_and_escalation_audit_include_required_context_without_raw_payloads() {
         );
         assert!(event.correlation_id.is_some());
         assert!(event.actor.is_some());
-        assert!(!event.decision_context.as_ref().expect("context").is_empty());
+        assert_ne!(event.decision_context.as_ref().expect("context").len(), 0);
     }
     assert!(retry.idempotency_key.is_some());
     let audit_text = format!("{events:?}");

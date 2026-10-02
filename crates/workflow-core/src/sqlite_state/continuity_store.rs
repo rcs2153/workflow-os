@@ -13,20 +13,20 @@ use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeDirectiveRecord, AuthoritativeDirectiveState, AuthoritativeOperationRecord,
     AuthoritativeWaitIdentity, AuthoritativeWaitRecord, AuthoritativeWaitState,
     AuthoritativeWindowRecord, AuthoritativeWindowState, AuthoritativeYieldRecord,
-    AuthorizedExecutionContinuityEligibilityReader, AuthorizedExecutionContinuityProjectionStore,
-    AuthorizedExecutionContinuityReconciler, AuthorizedExecutionContinuityStore,
-    CommittedOperationDisposition, CommittedSecurityRejection, CommittedSecurityRejectionKind,
-    ConsumeDirectiveRequest, ConsumeDirectiveResult, ContinuityCursor, ContinuityDirectiveId,
-    ContinuityInstanceEligibility, ContinuityOperationId, ContinuityProjectionBinding,
-    ContinuityReceipt, ContinuityReceiptId, ContinuityReconciliationResult, ContinuityRevision,
-    ContinuityTrustedTimeEpochId, ContinuityYieldGenerationId, ExpectedWindowBinding,
-    MutationResult, ProjectedContinuityReconciliationResult, ProjectedContinuityResult,
-    ProjectionCommitmentInput, ReconcileOperationRequest, ReconciledProjectedContinuityResult,
-    RecordAttemptOutcomeRequest, RecordedOperationResult, RecoverAmbiguousAttemptRequest,
-    ReferenceContinuityState, RegisterYieldRequest, RegisterYieldResult,
-    SecurityRejectionCommitmentInput, TransitionWaitRequest, TrustedTimeObservation,
-    TrustedTimePosture, TrustedTimeSecurityRecord, TrustedTimeSecuritySnapshot,
-    TrustedTimeSourceKind, WindowSecuritySnapshot,
+    AuthorizedExecutionAttemptDispatchValidator, AuthorizedExecutionContinuityEligibilityReader,
+    AuthorizedExecutionContinuityProjectionStore, AuthorizedExecutionContinuityReconciler,
+    AuthorizedExecutionContinuityStore, CommittedOperationDisposition, CommittedSecurityRejection,
+    CommittedSecurityRejectionKind, ConsumeDirectiveRequest, ConsumeDirectiveResult,
+    ContinuityCursor, ContinuityDirectiveId, ContinuityInstanceEligibility, ContinuityOperationId,
+    ContinuityProjectionBinding, ContinuityReceipt, ContinuityReceiptId,
+    ContinuityReconciliationResult, ContinuityRevision, ContinuityTrustedTimeEpochId,
+    ContinuityYieldGenerationId, ExpectedWindowBinding, MutationResult,
+    ProjectedContinuityReconciliationResult, ProjectedContinuityResult, ProjectionCommitmentInput,
+    ReconcileOperationRequest, ReconciledProjectedContinuityResult, RecordAttemptOutcomeRequest,
+    RecordedOperationResult, RecoverAmbiguousAttemptRequest, ReferenceContinuityState,
+    RegisterYieldRequest, RegisterYieldResult, SecurityRejectionCommitmentInput,
+    TransitionWaitRequest, TrustedTimeObservation, TrustedTimePosture, TrustedTimeSecurityRecord,
+    TrustedTimeSecuritySnapshot, TrustedTimeSourceKind, WindowSecuritySnapshot,
 };
 use crate::authorized_execution_continuity_state::semantics;
 use crate::authorized_execution_continuity_state::AuthorizedExecutionContinuityProjectionEventDefinition;
@@ -817,6 +817,10 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
         if replay {
             return Ok(ConsumeDirectiveResult::ExactReplay(result));
         }
+        let capability_binding = ExpectedWindowBinding {
+            cursor: cursor.clone(),
+            ..request.expected_window_binding.clone()
+        };
         match result {
             CommittedOperationDisposition::CommittedSecurityRejection(value) => {
                 Ok(ConsumeDirectiveResult::SecurityRejected(value))
@@ -837,9 +841,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
                         window_revision,
                         cursor,
                         authority_commitment: authority,
-                        window_binding_commitment: window_binding_commitment(
-                            &request.expected_window_binding,
-                        ),
+                        window_binding_commitment: window_binding_commitment(&capability_binding),
                         consume_operation_id,
                     },
                 })
@@ -1179,6 +1181,56 @@ impl AuthorizedExecutionContinuityEligibilityReader for SqliteStateBackend {
         &self,
     ) -> Result<ContinuityInstanceEligibility, WorkflowOsError> {
         SqliteContinuityStore::system(self).continuity_instance_eligibility()
+    }
+}
+
+impl AuthorizedExecutionAttemptDispatchValidator for SqliteStateBackend {
+    fn attempt_dispatch_is_current(
+        &self,
+        capability: &AttemptUseCapability,
+        expected: &ExpectedWindowBinding,
+    ) -> Result<bool, WorkflowOsError> {
+        let store = SqliteContinuityStore::system(self);
+        let observation = store.clock.observe()?;
+        let connection = self.connection()?;
+        let state = super::continuity_codec::load_snapshot(&connection)?;
+        let Some(window) = state.windows.get(&capability.window_id) else {
+            return Ok(false);
+        };
+        let Some(attempt) = state.attempts.get(&capability.attempt_id) else {
+            return Ok(false);
+        };
+        Ok(
+            state.trusted_time.eligibility == ContinuityInstanceEligibility::LiveStateEligible
+                && observation.source() == state.trusted_time.source
+                && observation.provenance_commitment() == &state.trusted_time.provenance_commitment
+                && observation.epoch_id() == &state.trusted_time.epoch_id
+                && state
+                    .trusted_time
+                    .last_observed_at
+                    .map_or(true, |prior| observation.observed_at() >= prior)
+                && observation.observed_at() < window.expires_at
+                && window.state == AuthoritativeWindowState::Executing
+                && window.workflow_id == expected.workflow_id
+                && window.run_id == expected.run_id
+                && window.step_id == expected.step_id
+                && window.subject_actor_id == expected.subject_actor_id
+                && window.immutable_run_bundle == expected.immutable_run_bundle
+                && window.governance_commitment == expected.governance_commitment
+                && window.authority_commitment == expected.authority_commitment
+                && window.cursor == expected.cursor
+                && window.revision == capability.window_revision
+                && capability.subject_actor_id == window.subject_actor_id
+                && capability.authority_commitment == window.authority_commitment
+                && capability.window_binding_commitment == window_binding_commitment(expected)
+                && attempt.state == AuthoritativeAttemptState::Started
+                && attempt.revision == ContinuityRevision::new(1)?
+                && attempt.window_id == capability.window_id
+                && attempt.subject_actor_id == window.subject_actor_id
+                && attempt.cursor == capability.cursor
+                && attempt.authority_commitment == window.authority_commitment
+                && attempt.consume_operation_id == capability.consume_operation_id,
+        )
     }
 }
 
@@ -1927,7 +1979,7 @@ fn persist_snapshot(
     persist_operation(transaction, new_operation, request)
 }
 
-fn persist_trusted_time(
+pub(super) fn persist_trusted_time(
     connection: &Connection,
     record: &TrustedTimeSecurityRecord,
 ) -> Result<(), WorkflowOsError> {
@@ -1939,7 +1991,7 @@ fn persist_trusted_time(
     Ok(())
 }
 
-fn persist_window(
+pub(super) fn persist_window(
     connection: &Connection,
     record: &AuthoritativeWindowRecord,
 ) -> Result<(), WorkflowOsError> {
@@ -1959,11 +2011,28 @@ fn persist_window(
     Ok(())
 }
 
-fn persist_attempt(
+pub(super) fn persist_attempt(
     connection: &Connection,
     record: &AuthoritativeAttemptRecord,
 ) -> Result<(), WorkflowOsError> {
-    connection.execute("INSERT INTO continuity_attempts (attempt_id,window_id,attempt_number,subject_actor_id,cursor_sequence,cursor_event_id,authority_commitment,consume_operation_id,state,revision,record_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ON CONFLICT(attempt_id) DO UPDATE SET cursor_sequence=excluded.cursor_sequence,cursor_event_id=excluded.cursor_event_id,state=excluded.state,revision=excluded.revision,record_json=excluded.record_json",params![record.attempt_id.as_str(),record.window_id.as_str(),i64::from(record.attempt_number),record.subject_actor_id.as_str(),to_i64(record.cursor.sequence_number.get())?,record.cursor.event_id.as_str(),record.authority_commitment.as_str(),record.consume_operation_id.as_str(),attempt_state(record.state),to_i64(record.revision.get())?,encode(record)?]).map_err(|_|corrupt())?;
+    let opening_origin: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM operational_opening_operations
+             WHERE operation_id=?1 AND attempt_id=?2 AND window_id=?3",
+            params![
+                record.consume_operation_id.as_str(),
+                record.attempt_id.as_str(),
+                record.window_id.as_str()
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|_| corrupt())?;
+    let origin = if opening_origin == 1 {
+        "operational_opening"
+    } else {
+        "consume_directive"
+    };
+    connection.execute("INSERT INTO continuity_attempts (attempt_id,window_id,attempt_number,subject_actor_id,cursor_sequence,cursor_event_id,authority_commitment,consume_operation_id,consume_operation_kind,state,revision,record_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) ON CONFLICT(attempt_id) DO UPDATE SET cursor_sequence=excluded.cursor_sequence,cursor_event_id=excluded.cursor_event_id,state=excluded.state,revision=excluded.revision,record_json=excluded.record_json",params![record.attempt_id.as_str(),record.window_id.as_str(),i64::from(record.attempt_number),record.subject_actor_id.as_str(),to_i64(record.cursor.sequence_number.get())?,record.cursor.event_id.as_str(),record.authority_commitment.as_str(),record.consume_operation_id.as_str(),origin,attempt_state(record.state),to_i64(record.revision.get())?,encode(record)?]).map_err(|_|corrupt())?;
     Ok(())
 }
 fn persist_yield(

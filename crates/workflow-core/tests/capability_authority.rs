@@ -1443,5 +1443,5 @@ fn step_projection_keeps_denied_capabilities_absent() {
     })
     .expect("empty projection");
 
-    assert!(projection.entries().is_empty());
+    assert_eq!(projection.entries().len(), 0);
 }

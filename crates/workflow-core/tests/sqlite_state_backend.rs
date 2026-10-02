@@ -109,7 +109,7 @@ fn sqlite_backend_passes_common_conformance_without_overclaiming() {
     );
     assert_eq!(
         contract.schema().adapter_schema_version(),
-        Some(3),
+        Some(4),
         "SQLite schema version is explicit"
     );
     assert_eq!(
@@ -265,7 +265,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
     let secret = "secret-schema-token-marker";
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 4)
+        .pragma_update(None, "user_version", 5)
         .expect("set newer schema");
     drop(connection);
 
@@ -278,7 +278,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 3)
+        .pragma_update(None, "user_version", 4)
         .expect("restore schema version");
     connection
         .execute(
@@ -298,7 +298,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 }
 
 #[test]
-fn sqlite_backend_requires_explicit_v1_to_v2_then_v2_to_v3_upgrades() {
+fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v4() {
     let fixture = Fixture::new();
     fixture
         .backend
@@ -313,9 +313,13 @@ fn sqlite_backend_requires_explicit_v1_to_v2_then_v2_to_v3_upgrades() {
         .expect("upgrade exact V1 database");
     let v3_required = SqliteStateBackend::open(&fixture.path).expect_err("V3 upgrade is explicit");
     assert_eq!(v3_required.code(), "state.sqlite.schema.upgrade_required");
+    let v3 = SqliteStateBackend::upgrade_authorized_execution_continuity_v2_to_v3(&fixture.path)
+        .expect("upgrade exact empty-continuity V2 database");
+    let v4_required = SqliteStateBackend::open(&fixture.path).expect_err("V4 upgrade is explicit");
+    assert_eq!(v4_required.code(), "state.sqlite.schema.upgrade_required");
     let upgraded =
-        SqliteStateBackend::upgrade_authorized_execution_continuity_v2_to_v3(&fixture.path)
-            .expect("upgrade exact empty-continuity V2 database");
+        SqliteStateBackend::upgrade_operational_execution_window_opening_v3_to_v4(&fixture.path)
+            .expect("upgrade exact empty-continuity V3 database");
     let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
     assert_eq!(
         reopened
@@ -336,11 +340,16 @@ fn sqlite_backend_requires_explicit_v1_to_v2_then_v2_to_v3_upgrades() {
             |row| row.get(0),
         )
         .expect("trusted time singleton");
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     assert_eq!(trusted_time_rows, 1);
 
-    SqliteStateBackend::upgrade_authorized_execution_continuity_v2_to_v3(&fixture.path)
-        .expect("upgrade is idempotent for exact V3");
+    SqliteStateBackend::upgrade_operational_execution_window_opening_v3_to_v4(&fixture.path)
+        .expect("upgrade is idempotent for exact V4");
+    assert_eq!(
+        v3.read_events(&fixture.created.run_id)
+            .expect("V3 handle remains readable"),
+        vec![fixture.created.clone()]
+    );
     assert_eq!(
         upgraded
             .read_events(&fixture.created.run_id)
@@ -380,6 +389,8 @@ fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
 
     SqliteStateBackend::upgrade_authorized_execution_continuity_v2_to_v3(&fixture.path)
         .expect("finish explicit V3 upgrade");
+    SqliteStateBackend::upgrade_operational_execution_window_opening_v3_to_v4(&fixture.path)
+        .expect("finish explicit V4 upgrade");
     let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
     assert_eq!(
         reopened
@@ -398,7 +409,7 @@ fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
             |row| row.get(0),
         )
         .expect("trusted time singleton");
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     assert_eq!(trusted_time_rows, 1);
 }
 
@@ -443,7 +454,9 @@ fn sqlite_backend_v1_upgrade_fails_closed_and_rolls_back() {
 #[test]
 fn sqlite_backend_v2_to_v3_upgrade_rejects_unprojected_continuity_history() {
     let fixture = Fixture::new();
-    downgrade_fixture_to_v2(&fixture.path);
+    downgrade_fixture_to_v1(&fixture.path);
+    SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(&fixture.path)
+        .expect("construct exact V2 fixture through the supported upgrade");
     let connection = Connection::open(&fixture.path).expect("open V2 fixture");
     connection
         .pragma_update(None, "foreign_keys", false)
@@ -477,6 +490,49 @@ fn sqlite_backend_v2_to_v3_upgrade_rejects_unprojected_continuity_history() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("schema version");
     assert_eq!(version, 2);
+}
+
+#[test]
+fn sqlite_backend_v3_to_v4_upgrade_refuses_preopening_continuity_state() {
+    let fixture = Fixture::new();
+    downgrade_fixture_to_v1(&fixture.path);
+    SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(&fixture.path)
+        .expect("construct exact V2 fixture through the supported upgrade");
+    SqliteStateBackend::upgrade_authorized_execution_continuity_v2_to_v3(&fixture.path)
+        .expect("construct exact V3 fixture through the supported upgrade");
+    let connection = Connection::open(&fixture.path).expect("open V3 fixture");
+    connection
+        .pragma_update(None, "foreign_keys", false)
+        .expect("disable foreign keys for pre-opening fixture");
+    connection
+        .execute(
+            "INSERT INTO continuity_windows
+             (window_id,workflow_id,run_id,step_id,window_binding_commitment,
+              subject_actor_id,immutable_bundle_commitment,governance_commitment,
+              authority_commitment,cursor_sequence,cursor_event_id,state,
+              maximum_attempts,next_attempt_number,expires_seconds,expires_nanos,
+              watermark_seconds,watermark_nanos,trusted_time_epoch_id,revision,
+              active_yield_generation_id,record_json)
+             VALUES ('window/preopening','workflow/preopening','run/preopening','step',
+                     'window-binding','actor','bundle','governance','authority',1,
+                     'event/preopening','executing',1,2,2,0,1,0,'epoch',1,NULL,'{}')",
+            [],
+        )
+        .expect("seed pre-opening continuity window");
+    drop(connection);
+
+    let error =
+        SqliteStateBackend::upgrade_operational_execution_window_opening_v3_to_v4(&fixture.path)
+            .expect_err("pre-opening state requires explicit operator migration");
+    assert_eq!(
+        error.code(),
+        "state.sqlite.schema.upgrade_opening_state_required"
+    );
+    let connection = Connection::open(&fixture.path).expect("inspect V3 fixture");
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("schema version");
+    assert_eq!(version, 3);
 }
 
 #[test]
@@ -662,6 +718,9 @@ fn downgrade_fixture_to_v1(path: &Path) {
     connection
         .execute_batch(
             "PRAGMA foreign_keys = OFF;
+             DROP TABLE operational_opening_projection_bindings;
+             DROP TABLE operational_opening_attempts;
+             DROP TABLE operational_opening_operations;
              DROP TABLE continuity_projection_bindings;
              DROP INDEX events_full_identity;
              ALTER TABLE snapshots RENAME TO snapshots_v3;
@@ -687,30 +746,4 @@ fn downgrade_fixture_to_v1(path: &Path) {
              PRAGMA user_version = 1;",
         )
         .expect("construct exact V1 fixture");
-}
-
-fn downgrade_fixture_to_v2(path: &Path) {
-    let connection = Connection::open(path).expect("open fixture for V2 downgrade");
-    connection
-        .execute_batch(
-            "PRAGMA foreign_keys = OFF;
-             DROP TABLE continuity_projection_bindings;
-             DROP INDEX events_full_identity;
-             DROP INDEX continuity_windows_run_identity;
-             ALTER TABLE snapshots RENAME TO snapshots_v3;
-             CREATE TABLE snapshots (
-    run_id TEXT PRIMARY KEY,
-    payload TEXT NOT NULL
-);
-             INSERT INTO snapshots (run_id, payload)
-             SELECT run_id, payload FROM snapshots_v3;
-             DROP TABLE snapshots_v3;
-             UPDATE schema_metadata
-             SET schema_version = 2,
-                 migration_state = 'ready',
-                 checksum = 'sha256:2a4c27713b3637989cfafce0ba68bb8444293edd6ce2557affc218ea13b7b1a5'
-             WHERE singleton = 1;
-             PRAGMA user_version = 2;",
-        )
-        .expect("construct exact V2 fixture");
 }

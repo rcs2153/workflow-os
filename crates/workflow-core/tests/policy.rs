@@ -37,7 +37,7 @@ fn allowed_local_skill_action() {
     ));
 
     assert!(decision.allowed);
-    assert!(decision.violations.is_empty());
+    assert_eq!(decision.violations.len(), 0);
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn jira_read_only_adapter_is_allowed_by_phase2_policy() {
     let decision = ConservativePolicyEngine::new().evaluate(&adapter);
 
     assert!(decision.allowed);
-    assert!(decision.violations.is_empty());
+    assert_eq!(decision.violations.len(), 0);
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn ci_read_only_adapter_is_allowed_by_phase2_policy() {
     let decision = ConservativePolicyEngine::new().evaluate(&adapter);
 
     assert!(decision.allowed);
-    assert!(decision.violations.is_empty());
+    assert_eq!(decision.violations.len(), 0);
 }
 
 #[test]

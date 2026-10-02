@@ -1833,6 +1833,14 @@ pub(crate) mod internal {
         ) -> Result<ContinuityInstanceEligibility, WorkflowOsError>;
     }
 
+    pub(crate) trait AuthorizedExecutionAttemptDispatchValidator {
+        fn attempt_dispatch_is_current(
+            &self,
+            capability: &AttemptUseCapability,
+            expected_window_binding: &ExpectedWindowBinding,
+        ) -> Result<bool, WorkflowOsError>;
+    }
+
     #[derive(Clone, Eq, PartialEq)]
     pub(crate) struct ReferenceContinuityState {
         pub(crate) trusted_time: TrustedTimeSecurityRecord,
@@ -5299,7 +5307,7 @@ mod tests {
             assert!(fixture.store.consume_directive(request).is_err());
             assert_eq!(fixture.store.snapshot().windows, before.windows);
             assert_eq!(fixture.store.snapshot().attempts, before.attempts);
-            assert!(fixture.store.snapshot().operations.is_empty());
+            assert_eq!(fixture.store.snapshot().operations.len(), 0);
         }
 
         let fixture = Fixture::yielded(false);

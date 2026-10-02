@@ -247,7 +247,7 @@ fn exact_required_reference_is_satisfied_without_payload_access() {
         RequiredContextConsumptionPosture::Satisfied
     );
     assert_eq!(result.satisfactions().len(), 1);
-    assert!(result.gaps().is_empty());
+    assert_eq!(result.gaps().len(), 0);
     assert_eq!(result.context(), &consumption_context());
 }
 

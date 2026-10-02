@@ -3742,7 +3742,7 @@ mod tests {
             outcome.source_failure_posture(),
             Some(CurrentAuthoritySourceFailurePosture::RetryableAfterSourceChange)
         );
-        assert!(outcome.reasons().is_empty());
+        assert_eq!(outcome.reasons(), []);
     }
 
     #[test]

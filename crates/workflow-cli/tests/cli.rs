@@ -707,7 +707,7 @@ fn command_local_help_does_not_become_positional_workflow_id() {
     assert!(stdout(&output).contains("Workflow OS CLI"));
     assert!(stdout(&output).contains("run <workflow-id>"));
     assert!(!stdout(&output).contains("executor.workflow.not_found"));
-    assert!(stderr(&output).is_empty());
+    assert_eq!(stderr(&output), "");
 }
 
 #[test]
@@ -5377,10 +5377,12 @@ fn ordinary_run_does_not_persist_work_report_artifacts() {
     assert!(!stdout(&output).contains("report: persisted"));
     let run_id = WorkflowRunId::new(run_id(&output)).expect("run id");
     let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
-    assert!(backend
-        .list_work_report_artifacts(&run_id)
-        .expect("artifacts list")
-        .is_empty());
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("artifacts list"),
+        []
+    );
 }
 
 #[test]
@@ -6806,10 +6808,13 @@ fn state_migration_cli_stages_inactive_then_explicitly_activates() {
     assert!(activated.status.success(), "{}", stderr(&activated));
     assert!(stdout(&activated).contains("migration_status: ready"));
     let backend = SqliteStateBackend::open(&database).expect("activated backend opens");
-    assert!(!backend
-        .read_events(&WorkflowRunId::new(run_id).expect("run id"))
-        .expect("events")
-        .is_empty());
+    assert_ne!(
+        backend
+            .read_events(&WorkflowRunId::new(run_id).expect("run id"))
+            .expect("events")
+            .len(),
+        0
+    );
 }
 
 #[test]

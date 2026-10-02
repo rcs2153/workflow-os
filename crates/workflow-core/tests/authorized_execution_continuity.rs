@@ -348,7 +348,7 @@ fn ordinary_turn_boundary_yields_without_a_false_wait() {
     let window = window();
     let yielded =
         AuthorizedExecutionYield::new(&window, yield_definition(Vec::new())).expect("yield");
-    assert!(yielded.wait_conditions().is_empty());
+    assert_eq!(yielded.wait_conditions().len(), 0);
     assert_eq!(
         yielded.resume_disposition(),
         AuthorizedExecutionResumeDisposition::EligibleForFreshAuthorization

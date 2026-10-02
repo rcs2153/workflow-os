@@ -629,7 +629,7 @@ mod tests {
         let rendered = error.to_string();
 
         assert!(!rendered.contains(private_marker));
-        assert!(!rendered.is_empty());
+        assert_ne!(rendered, "");
     }
 
     #[test]

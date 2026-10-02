@@ -2922,7 +2922,7 @@ mod http_tests {
             error.code(),
             "github_draft_pull_request.http.cross_repository.unsupported"
         );
-        assert!(provider.transport.requests.borrow().is_empty());
+        assert_eq!(provider.transport.requests.borrow().len(), 0);
     }
 
     #[test]
@@ -2946,7 +2946,7 @@ mod http_tests {
             error.code(),
             "github_draft_pull_request.http.target.not_allowlisted"
         );
-        assert!(provider.transport.requests.borrow().is_empty());
+        assert_eq!(provider.transport.requests.borrow().len(), 0);
     }
 
     #[test]

@@ -316,7 +316,11 @@ fn attempt_projection_matches(
     connection: &Connection,
     record: &AuthoritativeAttemptRecord,
 ) -> Result<bool, WorkflowOsError> {
-    count(connection, "SELECT COUNT(*) FROM continuity_attempts WHERE attempt_id=?1 AND window_id=?2 AND attempt_number=?3 AND subject_actor_id=?4 AND cursor_sequence=?5 AND cursor_event_id=?6 AND authority_commitment=?7 AND consume_operation_id=?8 AND state=?9 AND revision=?10", params![record.attempt_id.as_str(), record.window_id.as_str(), i64::from(record.attempt_number), record.subject_actor_id.as_str(), i64::try_from(record.cursor.sequence_number.get()).map_err(|_| corrupt())?, record.cursor.event_id.as_str(), record.authority_commitment.as_str(), record.consume_operation_id.as_str(), attempt_state(record.state), i64::try_from(record.revision.get()).map_err(|_| corrupt())?])
+    let row_matches = count(connection, "SELECT COUNT(*) FROM continuity_attempts WHERE attempt_id=?1 AND window_id=?2 AND attempt_number=?3 AND subject_actor_id=?4 AND cursor_sequence=?5 AND cursor_event_id=?6 AND authority_commitment=?7 AND consume_operation_id=?8 AND state=?9 AND revision=?10", params![record.attempt_id.as_str(), record.window_id.as_str(), i64::from(record.attempt_number), record.subject_actor_id.as_str(), i64::try_from(record.cursor.sequence_number.get()).map_err(|_| corrupt())?, record.cursor.event_id.as_str(), record.authority_commitment.as_str(), record.consume_operation_id.as_str(), attempt_state(record.state), i64::try_from(record.revision.get()).map_err(|_| corrupt())?])?;
+    if !row_matches {
+        return Ok(false);
+    }
+    count(connection, "SELECT COUNT(*) FROM continuity_attempts a WHERE a.attempt_id=?1 AND ((a.consume_operation_kind='consume_directive' AND EXISTS (SELECT 1 FROM continuity_operations o WHERE o.operation_id=a.consume_operation_id AND o.operation_kind='consume_directive' AND o.disposition='committed_success')) OR (a.consume_operation_kind='operational_opening' AND EXISTS (SELECT 1 FROM operational_opening_operations o WHERE o.operation_id=a.consume_operation_id AND o.attempt_id=a.attempt_id AND o.window_id=a.window_id)))", params![record.attempt_id.as_str()])
 }
 
 fn yield_projection_matches(
@@ -494,15 +498,7 @@ fn validate_relationships(state: &ReferenceContinuityState) -> Result<(), Workfl
         }
     }
     for attempt in state.attempts.values() {
-        if !state.windows.contains_key(&attempt.window_id)
-            || state
-                .operations
-                .get(&attempt.consume_operation_id)
-                .map_or(true, |operation| {
-                    operation.operation_kind
-                        != crate::AuthorizedExecutionContinuityOperationKind::ConsumeDirective
-                })
-        {
+        if !state.windows.contains_key(&attempt.window_id) {
             return Err(corrupt());
         }
     }

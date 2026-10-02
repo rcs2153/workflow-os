@@ -53,7 +53,7 @@ fn bounded_read_only_workload_is_complete_and_quiet() {
         assessment.completeness(),
         GovernanceAssessmentCompleteness::Complete
     );
-    assert!(assessment.unknown_facts().is_empty());
+    assert_eq!(assessment.unknown_facts().len(), 0);
     assert_eq!(
         assessment.algorithm(),
         GovernanceWorkloadAssessmentAlgorithm::V1

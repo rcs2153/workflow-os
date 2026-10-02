@@ -200,10 +200,10 @@ fn valid_empty_index_constructs() {
     let index =
         build_workflow_catalog_index(WorkflowCatalogIndexInput::new()).expect("empty index");
 
-    assert!(index.active_workflows().is_empty());
-    assert!(index.drafts().is_empty());
-    assert!(index.archived_drafts().is_empty());
-    assert!(index.conflicts().is_empty());
+    assert_eq!(index.active_workflows().len(), 0);
+    assert_eq!(index.drafts().len(), 0);
+    assert_eq!(index.archived_drafts().len(), 0);
+    assert_eq!(index.conflicts().len(), 0);
 }
 
 #[test]
@@ -530,7 +530,7 @@ fn missing_owner_escalation_stewardship_and_side_effect_posture_are_warnings() {
             .with_catalog_records(vec![clean_record]),
     )
     .expect("index builds");
-    assert!(index.conflicts().is_empty());
+    assert_eq!(index.conflicts().len(), 0);
 }
 
 #[test]

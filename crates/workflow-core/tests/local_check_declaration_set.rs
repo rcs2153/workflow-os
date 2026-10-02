@@ -175,7 +175,7 @@ fn resolver_binds_command_contract_and_independent_requirement_fingerprints() {
 fn resolver_emits_authoritative_empty_record() {
     let record = resolve(&workflow("      []"), &inventory(Vec::new()));
 
-    assert!(record.declarations().is_empty());
+    assert_eq!(record.declarations().len(), 0);
     assert_eq!(record.declaration_set_fingerprint().as_str().len(), 64);
 }
 

@@ -454,7 +454,7 @@ fn enriched_builder_publishes_one_declaration_set_for_every_step() {
         .find(|record| record.step_id().as_str() == "verify")
         .expect("verify record");
     assert_eq!(inspect.declarations().len(), 1);
-    assert!(verify.declarations().is_empty());
+    assert_eq!(verify.declarations().len(), 0);
 }
 
 #[test]
@@ -467,8 +467,8 @@ fn legacy_bundle_remains_readable_but_has_no_authoritative_declaration_sets() {
     let decoded: workflow_core::ImmutableRunBundleManifest =
         serde_json::from_str(&encoded).expect("deserialize");
 
-    assert!(legacy.manifest().local_check_declaration_sets().is_empty());
-    assert!(legacy.local_check_declaration_set_records().is_empty());
+    assert_eq!(legacy.manifest().local_check_declaration_sets().len(), 0);
+    assert_eq!(legacy.local_check_declaration_set_records().len(), 0);
     assert_eq!(&decoded, legacy.manifest());
 }
 
