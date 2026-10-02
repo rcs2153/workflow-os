@@ -426,9 +426,16 @@ current queue when they contain historical `next phase` language.
    See the [supervisor blocker-fix
    review](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_TRUSTED_HOST_SUPERVISOR_BLOCKER_FIX_REVIEW.md).
    The next P0 phase is a bounded atomic dispatch-reservation slice before any
-   repeated supervisor loop. Repeated scheduling, provider mutation,
-   OpenShell, nested harnesses, automatic approval, public runtime
-   configuration, CLI, SDK, and schema exposure remain blocked.
+   repeated supervisor loop. Its planning boundary is documented in the
+   [Atomic Dispatch Reservation
+   Plan](docs/implementation-plans/atomic-dispatch-reservation-plan.md) and
+   [planning report](docs/concepts/ATOMIC_DISPATCH_RESERVATION_PLAN_REPORT.md).
+   The plan requires one atomic winner, never reconstructs authority from
+   durable replay or ambiguous commit reconciliation, and keeps the result,
+   yield, and recovery operation set closed. Focused plan review is next.
+   Repeated scheduling, provider mutation, OpenShell, nested harnesses,
+   automatic approval, public runtime configuration, CLI, SDK, and schema
+   exposure remain blocked.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
