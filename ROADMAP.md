@@ -426,9 +426,38 @@ current queue when they contain historical `next phase` language.
    See the [supervisor blocker-fix
    review](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_TRUSTED_HOST_SUPERVISOR_BLOCKER_FIX_REVIEW.md).
    The next P0 phase is a bounded atomic dispatch-reservation slice before any
-   repeated supervisor loop. Repeated scheduling, provider mutation,
-   OpenShell, nested harnesses, automatic approval, public runtime
-   configuration, CLI, SDK, and schema exposure remain blocked.
+   repeated supervisor loop. Its planning boundary is documented in the
+   [Atomic Dispatch Reservation
+   Plan](docs/implementation-plans/atomic-dispatch-reservation-plan.md) and
+   [planning report](docs/concepts/ATOMIC_DISPATCH_RESERVATION_PLAN_REPORT.md).
+   The plan requires one atomic winner, never reconstructs authority from
+   durable replay or ambiguous commit reconciliation, and keeps the result,
+   yield, and recovery operation set closed. Its [focused maintainer/security
+   review](docs/concepts/ATOMIC_DISPATCH_RESERVATION_PLAN_REVIEW.md) found one
+   planning blocker: dispatch admission needed an exact append-only event and
+   atomic projection contract before implementation. The bounded fix now
+   defines the payload-free admission event, atomic snapshot binding,
+   reservation-bound outcome/yield/recovery inputs, and module-private
+   capability construction. The [focused fix
+   review](docs/concepts/ATOMIC_DISPATCH_RESERVATION_PLAN_BLOCKER_FIX_REVIEW.md)
+   accepted the plan. The private SQLite one-winner implementation is now
+   complete and documented in the [Atomic Dispatch Reservation Implementation
+   Report](docs/concepts/ATOMIC_DISPATCH_RESERVATION_IMPLEMENTATION_REPORT.md).
+   One immediate transaction admits exactly one caller, appends and projects
+   one payload-free admission event, returns non-reconstructable in-memory
+   authority only after an unambiguous commit, binds outcome/yield/recovery
+   writes to that admission, and withholds authority on replay or ambiguous
+   commit reconciliation. The focused maintainer/security
+   [implementation review](docs/concepts/ATOMIC_DISPATCH_RESERVATION_IMPLEMENTATION_REVIEW.md)
+   found and fixed one blocker: replay and downstream use now cross-check the
+   relational reservation, durable admission event, point-in-time projection,
+   and current rehydrated run snapshot. The private one-shot slice is accepted.
+   The next P0 phase is bounded trusted-host redispatch-loop planning over the
+   accepted execution-window, directive, supervisor, and reservation
+   boundaries.
+   Repeated scheduling, provider mutation, OpenShell, nested harnesses,
+   automatic approval, public runtime configuration, CLI, SDK, and schema
+   exposure remain blocked.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport

@@ -109,7 +109,7 @@ fn sqlite_backend_passes_common_conformance_without_overclaiming() {
     );
     assert_eq!(
         contract.schema().adapter_schema_version(),
-        Some(4),
+        Some(5),
         "SQLite schema version is explicit"
     );
     assert_eq!(
@@ -265,7 +265,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
     let secret = "secret-schema-token-marker";
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 5)
+        .pragma_update(None, "user_version", 6)
         .expect("set newer schema");
     drop(connection);
 
@@ -278,7 +278,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 4)
+        .pragma_update(None, "user_version", 5)
         .expect("restore schema version");
     connection
         .execute(
@@ -298,7 +298,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 }
 
 #[test]
-fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v4() {
+fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v5() {
     let fixture = Fixture::new();
     fixture
         .backend
@@ -317,9 +317,13 @@ fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v4() {
         .expect("upgrade exact empty-continuity V2 database");
     let v4_required = SqliteStateBackend::open(&fixture.path).expect_err("V4 upgrade is explicit");
     assert_eq!(v4_required.code(), "state.sqlite.schema.upgrade_required");
-    let upgraded =
+    let v4 =
         SqliteStateBackend::upgrade_operational_execution_window_opening_v3_to_v4(&fixture.path)
             .expect("upgrade exact empty-continuity V3 database");
+    let v5_required = SqliteStateBackend::open(&fixture.path).expect_err("V5 upgrade is explicit");
+    assert_eq!(v5_required.code(), "state.sqlite.schema.upgrade_required");
+    let upgraded = SqliteStateBackend::upgrade_dispatch_reservation_v4_to_v5(&fixture.path)
+        .expect("upgrade exact V4 database");
     let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
     assert_eq!(
         reopened
@@ -340,14 +344,19 @@ fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v4() {
             |row| row.get(0),
         )
         .expect("trusted time singleton");
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     assert_eq!(trusted_time_rows, 1);
 
-    SqliteStateBackend::upgrade_operational_execution_window_opening_v3_to_v4(&fixture.path)
-        .expect("upgrade is idempotent for exact V4");
+    SqliteStateBackend::upgrade_dispatch_reservation_v4_to_v5(&fixture.path)
+        .expect("upgrade is idempotent for exact V5");
     assert_eq!(
         v3.read_events(&fixture.created.run_id)
             .expect("V3 handle remains readable"),
+        vec![fixture.created.clone()]
+    );
+    assert_eq!(
+        v4.read_events(&fixture.created.run_id)
+            .expect("V4 handle remains readable"),
         vec![fixture.created.clone()]
     );
     assert_eq!(
@@ -391,6 +400,8 @@ fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
         .expect("finish explicit V3 upgrade");
     SqliteStateBackend::upgrade_operational_execution_window_opening_v3_to_v4(&fixture.path)
         .expect("finish explicit V4 upgrade");
+    SqliteStateBackend::upgrade_dispatch_reservation_v4_to_v5(&fixture.path)
+        .expect("finish explicit V5 upgrade");
     let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
     assert_eq!(
         reopened
@@ -409,7 +420,7 @@ fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
             |row| row.get(0),
         )
         .expect("trusted time singleton");
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     assert_eq!(trusted_time_rows, 1);
 }
 
@@ -718,6 +729,8 @@ fn downgrade_fixture_to_v1(path: &Path) {
     connection
         .execute_batch(
             "PRAGMA foreign_keys = OFF;
+             DROP TABLE dispatch_reservation_projection_bindings;
+             DROP TABLE dispatch_reservations;
              DROP TABLE operational_opening_projection_bindings;
              DROP TABLE operational_opening_attempts;
              DROP TABLE operational_opening_operations;

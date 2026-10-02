@@ -212,6 +212,10 @@ pub struct WorkflowRunSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_operational_opening_projection:
         Option<crate::OperationalExecutionWindowOpeningProjectionSnapshot>,
+    /// Latest payload-free dispatch-admission projection, when recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_dispatch_admission_projection:
+        Option<crate::dispatch_reservation::DispatchAdmissionProjectionSnapshot>,
 }
 
 impl WorkflowRunSnapshot {
@@ -232,14 +236,12 @@ impl WorkflowRunSnapshot {
             governance_disclosure_surface_acceptances: Vec::new(),
             last_continuity_projection: None,
             last_operational_opening_projection: None,
+            last_dispatch_admission_projection: None,
         }
     }
 
     fn apply(&mut self, event: &WorkflowRunEvent) -> Result<(), WorkflowOsError> {
-        let transition = StateTransition::for_kind(self.status, &event.kind)?;
-        self.status = transition.to;
-        self.last_sequence_number = event.sequence_number;
-        self.last_event_id = event.event_id.clone();
+        self.apply_event_header(event)?;
 
         match &event.kind {
             WorkflowRunEventKind::SkillInvocationRequested(record) => {
@@ -312,6 +314,13 @@ impl WorkflowRunSnapshot {
                     ),
                 );
             }
+            WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(projection) => {
+                self.last_dispatch_admission_projection = Some(
+                    crate::dispatch_reservation::DispatchAdmissionProjectionSnapshot::from_event(
+                        projection,
+                    ),
+                );
+            }
             WorkflowRunEventKind::RunCreated { .. }
             | WorkflowRunEventKind::RunValidated
             | WorkflowRunEventKind::RunStarted
@@ -332,6 +341,13 @@ impl WorkflowRunSnapshot {
             | WorkflowRunEventKind::SideEffectFailed(_) => {}
         }
 
+        Ok(())
+    }
+
+    fn apply_event_header(&mut self, event: &WorkflowRunEvent) -> Result<(), WorkflowOsError> {
+        self.status = StateTransition::for_kind(self.status, &event.kind)?.to;
+        self.last_sequence_number = event.sequence_number;
+        self.last_event_id = event.event_id.clone();
         Ok(())
     }
 }
@@ -449,6 +465,8 @@ pub enum WorkflowRunEventKindName {
     AuthorizedExecutionContinuityProjected,
     /// `OperationalExecutionWindowOpened`.
     OperationalExecutionWindowOpened,
+    /// `AuthorizedExecutionAttemptDispatchAdmitted`.
+    AuthorizedExecutionAttemptDispatchAdmitted,
     /// `HookInvocationRequested`.
     HookInvocationRequested,
     /// `HookInvocationEvaluated`.
@@ -564,6 +582,10 @@ pub enum WorkflowRunEventKind {
     ),
     /// One operational execution window and its first attempt were opened atomically.
     OperationalExecutionWindowOpened(Box<crate::OperationalExecutionWindowOpeningProjectionEvent>),
+    /// One authorized execution attempt was admitted for executor dispatch.
+    AuthorizedExecutionAttemptDispatchAdmitted(
+        Box<crate::dispatch_reservation::DispatchAdmissionProjectionEvent>,
+    ),
     /// Hook invocation was requested as model-only event vocabulary.
     HookInvocationRequested(Box<AgentHarnessHookWorkflowEvent>),
     /// Hook invocation was evaluated as model-only event vocabulary.
@@ -620,6 +642,9 @@ impl WorkflowRunEventKind {
             }
             Self::OperationalExecutionWindowOpened(_) => {
                 WorkflowRunEventKindName::OperationalExecutionWindowOpened
+            }
+            Self::AuthorizedExecutionAttemptDispatchAdmitted(_) => {
+                WorkflowRunEventKindName::AuthorizedExecutionAttemptDispatchAdmitted
             }
             Self::HookInvocationRequested(_) => WorkflowRunEventKindName::HookInvocationRequested,
             Self::HookInvocationEvaluated(_) => WorkflowRunEventKindName::HookInvocationEvaluated,
@@ -1124,6 +1149,26 @@ impl StateTransition {
                 from,
                 to: from,
                 event_kind: WorkflowRunEventKindName::OperationalExecutionWindowOpened,
+            });
+        }
+        if matches!(
+            event_kind,
+            WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(_)
+        ) {
+            if !matches!(
+                from,
+                WorkflowRunStatus::Running | WorkflowRunStatus::Retrying
+            ) {
+                return Err(invalid_transition(
+                    from,
+                    WorkflowRunEventKindName::AuthorizedExecutionAttemptDispatchAdmitted,
+                    "authorized execution dispatch admission is not valid from current status",
+                ));
+            }
+            return Ok(Self {
+                from,
+                to: from,
+                event_kind: WorkflowRunEventKindName::AuthorizedExecutionAttemptDispatchAdmitted,
             });
         }
         Self::for_event(from, event_kind.name())
@@ -1781,6 +1826,7 @@ impl WorkflowRunEvent {
                 | WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(_)
                 | WorkflowRunEventKind::AuthorizedExecutionContinuityProjected(_)
                 | WorkflowRunEventKind::OperationalExecutionWindowOpened(_)
+                | WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(_)
         )
     }
 }
