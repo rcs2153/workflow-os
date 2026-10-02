@@ -467,14 +467,16 @@ current queue when they contain historical `next phase` language.
    process posture and must not masquerade as workflow completion or wait.
    The focused maintainer/security
    [plan review](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_PLAN_REVIEW.md)
-   found two blockers. Budget exhaustion currently permits a normal host
-   return while Core still says `ResumeNow`, which can recreate the false
-   stall this lane is intended to eliminate. The iteration-input provider also
-   must not resupply the exact `SkillInput` or executor binding already fixed
-   by the accepted operation commitment. The next P0 phase is a focused
-   planning blocker fix that defines an enforceable non-terminal redispatch
-   obligation and narrows provider output to non-authorizing identities,
-   followed by a blocker-fix review before any loop implementation.
+   found two blockers. The focused planning fix removes caller-selected budget
+   exhaustion as a normal stop: the durable execution-window attempt limit is
+   now the finite bound, and the helper may not return normally while Core
+   still says `ResumeNow`. The fix also makes exact `SkillInput` and executor
+   binding immutable loop inputs and limits the injected provider to fresh
+   non-authorizing operation identities. The correction is documented in the
+   [blocker-fix
+   report](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_PLAN_BLOCKER_FIX_REPORT.md).
+   The next phase is a focused blocker-fix review before any loop
+   implementation.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

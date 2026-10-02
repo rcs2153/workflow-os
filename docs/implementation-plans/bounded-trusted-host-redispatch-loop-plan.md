@@ -25,11 +25,12 @@ new attempt atomically, and invoke the existing one-shot supervisor once.
 `AwaitCondition`, `Blocked`, and `Terminal` must stop the loop immediately and
 return the exact Core-derived posture.
 
-The loop must be finite and explicit. A configured iteration budget protects
-the host process from runaway local execution, but budget exhaustion must not
-be represented as workflow completion, approval wait, or a fabricated typed
-wait. It returns an explicit `ResumeRequired` host posture while durable Core
-state remains authoritative.
+The loop must be finite and explicit. Its bound comes from the authoritative
+window attempt limit, not a caller-selected host budget. Every redispatch
+consumes one durable attempt allocation, so the helper continues while Core
+derives `ResumeNow` and stops only on `AwaitCondition`, `Blocked`, `Terminal`,
+or a structured error. It must not return normally while lawful immediate
+continuation remains outstanding.
 
 ## 2. Current Accepted Foundation
 
@@ -54,8 +55,8 @@ The current `AuthoritativeContinuationDisposition` vocabulary is sufficient:
 - `Blocked`; and
 - `Terminal`.
 
-This phase should not add a fifth workflow disposition merely to describe a
-host iteration budget.
+This phase should not add a fifth workflow disposition or a normal host stop
+while `ResumeNow` remains authoritative.
 
 ## 3. Problem Statement
 
@@ -88,8 +89,8 @@ leaving execution injected and local.
 - Invoke at most one injected executor for each admitted reservation.
 - Stop immediately on typed wait, blocked, terminal, ambiguous, corrupt, or
   security-rejected posture.
-- Return a bounded explicit result that distinguishes workflow disposition
-  from host loop exhaustion.
+- Return a bounded explicit result only after Core derives a non-resumable
+  disposition.
 - Preserve current workflow pass/fail and terminal semantics.
 - Remain restart-safe and safe under two competing loop callers.
 - Keep all invocation values, outputs, and failure details outside events,
@@ -109,6 +110,8 @@ leaving execution injected and local.
 - No public runtime configuration, workflow spec fields, CLI, SDK, or example.
 - No filesystem or PostgreSQL parity in the first implementation.
 - No multiple-host lease, reservation stealing, heartbeat, or failover.
+- No caller-selected iteration budget or successful host-preemption return
+  while Core still derives `ResumeNow`.
 - No automatic retry after ambiguous executor entry or commit acknowledgement.
 - No new SideEffect, approval, report-artifact, or reasoning-lineage behavior.
 - No raw prompt, transcript, source, command output, provider payload,
@@ -126,7 +129,7 @@ leaving execution injected and local.
 | Invocation binding | Accepted immutable operation and executor commitments | Host-selected replacement input |
 | Wait posture | Durable typed wait records | Generic pause text or timer guess |
 | Completion | Valid durable terminal transition | Successful executor callback |
-| Host budget | Explicit loop input and result | Workflow status or wait condition |
+| Finite execution bound | Durable window maximum-attempt posture | Caller-selected budget or workflow status |
 
 ## 7. Required Invariants
 
@@ -147,8 +150,8 @@ leaving execution injected and local.
 11. `Blocked` returns without retrying or translating the block into an
     approval request.
 12. `Terminal` returns without another directive read or executor call.
-13. Host iteration-budget exhaustion is not a workflow event, wait, failure,
-    approval, or completion.
+13. The loop may not return a successful normal outcome while Core still
+    derives `ResumeNow`.
 14. Two concurrent loops cannot execute the same attempt twice.
 15. A successful local skill invocation does not by itself complete a step or
     workflow run.
@@ -161,9 +164,8 @@ The first implementation should add the smallest crate-private surface,
 provisionally:
 
 - `TrustedHostRedispatchLoopInput`
-- `TrustedHostRedispatchLoopBudget`
 - `TrustedHostRedispatchIterationInput`
-- `TrustedHostRedispatchInputProvider`
+- `TrustedHostRedispatchIdentityProvider`
 - `TrustedHostRedispatchLoopOutcome`
 - `TrustedHostRedispatchStopReason`
 - `run_bounded_trusted_host_redispatch_loop(...)`
@@ -175,18 +177,22 @@ The loop input should contain:
 - one `SqliteStateBackend` reference;
 - one initial opened or resumed supervisor capability;
 - one injected `TrustedHostAttemptExecutor`;
-- one injected, deterministic iteration-input provider;
-- one positive maximum executor-entry count; and
+- one injected, deterministic identity provider;
+- one immutable `SkillInput` and executor binding already committed by the
+  accepted opening operation; and
 - the exact initial operation/receipt/input material required by the existing
   one-shot supervisor.
 
-The input provider may supply bounded operation IDs, receipt IDs, yield
-generation IDs, and an invocation input already constrained by the accepted
-window binding. It is not an authority provider. Core must recompute and
-validate every commitment and reject substitution before admission.
+The identity provider may supply only bounded operation IDs, receipt IDs,
+attempt IDs where the accepted consume API requires them, and yield-generation
+IDs. It is not an invocation or authority provider. It must not receive,
+construct, replace, or return `SkillInput`, executor bindings, capabilities,
+durable state, or commitments. Core must recompute and validate every
+commitment and reject substitution before admission.
 
 The provider must not receive raw durable state, credentials, source contents,
-or authority-bearing values. Its Debug output must be bounded and redacted.
+invocation values, or authority-bearing values. Its Debug output must be
+bounded and redacted.
 
 ## 9. Loop Outcome Model
 
@@ -196,30 +202,23 @@ The loop should return one closed result with:
 - number of admitted executor entries;
 - bounded stop reason;
 - optional final successful `SkillOutput` held only in memory; and
-- a report-safe summary of whether redispatch remains required.
+- a report-safe summary of the final non-resumable Core disposition.
 
 Candidate stop reasons:
 
 - `AwaitCondition`
 - `Blocked`
 - `Terminal`
-- `ResumeRequiredBudgetExhausted`
 
 Storage, integrity, security, and reconciliation failures should remain
 structured `WorkflowOsError` values rather than being flattened into a normal
 stop reason.
 
-`ResumeRequiredBudgetExhausted` means durable Core state still says
-`ResumeNow`, but this explicit host call consumed its allowed local execution
-budget. It must not claim that the workflow is waiting or complete. A later
-host call must rehydrate from durable state and obtain fresh authority; it may
-not reuse any value returned by the exhausted loop.
-
 ## 10. Iteration Algorithm
 
 The private helper should follow this closed sequence:
 
-1. Validate the positive loop budget and initial input shape.
+1. Validate the initial input shape and exact immutable invocation binding.
 2. Execute the initial opened or resumed capability through the accepted
    one-shot supervisor.
 3. Count an iteration only when atomic reservation admits executor entry.
@@ -228,16 +227,18 @@ The private helper should follow this closed sequence:
 5. For `AwaitCondition`, return that posture immediately.
 6. For `Blocked`, return that posture immediately.
 7. For `Terminal`, return that posture immediately.
-8. For `ResumeNow`, compare the admitted-entry count with the explicit budget.
-9. If exhausted, re-read and verify `ResumeNow`, then return
-   `ResumeRequiredBudgetExhausted` without consuming another directive.
-10. Otherwise, ask the injected provider for the next bounded operation input.
-11. Through one Core-owned path, rehydrate the exact window, derive the current
+8. For `ResumeNow`, verify that the authoritative window still has a lawful
+   attempt allocation. If it does not, fail closed because Core liveness and
+   attempt-limit posture are inconsistent.
+9. Ask the injected identity provider for the next bounded non-authorizing
+   operation identities.
+10. Through one Core-owned path, rehydrate the exact window, derive the current
     directive, consume it at the current cursor, and obtain a private resumed
     attempt capability.
-12. Pass that owned capability to the one-shot supervisor, which atomically
-    reserves and invokes the next attempt once.
-13. Repeat from step 3.
+11. Pass that owned capability and the original immutable invocation input to
+    the one-shot supervisor, which atomically reserves and invokes the next
+    attempt once.
+12. Repeat from step 3.
 
 The implementation must not separate directive derivation and consumption
 with a host-authoritative cached `ResumeNow` decision. If the existing store
@@ -262,20 +263,23 @@ loop must never:
   or
 - substitute a new skill input that fails the accepted invocation binding.
 
-## 12. Budget And Fairness Posture
+## 12. Finite Bound And Fairness Posture
 
-The first implementation should use a small explicit positive integer budget.
-No default should be exposed publicly. Tests may use values such as one, two,
-or three.
+The first implementation must not accept a caller-selected iteration budget.
+The durable execution window already has a maximum-attempt posture, and every
+lawful iteration allocates exactly one attempt through directive consumption.
+That is the finite bound.
 
-The budget limits executor admissions, not internal reads or reconciliation.
-It must not be replenished by retries, exact replay, rejected reservations, or
-errors. The implementation should use checked arithmetic and reject zero or
-overflowing values with stable non-leaking codes.
+The helper should track admitted entries with checked arithmetic and
+cross-check them against the authoritative remaining-attempt posture. An
+inconsistency is a stable non-leaking liveness/integrity error, not a normal
+return, typed wait, block, approval, or terminal result.
 
-This is process-safety posture, not multi-run scheduling fairness. Cross-run
-fairness, queues, priorities, rate limits, and worker allocation remain future
-host-runtime concerns.
+This is not multi-run scheduling fairness. Cross-run fairness, queues,
+priorities, process preemption, rate limits, and worker allocation remain
+future trusted-host runtime concerns. A later scheduler may preempt only after
+it has a durable typed continuation handoff that cannot be mistaken for
+completion; this phase does not invent that boundary.
 
 ## 13. Typed Wait Behavior
 
@@ -339,7 +343,7 @@ property is being proved.
   if fresh Core state later derives `ResumeNow`.
 - Result/yield/recovery commit ambiguity: reconcile exactly; never guess.
 - Projection or snapshot mismatch: recovery-required error, no redispatch.
-- Iteration input provider failure: stable host-input error, no Core mutation
+- Iteration identity provider failure: stable host-input error, no Core mutation
   for a not-yet-consumed iteration.
 - Process crash: a new call starts from durable state and fresh authority; it
   does not deserialize loop-local capabilities.
@@ -376,9 +380,9 @@ provider data into audit or report structures.
 
 The first implementation should be one private Workflow Core slice:
 
-1. Add the bounded loop input, budget, result, and stop-reason models.
-2. Add one deterministic iteration-input provider trait for injected local
-   test/runtime context.
+1. Add the bounded loop input, result, and stop-reason models.
+2. Add one deterministic identity-provider trait for fresh non-authorizing
+   operation material.
 3. Add the smallest private helper that atomically derives and consumes the
    next directive before constructing resumed supervisor input.
 4. Compose the existing one-shot supervisor in a finite loop.
@@ -401,10 +405,9 @@ Tests should prove:
 3. `AwaitCondition` stops with no additional directive or executor call;
 4. `Blocked` stops with no hidden retry;
 5. `Terminal` stops with no additional read-to-consume path;
-6. budget one returns `ResumeRequiredBudgetExhausted` when Core still says
-   `ResumeNow`;
-7. budget exhaustion does not append completion, failure, approval, or wait;
-8. zero budget is rejected before writes or executor entry;
+6. the helper does not return normally while Core still says `ResumeNow`;
+7. the authoritative attempt limit bounds total executor entries;
+8. inconsistent `ResumeNow` plus exhausted authoritative attempts fails closed;
 9. two competing loops produce one executor entry for one attempt;
 10. exact directive and reservation replay never invoke the executor;
 11. stale cursor, revision, invocation, executor, actor, authority, and
@@ -418,19 +421,22 @@ Tests should prove:
 17. workflow status is not completed merely because the loop stops;
 18. Debug and errors do not leak inputs, outputs, paths, IDs, or secret-like
     markers;
-19. no provider, filesystem artifact, CLI output, or report artifact is
+19. the identity provider cannot supply or replace `SkillInput` or executor
+    binding;
+20. no provider, filesystem artifact, CLI output, or report artifact is
     created; and
-20. existing continuity, opening, supervisor, reservation, adapter, and
+21. existing continuity, opening, supervisor, reservation, adapter, and
     runtime tests remain green.
 
 ## 21. Open Questions
 
 - Should the first helper accept the initial attempt capability, or should a
   separately reviewed composition helper also open the window?
-- What is the narrowest safe provider interface for per-attempt operation and
-  receipt identities without making host input authoritative?
-- Should budget exhaustion be a successful result or a dedicated stable host
-  error while still exposing `ResumeNow`?
+- What is the narrowest safe identity-provider interface for per-attempt
+  operation and receipt identities?
+- Does the current authoritative attempt-limit projection expose enough
+  private state for the loop to cross-check finiteness without broadening the
+  public model?
 - Can the existing directive store API derive and consume in one safe private
   call, or is a new atomic composition operation required?
 - How should a successful attempt that leaves workflow-level work pending be
@@ -448,8 +454,9 @@ Perform a focused maintainer/security review of this plan. The review should
 concentrate on:
 
 - whether directive derivation and consumption are sufficiently atomic;
-- whether the input provider can substitute invocation or authority;
-- whether budget exhaustion preserves the no-false-stall invariant;
+- whether the identity provider is structurally unable to substitute
+  invocation or authority;
+- whether authoritative attempt limits preserve the no-false-stall invariant;
 - whether concurrency can cause duplicate executor entry;
 - whether ambiguous persistence can trigger unsafe redispatch; and
 - whether the proposed result vocabulary separates host posture from workflow
@@ -458,4 +465,3 @@ concentrate on:
 If accepted, implement only the private, local, SQLite, injected bounded loop.
 Provider execution, OpenShell, nested harnesses, public configuration, CLI,
 SDK, schema exposure, hosted behavior, and release changes must remain blocked.
-
