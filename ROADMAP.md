@@ -438,7 +438,9 @@ current queue when they contain historical `next phase` language.
    atomic projection contract before implementation. The bounded fix now
    defines the payload-free admission event, atomic snapshot binding,
    reservation-bound outcome/yield/recovery inputs, and module-private
-   capability construction. Focused fix review is next.
+   capability construction. The [focused fix
+   review](docs/concepts/ATOMIC_DISPATCH_RESERVATION_PLAN_BLOCKER_FIX_REVIEW.md)
+   accepted the plan. The private SQLite one-winner implementation is next.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
