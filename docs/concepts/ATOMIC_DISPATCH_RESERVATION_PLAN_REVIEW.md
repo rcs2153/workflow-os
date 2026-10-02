@@ -145,15 +145,19 @@ event-ledger assertions:
 
 ## 11. Blockers
 
-One blocker remains: resolve the append-only dispatch-admission event and
-projection contract before implementation.
+The original blocker was resolved in the subsequent planning fix. The updated
+plan now defines a payload-free
+`AuthorizedExecutionAttemptDispatchAdmitted` runtime event, atomic snapshot
+projection, exact replay and ambiguity bindings, reservation-bound outcome,
+yield, and recovery inputs, and a module-private capability constructor.
+
+No plan blocker remains. A focused fix review is still required before
+implementation.
 
 ## 12. Recommended Next Phase
 
-Run a **bounded atomic dispatch-reservation planning blocker fix**. Update the
-plan to define the exact payload-free admission event, atomic projection,
-reservation-to-outcome binding fields, and module-private capability
-construction boundary. Then repeat this focused review before implementation.
+Run a **focused review of the atomic dispatch-reservation planning blocker
+fix**. If accepted, proceed to the private SQLite one-winner implementation.
 
 ## 13. Governed Review Record
 

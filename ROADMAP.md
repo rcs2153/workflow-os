@@ -434,9 +434,11 @@ current queue when they contain historical `next phase` language.
    durable replay or ambiguous commit reconciliation, and keeps the result,
    yield, and recovery operation set closed. Its [focused maintainer/security
    review](docs/concepts/ATOMIC_DISPATCH_RESERVATION_PLAN_REVIEW.md) found one
-   planning blocker: dispatch admission needs an exact append-only event and
-   atomic projection contract before implementation. A bounded planning fix is
-   next.
+   planning blocker: dispatch admission needed an exact append-only event and
+   atomic projection contract before implementation. The bounded fix now
+   defines the payload-free admission event, atomic snapshot binding,
+   reservation-bound outcome/yield/recovery inputs, and module-private
+   capability construction. Focused fix review is next.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

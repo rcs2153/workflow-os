@@ -188,6 +188,36 @@ The schema migration must be additive and explicit. The first implementation
 is SQLite-only and must update the managed manifest digest and migration tests
 without pretending filesystem or PostgreSQL parity.
 
+### 8.1 Append-Only Admission Event
+
+Dispatch admission is a meaningful runtime transition and must be represented
+in the run event ledger. The reservation transaction must therefore append one
+payload-free `AuthorizedExecutionAttemptDispatchAdmitted` runtime event and
+project its binding into the run snapshot in the same transaction that inserts
+the unique reservation.
+
+Its bounded projection payload must contain:
+
+- reservation operation ID and receipt ID;
+- window ID and attempt ID;
+- window revision and attempt revision;
+- reservation request commitment;
+- invocation commitment and executor-selection commitment;
+- authority, governance, and trusted-time commitments;
+- expected input cursor and committed result cursor; and
+- the immutable reservation commitment.
+
+It must not contain invocation values, skill input, prompts, transcripts,
+command output, provider payloads, credentials, paths, or other raw content.
+The event is runtime audit/projection vocabulary only. It is not a sixth
+caller-invoked continuity operation, a workflow-spec field, a CLI command, an
+SDK surface, or an execution credential.
+
+The run snapshot should retain only the latest exact dispatch-admission
+projection binding needed for integrity checks and inspection. Rehydration
+must preserve workflow status and must not interpret admission as attempt,
+step, or run completion.
+
 ## 9. Atomic Reservation Transaction
 
 One immediate SQLite transaction should:
@@ -201,15 +231,19 @@ One immediate SQLite transaction should:
 5. reject an existing reservation for another operation or commitment;
 6. insert the reservation record and payload-free projection under the unique
    attempt constraint;
-7. commit; and
-8. return the private capability only after an unambiguous commit success.
+7. append the deterministic dispatch-admission event and project the snapshot;
+8. validate the reservation, event, and snapshot commitments as one exact
+   binding;
+9. commit; and
+10. return the private capability only after an unambiguous commit success.
 
 No executor callback may occur before step 8.
 
 ## 10. Replay And Conflict Behavior
 
 - Same operation ID and same request commitment after a confirmed committed
-  reservation: return `AlreadyAdmitted` and no capability.
+  reservation: return `AlreadyAdmitted` with the original receipt and event
+  binding, no duplicate event, and no capability.
 - Same operation ID with a different commitment: security rejection.
 - Different operation ID for the same attempt: already-admitted rejection.
 - Stale attempt/window revision or cursor: invalid-state rejection.
@@ -217,6 +251,10 @@ No executor callback may occur before step 8.
   rejection.
 - Missing or mismatched opening/directive origin: security rejection.
 - Corrupt partial reservation/projection: recovery-required error.
+
+Every read or replay path must cross-check the reservation relation, admission
+event binding, and projected run snapshot. A missing, duplicated, conflicting,
+or partially projected admission fails closed.
 
 Errors must use stable codes and must not echo IDs or caller values.
 
@@ -230,7 +268,8 @@ Reconciliation outcomes:
 
 - confirmed absence: return a bounded failure; no capability;
 - exact committed admission: return
-  `CommittedButCapabilityUnavailable`; no capability;
+  `CommittedButCapabilityUnavailable` with the committed receipt and event
+  binding; no capability;
 - committed security rejection: return the bounded rejection;
 - conflicting, unreadable, or partial state: return recovery-required; no
   capability.
@@ -252,6 +291,24 @@ Instead:
 4. the supervisor validates the exact invocation and executor binding again;
 5. the executor is invoked once; and
 6. result, yield, and ambiguity persistence require the reservation binding.
+
+The existing request models must gain private reservation-binding inputs:
+
+- `dispatch_reservation_receipt_id`;
+- `dispatch_reservation_commitment`; and
+- `dispatch_admission_cursor`.
+
+`RecordAttemptOutcomeRequest`, `RegisterYieldRequest`, and
+`RecoverAmbiguousAttemptRequest` must verify those values against the exact
+reservation relation and admission event inside their existing mutation
+transactions. The old attempt-use capability alone is no longer sufficient
+for those three mutations after reservation is implemented.
+
+The reservation module must own the only constructor for
+`ReservedAttemptDispatchCapability`. Its fields remain private to that module.
+Other modules may consume the opaque value through the supervisor API but may
+not construct, clone, serialize, deserialize, or reconstruct it from a receipt
+or event.
 
 This phase must not add a loop around the supervisor. One explicit caller may
 reserve and invoke one attempt.
@@ -301,35 +358,46 @@ Future implementation tests must prove:
 14. after-commit fault reconciles to committed-but-unavailable without
     authority;
 15. partial or corrupt projection fails closed;
-16. supervisor entry requires and consumes the reserved capability;
-17. result, yield, and ambiguity persistence require the reservation binding;
-18. supervisor success does not complete the workflow run;
-19. Debug, errors, serialization, and persistence do not leak raw values;
-20. managed SQLite migration and manifest integrity remain deterministic;
-21. existing opening, continuity, supervisor, executor, report, adapter, and
+16. one admission appends one ordered payload-free admission event;
+17. a losing claimant and exact replay append no duplicate admission event;
+18. ambiguous reconciliation returns the committed event binding without
+    authority;
+19. reservation, admission event, and snapshot disagreement fails closed;
+20. rehydration preserves workflow status and the exact admission projection;
+21. supervisor entry requires and consumes the reserved capability;
+22. result, yield, and ambiguity persistence require the receipt, commitment,
+    and admission cursor binding;
+23. supervisor success does not complete the workflow run;
+24. capability construction is localized to the reservation module;
+25. Debug, errors, serialization, and persistence do not leak raw values;
+26. managed SQLite migration and manifest integrity remain deterministic;
+27. existing opening, continuity, supervisor, executor, report, adapter, and
     runtime tests remain green; and
-22. `cargo test --workspace` passes in CI.
+28. `cargo test --workspace` passes in CI.
 
 ## 16. Proposed Implementation Sequence
 
 1. Add private reservation identities, request, outcome, receipt, projection,
    and capability types.
 2. Add the additive SQLite reservation schema and explicit migration.
-3. Implement atomic one-winner reservation and exact reconciliation.
-4. Replace supervisor read-only dispatch validation with required reservation
+3. Add the payload-free admission event, snapshot projection, and integrity
+   codec.
+4. Implement atomic one-winner reservation, event projection, and exact
+   reconciliation in one transaction.
+5. Replace supervisor read-only dispatch validation with required reservation
    capability consumption.
-5. Bind existing result, yield, and ambiguity persistence to the reservation.
-6. Add concurrency, replay, substitution, fault, and privacy tests.
-7. Update roadmap and create an end-of-phase report.
-8. Perform a focused maintainer/security review before any repeated dispatch
+6. Bind existing result, yield, and ambiguity persistence to the reservation
+   receipt, commitment, and admission cursor.
+7. Add concurrency, replay, event-integrity, substitution, fault, and privacy
+   tests.
+8. Update roadmap and create an end-of-phase report.
+9. Perform a focused maintainer/security review before any repeated dispatch
    or scheduler work.
 
 ## 17. Open Questions
 
 - Should the first implementation represent admitted posture solely through a
   reservation relation, or also add a private attempt-state discriminator?
-- Which existing projection event is the narrowest honest audit surface for
-  reservation, without adding a sixth public continuity operation?
 - Should result persistence settle the reservation in the same transaction or
   leave it immutable and derive settlement from the attempt outcome?
 - What bounded operator recovery is appropriate for an admitted capability
