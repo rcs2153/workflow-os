@@ -36,8 +36,12 @@ maintainer/security review accepts the boundary with non-blocking direct race
 and elapsed-deadline test follow-ups in
 [Trusted Host TimeWindow Wait Registration
 Review](../concepts/TRUSTED_HOST_TIME_WINDOW_WAIT_REGISTRATION_REVIEW.md).
-This plan defines the remaining wait-handoff and explicit reinvocation
-boundaries. It does not authorize a scheduler or public runtime behavior. The
+The remaining explicit reinvocation boundary is now specified in the
+[Trusted-Host Explicit Reinvocation Vertical Slice
+Plan](trusted-host-explicit-reinvocation-vertical-slice-plan.md). It composes
+the accepted inert handoff, source-specific `TimeWindow` transition, and
+operational entry helper without authorizing a scheduler or public runtime
+behavior. This document continues to define the prerequisite boundary. The
 planning review is recorded in
 [Private Trusted-Host Caller And Typed-Wait Plan
 Review](../concepts/TRUSTED_HOST_PRIVATE_CALLER_TYPED_WAIT_PLAN_REVIEW.md).
