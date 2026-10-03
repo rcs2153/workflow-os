@@ -345,7 +345,13 @@ blockers: the observation path must not use a create-capable SQLite open, and
 the accepted state-movement, non-handoff, and corruption test matrix must be
 completed. Both fixes are implemented in the [blocker-fix
 report](../concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_BLOCKER_FIX_REPORT.md).
-Focused blocker-fix review is required before explicit reinvocation planning.
+The focused blocker-fix
+[review](../concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_BLOCKER_FIX_REVIEW.md)
+accepted the corrected handoff boundary. Explicit reinvocation is now
+specified, but not implemented, in the [Trusted-Host Explicit Reinvocation
+Vertical Slice Plan](trusted-host-explicit-reinvocation-vertical-slice-plan.md).
+That plan preserves the handoff as inert correlation input and requires fresh
+authoritative classification and operational entry.
 
 ## 19. Governed Planning Record
 

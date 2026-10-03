@@ -577,8 +577,15 @@ current queue when they contain historical `next phase` language.
    remains absent, and the focused state-movement, non-handoff, and corruption
    matrix passes. The focused [blocker-fix
    review](docs/concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_BLOCKER_FIX_REVIEW.md)
-   accepts the corrected boundary. The next P0 phase is explicit reinvocation
-   vertical-slice planning from fresh authoritative classification. Provider,
+   accepts the corrected boundary. Explicit reinvocation from fresh
+   authoritative classification is now specified in the [Trusted-Host
+   Explicit Reinvocation Vertical Slice
+   Plan](docs/implementation-plans/trusted-host-explicit-reinvocation-vertical-slice-plan.md).
+   The first slice composes the inert handoff, exact source-specific
+   `TimeWindow` transition, and accepted operational entry helper without
+   turning the handoff into authority. The next P0 phase is focused
+   maintainer/security review of that plan; implementation is not yet
+   authorized. Provider,
    sandbox, nested-harness, public-config, CLI, SDK, and hosted integration
    remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
