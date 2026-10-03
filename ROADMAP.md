@@ -454,7 +454,46 @@ current queue when they contain historical `next phase` language.
    and current rehydrated run snapshot. The private one-shot slice is accepted.
    The next P0 phase is bounded trusted-host redispatch-loop planning over the
    accepted execution-window, directive, supervisor, and reservation
-   boundaries.
+   boundaries. That planning phase is documented in the [Bounded Trusted-Host
+   Redispatch Loop
+   Plan](docs/implementation-plans/bounded-trusted-host-redispatch-loop-plan.md)
+   and [planning
+   report](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_PLAN_REPORT.md).
+   The plan keeps Core authoritative for every iteration: only a freshly
+   derived `ResumeNow` may consume a fresh directive, commit a one-winner
+   dispatch reservation, and invoke one injected executor. Typed wait,
+   blocked, terminal, ambiguous, corrupt, and security-rejected posture stop
+   the loop without fabricated progress. The durable execution-window attempt
+   limit is the finite bound; no caller-selected host budget may masquerade as
+   workflow completion or wait.
+   The focused maintainer/security
+   [plan review](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_PLAN_REVIEW.md)
+   found two blockers. The focused planning fix removes caller-selected budget
+   exhaustion as a normal stop: the durable execution-window attempt limit is
+   now the finite bound, and the helper may not return normally while Core
+   still says `ResumeNow`. The fix also makes exact `SkillInput` and executor
+   binding immutable loop inputs and limits the injected provider to fresh
+   non-authorizing operation identities. The correction is documented in the
+   [blocker-fix
+   report](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_PLAN_BLOCKER_FIX_REPORT.md).
+   The focused
+   [blocker-fix review](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_PLAN_BLOCKER_FIX_REVIEW.md)
+   accepts both corrections. The private local SQLite bounded redispatch loop
+   is now implemented in the [implementation
+   report](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_IMPLEMENTATION_REPORT.md).
+   It composes the accepted one-shot supervisor in one private helper, derives
+   every continuation posture freshly, consumes a distinct directive and
+   atomic dispatch reservation for each resumed attempt, reuses the exact
+   immutable invocation, and cannot return normally while Core still derives
+   `ResumeNow`. Exhausted attempt authority fails closed rather than becoming
+   completion, wait, or approval. The focused maintainer/security
+   [implementation review](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_IMPLEMENTATION_REVIEW.md)
+   accepts the private slice with non-blocking composition-level race and
+   fault-injection follow-ups. The next P0 phase is planning the smallest
+   local trusted-host operational entry boundary that can obtain fresh initial
+   authority and invoke the accepted loop without reconstructing capabilities
+   after restart. Provider, sandbox, nested-harness, public-config, CLI, SDK,
+   and hosted integration remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

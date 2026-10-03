@@ -124,6 +124,35 @@ pub(crate) enum TrustedHostSupervisorAttemptCapability {
     },
 }
 
+pub(crate) struct TrustedHostSupervisorBinding {
+    pub(crate) window_id: crate::AuthorizedExecutionWindowId,
+    pub(crate) expected_window_binding: ExpectedWindowBinding,
+    pub(crate) operation_binding_commitment: SpecContentHash,
+}
+
+pub(crate) fn trusted_host_supervisor_binding(
+    capability: &TrustedHostSupervisorAttemptCapability,
+) -> TrustedHostSupervisorBinding {
+    match capability {
+        TrustedHostSupervisorAttemptCapability::Opened(capability) => {
+            TrustedHostSupervisorBinding {
+                window_id: capability.window_id.clone(),
+                expected_window_binding: capability.expected_window_binding.clone(),
+                operation_binding_commitment: capability.operation_binding_commitment.clone(),
+            }
+        }
+        TrustedHostSupervisorAttemptCapability::Resumed {
+            capability,
+            expected_window_binding,
+            operation_binding_commitment,
+        } => TrustedHostSupervisorBinding {
+            window_id: capability.window_id.clone(),
+            expected_window_binding: (**expected_window_binding).clone(),
+            operation_binding_commitment: operation_binding_commitment.clone(),
+        },
+    }
+}
+
 pub(crate) struct TrustedHostSupervisorInput<'a> {
     pub(crate) backend: &'a SqliteStateBackend,
     pub(crate) capability: TrustedHostSupervisorAttemptCapability,
