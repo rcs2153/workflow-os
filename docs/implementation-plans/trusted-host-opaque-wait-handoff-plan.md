@@ -339,7 +339,11 @@ The private model and coherent observation slice is implemented. Core now:
 
 The [implementation report](../concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_REPORT.md)
 records the completed scope and validation. Focused maintainer/security review
-is required before any reinvocation planning.
+is required before any reinvocation planning. That implementation
+[review](../concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_REVIEW.md) found two
+blockers: the observation path must not use a create-capable SQLite open, and
+the accepted state-movement, non-handoff, and corruption test matrix must be
+completed. Explicit reinvocation planning remains blocked.
 
 ## 19. Governed Planning Record
 

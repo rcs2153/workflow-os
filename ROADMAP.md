@@ -567,11 +567,14 @@ current queue when they contain historical `next phase` language.
    handoff is a deterministic inert projection derived inside one explicit
    read transaction. It exposes only bounded `TimeWindow` posture and
    `RequestFreshClassification`; it grants no authority and cannot satisfy a
-   wait, reserve dispatch, or invoke an executor. Focused restart, no-write,
-   redaction, blocked-posture, and concurrent old-or-new snapshot tests pass.
-   The next P0 phase is focused maintainer/security review before planning any
-   explicit reinvocation. Provider, sandbox, nested-harness, public-config,
-   CLI, SDK, and hosted integration remain blocked.
+   wait, reserve dispatch, or invoke an executor. Focused restart, redaction,
+   blocked-posture, and concurrent old-or-new snapshot tests pass. The focused
+   implementation [review](docs/concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_REVIEW.md)
+   requires blocker fixes before reinvocation planning: observation must use a
+   non-creating SQLite open path, and the accepted state-movement,
+   non-handoff, and corruption test matrix must be completed. The next P0
+   phase is that narrow blocker fix. Provider, sandbox, nested-harness,
+   public-config, CLI, SDK, and hosted integration remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
