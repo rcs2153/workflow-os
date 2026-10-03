@@ -559,9 +559,12 @@ current queue when they contain historical `next phase` language.
    deadline test follow-ups. The smallest opaque, non-authoritative wait
    handoff is now defined in the [Trusted Host Opaque Wait Handoff
    Plan](docs/implementation-plans/trusted-host-opaque-wait-handoff-plan.md).
-   The next P0 phase is focused maintainer/security review of that plan before
-   any code. Provider, sandbox, nested-harness, public-config, CLI, SDK, and
-   hosted integration remain blocked.
+   Its focused maintainer/security [review](docs/concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_PLAN_REVIEW.md)
+   accepts the plan with explicit coherent-read, type-separation, cursor-
+   commitment, and privacy constraints. The next P0 phase is the crate-private
+   handoff model and coherent SQLite observation implementation only. Provider,
+   sandbox, nested-harness, public-config, CLI, SDK, and hosted integration
+   remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
