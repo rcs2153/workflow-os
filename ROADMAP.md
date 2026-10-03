@@ -628,7 +628,13 @@ current queue when they contain historical `next phase` language.
    `NotYetEligible` is a non-mutating early-wake result, the first ticket uses
    the current durable absolute UTC deadline only as an inert hint, and the
    atomic transition retains the only satisfaction proof. The next phase is
-   focused maintainer/security re-review of the corrected plan.
+   focused maintainer/security re-review of the corrected plan. That
+   [re-review](docs/concepts/TRUSTED_HOST_PRIVATE_SCHEDULING_BOUNDARY_PLAN_BLOCKER_FIX_REVIEW.md)
+   accepts the corrections with no remaining planning blocker. The next P0
+   implementation is limited to the two prerequisite explicit-reinvocation
+   proofs: full-composition concurrent callers and transition-to-entry crash
+   recovery. Scheduling models and behavior remain deferred until those proofs
+   are implemented and reviewed.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
