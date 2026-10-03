@@ -1,10 +1,12 @@
 # Bounded Trusted-Host Redispatch Loop Plan
 
-Status: implemented as a private local SQLite slice; focused implementation
-review pending. Atomic dispatch reservation is implemented and accepted. The
-implementation is documented in the [Bounded Trusted-Host Redispatch Loop
-Implementation
-Report](../concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_IMPLEMENTATION_REPORT.md).
+Status: implemented and accepted as a private local SQLite slice with
+non-blocking follow-ups. Atomic dispatch reservation is implemented and
+accepted. The implementation is documented in the [Bounded Trusted-Host
+Redispatch Loop Implementation
+Report](../concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_IMPLEMENTATION_REPORT.md)
+and its focused [maintainer/security
+review](../concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_IMPLEMENTATION_REVIEW.md).
 It does not add a scheduler, provider execution, OpenShell, nested harnesses,
 public configuration, CLI, SDK, schema, hosted behavior, or release changes.
 

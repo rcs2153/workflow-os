@@ -486,9 +486,14 @@ current queue when they contain historical `next phase` language.
    atomic dispatch reservation for each resumed attempt, reuses the exact
    immutable invocation, and cannot return normally while Core still derives
    `ResumeNow`. Exhausted attempt authority fails closed rather than becoming
-   completion, wait, or approval. Focused maintainer/security implementation
-   review is the next required P0 phase before any provider, sandbox,
-   nested-harness, public-config, CLI, SDK, or hosted integration.
+   completion, wait, or approval. The focused maintainer/security
+   [implementation review](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_IMPLEMENTATION_REVIEW.md)
+   accepts the private slice with non-blocking composition-level race and
+   fault-injection follow-ups. The next P0 phase is planning the smallest
+   local trusted-host operational entry boundary that can obtain fresh initial
+   authority and invoke the accepted loop without reconstructing capabilities
+   after restart. Provider, sandbox, nested-harness, public-config, CLI, SDK,
+   and hosted integration remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
