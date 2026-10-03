@@ -369,10 +369,10 @@ verification errors must remain bounded and redaction-safe.
 6. Focused review.
 7. One source-specific local wake verifier and wait-transition composition.
 8. Focused review.
-9. Opaque wait handoff and one synchronous private caller. Planning is now
-   documented in [Trusted Host Opaque Wait Handoff
-   Plan](trusted-host-opaque-wait-handoff-plan.md); focused
-   maintainer/security review is required before implementation.
+9. Opaque wait handoff and one synchronous private caller. Implemented as a
+   crate-private, observation-only value derived within one coherent SQLite
+   read transaction; see the [Trusted Host Opaque Wait Handoff
+   Report](../concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_REPORT.md).
 10. End-to-end restart, wake, reinvocation, concurrency, and privacy tests.
 11. Maintainer/security review before any scheduler, provider, sandbox,
     nested-harness, or public runtime integration.

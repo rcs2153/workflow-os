@@ -2984,6 +2984,10 @@ mod conformance_backend {
             apply_trusted_host_time_window_wake, apply_trusted_host_time_window_wake_with_verifier,
             TrustedHostTimeWindowWakeInput, TrustedHostTimeWindowWakeStatus,
         };
+        use crate::sqlite_state::trusted_host_wait_handoff::{
+            observe_trusted_host_wait_with_time, observe_trusted_host_wait_with_time_and_hook,
+            TrustedHostWaitHandoffNextOperation,
+        };
         use crate::{
             ActorId, AuthorizedExecutionAttemptId, AuthorizedExecutionAttemptOutcome,
             AuthorizedExecutionWaitConditionId, AuthorizedExecutionWakeTriggerKind,
@@ -3533,6 +3537,212 @@ mod conformance_backend {
                 operation_id: ContinuityOperationId::new(operation).expect("operation"),
                 receipt_id: ContinuityReceiptId::new(receipt).expect("receipt"),
             }
+        }
+
+        fn time_window_locator(f: &Fixture) -> TrustedHostOperationalEntryLocator {
+            let state = f.backend.conformance_snapshot();
+            let window = state.windows.get(&f.window_id).expect("window");
+            TrustedHostOperationalEntryLocator {
+                workflow_id: window.workflow_id.clone(),
+                run_id: window.run_id.clone(),
+                step_id: window.step_id.clone(),
+                window_id: window.window_id.clone(),
+                subject_actor_id: window.subject_actor_id.clone(),
+                immutable_run_bundle: window.immutable_run_bundle.clone(),
+            }
+        }
+
+        fn handoff_observation_time() -> TrustedTimeObservation {
+            trusted_time_observation(
+                Timestamp::parse_rfc3339("2026-08-15T12:15:00Z").expect("time"),
+                TrustedTimeSourceKind::CoreInjectedClockV1,
+                expected_provenance().expect("provenance"),
+                expected_epoch().expect("epoch"),
+            )
+        }
+
+        #[test]
+        fn trusted_host_wait_handoff_is_deterministic_inert_and_redacted() {
+            let fixture = fixture(false, false);
+            register_time_window_wait(
+                &fixture,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let locator = time_window_locator(&fixture);
+            let before = fixture.backend.conformance_snapshot();
+
+            let first = observe_trusted_host_wait_with_time(
+                &fixture.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("first observation");
+            let second = observe_trusted_host_wait_with_time(
+                &fixture.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("second observation");
+            let after = fixture.backend.conformance_snapshot();
+
+            assert_eq!(
+                first.disposition,
+                AuthoritativeContinuationDisposition::AwaitCondition
+            );
+            let first_handoff = first.handoff.expect("handoff");
+            let second_handoff = second.handoff.expect("handoff");
+            assert_eq!(first_handoff.handoff_id(), second_handoff.handoff_id());
+            assert_eq!(first_handoff.condition_count(), 1);
+            assert_eq!(
+                first_handoff.next_operation(),
+                TrustedHostWaitHandoffNextOperation::RequestFreshClassification
+            );
+            assert!(before == after);
+
+            let debug = format!("{first_handoff:?}");
+            assert!(debug.contains("condition_count"));
+            for sensitive in [
+                "window/sqlite-continuity",
+                "wait/sqlite-time-window/1",
+                "yield/sqlite-register/2",
+                "2026-08-15",
+            ] {
+                assert!(!debug.contains(sensitive));
+            }
+        }
+
+        #[test]
+        fn trusted_host_wait_handoff_is_stable_after_restart() {
+            let fixture = fixture(false, false);
+            register_time_window_wait(
+                &fixture,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let locator = time_window_locator(&fixture);
+            let first = observe_trusted_host_wait_with_time(
+                &fixture.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("first observation")
+            .handoff
+            .expect("handoff");
+            let reopened = SqliteConformanceBackend::reopen_path(
+                fixture.backend.store.backend.database_path.clone(),
+            );
+            let second = observe_trusted_host_wait_with_time(
+                &reopened.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("restarted observation")
+            .handoff
+            .expect("handoff");
+            assert_eq!(first.handoff_id(), second.handoff_id());
+        }
+
+        #[test]
+        fn trusted_host_wait_observation_returns_no_handoff_when_blocked() {
+            let fixture = fixture(false, false);
+            register_time_window_wait(
+                &fixture,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let outcome = observe_trusted_host_wait_with_time(
+                &fixture.backend.store.backend,
+                &time_window_locator(&fixture),
+                trusted_time_observation(
+                    Timestamp::parse_rfc3339("2026-08-15T13:00:00Z").expect("time"),
+                    TrustedTimeSourceKind::CoreInjectedClockV1,
+                    expected_provenance().expect("provenance"),
+                    expected_epoch().expect("epoch"),
+                ),
+            )
+            .expect("blocked observation");
+            assert_eq!(
+                outcome.disposition,
+                AuthoritativeContinuationDisposition::Blocked
+            );
+            assert!(outcome.handoff.is_none());
+        }
+
+        #[test]
+        fn trusted_host_wait_handoff_rejects_unsupported_and_mismatched_binding_safely() {
+            let unsupported = fixture(true, true);
+            let unsupported_error = observe_trusted_host_wait_with_time(
+                &unsupported.backend.store.backend,
+                &time_window_locator(&unsupported),
+                handoff_observation_time(),
+            )
+            .expect_err("unbound wait must fail closed");
+            assert_eq!(
+                unsupported_error.code(),
+                "trusted_host_wait_handoff.dependency_unsupported"
+            );
+
+            let fixture = fixture(false, false);
+            register_time_window_wait(
+                &fixture,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let secret_marker = "workflow/private-marker";
+            let mut locator = time_window_locator(&fixture);
+            locator.workflow_id = WorkflowId::new(secret_marker).expect("workflow");
+            let mismatch = observe_trusted_host_wait_with_time(
+                &fixture.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect_err("mismatched locator must fail closed");
+            assert_eq!(
+                mismatch.code(),
+                "trusted_host_wait_handoff.window_binding_mismatch"
+            );
+            assert!(!format!("{mismatch:?} {mismatch}").contains(secret_marker));
+        }
+
+        #[test]
+        fn trusted_host_wait_observation_race_returns_coherent_old_snapshot() {
+            let fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            let locator = time_window_locator(&fixture);
+            let writer = fixture.backend.clone();
+            let request = time_window_transition_request(&fixture);
+
+            let outcome = observe_trusted_host_wait_with_time_and_hook(
+                &fixture.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+                move || {
+                    writer.conformance_set_time(deadline);
+                    writer.store.transition_time_window_wait(&request)?;
+                    Ok(())
+                },
+            )
+            .expect("coherent old observation");
+
+            assert_eq!(
+                outcome.disposition,
+                AuthoritativeContinuationDisposition::AwaitCondition
+            );
+            assert!(outcome.handoff.is_some());
+            let fresh = observe_trusted_host_wait_with_time(
+                &fixture.backend.store.backend,
+                &locator,
+                trusted_time_observation(
+                    deadline,
+                    TrustedTimeSourceKind::CoreInjectedClockV1,
+                    expected_provenance().expect("provenance"),
+                    expected_epoch().expect("epoch"),
+                ),
+            )
+            .expect("fresh observation");
+            assert_eq!(
+                fresh.disposition,
+                AuthoritativeContinuationDisposition::ResumeNow
+            );
+            assert!(fresh.handoff.is_none());
         }
 
         #[test]
