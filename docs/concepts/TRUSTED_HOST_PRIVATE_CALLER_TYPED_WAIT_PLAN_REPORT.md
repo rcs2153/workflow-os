@@ -2,8 +2,9 @@
 
 ## 1. Executive Summary
 
-Planning is complete for the smallest private caller and typed-wait boundary
-over the accepted local SQLite operational entry helper.
+Planning is complete and focused-review accepted for the smallest private
+caller and typed-wait boundary over the accepted local SQLite operational
+entry helper.
 
 The source review found a prerequisite that must precede caller integration:
 trusted-host yields currently register no waits, and private durable wait state
@@ -11,6 +12,11 @@ does not bind the exact dependency source expected to satisfy a condition. The
 plan therefore sequences authoritative dependency binding, typed wait
 registration, one source-specific wake verifier, opaque handoff, and explicit
 reinvocation before adding a private caller.
+
+The focused review chooses `TimeWindow` as the first wake source and requires
+fresh verification against the accepted trusted-time source. Executor wait
+declarations remain untrusted liveness requests and cannot create approval or
+policy authority.
 
 ## 2. Scope Completed
 
@@ -88,9 +94,8 @@ documentation only.
 
 ## 9. Recommended Next Phase
 
-Perform a focused maintainer/security review of the plan. If accepted, begin
-with authoritative wait dependency-binding planning or implementation as the
-review directs. Do not implement the caller first.
+Implement exact authoritative wait dependency binding and the private
+`TimeWindow` verifier only. Do not implement the caller first.
 
 ## 10. Governed Phase Record
 

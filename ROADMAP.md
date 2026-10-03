@@ -518,7 +518,14 @@ current queue when they contain historical `next phase` language.
    The plan identifies one prerequisite before caller integration: durable
    waits must bind the exact dependency source, not only a wake-trigger class,
    and the supervisor must support validated non-empty wait registration.
-   Focused maintainer/security plan review is next. Provider, sandbox,
+   The focused maintainer/security [plan
+   review](docs/concepts/TRUSTED_HOST_PRIVATE_CALLER_TYPED_WAIT_PLAN_REVIEW.md)
+   accepts the corrected sequence. Executor declarations are untrusted
+   liveness requests, not authority, and `TimeWindow` is the first wake source
+   because it can be verified against the accepted trusted-time boundary
+   without caller-authored satisfaction. The next P0 implementation is exact
+   durable wait-dependency binding plus the private `TimeWindow` verifier only;
+   caller integration remains blocked. Provider, sandbox,
    nested-harness, public-config, CLI, SDK, and hosted integration remain
    blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,

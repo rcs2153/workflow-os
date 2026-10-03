@@ -1,9 +1,12 @@
 # Private Trusted-Host Caller And Typed-Wait Boundary Plan
 
-Status: planning only. The private local SQLite operational entry boundary is
-implemented and accepted. This plan defines the smallest future caller,
+Status: accepted after focused maintainer/security review with in-review
+corrections and non-blocking follow-ups. The private local SQLite operational
+entry boundary is implemented and accepted. This plan defines the smallest future caller,
 genuine wait-registration, wait-handoff, wake-assessment, and explicit
-reinvocation boundaries. It does not implement runtime behavior.
+reinvocation boundaries. It does not implement runtime behavior. The review is
+recorded in [Private Trusted-Host Caller And Typed-Wait Plan
+Review](../concepts/TRUSTED_HOST_PRIVATE_CALLER_TYPED_WAIT_PLAN_REVIEW.md).
 
 ## 1. Executive Summary
 
@@ -147,6 +150,12 @@ The first implementation should consider only crate-private types:
 
 Names are provisional. No type should be public in the first slice.
 
+Executor declarations are untrusted liveness requests produced by the exact
+authorized invocation. They cannot grant authority, satisfy a policy or
+approval gate, weaken current governance, or bypass fresh reassessment. Core
+must reject any declaration unsupported by the first accepted source-specific
+contract. In the first slice, only `TimeWindow` is supported.
+
 ## 8. Authoritative Wait Dependency Binding
 
 Before caller integration, the private authoritative wait state must retain
@@ -176,10 +185,12 @@ Kind-to-trigger compatibility must be deterministic:
 - authority refresh -> authority source changed; and
 - conflict resolution -> conflict resolved.
 
-A future implementation requires an explicit private-state and SQLite
-migration review. It must not silently reinterpret existing rows. Existing
-rows without exact dependency binding must remain unsupported for automatic
-satisfaction and fail closed.
+A future implementation requires a new explicit SQLite continuity schema
+version covering both relational columns and canonical `record_json`; an
+additive side table would make cross-representation integrity harder to prove.
+It must not silently reinterpret existing rows. Existing rows without exact
+dependency binding remain unsupported for automatic satisfaction and fail
+closed.
 
 ## 9. Yield And Wait Registration
 
@@ -227,10 +238,18 @@ verifier must:
 5. transition the exact wait with compare-and-set semantics; and
 6. persist only source commitment and revision.
 
-The first implementation should support one source already backed by durable
-local Workflow OS state. Approval decision, accepted evidence, or accepted
-check state are candidates; the plan review must choose exactly one. A generic
-caller-authored wake capability or boolean is prohibited.
+The first implementation supports `TimeWindow` only. Core binds the exact
+deadline plus trusted-time source, provenance, and epoch commitment when the
+wait is registered. The deadline must be later than the registering
+observation and no later than the execution-window expiry. In one same-call
+verification, Core obtains a fresh trusted-time observation, validates source,
+provenance, epoch, monotonicity, and `observed_at >= deadline`, then constructs
+the private wake capability and transitions the wait. A caller-supplied clock,
+timestamp assertion, boolean, or wake capability is prohibited.
+
+Approval, evidence, check, external-event, capability, authority-refresh, and
+conflict sources remain unsupported until each has a source-specific plan and
+verifier. Executor yield must not create or replace an approval gate.
 
 Expiration, supersession, and cancellation remain explicit Core transitions
 and do not require a satisfaction capability. They must still validate current
@@ -305,8 +324,10 @@ verification errors must remain bounded and redaction-safe.
 ## 16. Proposed Implementation Sequence
 
 1. Focused maintainer/security review of this plan.
-2. Authoritative wait dependency-binding model and SQLite migration plan.
-3. Dependency-binding implementation and conformance tests.
+2. Authoritative wait dependency-binding model and SQLite schema update for
+   `TimeWindow` only.
+3. Dependency-binding and trusted-time verifier implementation with
+   conformance tests.
 4. Direct successful fresh-opening composition test for the accepted entry
    helper.
 5. Private typed wait declaration and atomic yield-registration integration.
@@ -348,14 +369,8 @@ Future tests should prove:
 
 ## 18. Open Questions
 
-- Which one durable local source should be the first wake verifier: approval,
-  accepted evidence, or accepted check state?
 - Should the durable wait retain a safe bounded reference plus commitment, or
   commitment and source category only?
-- Does the existing SQLite continuity schema need a new version or a separate
-  additive binding table to fail closed on legacy rows?
-- Should deadlines use the continuity trusted-time source directly or a
-  separate source-specific verifier?
 - What is the smallest opaque handoff identity that supports diagnosis without
   exposing dependency references?
 - Should cancellation and supersession share one private transition helper or
@@ -363,12 +378,10 @@ Future tests should prove:
 
 ## 19. Final Recommendation
 
-Proceed next to focused maintainer/security review of this plan. The review
-should decide the exact durable dependency binding and first source-specific
-wake verifier.
-
-If accepted, implement authoritative wait dependency binding first. Do not
-start with the caller. A caller over trigger-only waits would create the
+Proceed next to exact authoritative wait dependency binding and the private
+`TimeWindow` verifier only. Use a new reviewed SQLite continuity schema
+version, preserve legacy rows as unsupported for automatic wake, and add no
+caller integration yet. A caller over trigger-only waits would create the
 appearance of governed waiting without proving that the correct dependency
 satisfied the condition.
 
