@@ -31,8 +31,12 @@ entry boundary and first exact `TimeWindow` caller are implemented and
 accepted. The first private typed-wait registration slice is now implemented:
 the exact authorized executor may return zero or one bounded `TimeWindow`
 declaration, Core derives its trusted-time dependency binding, and the existing
-SQLite transaction atomically registers the yield and wait. This plan defines
-the remaining focused review, wait-handoff, and explicit reinvocation
+SQLite transaction atomically registers the yield and wait. Its focused
+maintainer/security review accepts the boundary with non-blocking direct race
+and elapsed-deadline test follow-ups in
+[Trusted Host TimeWindow Wait Registration
+Review](../concepts/TRUSTED_HOST_TIME_WINDOW_WAIT_REGISTRATION_REVIEW.md).
+This plan defines the remaining wait-handoff and explicit reinvocation
 boundaries. It does not authorize a scheduler or public runtime behavior. The
 planning review is recorded in
 [Private Trusted-Host Caller And Typed-Wait Plan
