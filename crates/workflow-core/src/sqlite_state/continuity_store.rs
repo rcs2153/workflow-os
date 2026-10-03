@@ -6,9 +6,10 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use crate::authorized_execution_continuity_state::internal::{
     continuity_state_error, expected_attempt_outcome_commitment,
     expected_consume_directive_commitment, expected_recovery_commitment,
-    expected_register_yield_commitment, expected_transition_wait_commitment, operation_commitment,
-    projection_commitment, rejection_commitment, result_commitment, trusted_time_commitment,
-    trusted_time_observation, validate_wait_count, window_binding_commitment, AttemptUseCapability,
+    expected_register_yield_commitment, expected_time_window_transition_commitment,
+    expected_transition_wait_commitment, operation_commitment, projection_commitment,
+    rejection_commitment, result_commitment, trusted_time_commitment, trusted_time_observation,
+    validate_wait_count, window_binding_commitment, AttemptUseCapability,
     AuthoritativeAttemptRecord, AuthoritativeAttemptState, AuthoritativeContinuationDisposition,
     AuthoritativeDirectiveRecord, AuthoritativeDirectiveState, AuthoritativeOperationRecord,
     AuthoritativeWaitDependencyBinding, AuthoritativeWaitIdentity, AuthoritativeWaitRecord,
@@ -90,6 +91,12 @@ enum InjectedCommitFault {
     After,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum MutationPhase {
+    Preflight,
+    Commit,
+}
+
 impl SqliteContinuityStore {
     pub(super) fn system(backend: &SqliteStateBackend) -> Self {
         Self {
@@ -141,6 +148,7 @@ impl SqliteContinuityStore {
             &mut ReferenceContinuityState,
             Timestamp,
             &ContinuityCursor,
+            MutationPhase,
         ) -> Result<RecordedOperationResult, WorkflowOsError>,
     {
         request_envelope.validate()?;
@@ -213,6 +221,7 @@ impl SqliteContinuityStore {
             &mut preflight,
             window.trusted_time_watermark,
             &committed_cursor,
+            MutationPhase::Preflight,
         )?;
 
         let observation = self.clock.observe()?;
@@ -284,6 +293,7 @@ impl SqliteContinuityStore {
                 &mut state,
                 observed_at,
                 &committed_cursor,
+                MutationPhase::Commit,
             )?)
         };
         let committed = operation_commitment(
@@ -358,97 +368,143 @@ impl SqliteContinuityStore {
         Ok((disposition, false))
     }
 
-    #[allow(dead_code)] // Exposed only through the private SQLite boundary until caller integration.
+    #[allow(dead_code, clippy::too_many_lines)] // Keep the private verifier as one auditable boundary.
     pub(super) fn transition_time_window_wait(
         &self,
-        input: TimeWindowTransitionRequest,
+        input: &TimeWindowTransitionRequest,
     ) -> Result<MutationResult, WorkflowOsError> {
-        let state = super::continuity_codec::load_snapshot(&self.backend.connection()?)?;
-        let window = state.windows.get(&input.window_id).ok_or_else(corrupt)?;
-        if window.revision != input.expected_window_revision
-            || window.cursor != input.cursor
-            || window.active_yield.as_ref() != Some(&input.expected_generation_id)
-        {
-            return Err(semantic_error(
-                WorkflowOsErrorKind::InvalidState,
-                "wait.revision_stale",
-            ));
-        }
-        let identity = AuthoritativeWaitIdentity::new(
-            input.condition_id.clone(),
-            input.expected_condition_version,
+        let request_commitment = expected_time_window_transition_commitment(input);
+        let envelope = envelope(
+            "transition_time_window_wait",
+            &input.operation_id,
+            &input.window_id,
+            None,
+            Some(input.condition_id.as_str()),
+            Some(input.expected_condition_version),
+            None,
+            vec![
+                input.receipt_id.as_str(),
+                input.expected_generation_id.as_str(),
+                input.cursor.event_id.as_str(),
+            ],
         );
-        let wait = state.waits.get(&identity).ok_or_else(corrupt)?;
-        if wait.window_id != input.window_id
-            || wait.generation_id != input.expected_generation_id
-            || wait.revision != input.expected_wait_revision
-            || wait.state != AuthoritativeWaitState::Unsatisfied
-            || wait.wake_trigger != AuthorizedExecutionWakeTriggerKind::DeadlineReached
-        {
-            return Err(semantic_error(
-                WorkflowOsErrorKind::InvalidState,
-                "wait.revision_stale",
-            ));
-        }
-        let Some(AuthoritativeWaitDependencyBinding::TimeWindow {
-            dependency_commitment,
-            deadline,
-            source,
-            provenance_commitment,
-            epoch_id,
-        }) = wait.dependency_binding.as_ref()
-        else {
-            return Err(semantic_error(
-                WorkflowOsErrorKind::Security,
-                "wait.dependency_unbound",
-            ));
-        };
-        let observation = self.clock.observe()?;
-        if observation.source() != *source
-            || observation.provenance_commitment() != provenance_commitment
-            || observation.epoch_id() != epoch_id
-            || observation.source() != state.trusted_time.source
-            || observation.provenance_commitment() != &state.trusted_time.provenance_commitment
-            || observation.epoch_id() != &state.trusted_time.epoch_id
-            || observation.observed_at() < *deadline
-            || observation.observed_at() < window.trusted_time_watermark
-            || observation.observed_at() >= window.expires_at
-        {
-            return Err(semantic_error(
-                WorkflowOsErrorKind::Security,
-                "wait.time_window_unsatisfied",
-            ));
-        }
-        let capability = WakeAssessmentCapability {
-            window_id: input.window_id.clone(),
-            generation_id: input.expected_generation_id.clone(),
-            condition_id: input.condition_id.clone(),
-            condition_version: input.expected_condition_version,
-            trigger: AuthorizedExecutionWakeTriggerKind::DeadlineReached,
-            source_reference: ContinuityWakeSourceReference::new(
-                "trusted-time/core-injected-clock-v1",
-            )?,
-            source_commitment: trusted_time_commitment(&observation),
-            source_revision: state.trusted_time.revision.get(),
-            dependency_commitment: Some(dependency_commitment.clone()),
-        };
-        let mut request = TransitionWaitRequest {
-            operation_id: input.operation_id,
-            request_commitment: SpecContentHash::from_text("pending"),
-            receipt_id: input.receipt_id,
-            window_id: input.window_id,
-            expected_window_revision: input.expected_window_revision,
-            expected_window_binding: input.expected_window_binding,
-            cursor: input.cursor,
-            condition_id: input.condition_id,
-            expected_generation_id: input.expected_generation_id,
-            expected_condition_version: input.expected_condition_version,
-            expected_wait_revision: input.expected_wait_revision,
-            target: AuthoritativeWaitState::Satisfied,
-            wake_capability: Some(&capability),
-        };
-        request.request_commitment = expected_transition_wait_commitment(&request);
-        self.transition_wait(request)
+        let (result, replay) = self.transact(
+            AuthorizedExecutionContinuityOperationKind::TransitionWait,
+            &input.operation_id,
+            &request_commitment,
+            &input.receipt_id,
+            &input.window_id,
+            &input.cursor,
+            &envelope,
+            None,
+            |state, observed_at, _write_cursor, phase| {
+                let window = state.windows.get(&input.window_id).ok_or_else(corrupt)?;
+                validate_window(
+                    window,
+                    &input.expected_window_binding,
+                    input.expected_window_revision,
+                    &input.cursor,
+                    observed_at,
+                )?;
+                if window.state != AuthoritativeWindowState::Yielded
+                    || window.active_yield.as_ref() != Some(&input.expected_generation_id)
+                {
+                    return Err(semantic_error(
+                        WorkflowOsErrorKind::InvalidState,
+                        "window.ineligible",
+                    ));
+                }
+                let identity = AuthoritativeWaitIdentity::new(
+                    input.condition_id.clone(),
+                    input.expected_condition_version,
+                );
+                let wait = state.waits.get(&identity).ok_or_else(corrupt)?;
+                if wait.window_id != input.window_id
+                    || wait.generation_id != input.expected_generation_id
+                    || wait.revision != input.expected_wait_revision
+                    || wait.state != AuthoritativeWaitState::Unsatisfied
+                    || wait.wake_trigger != AuthorizedExecutionWakeTriggerKind::DeadlineReached
+                {
+                    return Err(semantic_error(
+                        WorkflowOsErrorKind::InvalidState,
+                        "wait.revision_stale",
+                    ));
+                }
+                let Some(AuthoritativeWaitDependencyBinding::TimeWindow {
+                    dependency_commitment,
+                    deadline,
+                    source,
+                    provenance_commitment,
+                    epoch_id,
+                }) = wait.dependency_binding.as_ref()
+                else {
+                    return Err(semantic_error(
+                        WorkflowOsErrorKind::Security,
+                        "wait.dependency_unbound",
+                    ));
+                };
+                let expected_binding =
+                    super::super::authorized_execution_continuity_state::internal::time_window_dependency_binding(
+                        *deadline,
+                        *source,
+                        provenance_commitment.clone(),
+                        epoch_id.clone(),
+                    );
+                let AuthoritativeWaitDependencyBinding::TimeWindow {
+                    dependency_commitment: expected_commitment,
+                    ..
+                } = expected_binding;
+                if dependency_commitment != &expected_commitment
+                    || *source != state.trusted_time.source
+                    || provenance_commitment != &state.trusted_time.provenance_commitment
+                    || epoch_id != &state.trusted_time.epoch_id
+                    || (phase == MutationPhase::Commit && observed_at < *deadline)
+                {
+                    return Err(semantic_error(
+                        WorkflowOsErrorKind::Security,
+                        "wait.time_window_unsatisfied",
+                    ));
+                }
+                let observation = trusted_time_observation(
+                    observed_at,
+                    *source,
+                    provenance_commitment.clone(),
+                    epoch_id.clone(),
+                );
+                let capability = WakeAssessmentCapability {
+                    window_id: input.window_id.clone(),
+                    generation_id: input.expected_generation_id.clone(),
+                    condition_id: input.condition_id.clone(),
+                    condition_version: input.expected_condition_version,
+                    trigger: AuthorizedExecutionWakeTriggerKind::DeadlineReached,
+                    source_reference: ContinuityWakeSourceReference::new(
+                        "trusted-time/core-injected-clock-v1",
+                    )?,
+                    source_commitment: trusted_time_commitment(&observation),
+                    source_revision: state.trusted_time.revision.get(),
+                    dependency_commitment: Some(dependency_commitment.clone()),
+                };
+                let wait = state.waits.get_mut(&identity).ok_or_else(corrupt)?;
+                wait.state = AuthoritativeWaitState::Satisfied;
+                wait.source_commitment = Some(capability.source_commitment);
+                wait.source_revision = Some(capability.source_revision);
+                wait.revision = wait.revision.checked_next()?;
+                let wait_revision = wait.revision;
+                let window = state.windows.get_mut(&input.window_id).ok_or_else(corrupt)?;
+                window.trusted_time_watermark = observed_at;
+                window.revision = window.revision.checked_next()?;
+                Ok(RecordedOperationResult::WaitTransitioned {
+                    window_id: input.window_id.clone(),
+                    generation_id: input.expected_generation_id.clone(),
+                    condition_id: input.condition_id.clone(),
+                    condition_version: input.expected_condition_version,
+                    wait_state: AuthoritativeWaitState::Satisfied,
+                    wait_revision,
+                    window_revision: window.revision,
+                })
+            },
+        )?;
+        Ok(mutation_result(result, replay))
     }
 }
 
@@ -490,7 +546,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
                 .dispatch_reservation
                 .as_ref()
                 .map(|binding| (&request.attempt_id, binding)),
-            |state, observed_at, write_cursor| {
+            |state, observed_at, write_cursor, _phase| {
                 let window = state.windows.get(&request.window_id).ok_or_else(corrupt)?;
                 validate_window(
                     window,
@@ -701,7 +757,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
             &request.cursor,
             &envelope,
             None,
-            |state, observed_at, _write_cursor| {
+            |state, observed_at, _write_cursor, _phase| {
                 let window = state.windows.get(&request.window_id).ok_or_else(corrupt)?;
                 validate_window(
                     window,
@@ -851,7 +907,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
             &request.cursor,
             &envelope,
             None,
-            |state, observed_at, write_cursor| {
+            |state, observed_at, write_cursor, _phase| {
                 let window = state.windows.get(&request.window_id).ok_or_else(corrupt)?;
                 validate_window(
                     window,
@@ -1066,7 +1122,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
                 .dispatch_reservation
                 .as_ref()
                 .map(|binding| (&request.attempt_id, binding)),
-            |state, observed_at, _write_cursor| {
+            |state, observed_at, _write_cursor, _phase| {
                 validate_attempt_request(
                     state,
                     &request.window_id,
@@ -1131,7 +1187,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
                 .dispatch_reservation
                 .as_ref()
                 .map(|binding| (&request.attempt_id, binding)),
-            |state, observed_at, _write_cursor| {
+            |state, observed_at, _write_cursor, _phase| {
                 let window = state.windows.get(&request.window_id).ok_or_else(corrupt)?;
                 validate_window(
                     window,
@@ -2910,7 +2966,7 @@ mod conformance_backend {
 
     #[cfg(test)]
     mod tests {
-        use std::collections::BTreeMap;
+        use std::collections::{BTreeMap, VecDeque};
         use std::process::{Command, Stdio};
         use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
         use std::sync::{Arc, Barrier};
@@ -2934,6 +2990,31 @@ mod conformance_backend {
         use super::*;
 
         const SUBPROCESS_CHILD_TEST: &str = "sqlite_state::continuity_store::conformance_backend::tests::sqlite_subprocess_crash_child";
+
+        struct SequenceClock {
+            observations: Mutex<VecDeque<Timestamp>>,
+            count: Arc<AtomicUsize>,
+        }
+
+        impl ContinuityClock for SequenceClock {
+            fn observe(&self) -> Result<TrustedTimeObservation, WorkflowOsError> {
+                self.count.fetch_add(1, AtomicOrdering::SeqCst);
+                let observed_at = self
+                    .observations
+                    .lock()
+                    .map_err(|_| corrupt())?
+                    .pop_front()
+                    .ok_or_else(|| {
+                        semantic_error(WorkflowOsErrorKind::InvalidState, "time.unavailable")
+                    })?;
+                Ok(trusted_time_observation(
+                    observed_at,
+                    TrustedTimeSourceKind::CoreInjectedClockV1,
+                    expected_provenance()?,
+                    expected_epoch()?,
+                ))
+            }
+        }
 
         struct Fixture {
             backend: SqliteConformanceBackend,
@@ -3433,7 +3514,7 @@ mod conformance_backend {
             let early = fixture
                 .backend
                 .store
-                .transition_time_window_wait(time_window_transition_request(&fixture));
+                .transition_time_window_wait(&time_window_transition_request(&fixture));
             let Err(early) = early else {
                 panic!("early transition must fail");
             };
@@ -3447,13 +3528,136 @@ mod conformance_backend {
                 fixture
                     .backend
                     .store
-                    .transition_time_window_wait(time_window_transition_request(&fixture))
+                    .transition_time_window_wait(&time_window_transition_request(&fixture))
                     .expect("transition"),
                 MutationResult::Recorded(RecordedOperationResult::WaitTransitioned {
                     wait_state: AuthoritativeWaitState::Satisfied,
                     ..
                 })
             ));
+        }
+
+        #[test]
+        fn sqlite_time_window_verifier_uses_one_transaction_observation() {
+            let mut fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            let count = Arc::new(AtomicUsize::new(0));
+            fixture.backend.store.clock = Arc::new(SequenceClock {
+                observations: Mutex::new(VecDeque::from([
+                    deadline,
+                    Timestamp::parse_rfc3339("2026-08-15T12:29:59Z").expect("fallback"),
+                ])),
+                count: count.clone(),
+            });
+
+            assert!(matches!(
+                fixture
+                    .backend
+                    .store
+                    .transition_time_window_wait(&time_window_transition_request(&fixture))
+                    .expect("transition"),
+                MutationResult::Recorded(RecordedOperationResult::WaitTransitioned {
+                    wait_state: AuthoritativeWaitState::Satisfied,
+                    ..
+                })
+            ));
+            assert_eq!(count.load(AtomicOrdering::SeqCst), 1);
+        }
+
+        #[test]
+        fn sqlite_time_window_verifier_exact_replay_recovers_ambiguous_commit() {
+            let fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            fixture.backend.conformance_set_time(deadline);
+            let request = time_window_transition_request(&fixture);
+            fixture
+                .backend
+                .conformance_inject_fault(ContinuityConformanceFault::After);
+
+            let Err(error) = fixture.backend.store.transition_time_window_wait(&request) else {
+                panic!("post-commit acknowledgement must be ambiguous");
+            };
+            assert_eq!(error.code(), "state.sqlite.commit_ambiguous");
+            assert!(matches!(
+                fixture
+                    .backend
+                    .store
+                    .transition_time_window_wait(&request)
+                    .expect("exact replay"),
+                MutationResult::ExactReplay(CommittedOperationDisposition::CommittedSuccess(
+                    RecordedOperationResult::WaitTransitioned {
+                        wait_state: AuthoritativeWaitState::Satisfied,
+                        ..
+                    }
+                ))
+            ));
+        }
+
+        #[test]
+        fn sqlite_time_window_verifier_rejects_conflicting_replay() {
+            let fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            fixture.backend.conformance_set_time(deadline);
+            let request = time_window_transition_request(&fixture);
+            fixture
+                .backend
+                .store
+                .transition_time_window_wait(&request)
+                .expect("transition");
+            let mut conflict = request;
+            conflict.receipt_id =
+                ContinuityReceiptId::new("receipt/sqlite-time-window-conflict").expect("receipt");
+
+            let Err(error) = fixture.backend.store.transition_time_window_wait(&conflict) else {
+                panic!("conflicting replay must fail");
+            };
+            assert_eq!(
+                error.code(),
+                "authorized_execution_continuity_state.operation.replay_conflict"
+            );
+        }
+
+        #[test]
+        fn sqlite_time_window_verifier_allows_only_one_competing_transition() {
+            let fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            fixture.backend.conformance_set_time(deadline);
+            let left_store = fixture.backend.store.clone();
+            let right_store = fixture.backend.store.clone();
+            let left_request = time_window_transition_request(&fixture);
+            let mut right_request = left_request.clone();
+            right_request.operation_id =
+                ContinuityOperationId::new("operation/sqlite-time-window-competing")
+                    .expect("operation");
+            right_request.receipt_id =
+                ContinuityReceiptId::new("receipt/sqlite-time-window-competing").expect("receipt");
+            let barrier = Arc::new(Barrier::new(2));
+            let left_barrier = barrier.clone();
+            let right_barrier = barrier;
+            let left = thread::spawn(move || {
+                left_barrier.wait();
+                left_store.transition_time_window_wait(&left_request)
+            });
+            let right = thread::spawn(move || {
+                right_barrier.wait();
+                right_store.transition_time_window_wait(&right_request)
+            });
+            let results = [left.join().expect("left"), right.join().expect("right")];
+            assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+            assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
+            let state = fixture.backend.conformance_snapshot();
+            let wait = state
+                .waits
+                .values()
+                .find(|wait| {
+                    wait.wake_trigger == AuthorizedExecutionWakeTriggerKind::DeadlineReached
+                })
+                .expect("wait");
+            assert_eq!(wait.state, AuthoritativeWaitState::Satisfied);
         }
 
         #[test]
@@ -3578,7 +3782,7 @@ mod conformance_backend {
                 fixture
                     .backend
                     .store
-                    .transition_time_window_wait(TimeWindowTransitionRequest {
+                    .transition_time_window_wait(&TimeWindowTransitionRequest {
                         operation_id: ContinuityOperationId::new("operation/legacy-unbound")
                             .expect("operation"),
                         receipt_id: ContinuityReceiptId::new("receipt/legacy-unbound")
