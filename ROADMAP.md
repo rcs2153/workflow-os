@@ -583,9 +583,15 @@ current queue when they contain historical `next phase` language.
    Plan](docs/implementation-plans/trusted-host-explicit-reinvocation-vertical-slice-plan.md).
    The first slice composes the inert handoff, exact source-specific
    `TimeWindow` transition, and accepted operational entry helper without
-   turning the handoff into authority. The next P0 phase is focused
-   maintainer/security review of that plan; implementation is not yet
-   authorized. Provider,
+   turning the handoff into authority. Focused maintainer/security review is
+   accepted with in-review corrections in the [Trusted-Host Explicit
+   Reinvocation Vertical Slice Plan
+   Review](docs/concepts/TRUSTED_HOST_EXPLICIT_REINVOCATION_VERTICAL_SLICE_PLAN_REVIEW.md).
+   The transition replay must durably bind a payload-free handoff commitment,
+   the existing-window entry path must not accept irrelevant opening inputs,
+   and security rejections return no disposition oracle. The next P0 phase is
+   one crate-private local SQLite implementation slice with restart,
+   concurrency, and privacy tests. Provider,
    sandbox, nested-harness, public-config, CLI, SDK, and hosted integration
    remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
