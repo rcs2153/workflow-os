@@ -547,9 +547,12 @@ current queue when they contain historical `next phase` language.
    reopened backend, and returns only bounded transition status plus current
    continuation posture. It does not schedule, poll, register executor-authored
    typed waits, invoke the executor, or expose a public surface. A focused
-   maintainer/security review is the next P0 phase. Provider, sandbox,
-   nested-harness, public-config, CLI, SDK, and hosted integration remain
-   blocked.
+   maintainer/security review accepted the caller with non-blocking test
+   follow-ups. The next P0 phase is the private typed-wait registration slice:
+   let the exact authorized executor return one bounded `TimeWindow`
+   declaration that Core validates and registers atomically with yield. Opaque
+   wait handoff follows registration. Provider, sandbox, nested-harness,
+   public-config, CLI, SDK, and hosted integration remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

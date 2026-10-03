@@ -21,13 +21,17 @@ implemented slices are recorded in
 [`TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_REPORT.md`](../concepts/TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_REPORT.md).
 The caller integration is recorded in
 [`TRUSTED_HOST_TIME_WINDOW_CALLER_IMPLEMENTATION_REPORT.md`](../concepts/TRUSTED_HOST_TIME_WINDOW_CALLER_IMPLEMENTATION_REPORT.md).
+Its focused maintainer/security review accepted the private boundary with
+non-blocking test follow-ups in
+[`TRUSTED_HOST_TIME_WINDOW_CALLER_REVIEW.md`](../concepts/TRUSTED_HOST_TIME_WINDOW_CALLER_REVIEW.md).
 
 Status: accepted after focused maintainer/security review with in-review
 corrections and non-blocking follow-ups. The private local SQLite operational
-entry boundary is implemented and accepted. This plan defines the smallest future caller,
-genuine wait-registration, wait-handoff, wake-assessment, and explicit
-reinvocation boundaries. It does not implement runtime behavior. The review is
-recorded in [Private Trusted-Host Caller And Typed-Wait Plan
+entry boundary and first exact `TimeWindow` caller are implemented and
+accepted. This plan defines the remaining genuine wait-registration,
+wait-handoff, and explicit reinvocation boundaries. It does not authorize a
+scheduler or public runtime behavior. The planning review is recorded in
+[Private Trusted-Host Caller And Typed-Wait Plan
 Review](../concepts/TRUSTED_HOST_PRIVATE_CALLER_TYPED_WAIT_PLAN_REVIEW.md).
 
 ## 1. Executive Summary
