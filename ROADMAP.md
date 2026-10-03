@@ -528,9 +528,18 @@ current queue when they contain historical `next phase` language.
    stores the exact deadline, trusted-time source, provenance commitment, epoch,
    and their domain-separated dependency commitment; legacy unbound deadline
    waits fail closed. Core obtains the trusted-time observation and constructs
-   the private wake capability inside the same verifier boundary. The next P0
-   phase is the focused maintainer/security implementation review; caller
-   integration remains blocked. Provider, sandbox,
+   the private wake capability inside the same verifier boundary. The focused
+   maintainer/security [implementation
+   review](docs/concepts/TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_REVIEW.md) found
+   two blockers: the exact deadline was checked against an observation made
+   before, rather than by, the atomic transition, and wrapper preflight rejected
+   an exact retry before operation replay could recover an ambiguous successful
+   commit. The focused [blocker
+   fix](docs/concepts/TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_BLOCKER_FIX_REPORT.md)
+   now uses the transaction's single trusted-time observation for deadline
+   enforcement and admits exact operation replay before current-state
+   eligibility checks. The next P0 phase is a focused blocker-fix review;
+   caller integration remains blocked pending acceptance. Provider, sandbox,
    nested-harness, public-config, CLI, SDK, and hosted integration remain
    blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,

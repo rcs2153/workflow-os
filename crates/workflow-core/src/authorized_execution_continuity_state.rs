@@ -1599,6 +1599,7 @@ pub(crate) mod internal {
         pub(crate) wake_capability: Option<&'a WakeAssessmentCapability>,
     }
 
+    #[derive(Clone)]
     pub(crate) struct TimeWindowTransitionRequest {
         pub(crate) operation_id: ContinuityOperationId,
         pub(crate) receipt_id: ContinuityReceiptId,
@@ -2275,6 +2276,28 @@ pub(crate) mod internal {
             "workflow-os/authorized-execution-continuity/transition-wait/v1",
             &request.operation_id,
             &fields.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+    }
+
+    pub(crate) fn expected_time_window_transition_commitment(
+        request: &TimeWindowTransitionRequest,
+    ) -> SpecContentHash {
+        request_commitment(
+            "workflow-os/authorized-execution-continuity/time-window-transition/v1",
+            &request.operation_id,
+            &[
+                request.receipt_id.as_str(),
+                request.window_id.as_str(),
+                &request.expected_window_revision.get().to_string(),
+                window_binding_commitment(&request.expected_window_binding).as_str(),
+                &request.cursor.sequence_number.get().to_string(),
+                request.cursor.event_id.as_str(),
+                request.condition_id.as_str(),
+                request.expected_generation_id.as_str(),
+                &request.expected_condition_version.to_string(),
+                &request.expected_wait_revision.get().to_string(),
+                "satisfied",
+            ],
         )
     }
 

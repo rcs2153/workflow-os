@@ -136,6 +136,12 @@ Perform a focused maintainer/security review of this implementation. Do not
 integrate a caller until the review confirms commitment coverage, migration
 posture, trusted-time freshness, replay/concurrency behavior, and privacy.
 
+That review is now complete in [Trusted Host TimeWindow Wait Binding
+Review](TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_REVIEW.md). It found blockers in
+atomic deadline enforcement and exact replay through the private verifier.
+The focused [blocker fix](TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_BLOCKER_FIX_REPORT.md)
+is implemented. Caller integration remains blocked pending focused re-review.
+
 ## 12. Governed Phase Record
 
 - workflow: `dg/implement`

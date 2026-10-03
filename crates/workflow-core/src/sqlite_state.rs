@@ -299,7 +299,7 @@ impl SqliteStateBackend {
     #[allow(dead_code)] // First trusted-host caller is deliberately deferred to the next phase.
     pub(crate) fn transition_time_window_wait(
         &self,
-        input: crate::authorized_execution_continuity_state::internal::TimeWindowTransitionRequest,
+        input: &crate::authorized_execution_continuity_state::internal::TimeWindowTransitionRequest,
     ) -> Result<
         crate::authorized_execution_continuity_state::internal::MutationResult,
         WorkflowOsError,
