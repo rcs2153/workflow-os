@@ -1,5 +1,19 @@
 # Private Trusted-Host Caller And Typed-Wait Boundary Plan
 
+## Implementation Status
+
+The first prerequisite slice is implemented: authoritative waits can carry an
+exact private `TimeWindow` dependency binding, SQLite schema v6 persists that
+binding without inventing values for legacy rows, and a crate-private verifier
+obtains trusted time and transitions only the exactly bound wait. Legacy
+unbound deadline waits fail closed.
+
+The private trusted-host caller, supervisor registration path, scheduling,
+polling, executor recirculation, and other wake-source families remain
+unimplemented. This document continues to govern their sequencing; the
+implemented slice is recorded in
+[`TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_REPORT.md`](../concepts/TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_REPORT.md).
+
 Status: accepted after focused maintainer/security review with in-review
 corrections and non-blocking follow-ups. The private local SQLite operational
 entry boundary is implemented and accepted. This plan defines the smallest future caller,

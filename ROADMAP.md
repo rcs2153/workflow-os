@@ -523,9 +523,14 @@ current queue when they contain historical `next phase` language.
    accepts the corrected sequence. Executor declarations are untrusted
    liveness requests, not authority, and `TimeWindow` is the first wake source
    because it can be verified against the accepted trusted-time boundary
-   without caller-authored satisfaction. The next P0 implementation is exact
-   durable wait-dependency binding plus the private `TimeWindow` verifier only;
-   caller integration remains blocked. Provider, sandbox,
+   without caller-authored satisfaction. Exact durable wait-dependency binding
+   and the private `TimeWindow` verifier are now implemented. SQLite schema v6
+   stores the exact deadline, trusted-time source, provenance commitment, epoch,
+   and their domain-separated dependency commitment; legacy unbound deadline
+   waits fail closed. Core obtains the trusted-time observation and constructs
+   the private wake capability inside the same verifier boundary. The next P0
+   phase is the focused maintainer/security implementation review; caller
+   integration remains blocked. Provider, sandbox,
    nested-harness, public-config, CLI, SDK, and hosted integration remain
    blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,

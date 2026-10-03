@@ -36,7 +36,8 @@ use crate::{
     WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
 };
 
-const ADAPTER_SCHEMA_VERSION: u32 = 5;
+const ADAPTER_SCHEMA_VERSION: u32 = 6;
+const DISPATCH_RESERVATION_ADAPTER_SCHEMA_VERSION: u32 = 5;
 const OPERATIONAL_OPENING_ADAPTER_SCHEMA_VERSION: u32 = 4;
 const PREVIOUS_ADAPTER_SCHEMA_VERSION: u32 = 3;
 const CONTINUITY_ADAPTER_SCHEMA_VERSION: u32 = 2;
@@ -56,10 +57,14 @@ const OPERATIONAL_OPENING_SCHEMA_CHECKSUM: &str =
     "sha256:1016e62bd4d5b3e27f29822212cfe771de7287206799a9135d8f054abb5c5aeb";
 const OPERATIONAL_OPENING_SCHEMA_MANIFEST_DIGEST: &str =
     "1016e62bd4d5b3e27f29822212cfe771de7287206799a9135d8f054abb5c5aeb";
-const SCHEMA_CHECKSUM: &str =
+const DISPATCH_RESERVATION_SCHEMA_CHECKSUM: &str =
     "sha256:17534b84a0ee25e73b4415842c5127eee8d5190fe28280aa7e5915a2f7bdcd6f";
-const SCHEMA_MANIFEST_DIGEST: &str =
+const DISPATCH_RESERVATION_SCHEMA_MANIFEST_DIGEST: &str =
     "17534b84a0ee25e73b4415842c5127eee8d5190fe28280aa7e5915a2f7bdcd6f";
+const SCHEMA_CHECKSUM: &str =
+    "sha256:722932d52cc757312bc8c592eb1c3009e4eff2c4c6104b92655dfd0dbe5709e7";
+const SCHEMA_MANIFEST_DIGEST: &str =
+    "722932d52cc757312bc8c592eb1c3009e4eff2c4c6104b92655dfd0dbe5709e7";
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(2);
 
 const BASE_SCHEMA: &str = r"
@@ -159,6 +164,7 @@ const OPERATIONAL_OPENING_SCHEMA_V4: &str =
     include_str!("sqlite_operational_opening_schema_v4.sql");
 const DISPATCH_RESERVATION_SCHEMA_V5: &str =
     include_str!("sqlite_dispatch_reservation_schema_v5.sql");
+const TIME_WINDOW_WAIT_SCHEMA_V6: &str = include_str!("sqlite_time_window_wait_schema_v6.sql");
 const CONTINUITY_CLOCK_PROVENANCE: &str =
     "77efdb5ae4c8696d8573d816a52dce594793b1749471a98cc58a85fc8129e50f";
 const CONTINUITY_CLOCK_EPOCH: &str = "epoch/sqlite-local-live-state/1";
@@ -288,6 +294,17 @@ impl SqliteStateBackend {
     #[must_use]
     pub const fn adapter_schema_version() -> u32 {
         ADAPTER_SCHEMA_VERSION
+    }
+
+    #[allow(dead_code)] // First trusted-host caller is deliberately deferred to the next phase.
+    pub(crate) fn transition_time_window_wait(
+        &self,
+        input: crate::authorized_execution_continuity_state::internal::TimeWindowTransitionRequest,
+    ) -> Result<
+        crate::authorized_execution_continuity_state::internal::MutationResult,
+        WorkflowOsError,
+    > {
+        continuity_store::SqliteContinuityStore::system(self).transition_time_window_wait(input)
     }
 
     /// Explicitly upgrades one exact ready V1 database to the additive V2
@@ -600,8 +617,8 @@ impl SqliteStateBackend {
         let version: u32 = transaction
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(|_| schema_recovery_required())?;
-        if version == ADAPTER_SCHEMA_VERSION {
-            validate_schema_metadata(&transaction)?;
+        if version == DISPATCH_RESERVATION_ADAPTER_SCHEMA_VERSION {
+            validate_v5_upgrade_eligibility(&transaction)?;
             transaction
                 .commit()
                 .map_err(|_| schema_recovery_required())?;
@@ -616,6 +633,67 @@ impl SqliteStateBackend {
         validate_v4_upgrade_eligibility(&transaction)?;
         transaction
             .execute_batch(DISPATCH_RESERVATION_SCHEMA_V5)
+            .and_then(|()| {
+                transaction.execute(
+                    "UPDATE schema_metadata SET schema_version=?1, checksum=?2 WHERE singleton=1",
+                    params![
+                        DISPATCH_RESERVATION_ADAPTER_SCHEMA_VERSION,
+                        DISPATCH_RESERVATION_SCHEMA_CHECKSUM
+                    ],
+                )?;
+                transaction.pragma_update(
+                    None,
+                    "user_version",
+                    DISPATCH_RESERVATION_ADAPTER_SCHEMA_VERSION,
+                )
+            })
+            .map_err(|_| schema_recovery_required())?;
+        validate_v5_upgrade_eligibility(&transaction)?;
+        transaction
+            .commit()
+            .map_err(|_| schema_recovery_required())?;
+        Ok(backend)
+    }
+
+    /// Explicitly upgrades one exact ready V5 database to the additive V6
+    /// exact `TimeWindow` wait-dependency binding schema.
+    ///
+    /// Existing waits remain explicitly unbound and are ineligible for the
+    /// private trusted-time verifier. No dependency identity is inferred.
+    ///
+    /// # Errors
+    ///
+    /// Returns a bounded error for incompatible or unverifiable state.
+    pub fn upgrade_time_window_wait_binding_v5_to_v6(
+        database_path: impl Into<PathBuf>,
+    ) -> Result<Self, WorkflowOsError> {
+        let backend = Self {
+            database_path: database_path.into(),
+            busy_timeout: DEFAULT_BUSY_TIMEOUT,
+        };
+        let mut connection = backend.existing_connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| schema_recovery_required())?;
+        let version: u32 = transaction
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|_| schema_recovery_required())?;
+        if version == ADAPTER_SCHEMA_VERSION {
+            validate_schema_metadata(&transaction)?;
+            transaction
+                .commit()
+                .map_err(|_| schema_recovery_required())?;
+            return Ok(backend);
+        }
+        if version != DISPATCH_RESERVATION_ADAPTER_SCHEMA_VERSION {
+            return Err(sqlite_state_error(
+                "schema.incompatible",
+                "SQLite state schema version is not supported",
+            ));
+        }
+        validate_v5_upgrade_eligibility(&transaction)?;
+        transaction
+            .execute_batch(TIME_WINDOW_WAIT_SCHEMA_V6)
             .and_then(|()| {
                 transaction.execute(
                     "UPDATE schema_metadata SET schema_version=?1, checksum=?2 WHERE singleton=1",
@@ -942,6 +1020,14 @@ impl SqliteStateBackend {
                 })?;
             transaction
                 .execute_batch(DISPATCH_RESERVATION_SCHEMA_V5)
+                .map_err(|_| {
+                    migration_runtime_error(
+                        "destination.initialize_failed",
+                        "state migration destination could not be initialized",
+                    )
+                })?;
+            transaction
+                .execute_batch(TIME_WINDOW_WAIT_SCHEMA_V6)
                 .map_err(|_| {
                     migration_runtime_error(
                         "destination.initialize_failed",
@@ -1638,6 +1724,15 @@ impl SqliteStateBackend {
                             "SQLite state schema could not be initialized",
                         )
                     })?;
+                transaction
+                    .execute_batch(TIME_WINDOW_WAIT_SCHEMA_V6)
+                    .map_err(|error| {
+                        map_sqlite_error(
+                            error,
+                            "schema.initialize_failed",
+                            "SQLite state schema could not be initialized",
+                        )
+                    })?;
                 migrate_v3_snapshots(&transaction)?;
                 initialize_continuity_trusted_time(&transaction).map_err(|error| {
                     map_sqlite_error(
@@ -1705,6 +1800,13 @@ impl SqliteStateBackend {
                 Err(sqlite_state_error(
                     "schema.upgrade_required",
                     "SQLite state schema requires an explicit dispatch reservation upgrade",
+                ))
+            }
+            DISPATCH_RESERVATION_ADAPTER_SCHEMA_VERSION => {
+                validate_v5_upgrade_eligibility(connection)?;
+                Err(sqlite_state_error(
+                    "schema.upgrade_required",
+                    "SQLite state schema requires an explicit TimeWindow wait-binding upgrade",
                 ))
             }
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(connection),
@@ -3033,6 +3135,28 @@ fn validate_v3_upgrade_eligibility(connection: &Connection) -> Result<(), Workfl
     validate_schema_manifest(connection, PREVIOUS_SCHEMA_MANIFEST_DIGEST)
 }
 
+fn validate_v5_upgrade_eligibility(connection: &Connection) -> Result<(), WorkflowOsError> {
+    let metadata = connection
+        .query_row(
+            "SELECT schema_version, migration_state, checksum FROM schema_metadata WHERE singleton=1",
+            [],
+            |row| Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
+        )
+        .optional()
+        .map_err(|_| schema_recovery_required())?;
+    if metadata
+        != Some((
+            DISPATCH_RESERVATION_ADAPTER_SCHEMA_VERSION,
+            "ready".to_owned(),
+            DISPATCH_RESERVATION_SCHEMA_CHECKSUM.to_owned(),
+        ))
+    {
+        return Err(schema_recovery_required());
+    }
+    validate_schema_manifest(connection, DISPATCH_RESERVATION_SCHEMA_MANIFEST_DIGEST)?;
+    validate_continuity_security_state(connection)
+}
+
 fn validate_schema_metadata(connection: &Connection) -> Result<(), WorkflowOsError> {
     let metadata = connection
         .query_row(
@@ -3060,7 +3184,8 @@ fn validate_schema_metadata(connection: &Connection) -> Result<(), WorkflowOsErr
             if state == "ready" && checksum == SCHEMA_CHECKSUM =>
         {
             validate_schema_manifest(connection, SCHEMA_MANIFEST_DIGEST)?;
-            validate_continuity_security_state(connection)
+            validate_continuity_security_state(connection)?;
+            validate_time_window_wait_binding_columns(connection)
         }
         Some((version, _, _)) if version > ADAPTER_SCHEMA_VERSION => Err(sqlite_state_error(
             "schema.incompatible",
@@ -3071,6 +3196,39 @@ fn validate_schema_metadata(connection: &Connection) -> Result<(), WorkflowOsErr
             "SQLite state schema requires operator recovery",
         )),
     }
+}
+
+fn validate_time_window_wait_binding_columns(
+    connection: &Connection,
+) -> Result<(), WorkflowOsError> {
+    let invalid: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM continuity_waits WHERE NOT (
+                (dependency_kind IS NULL
+                 AND dependency_commitment IS NULL
+                 AND deadline_seconds IS NULL
+                 AND deadline_nanos IS NULL
+                 AND required_time_source_kind IS NULL
+                 AND required_time_provenance_commitment IS NULL
+                 AND required_time_epoch_id IS NULL)
+                OR
+                (dependency_kind='time_window'
+                 AND wake_trigger='deadline_reached'
+                 AND dependency_commitment IS NOT NULL
+                 AND deadline_seconds IS NOT NULL
+                 AND deadline_nanos IS NOT NULL
+                 AND required_time_source_kind='core_injected_clock_v1'
+                 AND required_time_provenance_commitment IS NOT NULL
+                 AND required_time_epoch_id IS NOT NULL)
+            )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| schema_recovery_required())?;
+    if invalid != 0 {
+        return Err(schema_recovery_required());
+    }
+    Ok(())
 }
 
 fn validate_v4_upgrade_eligibility(connection: &Connection) -> Result<(), WorkflowOsError> {
