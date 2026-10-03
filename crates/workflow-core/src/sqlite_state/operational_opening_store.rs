@@ -651,7 +651,7 @@ mod tests {
         InjectedSupervisorPersistenceFault, LocalSkillAttemptExecutor,
         TrustedHostAttemptExecutionContext, TrustedHostAttemptExecutionResult,
         TrustedHostAttemptExecutor, TrustedHostSupervisorAttemptCapability,
-        TrustedHostSupervisorInput, TrustedHostSupervisorPersistenceInput,
+        TrustedHostSupervisorInput, TrustedHostSupervisorPersistenceInput, TrustedHostYieldRequest,
     };
     use crate::{
         ActorId, AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId, EventId, EventLogStore,
@@ -1361,7 +1361,33 @@ mod tests {
             &self,
             _context: &TrustedHostAttemptExecutionContext<'_>,
         ) -> TrustedHostAttemptExecutionResult {
-            TrustedHostAttemptExecutionResult::Yielded(AuthorizedExecutionYieldReason::TurnBoundary)
+            TrustedHostAttemptExecutionResult::Yielded(TrustedHostYieldRequest::without_wait(
+                AuthorizedExecutionYieldReason::TurnBoundary,
+            ))
+        }
+    }
+
+    struct TimeWindowYieldExecutor {
+        condition_version: u32,
+        deadline: Timestamp,
+    }
+
+    impl TrustedHostAttemptExecutor for TimeWindowYieldExecutor {
+        fn binding_commitment(&self) -> SpecContentHash {
+            supervisor_executor_binding()
+        }
+
+        fn execute(
+            &self,
+            _context: &TrustedHostAttemptExecutionContext<'_>,
+        ) -> TrustedHostAttemptExecutionResult {
+            TrustedHostAttemptExecutionResult::Yielded(TrustedHostYieldRequest::with_time_window(
+                AuthorizedExecutionYieldReason::ContextBudget,
+                crate::AuthorizedExecutionWaitConditionId::new("wait/supervisor-time-window")
+                    .expect("condition"),
+                self.condition_version,
+                self.deadline,
+            ))
         }
     }
 
@@ -1380,9 +1406,9 @@ mod tests {
             _context: &TrustedHostAttemptExecutionContext<'_>,
         ) -> TrustedHostAttemptExecutionResult {
             if self.calls.fetch_add(1, Ordering::Relaxed) < self.yields_before_success {
-                TrustedHostAttemptExecutionResult::Yielded(
+                TrustedHostAttemptExecutionResult::Yielded(TrustedHostYieldRequest::without_wait(
                     AuthorizedExecutionYieldReason::TurnBoundary,
-                )
+                ))
             } else {
                 TrustedHostAttemptExecutionResult::Succeeded(SkillOutput::new(
                     BTreeMap::from([("status".to_owned(), "ok".to_owned())]),
@@ -1730,6 +1756,162 @@ mod tests {
         let final_run = fixture.backend.rehydrate_run(&fixture.run_id).expect("run");
         assert_eq!(final_run.snapshot.status, WorkflowRunStatus::Running);
         assert_eq!(final_run.events.len(), 9);
+    }
+
+    #[test]
+    fn one_shot_supervisor_registers_one_bound_time_window_wait_atomically() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/time-window-yield", 2);
+        let window_id = capability.window_id.clone();
+        let generation_id =
+            ContinuityYieldGenerationId::new("yield/supervisor-time-window/1").expect("generation");
+        let deadline = Timestamp::parse_rfc3339("2099-09-30T10:05:00Z").expect("deadline");
+        let result = supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &TimeWindowYieldExecutor {
+                condition_version: 1,
+                deadline,
+            },
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/supervisor-time-window-yield")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/supervisor-time-window-yield")
+                    .expect("receipt"),
+                yield_generation: Some(generation_id.clone()),
+            },
+        })
+        .expect("time-window yield persists");
+        assert_eq!(
+            result.disposition,
+            crate::authorized_execution_continuity_state::internal::AuthoritativeContinuationDisposition::AwaitCondition
+        );
+
+        let state = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("continuity snapshot");
+        let yielded = state.yields.get(&generation_id).expect("yield record");
+        assert_eq!(yielded.wait_ids.len(), 1);
+        let wait = state.waits.get(&yielded.wait_ids[0]).expect("wait record");
+        assert_eq!(wait.window_id, window_id);
+        assert_eq!(wait.generation_id, generation_id);
+        assert_eq!(wait.condition_version, 1);
+        assert_eq!(
+            wait.wake_trigger,
+            crate::AuthorizedExecutionWakeTriggerKind::DeadlineReached
+        );
+        assert_eq!(
+            wait.state,
+            crate::authorized_execution_continuity_state::internal::AuthoritativeWaitState::Unsatisfied
+        );
+        let Some(
+            crate::authorized_execution_continuity_state::internal::AuthoritativeWaitDependencyBinding::TimeWindow {
+                deadline: stored_deadline,
+                source,
+                provenance_commitment,
+                epoch_id,
+                ..
+            },
+        ) = &wait.dependency_binding
+        else {
+            panic!("time-window dependency binding must be stored");
+        };
+        assert_eq!(*stored_deadline, deadline);
+        assert_eq!(*source, state.trusted_time.source);
+        assert_eq!(
+            provenance_commitment,
+            &state.trusted_time.provenance_commitment
+        );
+        assert_eq!(epoch_id, &state.trusted_time.epoch_id);
+    }
+
+    #[test]
+    fn one_shot_supervisor_rejects_invalid_time_window_declaration_without_wait() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/invalid-time-window-yield", 2);
+        let error = supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &TimeWindowYieldExecutor {
+                condition_version: 0,
+                deadline: Timestamp::parse_rfc3339("2099-09-30T10:05:00Z").expect("deadline"),
+            },
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/invalid-time-window-yield")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/invalid-time-window-yield")
+                    .expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new("yield/invalid-time-window/1")
+                        .expect("generation"),
+                ),
+            },
+        })
+        .expect_err("invalid condition version must fail closed");
+        assert_eq!(
+            error.code(),
+            "trusted_host_supervisor.wait_declaration_invalid"
+        );
+
+        let state = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("continuity snapshot");
+        assert!(state.yields.is_empty());
+        assert!(state.waits.is_empty());
+        assert!(!format!(
+            "{:?}",
+            TrustedHostYieldRequest::with_time_window(
+                AuthorizedExecutionYieldReason::ContextBudget,
+                crate::AuthorizedExecutionWaitConditionId::new("wait/private-context")
+                    .expect("condition"),
+                1,
+                Timestamp::parse_rfc3339("2099-09-30T10:05:00Z").expect("deadline"),
+            )
+        )
+        .contains("private-context"));
+    }
+
+    #[test]
+    fn one_shot_supervisor_rejects_time_window_deadline_outside_authorized_window() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/outside-time-window-yield", 2);
+        let forbidden_deadline = "2100-09-30T10:05:00Z";
+        let error = supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &TimeWindowYieldExecutor {
+                condition_version: 1,
+                deadline: Timestamp::parse_rfc3339(forbidden_deadline).expect("deadline"),
+            },
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/outside-time-window-yield")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/outside-time-window-yield")
+                    .expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new("yield/outside-time-window/1")
+                        .expect("generation"),
+                ),
+            },
+        })
+        .expect_err("deadline outside the authorized window must fail closed");
+        assert_eq!(
+            error.code(),
+            "sqlite_state.time_window_wait.binding_invalid"
+        );
+        assert!(!error.to_string().contains(forbidden_deadline));
+
+        let state = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("continuity snapshot");
+        assert!(state.yields.is_empty());
+        assert!(state.waits.is_empty());
     }
 
     #[test]

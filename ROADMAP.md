@@ -548,11 +548,15 @@ current queue when they contain historical `next phase` language.
    continuation posture. It does not schedule, poll, register executor-authored
    typed waits, invoke the executor, or expose a public surface. A focused
    maintainer/security review accepted the caller with non-blocking test
-   follow-ups. The next P0 phase is the private typed-wait registration slice:
-   let the exact authorized executor return one bounded `TimeWindow`
-   declaration that Core validates and registers atomically with yield. Opaque
-   wait handoff follows registration. Provider, sandbox, nested-harness,
-   public-config, CLI, SDK, and hosted integration remain blocked.
+   follow-ups. The private typed-wait registration slice is now implemented:
+   the exact authorized executor may return zero or one bounded `TimeWindow`
+   declaration; Core derives the exact trusted-time dependency binding and the
+   existing SQLite continuity transaction atomically registers the yield and
+   wait. Invalid versions and deadlines outside the authorized window fail
+   without a partial yield or wait. The next P0 phase is a focused
+   maintainer/security review of this registration boundary. Opaque wait
+   handoff follows acceptance. Provider, sandbox, nested-harness, public-config,
+   CLI, SDK, and hosted integration remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
