@@ -8,11 +8,19 @@ binding without inventing values for legacy rows, and a crate-private verifier
 obtains trusted time and transitions only the exactly bound wait. Legacy
 unbound deadline waits fail closed.
 
-The private trusted-host caller, supervisor registration path, scheduling,
+The first private trusted-host caller is now implemented for one existing exact
+`TimeWindow` wait. It derives mutable expectations from authoritative SQLite
+state, invokes the accepted verifier, recovers exact operation replay across a
+reopened backend, and returns bounded transition status plus current
+continuation posture. It does not treat satisfaction as execution authority.
+
+The supervisor typed-wait registration path, opaque wait handoff, scheduling,
 polling, executor recirculation, and other wake-source families remain
 unimplemented. This document continues to govern their sequencing; the
-implemented slice is recorded in
+implemented slices are recorded in
 [`TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_REPORT.md`](../concepts/TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_REPORT.md).
+The caller integration is recorded in
+[`TRUSTED_HOST_TIME_WINDOW_CALLER_IMPLEMENTATION_REPORT.md`](../concepts/TRUSTED_HOST_TIME_WINDOW_CALLER_IMPLEMENTATION_REPORT.md).
 
 Status: accepted after focused maintainer/security review with in-review
 corrections and non-blocking follow-ups. The private local SQLite operational

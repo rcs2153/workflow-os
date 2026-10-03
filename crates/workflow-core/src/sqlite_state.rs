@@ -177,6 +177,8 @@ mod operational_opening_store;
 mod trusted_host_operational_entry;
 #[allow(dead_code)]
 mod trusted_host_redispatch_loop;
+#[allow(dead_code)]
+mod trusted_host_time_window_caller;
 
 /// Opt-in embedded `SQLite` durable-state backend.
 ///
@@ -296,7 +298,6 @@ impl SqliteStateBackend {
         ADAPTER_SCHEMA_VERSION
     }
 
-    #[allow(dead_code)] // First trusted-host caller is deliberately deferred to the next phase.
     pub(crate) fn transition_time_window_wait(
         &self,
         input: &crate::authorized_execution_continuity_state::internal::TimeWindowTransitionRequest,
