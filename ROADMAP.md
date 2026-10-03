@@ -508,8 +508,11 @@ current queue when they contain historical `next phase` language.
    It classifies fresh and restarted entry from authoritative state, reuses
    same-call current-authority opening, consumes one fresh resume directive,
    and returns bounded wait, blocked, or terminal posture without capability
-   reconstruction. The next P0 phase is focused maintainer/security
-   implementation review before any caller integration. Provider, sandbox,
+   reconstruction. The focused maintainer/security [implementation
+   review](docs/concepts/TRUSTED_HOST_OPERATIONAL_ENTRY_BOUNDARY_IMPLEMENTATION_REVIEW.md)
+   accepts the private helper with non-blocking follow-ups. The next P0 phase
+   is planning the smallest private caller and typed-wait registration boundary
+   before any runtime integration. Provider, sandbox,
    nested-harness, public-config, CLI, SDK, and hosted integration remain
    blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,

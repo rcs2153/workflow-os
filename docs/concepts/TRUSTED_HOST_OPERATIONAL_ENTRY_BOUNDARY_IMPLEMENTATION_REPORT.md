@@ -15,8 +15,10 @@ capability into the accepted bounded redispatch loop. Wait, blocked, and
 terminal postures return without executor entry. No capability is persisted,
 serialized, cloned, inferred, or reconstructed.
 
-The slice remains crate-private, local, injected, SQLite-only, and
-review-pending. It adds no scheduler, daemon, automatic caller, model turn,
+The slice remains crate-private, local, injected, and SQLite-only. Its focused
+[implementation review](TRUSTED_HOST_OPERATIONAL_ENTRY_BOUNDARY_IMPLEMENTATION_REVIEW.md)
+accepted it with non-blocking follow-ups. It adds no scheduler, daemon,
+automatic caller, model turn,
 provider execution, OpenShell integration, nested harness execution, public
 configuration, CLI, SDK, schema, hosted behavior, or release change.
 
@@ -184,14 +186,9 @@ substitute for local validation.
 
 ## 12. Recommended Next Phase
 
-Perform a focused maintainer/security implementation review. Verify exact
-source-of-truth classification, reuse of the registered-current-authority
-opening boundary, no capability reconstruction, exact invocation and executor
-binding, one-use resume authority, closed wait/block/terminal behavior,
-non-leaking errors, and absence of public/runtime/provider broadening.
-
-If accepted, plan the smallest private trusted-host caller that can register
-typed waits and reinvoke this boundary after lawful external state changes.
+Plan the smallest private trusted-host caller that can register typed waits
+and reinvoke this boundary after lawful external state changes. Add a direct
+fresh-opening composition test before caller integration is accepted.
 Do not add provider execution, OpenShell, nested harnesses, automatic
 approval, public configuration, CLI, SDK, hosted behavior, or release claims.
 

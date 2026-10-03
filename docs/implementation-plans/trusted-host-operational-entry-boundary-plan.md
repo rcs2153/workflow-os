@@ -1,12 +1,14 @@
 # Trusted-Host Operational Entry Boundary Plan
 
-Status: implemented; focused implementation review pending. The bounded
+Status: implemented and accepted with non-blocking follow-ups. The bounded
 trusted-host redispatch loop is implemented and accepted as a private local
 SQLite slice. The private operational entry helper described here now
 classifies fresh and restarted entry from authoritative SQLite state, reuses
 the accepted registered-current-authority opening boundary, consumes fresh
 resume authority, and invokes the accepted loop. It is not connected to a
-public or automatic runtime caller.
+public or automatic runtime caller. The focused implementation review is
+recorded in [Trusted-Host Operational Entry Boundary Implementation
+Review](../concepts/TRUSTED_HOST_OPERATIONAL_ENTRY_BOUNDARY_IMPLEMENTATION_REVIEW.md).
 
 ## 1. Executive Summary
 
@@ -333,8 +335,9 @@ The implementation and reused primitive coverage should prove:
    and privacy tests are implemented; reused primitive suites retain replay,
    ambiguity, and concurrency proofs.
 5. Complete workspace validation is required for phase close.
-6. A focused implementation review remains next.
-7. Only after acceptance may a separate phase plan a caller that registers
+6. The focused implementation review accepted the slice with non-blocking
+   follow-ups.
+7. A separate phase may now plan a caller that registers
    typed waits and reinvokes this boundary after lawful external changes.
 
 ## 17. Open Questions
@@ -356,11 +359,10 @@ provider execution.
 
 ## 18. Final Recommendation
 
-Proceed next to a focused maintainer/security implementation review of the
-private local SQLite operational entry helper. Verify that it obtains fresh
-authority only from the accepted opening or directive-consumption operations,
-never reconstructs capability, binds the exact invocation and executor, and
-returns bounded wait, blocked, or terminal posture without executor entry.
+Proceed next to planning the smallest private trusted-host caller and
+typed-wait registration boundary. Preserve the accepted entry helper as the
+only operational admission point and add the direct fresh-opening composition
+test before caller integration is accepted.
 
 Do not add a scheduler, daemon, public runtime API, CLI, SDK, schema, provider
 execution, provider mutation, OpenShell, nested harnesses, automatic approval,
