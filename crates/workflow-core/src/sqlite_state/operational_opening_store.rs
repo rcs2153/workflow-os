@@ -637,6 +637,10 @@ mod tests {
     use crate::sqlite_state::dispatch_reservation_store::{
         inject_dispatch_commit_fault, InjectedDispatchCommitFault,
     };
+    use crate::sqlite_state::trusted_host_operational_entry::{
+        enter_trusted_host_operation, TrustedHostOperationalEntryInput,
+        TrustedHostOperationalEntryLocator,
+    };
     use crate::sqlite_state::trusted_host_redispatch_loop::{
         run_bounded_trusted_host_redispatch_loop, TrustedHostRedispatchIdentityProvider,
         TrustedHostRedispatchIterationIdentity, TrustedHostRedispatchLoopInput,
@@ -2213,6 +2217,275 @@ mod tests {
                 .status,
             WorkflowRunStatus::Running
         );
+    }
+
+    #[test]
+    fn operational_entry_surfaces_existing_executing_window_as_blocked() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/entry-blocked", 2);
+        let locator = TrustedHostOperationalEntryLocator {
+            workflow_id: fixture.workflow_id.clone(),
+            run_id: fixture.run_id.clone(),
+            step_id: fixture.step_id.clone(),
+            window_id: capability.window_id.clone(),
+            subject_actor_id: capability.subject_actor_id.clone(),
+            immutable_run_bundle: fixture.bundle.clone(),
+        };
+        drop(capability);
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let outcome = enter_trusted_host_operation(TrustedHostOperationalEntryInput {
+            backend: &fixture.backend,
+            locator,
+            opening: None,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            opening_persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/entry-blocked")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/entry-blocked").expect("receipt"),
+                yield_generation: None,
+            },
+            identity_provider: &mut identity_provider,
+        })
+        .expect("executing window is a bounded block");
+
+        assert_eq!(
+            outcome.disposition,
+            crate::authorized_execution_continuity_state::internal::AuthoritativeContinuationDisposition::Blocked
+        );
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRedispatchStopReason::Blocked
+        );
+        assert_eq!(outcome.executor_entries, 0);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(identity_provider.calls, 0);
+    }
+
+    #[test]
+    fn operational_entry_requires_opening_context_for_fresh_scope() {
+        let fixture = Fixture::new();
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let error = enter_trusted_host_operation(TrustedHostOperationalEntryInput {
+            backend: &fixture.backend,
+            locator: TrustedHostOperationalEntryLocator {
+                workflow_id: fixture.workflow_id.clone(),
+                run_id: fixture.run_id.clone(),
+                step_id: fixture.step_id.clone(),
+                window_id: AuthorizedExecutionWindowId::new("window/missing-opening-context")
+                    .expect("window"),
+                subject_actor_id: ActorId::new("agent/opening-test").expect("actor"),
+                immutable_run_bundle: fixture.bundle.clone(),
+            },
+            opening: None,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            opening_persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/missing-opening-context")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/missing-opening-context")
+                    .expect("receipt"),
+                yield_generation: None,
+            },
+            identity_provider: &mut identity_provider,
+        })
+        .expect_err("fresh scope without opening context must fail closed");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host_operational_entry.opening_context_missing"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(identity_provider.calls, 0);
+    }
+
+    #[test]
+    fn operational_entry_surfaces_terminal_window_without_executor_entry() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/entry-terminal", 1);
+        let locator = TrustedHostOperationalEntryLocator {
+            workflow_id: fixture.workflow_id.clone(),
+            run_id: fixture.run_id.clone(),
+            step_id: fixture.step_id.clone(),
+            window_id: capability.window_id.clone(),
+            subject_actor_id: capability.subject_actor_id.clone(),
+            immutable_run_bundle: fixture.bundle.clone(),
+        };
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/entry-terminal")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/entry-terminal").expect("receipt"),
+                yield_generation: None,
+            },
+        })
+        .expect("initial attempt reaches terminal window posture");
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let outcome = enter_trusted_host_operation(TrustedHostOperationalEntryInput {
+            backend: &fixture.backend,
+            locator,
+            opening: None,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            opening_persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/unused-terminal")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/unused-terminal").expect("receipt"),
+                yield_generation: None,
+            },
+            identity_provider: &mut identity_provider,
+        })
+        .expect("terminal window is a bounded terminal outcome");
+
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRedispatchStopReason::Terminal
+        );
+        assert_eq!(outcome.executor_entries, 0);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(identity_provider.calls, 0);
+    }
+
+    #[test]
+    fn operational_entry_rehydrates_resume_and_invokes_once() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/entry-resume", 2);
+        let locator = TrustedHostOperationalEntryLocator {
+            workflow_id: fixture.workflow_id.clone(),
+            run_id: fixture.run_id.clone(),
+            step_id: fixture.step_id.clone(),
+            window_id: capability.window_id.clone(),
+            subject_actor_id: capability.subject_actor_id.clone(),
+            immutable_run_bundle: fixture.bundle.clone(),
+        };
+        supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &YieldExecutor,
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/entry-yield").expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/entry-yield").expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new("yield/entry-yield").expect("generation"),
+                ),
+            },
+        })
+        .expect("initial attempt yields");
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let outcome = enter_trusted_host_operation(TrustedHostOperationalEntryInput {
+            backend: &fixture.backend,
+            locator,
+            opening: None,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            opening_persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/unused-opening")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/unused-opening").expect("receipt"),
+                yield_generation: None,
+            },
+            identity_provider: &mut identity_provider,
+        })
+        .expect("fresh entry resumes current authority");
+
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRedispatchStopReason::Terminal
+        );
+        assert_eq!(outcome.executor_entries, 1);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(identity_provider.calls, 1);
+        assert_eq!(
+            fixture
+                .backend
+                .rehydrate_run(&fixture.run_id)
+                .expect("run")
+                .snapshot
+                .status,
+            WorkflowRunStatus::Running
+        );
+    }
+
+    #[test]
+    fn operational_entry_rejects_changed_invocation_before_resume() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/entry-substitution", 2);
+        let locator = TrustedHostOperationalEntryLocator {
+            workflow_id: fixture.workflow_id.clone(),
+            run_id: fixture.run_id.clone(),
+            step_id: fixture.step_id.clone(),
+            window_id: capability.window_id.clone(),
+            subject_actor_id: capability.subject_actor_id.clone(),
+            immutable_run_bundle: fixture.bundle.clone(),
+        };
+        supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &YieldExecutor,
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/entry-substitution-yield")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/entry-substitution-yield")
+                    .expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new("yield/entry-substitution")
+                        .expect("generation"),
+                ),
+            },
+        })
+        .expect("initial attempt yields");
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let mut substituted = skill_input(&fixture);
+        substituted.values.insert(
+            "context".to_owned(),
+            "authorization=secret-entry-marker".to_owned(),
+        );
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let error = enter_trusted_host_operation(TrustedHostOperationalEntryInput {
+            backend: &fixture.backend,
+            locator,
+            opening: None,
+            executor: &executor,
+            skill_input: substituted,
+            opening_persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/unused-substitution")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/unused-substitution").expect("receipt"),
+                yield_generation: None,
+            },
+            identity_provider: &mut identity_provider,
+        })
+        .expect_err("changed invocation must fail before resume");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host_operational_entry.invocation_binding_mismatch"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(identity_provider.calls, 0);
+        let debug = format!("{error:?}");
+        assert!(!debug.contains("secret-entry-marker"));
+        assert!(!debug.contains(fixture.run_id.as_str()));
     }
 
     #[test]

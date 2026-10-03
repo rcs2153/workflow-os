@@ -168,6 +168,8 @@ mod continuity_store;
 mod dispatch_reservation_store;
 mod operational_opening_store;
 #[allow(dead_code)]
+mod trusted_host_operational_entry;
+#[allow(dead_code)]
 mod trusted_host_redispatch_loop;
 
 /// Opt-in embedded `SQLite` durable-state backend.
