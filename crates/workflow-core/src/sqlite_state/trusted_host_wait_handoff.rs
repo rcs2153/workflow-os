@@ -4,8 +4,9 @@ use sha2::{Digest, Sha256};
 
 use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeContinuationDisposition, AuthoritativeWaitDependencyBinding,
-    AuthoritativeWaitIdentity, AuthoritativeWaitState, ContinuityRevision,
-    ContinuityYieldGenerationId, ReferenceContinuityState, TrustedTimeObservation,
+    AuthoritativeWaitIdentity, AuthoritativeWaitState, AuthoritativeWindowState,
+    ContinuityRevision, ContinuityYieldGenerationId, ReferenceContinuityState,
+    TrustedTimeObservation,
 };
 use crate::authorized_execution_continuity_state::semantics;
 use crate::{
@@ -87,6 +88,12 @@ impl fmt::Debug for TrustedHostWaitHandoff {
     }
 }
 
+impl TrustedHostWaitHandoff {
+    pub(super) fn commitment(&self) -> SpecContentHash {
+        self.handoff_id.0.clone()
+    }
+}
+
 #[cfg(test)]
 impl TrustedHostWaitHandoff {
     pub(super) fn handoff_id(&self) -> &TrustedHostWaitHandoffId {
@@ -123,6 +130,31 @@ pub(crate) fn observe_trusted_host_wait(
     locator: &TrustedHostOperationalEntryLocator,
 ) -> Result<TrustedHostWaitObservation, WorkflowOsError> {
     observe_with(backend, locator, observe_continuity_trusted_time)
+}
+
+pub(super) fn validate_trusted_host_wait_handoff_commitment(
+    state: &ReferenceContinuityState,
+    locator: &TrustedHostOperationalEntryLocator,
+    commitment: &SpecContentHash,
+) -> Result<(), WorkflowOsError> {
+    let window = state
+        .windows
+        .get(&locator.window_id)
+        .ok_or_else(handoff_corrupt)?;
+    validate_locator(locator, window)?;
+    if window.state != AuthoritativeWindowState::Yielded {
+        return Err(handoff_mismatch());
+    }
+    let generation_id = window.active_yield.as_ref().ok_or_else(handoff_mismatch)?;
+    let active_yield = state
+        .yields
+        .get(generation_id)
+        .ok_or_else(handoff_corrupt)?;
+    let current = derive_handoff(state, window, active_yield)?;
+    if current.commitment() != *commitment {
+        return Err(handoff_mismatch());
+    }
+    Ok(())
 }
 
 fn observe_with(
@@ -368,6 +400,14 @@ fn handoff_unsupported() -> WorkflowOsError {
         WorkflowOsErrorKind::InvalidState,
         "dependency_unsupported",
         "trusted-host wait handoff dependency is unsupported",
+    )
+}
+
+fn handoff_mismatch() -> WorkflowOsError {
+    handoff_error(
+        WorkflowOsErrorKind::Security,
+        "handoff_mismatch",
+        "trusted-host wait handoff is not current",
     )
 }
 

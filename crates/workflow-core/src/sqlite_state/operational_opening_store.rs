@@ -646,6 +646,10 @@ mod tests {
         TrustedHostRedispatchIterationIdentity, TrustedHostRedispatchLoopInput,
         TrustedHostRedispatchStopReason,
     };
+    use crate::sqlite_state::trusted_host_time_window_reinvocation::{
+        reinvoke_after_time_window_wait, TrustedHostTimeWindowReinvocationInput,
+    };
+    use crate::sqlite_state::trusted_host_wait_handoff::observe_trusted_host_wait_with_time;
     use crate::trusted_host_supervisor::{
         inject_supervisor_persistence_fault, supervise_one_local_skill_attempt,
         InjectedSupervisorPersistenceFault, LocalSkillAttemptExecutor,
@@ -2603,6 +2607,136 @@ mod tests {
                 .status,
             WorkflowRunStatus::Running
         );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn explicit_time_window_reinvocation_enters_existing_window_once() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/explicit-reinvocation", 2);
+        let window_id = capability.window_id.clone();
+        let locator = TrustedHostOperationalEntryLocator {
+            workflow_id: fixture.workflow_id.clone(),
+            run_id: fixture.run_id.clone(),
+            step_id: fixture.step_id.clone(),
+            window_id: capability.window_id.clone(),
+            subject_actor_id: capability.subject_actor_id.clone(),
+            immutable_run_bundle: fixture.bundle.clone(),
+        };
+        let started_at = Timestamp::now_utc();
+        let deadline = Timestamp::from_offset_date_time(
+            started_at.as_offset_date_time() + time::Duration::seconds(2),
+        );
+        supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &TimeWindowYieldExecutor {
+                condition_version: 1,
+                deadline,
+            },
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/explicit-reinvocation-yield")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/explicit-reinvocation-yield")
+                    .expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new("yield/explicit-reinvocation")
+                        .expect("generation"),
+                ),
+            },
+        })
+        .expect("initial attempt yields");
+        let observed_before_deadline = Timestamp::now_utc();
+        let handoff = observe_trusted_host_wait_with_time(
+            &fixture.backend,
+            &locator,
+            trusted_time_observation(
+                observed_before_deadline,
+                TrustedTimeSourceKind::CoreInjectedClockV1,
+                SpecContentHash::new(super::super::CONTINUITY_CLOCK_PROVENANCE)
+                    .expect("provenance"),
+                ContinuityTrustedTimeEpochId::new(super::super::CONTINUITY_CLOCK_EPOCH)
+                    .expect("epoch"),
+            ),
+        )
+        .expect("handoff observation")
+        .handoff
+        .expect("handoff");
+        std::thread::sleep(std::time::Duration::from_millis(2_100));
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let outcome = reinvoke_after_time_window_wait(TrustedHostTimeWindowReinvocationInput {
+            backend: &fixture.backend,
+            handoff: handoff.clone(),
+            locator,
+            condition_id: crate::AuthorizedExecutionWaitConditionId::new(
+                "wait/supervisor-time-window",
+            )
+            .expect("condition"),
+            condition_version: 1,
+            operation_id: ContinuityOperationId::new("operation/explicit-reinvocation-wake")
+                .expect("operation"),
+            receipt_id: ContinuityReceiptId::new("receipt/explicit-reinvocation-wake")
+                .expect("receipt"),
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            identity_provider: &mut identity_provider,
+        })
+        .expect("explicit reinvocation");
+
+        assert_eq!(
+            outcome.wake_status,
+            crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::Transitioned
+        );
+        assert_eq!(
+            outcome.execution.stop_reason,
+            TrustedHostRedispatchStopReason::Terminal
+        );
+        assert_eq!(outcome.execution.executor_entries, 1);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(identity_provider.calls, 1);
+
+        let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen backend");
+        let mut replay_identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let replay = reinvoke_after_time_window_wait(TrustedHostTimeWindowReinvocationInput {
+            backend: &reopened,
+            handoff,
+            locator: TrustedHostOperationalEntryLocator {
+                workflow_id: fixture.workflow_id.clone(),
+                run_id: fixture.run_id.clone(),
+                step_id: fixture.step_id.clone(),
+                window_id,
+                subject_actor_id: ActorId::new("agent/opening-test").expect("actor"),
+                immutable_run_bundle: fixture.bundle.clone(),
+            },
+            condition_id: crate::AuthorizedExecutionWaitConditionId::new(
+                "wait/supervisor-time-window",
+            )
+            .expect("condition"),
+            condition_version: 1,
+            operation_id: ContinuityOperationId::new("operation/explicit-reinvocation-wake")
+                .expect("operation"),
+            receipt_id: ContinuityReceiptId::new("receipt/explicit-reinvocation-wake")
+                .expect("receipt"),
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            identity_provider: &mut replay_identity_provider,
+        })
+        .expect("reopened exact replay");
+        assert_eq!(
+            replay.wake_status,
+            crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::ExactReplay
+        );
+        assert_eq!(
+            replay.execution.stop_reason,
+            TrustedHostRedispatchStopReason::Terminal
+        );
+        assert_eq!(replay.execution.executor_entries, 0);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(replay_identity_provider.calls, 0);
     }
 
     #[test]

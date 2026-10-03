@@ -589,11 +589,17 @@ current queue when they contain historical `next phase` language.
    Review](docs/concepts/TRUSTED_HOST_EXPLICIT_REINVOCATION_VERTICAL_SLICE_PLAN_REVIEW.md).
    The transition replay must durably bind a payload-free handoff commitment,
    the existing-window entry path must not accept irrelevant opening inputs,
-   and security rejections return no disposition oracle. The next P0 phase is
-   one crate-private local SQLite implementation slice with restart,
-   concurrency, and privacy tests. Provider,
+   and security rejections return no disposition oracle. That crate-private
+   local SQLite implementation slice is now complete in the [implementation
+   report](docs/concepts/TRUSTED_HOST_EXPLICIT_REINVOCATION_VERTICAL_SLICE_REPORT.md).
+   One explicit helper validates the current inert handoff, applies the exact
+   source-specific transition, and re-enters only through the accepted
+   existing-window supervisor path. Handoff-bound replay is domain-separated
+   from legacy direct wake, survives backend reopen, and rejects substituted
+   handoff commitments without another executor entry. Provider,
    sandbox, nested-harness, public-config, CLI, SDK, and hosted integration
-   remain blocked.
+   remain blocked. The next phase is focused maintainer/security review of
+   this private composition.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

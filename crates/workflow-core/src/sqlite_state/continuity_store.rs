@@ -374,20 +374,42 @@ impl SqliteContinuityStore {
         input: &TimeWindowTransitionRequest,
     ) -> Result<MutationResult, WorkflowOsError> {
         let request_commitment = expected_time_window_transition_commitment(input);
-        let envelope = envelope(
-            "transition_time_window_wait",
-            &input.operation_id,
-            &input.window_id,
-            None,
-            Some(input.condition_id.as_str()),
-            Some(input.expected_condition_version),
-            None,
-            vec![
-                input.receipt_id.as_str(),
-                input.expected_generation_id.as_str(),
-                input.cursor.event_id.as_str(),
-            ],
-        );
+        let envelope = if let Some(handoff_commitment) = &input.handoff_commitment {
+            envelope(
+                "transition_time_window_wait_handoff",
+                &input.operation_id,
+                &input.window_id,
+                None,
+                Some(input.condition_id.as_str()),
+                Some(input.expected_condition_version),
+                None,
+                vec![
+                    input.receipt_id.as_str(),
+                    input.expected_generation_id.as_str(),
+                    &input.expected_window_revision.get().to_string(),
+                    window_binding_commitment(&input.expected_window_binding).as_str(),
+                    &input.cursor.sequence_number.get().to_string(),
+                    input.cursor.event_id.as_str(),
+                    &input.expected_wait_revision.get().to_string(),
+                    handoff_commitment.as_str(),
+                ],
+            )
+        } else {
+            envelope(
+                "transition_time_window_wait",
+                &input.operation_id,
+                &input.window_id,
+                None,
+                Some(input.condition_id.as_str()),
+                Some(input.expected_condition_version),
+                None,
+                vec![
+                    input.receipt_id.as_str(),
+                    input.expected_generation_id.as_str(),
+                    input.cursor.event_id.as_str(),
+                ],
+            )
+        };
         let (result, replay) = self.transact(
             AuthorizedExecutionContinuityOperationKind::TransitionWait,
             &input.operation_id,
@@ -3496,6 +3518,7 @@ mod conformance_backend {
                     .expect("yield"),
                 expected_condition_version: 1,
                 expected_wait_revision: wait.revision,
+                handoff_commitment: None,
             }
         }
 
@@ -3537,6 +3560,7 @@ mod conformance_backend {
                 condition_version: 1,
                 operation_id: ContinuityOperationId::new(operation).expect("operation"),
                 receipt_id: ContinuityReceiptId::new(receipt).expect("receipt"),
+                handoff_commitment: None,
             }
         }
 
@@ -4130,6 +4154,7 @@ mod conformance_backend {
                 condition_version: 1,
                 operation_id: ContinuityOperationId::new(operation).expect("operation"),
                 receipt_id: ContinuityReceiptId::new(receipt).expect("receipt"),
+                handoff_commitment: None,
             })
             .expect("replay");
 
@@ -4138,6 +4163,86 @@ mod conformance_backend {
                 outcome.disposition,
                 AuthoritativeContinuationDisposition::Blocked
             );
+        }
+
+        #[test]
+        fn trusted_host_time_window_handoff_binding_replays_and_rejects_substitution() {
+            let fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            let locator = time_window_locator(&fixture);
+            let handoff = observe_trusted_host_wait_with_time(
+                &fixture.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("handoff observation")
+            .handoff
+            .expect("handoff");
+            fixture.backend.conformance_set_time(deadline);
+            let operation = "operation/trusted-host-time-window/handoff-replay";
+            let receipt = "receipt/trusted-host-time-window/handoff-replay";
+            let mut initial = time_window_caller_input(&fixture, operation, receipt);
+            initial.handoff_commitment = Some(handoff.commitment());
+            let first = apply_trusted_host_time_window_wake_with_verifier(initial, |request| {
+                fixture.backend.store.transition_time_window_wait(request)
+            })
+            .expect("initial transition");
+            assert_eq!(first.status, TrustedHostTimeWindowWakeStatus::Transitioned);
+
+            let reopened =
+                SqliteStateBackend::open(fixture.backend.store.backend.database_path.clone())
+                    .expect("reopen backend");
+            let mut replay = time_window_caller_input_for_backend(
+                &reopened,
+                &fixture.window_id,
+                operation,
+                receipt,
+            );
+            replay.handoff_commitment = Some(handoff.commitment());
+            let replayed = apply_trusted_host_time_window_wake(replay).expect("exact replay");
+            assert_eq!(
+                replayed.status,
+                TrustedHostTimeWindowWakeStatus::ExactReplay
+            );
+
+            let mut substituted = time_window_caller_input_for_backend(
+                &reopened,
+                &fixture.window_id,
+                operation,
+                receipt,
+            );
+            substituted.handoff_commitment = Some(SpecContentHash::from_text(
+                "secret-substituted-handoff-marker",
+            ));
+            let error = apply_trusted_host_time_window_wake(substituted)
+                .expect_err("substituted handoff must fail closed");
+            assert_eq!(
+                error.code(),
+                "trusted_host_time_window_caller.operation_replay_conflict"
+            );
+            assert!(!format!("{error:?} {error}").contains("secret-substituted-handoff-marker"));
+        }
+
+        #[test]
+        fn trusted_host_time_window_handoff_binding_rejects_stale_input_before_mutation() {
+            let fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            fixture.backend.conformance_set_time(deadline);
+            let before = fixture.backend.conformance_snapshot();
+            let mut input = time_window_caller_input(
+                &fixture,
+                "operation/trusted-host-time-window/stale-handoff",
+                "receipt/trusted-host-time-window/stale-handoff",
+            );
+            input.handoff_commitment =
+                Some(SpecContentHash::from_text("secret-stale-handoff-marker"));
+            let error = apply_trusted_host_time_window_wake(input)
+                .expect_err("stale handoff must fail before transition");
+            assert_eq!(error.code(), "trusted_host_wait_handoff.handoff_mismatch");
+            assert!(before == fixture.backend.conformance_snapshot());
+            assert!(!format!("{error:?} {error}").contains("secret-stale-handoff-marker"));
         }
 
         #[test]
@@ -4553,6 +4658,7 @@ mod conformance_backend {
                         expected_generation_id: fixture.generation_id.clone(),
                         expected_condition_version: wait.condition_version,
                         expected_wait_revision: wait.revision,
+                        handoff_commitment: None,
                     });
             let Err(error) = error else {
                 panic!("unbound wait must fail");
