@@ -1654,6 +1654,30 @@ impl SqliteStateBackend {
         self.configure_connection(connection)
     }
 
+    fn existing_read_only_connection(&self) -> Result<Connection, WorkflowOsError> {
+        let connection = Connection::open_with_flags(
+            &self.database_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+        )
+        .map_err(|error| {
+            map_sqlite_error(
+                error,
+                "open.failed",
+                "SQLite state database could not be opened",
+            )
+        })?;
+        connection
+            .busy_timeout(self.busy_timeout)
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "configuration.failed",
+                    "SQLite state durability configuration failed",
+                )
+            })?;
+        Ok(connection)
+    }
+
     fn configure_connection(&self, connection: Connection) -> Result<Connection, WorkflowOsError> {
         connection
             .busy_timeout(self.busy_timeout)

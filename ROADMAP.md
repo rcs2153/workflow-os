@@ -570,11 +570,14 @@ current queue when they contain historical `next phase` language.
    wait, reserve dispatch, or invoke an executor. Focused restart, redaction,
    blocked-posture, and concurrent old-or-new snapshot tests pass. The focused
    implementation [review](docs/concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_REVIEW.md)
-   requires blocker fixes before reinvocation planning: observation must use a
-   non-creating SQLite open path, and the accepted state-movement,
-   non-handoff, and corruption test matrix must be completed. The next P0
-   phase is that narrow blocker fix. Provider, sandbox, nested-harness,
-   public-config, CLI, SDK, and hosted integration remain blocked.
+   required blocker fixes before reinvocation planning. Those fixes are now
+   implemented in the [blocker-fix
+   report](docs/concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_BLOCKER_FIX_REPORT.md):
+   observation uses an existing read-only SQLite connection, missing storage
+   remains absent, and the focused state-movement, non-handoff, and corruption
+   matrix passes. The next P0 phase is focused blocker-fix review. Provider,
+   sandbox, nested-harness, public-config, CLI, SDK, and hosted integration
+   remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

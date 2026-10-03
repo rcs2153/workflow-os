@@ -2985,7 +2985,8 @@ mod conformance_backend {
             TrustedHostTimeWindowWakeInput, TrustedHostTimeWindowWakeStatus,
         };
         use crate::sqlite_state::trusted_host_wait_handoff::{
-            observe_trusted_host_wait_with_time, observe_trusted_host_wait_with_time_and_hook,
+            derive_trusted_host_wait_observation_for_test, observe_trusted_host_wait_with_time,
+            observe_trusted_host_wait_with_time_and_hook, TrustedHostWaitHandoffId,
             TrustedHostWaitHandoffNextOperation,
         };
         use crate::{
@@ -3561,6 +3562,22 @@ mod conformance_backend {
             )
         }
 
+        fn derived_handoff_id(
+            state: &ReferenceContinuityState,
+            locator: &TrustedHostOperationalEntryLocator,
+        ) -> TrustedHostWaitHandoffId {
+            derive_trusted_host_wait_observation_for_test(
+                state,
+                locator,
+                &handoff_observation_time(),
+            )
+            .expect("derived observation")
+            .handoff
+            .expect("handoff")
+            .handoff_id()
+            .clone()
+        }
+
         #[test]
         fn trusted_host_wait_handoff_is_deterministic_inert_and_redacted() {
             let fixture = fixture(false, false);
@@ -3609,6 +3626,150 @@ mod conformance_backend {
             ] {
                 assert!(!debug.contains(sensitive));
             }
+        }
+
+        fn handoff_identity_fixture() -> (
+            Fixture,
+            TrustedHostOperationalEntryLocator,
+            ReferenceContinuityState,
+            TrustedHostWaitHandoffId,
+        ) {
+            let fixture = fixture(false, false);
+            register_time_window_wait(
+                &fixture,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let locator = time_window_locator(&fixture);
+            let baseline = fixture.backend.conformance_snapshot();
+            let baseline_id = derived_handoff_id(&baseline, &locator);
+            (fixture, locator, baseline, baseline_id)
+        }
+
+        #[test]
+        fn trusted_host_wait_handoff_identity_tracks_revision_movement() {
+            let (fixture, locator, baseline, baseline_id) = handoff_identity_fixture();
+            let mut revision_changed = baseline.clone();
+            let current_revision = revision_changed
+                .windows
+                .get(&fixture.window_id)
+                .expect("window")
+                .revision
+                .get();
+            revision_changed
+                .windows
+                .get_mut(&fixture.window_id)
+                .expect("window")
+                .revision = ContinuityRevision::new(current_revision + 1).expect("revision");
+            assert_ne!(baseline_id, derived_handoff_id(&revision_changed, &locator));
+        }
+
+        #[test]
+        fn trusted_host_wait_handoff_identity_tracks_cursor_movement() {
+            let (fixture, locator, baseline, baseline_id) = handoff_identity_fixture();
+            let mut cursor_changed = baseline.clone();
+            let changed_cursor = ContinuityCursor {
+                sequence_number: EventSequenceNumber::new(8).expect("sequence"),
+                event_id: EventId::new("event/sqlite-continuity/8").expect("event"),
+            };
+            let active_generation = cursor_changed
+                .windows
+                .get(&fixture.window_id)
+                .expect("window")
+                .active_yield
+                .clone()
+                .expect("yield");
+            cursor_changed
+                .windows
+                .get_mut(&fixture.window_id)
+                .expect("window")
+                .cursor = changed_cursor.clone();
+            cursor_changed
+                .yields
+                .get_mut(&active_generation)
+                .expect("yield")
+                .cursor = changed_cursor;
+            assert_ne!(baseline_id, derived_handoff_id(&cursor_changed, &locator));
+        }
+
+        #[test]
+        fn trusted_host_wait_handoff_identity_tracks_generation_movement() {
+            let (fixture, locator, baseline, baseline_id) = handoff_identity_fixture();
+            let mut generation_changed = baseline.clone();
+            let original_generation = generation_changed
+                .windows
+                .get(&fixture.window_id)
+                .expect("window")
+                .active_yield
+                .clone()
+                .expect("yield");
+            let changed_generation =
+                ContinuityYieldGenerationId::new("yield/sqlite-register/changed")
+                    .expect("generation");
+            let mut yield_record = generation_changed
+                .yields
+                .remove(&original_generation)
+                .expect("yield");
+            yield_record.generation_id = changed_generation.clone();
+            for identity in &yield_record.wait_ids {
+                generation_changed
+                    .waits
+                    .get_mut(identity)
+                    .expect("wait")
+                    .generation_id = changed_generation.clone();
+            }
+            generation_changed
+                .yields
+                .insert(changed_generation.clone(), yield_record);
+            generation_changed
+                .windows
+                .get_mut(&fixture.window_id)
+                .expect("window")
+                .active_yield = Some(changed_generation);
+            assert_ne!(
+                baseline_id,
+                derived_handoff_id(&generation_changed, &locator)
+            );
+        }
+
+        #[test]
+        fn trusted_host_wait_handoff_identity_tracks_condition_movement() {
+            let (fixture, locator, baseline, baseline_id) = handoff_identity_fixture();
+            let mut condition_changed = baseline.clone();
+            let generation = condition_changed
+                .windows
+                .get(&fixture.window_id)
+                .expect("window")
+                .active_yield
+                .clone()
+                .expect("yield");
+            let original_identity = condition_changed
+                .yields
+                .get(&generation)
+                .expect("yield")
+                .wait_ids[0]
+                .clone();
+            let changed_condition =
+                AuthorizedExecutionWaitConditionId::new("wait/sqlite-time-window/changed")
+                    .expect("condition");
+            let changed_identity = AuthoritativeWaitIdentity::new(changed_condition.clone(), 2);
+            let mut wait = condition_changed
+                .waits
+                .remove(&original_identity)
+                .expect("wait");
+            wait.condition_id = changed_condition;
+            wait.condition_version = 2;
+            condition_changed
+                .waits
+                .insert(changed_identity.clone(), wait);
+            condition_changed
+                .yields
+                .get_mut(&generation)
+                .expect("yield")
+                .wait_ids = vec![changed_identity];
+            assert_ne!(
+                baseline_id,
+                derived_handoff_id(&condition_changed, &locator)
+            );
         }
 
         #[test]
@@ -3664,6 +3825,166 @@ mod conformance_backend {
                 AuthoritativeContinuationDisposition::Blocked
             );
             assert!(outcome.handoff.is_none());
+        }
+
+        #[test]
+        fn trusted_host_wait_observation_never_hands_off_non_actionable_state() {
+            for state in [
+                AuthoritativeWindowState::Closed,
+                AuthoritativeWindowState::Revoked,
+                AuthoritativeWindowState::Superseded,
+            ] {
+                let fixture = fixture(false, false);
+                register_time_window_wait(
+                    &fixture,
+                    Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+                );
+                let locator = time_window_locator(&fixture);
+                let mut snapshot = fixture.backend.conformance_snapshot();
+                snapshot
+                    .windows
+                    .get_mut(&fixture.window_id)
+                    .expect("window")
+                    .state = state;
+                let outcome = derive_trusted_host_wait_observation_for_test(
+                    &snapshot,
+                    &locator,
+                    &handoff_observation_time(),
+                )
+                .expect("terminal observation");
+                assert_eq!(
+                    outcome.disposition,
+                    AuthoritativeContinuationDisposition::Terminal
+                );
+                assert!(outcome.handoff.is_none());
+            }
+
+            let fixture = fixture(false, false);
+            register_time_window_wait(
+                &fixture,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let locator = time_window_locator(&fixture);
+            let mut expired_window = fixture.backend.conformance_snapshot();
+            let window = expired_window
+                .windows
+                .get_mut(&fixture.window_id)
+                .expect("window");
+            window.state = AuthoritativeWindowState::Expired;
+            window.trusted_time_watermark = window.expires_at;
+            let outcome = derive_trusted_host_wait_observation_for_test(
+                &expired_window,
+                &locator,
+                &handoff_observation_time(),
+            )
+            .expect("expired observation");
+            assert_eq!(
+                outcome.disposition,
+                AuthoritativeContinuationDisposition::Terminal
+            );
+            assert!(outcome.handoff.is_none());
+
+            for (state, disposition) in [
+                (
+                    AuthoritativeWaitState::Satisfied,
+                    AuthoritativeContinuationDisposition::ResumeNow,
+                ),
+                (
+                    AuthoritativeWaitState::Canceled,
+                    AuthoritativeContinuationDisposition::Blocked,
+                ),
+                (
+                    AuthoritativeWaitState::Expired,
+                    AuthoritativeContinuationDisposition::Blocked,
+                ),
+                (
+                    AuthoritativeWaitState::Superseded,
+                    AuthoritativeContinuationDisposition::Blocked,
+                ),
+            ] {
+                let mut snapshot = fixture.backend.conformance_snapshot();
+                snapshot
+                    .waits
+                    .values_mut()
+                    .find(|wait| {
+                        wait.wake_trigger == AuthorizedExecutionWakeTriggerKind::DeadlineReached
+                    })
+                    .expect("time wait")
+                    .state = state;
+                let outcome = derive_trusted_host_wait_observation_for_test(
+                    &snapshot,
+                    &locator,
+                    &handoff_observation_time(),
+                )
+                .expect("non-actionable observation");
+                assert_eq!(outcome.disposition, disposition);
+                assert!(outcome.handoff.is_none());
+            }
+        }
+
+        #[test]
+        fn trusted_host_wait_observation_missing_database_creates_nothing() {
+            let fixture = fixture(false, false);
+            register_time_window_wait(
+                &fixture,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let locator = time_window_locator(&fixture);
+            let backend = fixture.backend.store.backend.clone();
+            let database_path = backend.database_path.clone();
+            drop(fixture);
+            let related_paths = [
+                database_path.clone(),
+                std::path::PathBuf::from(format!("{}-wal", database_path.display())),
+                std::path::PathBuf::from(format!("{}-shm", database_path.display())),
+            ];
+            for path in &related_paths {
+                if path.exists() {
+                    std::fs::remove_file(path).expect("remove SQLite file");
+                }
+            }
+
+            let error =
+                observe_trusted_host_wait_with_time(&backend, &locator, handoff_observation_time())
+                    .expect_err("missing database must fail closed");
+            assert_eq!(error.code(), "state.sqlite.open.failed");
+            assert!(related_paths.iter().all(|path| !path.exists()));
+            let debug = format!("{error:?} {error}");
+            assert!(!debug.contains(database_path.to_string_lossy().as_ref()));
+        }
+
+        #[test]
+        fn trusted_host_wait_observation_rejects_corrupt_projection_without_handoff() {
+            let fixture = fixture(false, false);
+            register_time_window_wait(
+                &fixture,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let locator = time_window_locator(&fixture);
+            let marker = "workflow/corrupt-private-marker";
+            fixture
+                .backend
+                .store
+                .backend
+                .connection()
+                .expect("connection")
+                .execute(
+                    "UPDATE continuity_windows SET workflow_id=?1 WHERE window_id=?2",
+                    params![marker, fixture.window_id.as_str()],
+                )
+                .expect("corrupt projection");
+
+            let error = observe_trusted_host_wait_with_time(
+                &fixture.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect_err("corrupt projection must fail closed");
+            assert_eq!(
+                error.code(),
+                "authorized_execution_continuity_state.state.corrupt"
+            );
+            assert!(!format!("{error:?} {error}").contains(marker));
         }
 
         #[test]

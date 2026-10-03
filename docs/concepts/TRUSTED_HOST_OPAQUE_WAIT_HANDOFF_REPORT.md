@@ -91,7 +91,7 @@ Focused tests cover:
 
 - `cargo check -p workflow-core` with an isolated target directory: passed.
 - `cargo test -p workflow-core trusted_host_wait_ -- --nocapture` with an
-  isolated target directory: 5 focused tests passed.
+  isolated target directory: 12 focused tests passed after blocker hardening.
 - `cargo fmt --all --check`: passed.
 - `cargo clippy --workspace --all-targets -- -D warnings` with an isolated
   target directory: passed.
@@ -119,6 +119,15 @@ kernel dispositions without fabricated handoffs.
 - No explicit reinvocation path exists.
 - The first caller supports a tightly bounded wait shape; broader condition
   sets require separate review.
+
+## 11.1 Blocker Fix Forward
+
+The focused implementation review found two blockers. The observation path now
+uses an existing read-only SQLite connection, and the focused suite proves
+missing-storage non-creation plus revision, cursor, generation, condition,
+terminal, non-actionable, and corrupt-projection behavior. The [blocker-fix
+report](TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_BLOCKER_FIX_REPORT.md) records the
+change. Reinvocation remains blocked pending focused blocker-fix review.
 
 ## 12. Recommended Next Phase
 
