@@ -181,6 +181,8 @@ mod trusted_host_redispatch_loop;
 #[allow(dead_code)]
 mod trusted_host_time_window_caller;
 #[allow(dead_code)]
+mod trusted_host_time_window_reinvocation;
+#[allow(dead_code)]
 mod trusted_host_wait_handoff;
 
 /// Opt-in embedded `SQLite` durable-state backend.

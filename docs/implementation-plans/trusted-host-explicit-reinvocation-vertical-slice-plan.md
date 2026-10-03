@@ -1,5 +1,11 @@
 # Trusted-Host Explicit Reinvocation Vertical Slice Plan
 
+Implementation status: the first crate-private local SQLite slice is
+implemented and documented in the [implementation
+report](../concepts/TRUSTED_HOST_EXPLICIT_REINVOCATION_VERTICAL_SLICE_REPORT.md).
+It remains private and explicit; no scheduler or automatic reinvocation was
+added.
+
 ## 1. Executive Summary
 
 Workflow OS can now register one exact `TimeWindow` wait, project an inert

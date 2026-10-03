@@ -54,6 +54,23 @@ pub(crate) struct TrustedHostOperationalEntryInput<'a> {
     pub(crate) identity_provider: &'a mut dyn TrustedHostRedispatchIdentityProvider,
 }
 
+pub(crate) struct TrustedHostExistingOperationalEntryInput<'a> {
+    pub(crate) backend: &'a SqliteStateBackend,
+    pub(crate) locator: TrustedHostOperationalEntryLocator,
+    pub(crate) executor: &'a dyn TrustedHostAttemptExecutor,
+    pub(crate) skill_input: SkillInput,
+    pub(crate) identity_provider: &'a mut dyn TrustedHostRedispatchIdentityProvider,
+}
+
+impl fmt::Debug for TrustedHostExistingOperationalEntryInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedHostExistingOperationalEntryInput")
+            .field("binding", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
 impl fmt::Debug for TrustedHostOperationalEntryInput<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -93,28 +110,19 @@ pub(crate) fn enter_trusted_host_operation(
                     "trusted-host operational entry binding is invalid",
                 ));
             }
-            let binding = existing_window_binding(
-                input.backend,
-                &input.locator,
-                window,
-                &invocation_commitment,
-            )?;
             let disposition = input
                 .backend
                 .continuation_disposition(&input.locator.window_id)?;
             if disposition != AuthoritativeContinuationDisposition::ResumeNow {
                 return closed_outcome(disposition);
             }
-            let identity = input.identity_provider.next_identity(1)?;
-            let resumed = consume_fresh_resume_directive(input.backend, &binding, identity)?;
-            (
-                resumed.capability,
-                TrustedHostSupervisorPersistenceInput {
-                    operation: resumed.supervisor_operation,
-                    receipt: resumed.supervisor_receipt,
-                    yield_generation: Some(resumed.yield_generation),
-                },
-            )
+            resume_existing_attempt(
+                input.backend,
+                &input.locator,
+                window,
+                &invocation_commitment,
+                input.identity_provider,
+            )?
         }
         _ => {
             return Err(entry_error(
@@ -133,6 +141,87 @@ pub(crate) fn enter_trusted_host_operation(
         initial_persistence,
         identity_provider: input.identity_provider,
     })
+}
+
+pub(crate) fn enter_existing_trusted_host_operation(
+    input: TrustedHostExistingOperationalEntryInput<'_>,
+) -> Result<TrustedHostRedispatchLoopOutcome, WorkflowOsError> {
+    let invocation_commitment = trusted_host_invocation_commitment(
+        &input.skill_input,
+        &input.executor.binding_commitment(),
+    );
+    validate_skill_identity(&input.locator, &input.skill_input)?;
+    let state = continuity_codec::load_snapshot(&input.backend.connection()?)?;
+    let matching = state
+        .windows
+        .values()
+        .filter(|window| {
+            window.workflow_id == input.locator.workflow_id
+                && window.run_id == input.locator.run_id
+                && window.step_id == input.locator.step_id
+        })
+        .collect::<Vec<_>>();
+    let [window] = matching.as_slice() else {
+        return Err(entry_error(
+            WorkflowOsErrorKind::InvalidState,
+            "existing_window_unavailable",
+            "trusted-host existing operational window is unavailable",
+        ));
+    };
+    if window.window_id != input.locator.window_id {
+        return Err(entry_error(
+            WorkflowOsErrorKind::Security,
+            "window_identity_mismatch",
+            "trusted-host operational entry binding is invalid",
+        ));
+    }
+    let disposition = input
+        .backend
+        .continuation_disposition(&input.locator.window_id)?;
+    if disposition != AuthoritativeContinuationDisposition::ResumeNow {
+        return closed_outcome(disposition);
+    }
+    let (initial_capability, initial_persistence) = resume_existing_attempt(
+        input.backend,
+        &input.locator,
+        window,
+        &invocation_commitment,
+        input.identity_provider,
+    )?;
+    run_bounded_trusted_host_redispatch_loop(TrustedHostRedispatchLoopInput {
+        backend: input.backend,
+        initial_capability,
+        executor: input.executor,
+        skill_input: input.skill_input,
+        initial_persistence,
+        identity_provider: input.identity_provider,
+    })
+}
+
+fn resume_existing_attempt(
+    backend: &SqliteStateBackend,
+    locator: &TrustedHostOperationalEntryLocator,
+    window: &crate::authorized_execution_continuity_state::internal::AuthoritativeWindowRecord,
+    invocation_commitment: &SpecContentHash,
+    identity_provider: &mut dyn TrustedHostRedispatchIdentityProvider,
+) -> Result<
+    (
+        TrustedHostSupervisorAttemptCapability,
+        TrustedHostSupervisorPersistenceInput,
+    ),
+    WorkflowOsError,
+> {
+    let binding = existing_window_binding(backend, locator, window, invocation_commitment)?;
+    let identity = identity_provider.next_identity(1)?;
+    let resumed = consume_fresh_resume_directive(backend, &binding, identity)?;
+    Ok((
+        resumed.capability,
+        TrustedHostSupervisorPersistenceInput {
+            operation: resumed.supervisor_operation,
+            receipt: resumed.supervisor_receipt,
+            yield_generation: Some(resumed.yield_generation),
+        },
+    ))
 }
 
 fn open_initial_attempt(

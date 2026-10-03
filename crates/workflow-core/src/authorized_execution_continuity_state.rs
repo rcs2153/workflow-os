@@ -1611,6 +1611,7 @@ pub(crate) mod internal {
         pub(crate) expected_generation_id: ContinuityYieldGenerationId,
         pub(crate) expected_condition_version: u32,
         pub(crate) expected_wait_revision: ContinuityRevision,
+        pub(crate) handoff_commitment: Option<SpecContentHash>,
     }
 
     pub(crate) struct ConsumeDirectiveRequest {
@@ -2282,6 +2283,26 @@ pub(crate) mod internal {
     pub(crate) fn expected_time_window_transition_commitment(
         request: &TimeWindowTransitionRequest,
     ) -> SpecContentHash {
+        if let Some(handoff_commitment) = &request.handoff_commitment {
+            return request_commitment(
+                "workflow-os/authorized-execution-continuity/time-window-transition/v2",
+                &request.operation_id,
+                &[
+                    request.receipt_id.as_str(),
+                    request.window_id.as_str(),
+                    &request.expected_window_revision.get().to_string(),
+                    window_binding_commitment(&request.expected_window_binding).as_str(),
+                    &request.cursor.sequence_number.get().to_string(),
+                    request.cursor.event_id.as_str(),
+                    request.condition_id.as_str(),
+                    request.expected_generation_id.as_str(),
+                    &request.expected_condition_version.to_string(),
+                    &request.expected_wait_revision.get().to_string(),
+                    "satisfied",
+                    handoff_commitment.as_str(),
+                ],
+            );
+        }
         request_commitment(
             "workflow-os/authorized-execution-continuity/time-window-transition/v1",
             &request.operation_id,

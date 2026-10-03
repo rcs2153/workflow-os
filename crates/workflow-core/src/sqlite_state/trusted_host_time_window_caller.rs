@@ -11,10 +11,11 @@ use crate::authorized_execution_continuity_state::internal::{
 };
 use crate::{
     AuthorizedExecutionContinuityOperationKind, AuthorizedExecutionWaitConditionId,
-    AuthorizedExecutionWakeTriggerKind, WorkflowOsError, WorkflowOsErrorKind,
+    AuthorizedExecutionWakeTriggerKind, SpecContentHash, WorkflowOsError, WorkflowOsErrorKind,
 };
 
 use super::trusted_host_operational_entry::TrustedHostOperationalEntryLocator;
+use super::trusted_host_wait_handoff::validate_trusted_host_wait_handoff_commitment;
 use super::{continuity_codec, SqliteStateBackend};
 
 pub(crate) struct TrustedHostTimeWindowWakeInput<'a> {
@@ -24,6 +25,7 @@ pub(crate) struct TrustedHostTimeWindowWakeInput<'a> {
     pub(crate) condition_version: u32,
     pub(crate) operation_id: ContinuityOperationId,
     pub(crate) receipt_id: ContinuityReceiptId,
+    pub(crate) handoff_commitment: Option<SpecContentHash>,
 }
 
 impl fmt::Debug for TrustedHostTimeWindowWakeInput<'_> {
@@ -77,6 +79,10 @@ fn apply_with_verifier(
         );
     }
 
+    if let Some(commitment) = &input.handoff_commitment {
+        validate_trusted_host_wait_handoff_commitment(&state, &input.locator, commitment)?;
+    }
+
     let wait = state
         .waits
         .get(&AuthoritativeWaitIdentity::new(
@@ -119,6 +125,7 @@ fn apply_with_verifier(
         expected_generation_id: wait.generation_id.clone(),
         expected_condition_version: input.condition_version,
         expected_wait_revision: wait.revision,
+        handoff_commitment: input.handoff_commitment,
     };
     let status = transition_status(&verifier(&request)?)?;
     bounded_outcome(input.backend, &request.window_id, status)
@@ -160,7 +167,7 @@ fn validate_replay_identity(
         .backend
         .connection()?
         .query_row(
-            "SELECT receipt_id, operation_kind, request_window_id, request_wait_condition_id, request_wait_condition_version FROM continuity_operations WHERE operation_id=?1",
+            "SELECT receipt_id, operation_kind, request_window_id, request_wait_condition_id, request_wait_condition_version, request_json FROM continuity_operations WHERE operation_id=?1",
             [input.operation_id.as_str()],
             |row| {
                 Ok((
@@ -169,6 +176,7 @@ fn validate_replay_identity(
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<u32>>(4)?,
+                    row.get::<_, String>(5)?,
                 ))
             },
         )
@@ -182,6 +190,28 @@ fn validate_replay_identity(
         || row.2 != input.locator.window_id.as_str()
         || row.3.as_deref() != Some(input.condition_id.as_str())
         || row.4 != Some(input.condition_version)
+    {
+        return Err(caller_error(
+            WorkflowOsErrorKind::Security,
+            "operation_replay_conflict",
+            "trusted-host TimeWindow operation replay conflicts with durable state",
+        ));
+    }
+    let envelope: continuity_codec::RequestEnvelope = continuity_codec::decode(&row.5)?;
+    let expected_domain = if input.handoff_commitment.is_some() {
+        "workflow-os/authorized-execution-continuity/transition_time_window_wait_handoff/v1"
+    } else {
+        "workflow-os/authorized-execution-continuity/transition_time_window_wait/v1"
+    };
+    let handoff_matches = match &input.handoff_commitment {
+        Some(commitment) => envelope.fields.last().map(String::as_str) == Some(commitment.as_str()),
+        None => envelope.fields.len() == 4,
+    };
+    if envelope.domain != expected_domain
+        || envelope.window_id != input.locator.window_id.as_str()
+        || envelope.wait_condition_id.as_deref() != Some(input.condition_id.as_str())
+        || envelope.wait_condition_version != Some(input.condition_version)
+        || !handoff_matches
     {
         return Err(caller_error(
             WorkflowOsErrorKind::Security,
