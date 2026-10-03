@@ -295,23 +295,28 @@ The implementation phase should update:
 Documentation must continue to say that the handoff is private,
 non-authoritative, non-scheduling, and not a public runtime feature.
 
-## 17. Open Questions
+## 17. Review Decisions
 
-- Should the first handoff expose condition IDs, or only an ordered condition
-  count plus a conditions commitment?
-- Should the cursor be carried as a bounded value or only as a commitment?
-- Should `Blocked` and `Terminal` use sibling private posture values or remain
-  ordinary caller dispositions without a handoff?
-- Is a dedicated handoff ID newtype useful, or is a private `SpecContentHash`
-  sufficient until a public boundary exists?
+The focused maintainer/security
+[review](../concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_PLAN_REVIEW.md) resolves
+the open questions:
 
-These questions should be resolved in the focused plan review before code.
+- condition IDs and versions may remain private handoff fields but must not be
+  exposed by Debug or serialization;
+- the handoff carries a cursor commitment, not the cursor;
+- blocked and terminal posture return ordinary dispositions without a
+  handoff; and
+- the handoff ID is a dedicated crate-private newtype backed by a
+  domain-separated commitment.
+
+Implementation must construct the handoff inside one explicit SQLite read
+transaction and prove old-or-new coherence under a concurrent wait transition.
 
 ## 18. Final Recommendation
 
-Proceed to a focused maintainer/security review of this plan. If accepted,
-implement only the crate-private handoff model and coherent observation path
-for an already-registered exact `TimeWindow` wait.
+The focused maintainer/security review accepts the plan. Implement only the
+crate-private handoff model and coherent observation path for an
+already-registered exact `TimeWindow` wait.
 
 Do not implement wait satisfaction, polling, scheduling, automatic
 reinvocation, provider or sandbox execution, nested harnesses, public APIs,
