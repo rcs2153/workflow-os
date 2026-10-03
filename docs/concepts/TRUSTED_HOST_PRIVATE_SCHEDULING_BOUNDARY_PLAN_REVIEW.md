@@ -4,6 +4,11 @@
 
 **Needs planning blocker fixes.**
 
+Fix-forward status: the planning blockers are addressed in the corrected plan
+and documented in the [planning blocker-fix
+report](TRUSTED_HOST_PRIVATE_SCHEDULING_BOUNDARY_PLAN_BLOCKER_FIX_REPORT.md).
+This original verdict is preserved pending focused blocker-fix re-review.
+
 The plan has the correct architectural boundary: Core remains authoritative,
 the host owns waiting only, the ticket and callback are inert, and one host
 wake may request only one source-specific reinvocation. The planned boundary

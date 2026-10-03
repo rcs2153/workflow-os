@@ -623,6 +623,12 @@ current queue when they contain historical `next phase` language.
    planning blocker fix defining a Core-owned non-mutating readiness assessment
    and a private absolute UTC scheduling hint. Scheduling implementation
    remains blocked until that fix and the two reinvocation proofs are reviewed.
+   The planning blockers are now corrected in the [blocker-fix
+   report](docs/concepts/TRUSTED_HOST_PRIVATE_SCHEDULING_BOUNDARY_PLAN_BLOCKER_FIX_REPORT.md):
+   `NotYetEligible` is a non-mutating early-wake result, the first ticket uses
+   the current durable absolute UTC deadline only as an inert hint, and the
+   atomic transition retains the only satisfaction proof. The next phase is
+   focused maintainer/security re-review of the corrected plan.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

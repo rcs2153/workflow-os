@@ -1,9 +1,9 @@
 # Private Trusted-Host Scheduling Boundary Plan
 
-Status: planning only. The explicit crate-private `TimeWindow` reinvocation
-slice is implemented and accepted. No scheduler, timer driver, background
-worker, automatic model turn, public configuration, or hosted runtime is
-implemented by this plan.
+Status: planning only, corrected after focused security review. The explicit
+crate-private `TimeWindow` reinvocation slice is implemented and accepted. No
+scheduler, timer driver, background worker, automatic model turn, public
+configuration, or hosted runtime is implemented by this plan.
 
 ## 1. Executive Summary
 
@@ -149,7 +149,7 @@ reinvocation modules:
 
 - `TrustedHostTimeWindowScheduleTicket`
   - payload-free ticket commitment;
-  - safe scheduling instant or bounded delay derived from the exact durable
+  - the exact private absolute UTC scheduling instant derived from the durable
     deadline;
   - trusted-time source category and epoch commitment where required;
   - handoff commitment; and
@@ -194,11 +194,44 @@ satisfied. Copying, replaying, delaying, or firing the ticket early cannot
 authorize transition or entry. The accepted source-specific verifier performs
 the authoritative check after wake.
 
+The first slice uses an absolute UTC instant because the accepted durable
+deadline and `CoreInjectedClockV1` observation share that domain. A host timer
+API may compute a process-local relative delay, but that delay is neither
+persisted nor returned to Core and cannot satisfy the wait. A different
+trusted-time source or clock domain requires a separate reviewed contract.
+
 The ticket must not expose prompts, commands, source contents, raw provider
 payloads, credentials, approval reasons, evidence bodies, check output, or
 private authority material.
 
-## 10. Schedule-Once Algorithm
+## 10. Core-Owned Readiness Assessment
+
+The accepted transition records an unelapsed deadline as a security
+rejection. Normal host timer jitter must not enter that mutation boundary.
+Before reinvocation, Core therefore needs one private, non-mutating
+source-specific readiness assessment.
+
+The assessment must:
+
+1. load the current authoritative wait and exact dependency binding;
+2. obtain a fresh trusted-time observation through the accepted Core-owned
+   source;
+3. validate source, provenance, epoch, condition, generation, revision,
+   window, and handoff/ticket commitments;
+4. return `Eligible`, `NotYetEligible`, or a structured security/corruption
+   error;
+5. write no operation, security rejection, event, directive, reservation,
+   receipt, or workflow transition; and
+6. grant no wake, authority, or dispatch capability.
+
+`NotYetEligible` is the only benign early-wake result. It returns refreshed
+inert scheduling posture with zero executor entry. `Eligible` permits the host
+to call the accepted explicit reinvocation helper once, but it is still not
+proof of satisfaction. The transition transaction obtains and checks trusted
+time again atomically. A clock or state change between readiness and transition
+therefore fails closed inside the accepted mutation boundary.
+
+## 11. Schedule-Once Algorithm
 
 The future private helper should follow this closed sequence:
 
@@ -210,21 +243,24 @@ The future private helper should follow this closed sequence:
 4. Wait once without polling Core or mutating workflow state.
 5. On cancellation or host failure, return a structured non-terminal outcome;
    do not transition the wait or fabricate workflow failure.
-6. On wake, call `reinvoke_after_time_window_wait` exactly once with the
+6. On wake, call the Core-owned readiness assessment exactly once.
+7. For `NotYetEligible`, derive refreshed inert scheduling posture and return
+   without mutation, automatic re-arming, or executor entry.
+8. For `Eligible`, call `reinvoke_after_time_window_wait` exactly once with the
    original inert handoff and exact immutable invocation binding.
-7. Let Core freshly verify handoff commitment, trusted time, exact dependency,
+9. Let Core freshly verify handoff commitment, trusted time, exact dependency,
    replay posture, authority, required context, directive, and dispatch.
-8. Return the accepted execution, refreshed wait, blocked, terminal, or
+10. Return the accepted execution, refreshed wait, blocked, terminal, or
    structured error posture.
 
 The helper must not loop, re-arm itself, sleep again, or call another wake
 family in the first slice.
 
-## 11. Early, Late, Spurious, And Duplicate Wakes
+## 12. Early, Late, Spurious, And Duplicate Wakes
 
-- An early or spurious host wake is not deadline satisfaction. The trusted-time
-  verifier must leave the wait unsatisfied and the helper must return bounded
-  wait posture or a stable not-yet-actionable result with zero executor entry.
+- An early or spurious host wake is not deadline satisfaction. The readiness
+  assessment returns `NotYetEligible`, writes no durable rejection, and leaves
+  the wait unsatisfied with zero executor entry.
 - A late wake is acceptable only if the exact wait and immutable bindings are
   still current when Core verifies them.
 - Duplicate host callbacks may race, but the prerequisite full-composition
@@ -236,7 +272,12 @@ family in the first slice.
 - The host must not automatically retry a security rejection, corrupt state,
   or ambiguous outcome.
 
-## 12. Restart And Recovery
+Cancellation before wake returns a host-level canceled outcome with no Core
+mutation. Cancellation racing after `Eligible` cannot revoke a transition that
+Core has already committed. The first helper does not add host retry,
+automatic re-arming, or cancellation-driven workflow mutation.
+
+## 13. Restart And Recovery
 
 The first implementation may remain local SQLite and single host, but it must
 be restart-safe.
@@ -256,7 +297,7 @@ a later separately reviewed phase. The first slice should prove restart by
 recreating the injected host around durable Core state, not by adding a new
 scheduler store.
 
-## 13. Genuine Wait And False-Stall Posture
+## 14. Genuine Wait And False-Stall Posture
 
 The boundary must distinguish:
 
@@ -274,7 +315,7 @@ is not workflow completion. Conversely, this boundary does not guarantee that
 the Codex desktop, ChatGPT, or another conversational product will create a
 new model turn. It governs a local injected executor process only.
 
-## 14. Security And Privacy
+## 15. Security And Privacy
 
 - A schedule ticket and callback are never authority.
 - Only Core may obtain trusted time and create the private wake capability.
@@ -287,7 +328,7 @@ new model turn. It governs a local injected executor process only.
 - The deadline waiter receives no workflow state, executor input, capability,
   approval context, or provider data.
 
-## 15. Test Plan
+## 16. Test Plan
 
 Before scheduler implementation:
 
@@ -300,7 +341,8 @@ For the later private scheduling slice, focused tests must prove:
 3. a future exact deadline registers one injected wait and performs no Core
    polling;
 4. one elapsed wake requests one source-specific reinvocation;
-5. early wake leaves the wait unsatisfied with zero executor entries;
+5. early wake returns `NotYetEligible`, writes no operation or security
+   rejection, and leaves the wait unsatisfied with zero executor entries;
 6. late wake succeeds only while exact bindings remain current;
 7. canceled host wait preserves non-terminal workflow posture;
 8. host failure does not fabricate workflow failure or completion;
@@ -313,19 +355,24 @@ For the later private scheduling slice, focused tests must prove:
 14. exact replay after ambiguous transition remains domain-separated from
     direct wake;
 15. one scheduled call never loops or re-arms itself;
-16. Debug and errors do not leak schedule, binding, or test-secret values;
-17. no public API, serde, CLI, SDK, schema, provider, OpenShell, nested-harness,
+16. `Eligible` grants no authority and a clock or state change before the
+    transition is rejected by the transaction's fresh trusted-time check;
+17. wrong source, provenance, epoch, dependency, or wait revision fails closed
+    in readiness assessment;
+18. Debug and errors do not leak schedule, binding, or test-secret values;
+19. no public API, serde, CLI, SDK, schema, provider, OpenShell, nested-harness,
     hosted, or write behavior appears; and
-18. existing continuity, wait, reinvocation, operational-entry, runtime,
+20. existing continuity, wait, reinvocation, operational-entry, runtime,
     adapter, report, and workspace tests remain green.
 
-## 16. Proposed Implementation Sequence
+## 17. Proposed Implementation Sequence
 
 1. Implement the full-composition concurrent-caller proof in the existing
    reinvocation test boundary.
 2. Implement transition-to-entry crash fault injection and recovery proof.
 3. Perform focused maintainer/security review of those prerequisite proofs.
-4. Add the crate-private coherent scheduling observation and inert ticket.
+4. Add the crate-private coherent scheduling observation, absolute UTC inert
+   ticket, and non-mutating readiness assessment.
 5. Add one injected deadline-wait interface and schedule-once helper.
 6. Add early, late, cancellation, duplicate, restart, binding, privacy, and
    non-polling tests.
@@ -334,12 +381,8 @@ For the later private scheduling slice, focused tests must prove:
 9. Only after acceptance, consider repeated private scheduling, another wake
    family, or a public host integration as separate phases.
 
-## 17. Open Questions
+## 18. Open Questions
 
-- Should the host receive an absolute instant, a bounded delay, or both when
-  trusted-time and host-clock domains differ?
-- Can the current trusted-time provider expose a safe scheduling hint without
-  weakening the rule that only same-call verification proves satisfaction?
 - Should early wake return a refreshed scheduling ticket immediately or force
   a separate fresh observation call?
 - What minimum fault hook proves the transition-to-entry crash seam without
@@ -349,7 +392,7 @@ For the later private scheduling slice, focused tests must prove:
 - Which metrics can disclose false stalls, wake latency, duplicate callbacks,
   and scheduler failures without leaking workflow identities or payloads?
 
-## 18. Final Recommendation
+## 19. Final Recommendation
 
 After focused review of this plan, complete and review the two prerequisite
 reinvocation proofs. Then implement one crate-private local SQLite
