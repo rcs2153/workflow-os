@@ -97,6 +97,12 @@ documentation only.
 Implement exact authoritative wait dependency binding and the private
 `TimeWindow` verifier only. Do not implement the caller first.
 
+That prerequisite implementation is now complete and documented in the
+[Trusted Host TimeWindow Wait Binding Implementation
+Report](TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_REPORT.md). The historical
+planning finding remains unchanged; the next phase is its focused
+maintainer/security implementation review, not caller integration.
+
 ## 10. Governed Phase Record
 
 - workflow: `dg/d`

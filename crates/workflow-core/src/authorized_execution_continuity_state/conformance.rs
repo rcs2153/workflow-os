@@ -250,6 +250,7 @@ impl<B: ContinuityConformanceBackend> ContinuityConformanceFixture<B> {
                         window_id: window_id.clone(),
                         generation_id: generation_id.clone(),
                         wake_trigger: AuthorizedExecutionWakeTriggerKind::EvidenceAccepted,
+                        dependency_binding: None,
                         state: AuthoritativeWaitState::Unsatisfied,
                         source_commitment: None,
                         source_revision: None,
@@ -439,6 +440,7 @@ impl<B: ContinuityConformanceBackend> ContinuityConformanceFixture<B> {
                 .expect("source"),
             source_commitment: SpecContentHash::from_text("source"),
             source_revision: 1,
+            dependency_commitment: None,
         }
     }
 

@@ -6,13 +6,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeAttemptRecord, AuthoritativeAttemptState, AuthoritativeDirectiveRecord,
-    AuthoritativeDirectiveState, AuthoritativeOperationRecord, AuthoritativeWaitIdentity,
-    AuthoritativeWaitRecord, AuthoritativeWaitState, AuthoritativeWindowRecord,
-    AuthoritativeWindowState, AuthoritativeYieldRecord, CommittedOperationDisposition,
-    CommittedSecurityRejectionKind, ContinuityInstanceEligibility, ContinuityRevision,
-    ContinuityTrustedTimeEpochId, ContinuityYieldGenerationId, ExpectedWindowBinding,
-    RecordedOperationResult, ReferenceContinuityState, SecurityRejectionCommitmentInput,
-    TrustedTimePosture, TrustedTimeSecurityRecord, TrustedTimeSourceKind,
+    AuthoritativeDirectiveState, AuthoritativeOperationRecord, AuthoritativeWaitDependencyBinding,
+    AuthoritativeWaitIdentity, AuthoritativeWaitRecord, AuthoritativeWaitState,
+    AuthoritativeWindowRecord, AuthoritativeWindowState, AuthoritativeYieldRecord,
+    CommittedOperationDisposition, CommittedSecurityRejectionKind, ContinuityInstanceEligibility,
+    ContinuityRevision, ContinuityTrustedTimeEpochId, ContinuityYieldGenerationId,
+    ExpectedWindowBinding, RecordedOperationResult, ReferenceContinuityState,
+    SecurityRejectionCommitmentInput, TrustedTimePosture, TrustedTimeSecurityRecord,
+    TrustedTimeSourceKind,
 };
 use crate::{SpecContentHash, Timestamp, WorkflowOsError, WorkflowOsErrorKind};
 
@@ -341,7 +342,29 @@ fn wait_projection_matches(
     connection: &Connection,
     record: &AuthoritativeWaitRecord,
 ) -> Result<bool, WorkflowOsError> {
-    count(connection, "SELECT COUNT(*) FROM continuity_waits WHERE condition_id=?1 AND condition_version=?2 AND window_id=?3 AND generation_id=?4 AND wake_trigger=?5 AND state=?6 AND source_commitment IS ?7 AND source_revision IS ?8 AND revision=?9", params![record.condition_id.as_str(), i64::from(record.condition_version), record.window_id.as_str(), record.generation_id.as_str(), wake_trigger(record.wake_trigger), wait_state(record.state), record.source_commitment.as_ref().map(SpecContentHash::as_str), record.source_revision.and_then(|value| i64::try_from(value).ok()), i64::try_from(record.revision.get()).map_err(|_| corrupt())?])
+    let (kind, commitment, deadline_seconds, deadline_nanos, source, provenance, epoch) =
+        match &record.dependency_binding {
+            None => (None, None, None, None, None, None, None),
+            Some(AuthoritativeWaitDependencyBinding::TimeWindow {
+                dependency_commitment,
+                deadline,
+                source: TrustedTimeSourceKind::CoreInjectedClockV1,
+                provenance_commitment,
+                epoch_id,
+            }) => {
+                let (seconds, nanos) = timestamp_parts(*deadline);
+                (
+                    Some("time_window"),
+                    Some(dependency_commitment.as_str()),
+                    Some(seconds),
+                    Some(nanos),
+                    Some("core_injected_clock_v1"),
+                    Some(provenance_commitment.as_str()),
+                    Some(epoch_id.as_str()),
+                )
+            }
+        };
+    count(connection, "SELECT COUNT(*) FROM continuity_waits WHERE condition_id=?1 AND condition_version=?2 AND window_id=?3 AND generation_id=?4 AND wake_trigger=?5 AND dependency_kind IS ?6 AND dependency_commitment IS ?7 AND deadline_seconds IS ?8 AND deadline_nanos IS ?9 AND required_time_source_kind IS ?10 AND required_time_provenance_commitment IS ?11 AND required_time_epoch_id IS ?12 AND state=?13 AND source_commitment IS ?14 AND source_revision IS ?15 AND revision=?16", params![record.condition_id.as_str(), i64::from(record.condition_version), record.window_id.as_str(), record.generation_id.as_str(), wake_trigger(record.wake_trigger), kind, commitment, deadline_seconds, deadline_nanos, source, provenance, epoch, wait_state(record.state), record.source_commitment.as_ref().map(SpecContentHash::as_str), record.source_revision.and_then(|value| i64::try_from(value).ok()), i64::try_from(record.revision.get()).map_err(|_| corrupt())?])
 }
 
 fn directive_projection_matches(

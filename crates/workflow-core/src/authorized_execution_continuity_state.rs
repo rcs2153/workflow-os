@@ -1329,10 +1329,33 @@ pub(crate) mod internal {
         pub(crate) window_id: AuthorizedExecutionWindowId,
         pub(crate) generation_id: ContinuityYieldGenerationId,
         pub(crate) wake_trigger: AuthorizedExecutionWakeTriggerKind,
+        #[serde(default)]
+        pub(crate) dependency_binding: Option<AuthoritativeWaitDependencyBinding>,
         pub(crate) state: AuthoritativeWaitState,
         pub(crate) source_commitment: Option<SpecContentHash>,
         pub(crate) source_revision: Option<u64>,
         pub(crate) revision: ContinuityRevision,
+    }
+
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+    pub(crate) enum AuthoritativeWaitDependencyBinding {
+        TimeWindow {
+            dependency_commitment: SpecContentHash,
+            deadline: Timestamp,
+            source: TrustedTimeSourceKind,
+            provenance_commitment: SpecContentHash,
+            epoch_id: ContinuityTrustedTimeEpochId,
+        },
+    }
+
+    impl fmt::Debug for AuthoritativeWaitDependencyBinding {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter
+                .debug_struct("AuthoritativeWaitDependencyBinding")
+                .field("kind", &"time_window")
+                .field("binding", &"[REDACTED]")
+                .finish_non_exhaustive()
+        }
     }
 
     #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -1511,6 +1534,7 @@ pub(crate) mod internal {
         pub(crate) source_reference: ContinuityWakeSourceReference,
         pub(crate) source_commitment: SpecContentHash,
         pub(crate) source_revision: u64,
+        pub(crate) dependency_commitment: Option<SpecContentHash>,
     }
 
     impl fmt::Debug for WakeAssessmentCapability {
@@ -1575,6 +1599,19 @@ pub(crate) mod internal {
         pub(crate) wake_capability: Option<&'a WakeAssessmentCapability>,
     }
 
+    pub(crate) struct TimeWindowTransitionRequest {
+        pub(crate) operation_id: ContinuityOperationId,
+        pub(crate) receipt_id: ContinuityReceiptId,
+        pub(crate) window_id: AuthorizedExecutionWindowId,
+        pub(crate) expected_window_revision: ContinuityRevision,
+        pub(crate) expected_window_binding: ExpectedWindowBinding,
+        pub(crate) cursor: ContinuityCursor,
+        pub(crate) condition_id: AuthorizedExecutionWaitConditionId,
+        pub(crate) expected_generation_id: ContinuityYieldGenerationId,
+        pub(crate) expected_condition_version: u32,
+        pub(crate) expected_wait_revision: ContinuityRevision,
+    }
+
     pub(crate) struct ConsumeDirectiveRequest {
         pub(crate) operation_id: ContinuityOperationId,
         pub(crate) request_commitment: SpecContentHash,
@@ -1622,6 +1659,7 @@ pub(crate) mod internal {
         pub(crate) condition_id: AuthorizedExecutionWaitConditionId,
         pub(crate) condition_version: u32,
         pub(crate) wake_trigger: AuthorizedExecutionWakeTriggerKind,
+        pub(crate) dependency_binding: Option<AuthoritativeWaitDependencyBinding>,
     }
 
     #[derive(Clone, Eq, PartialEq)]
@@ -2061,6 +2099,66 @@ pub(crate) mod internal {
         SpecContentHash::from_bytes(hasher.finalize())
     }
 
+    pub(crate) fn time_window_dependency_binding(
+        deadline: Timestamp,
+        source: TrustedTimeSourceKind,
+        provenance_commitment: SpecContentHash,
+        epoch_id: ContinuityTrustedTimeEpochId,
+    ) -> AuthoritativeWaitDependencyBinding {
+        let mut hasher = Sha256::new();
+        frame(&mut hasher, "version", "v1");
+        frame(
+            &mut hasher,
+            "domain",
+            "workflow-os/authorized-execution-continuity/time-window-dependency/v1",
+        );
+        frame(&mut hasher, "deadline", &deadline.to_rfc3339());
+        frame(
+            &mut hasher,
+            "source",
+            match source {
+                TrustedTimeSourceKind::CoreInjectedClockV1 => "core_injected_clock_v1",
+            },
+        );
+        frame(&mut hasher, "provenance", provenance_commitment.as_str());
+        frame(&mut hasher, "epoch_id", epoch_id.as_str());
+        AuthoritativeWaitDependencyBinding::TimeWindow {
+            dependency_commitment: SpecContentHash::from_bytes(hasher.finalize()),
+            deadline,
+            source,
+            provenance_commitment,
+            epoch_id,
+        }
+    }
+
+    fn append_wait_dependency_binding(
+        fields: &mut Vec<String>,
+        binding: Option<&AuthoritativeWaitDependencyBinding>,
+    ) {
+        match binding {
+            None => fields.push("unbound".to_owned()),
+            Some(AuthoritativeWaitDependencyBinding::TimeWindow {
+                dependency_commitment,
+                deadline,
+                source,
+                provenance_commitment,
+                epoch_id,
+            }) => {
+                fields.push("time_window".to_owned());
+                fields.push(dependency_commitment.as_str().to_owned());
+                fields.push(deadline.to_rfc3339());
+                fields.push(
+                    match source {
+                        TrustedTimeSourceKind::CoreInjectedClockV1 => "core_injected_clock_v1",
+                    }
+                    .to_owned(),
+                );
+                fields.push(provenance_commitment.as_str().to_owned());
+                fields.push(epoch_id.as_str().to_owned());
+            }
+        }
+    }
+
     pub(crate) fn expected_register_yield_commitment(
         request: &RegisterYieldRequest<'_>,
     ) -> SpecContentHash {
@@ -2126,6 +2224,7 @@ pub(crate) mod internal {
             fields.push(wait.condition_id.as_str().to_owned());
             fields.push(wait.condition_version.to_string());
             fields.push(wake_trigger_code(wait.wake_trigger).to_owned());
+            append_wait_dependency_binding(&mut fields, wait.dependency_binding.as_ref());
         }
         request_commitment(
             "workflow-os/authorized-execution-continuity/register-yield/v1",
@@ -2149,6 +2248,10 @@ pub(crate) mod internal {
                     capability.source_reference.as_str().to_owned(),
                     capability.source_commitment.as_str().to_owned(),
                     capability.source_revision.to_string(),
+                    capability
+                        .dependency_commitment
+                        .as_ref()
+                        .map_or_else(|| "unbound".to_owned(), |value| value.as_str().to_owned()),
                 ]
             },
         );
@@ -3734,6 +3837,7 @@ mod tests {
                                 window_id: request.window_id.clone(),
                                 generation_id: request.generation_id.clone(),
                                 wake_trigger: wait.wake_trigger,
+                                dependency_binding: wait.dependency_binding.clone(),
                                 state: AuthoritativeWaitState::Unsatisfied,
                                 source_commitment: None,
                                 source_revision: None,
@@ -4545,6 +4649,7 @@ mod tests {
                         window_id: window_id.clone(),
                         generation_id: generation_id.clone(),
                         wake_trigger: AuthorizedExecutionWakeTriggerKind::EvidenceAccepted,
+                        dependency_binding: None,
                         state: AuthoritativeWaitState::Unsatisfied,
                         source_commitment: None,
                         source_revision: None,
@@ -4698,6 +4803,7 @@ mod tests {
                     .expect("source"),
                 source_commitment: SpecContentHash::from_text("wake source"),
                 source_revision: 1,
+                dependency_commitment: None,
             }
         }
     }
@@ -5841,11 +5947,13 @@ mod tests {
                 condition_id: AuthorizedExecutionWaitConditionId::new("wait/z").expect("wait"),
                 condition_version: 1,
                 wake_trigger: AuthorizedExecutionWakeTriggerKind::EvidenceAccepted,
+                dependency_binding: None,
             },
             SeedWait {
                 condition_id: AuthorizedExecutionWaitConditionId::new("wait/a").expect("wait"),
                 condition_version: 1,
                 wake_trigger: AuthorizedExecutionWakeTriggerKind::CheckAccepted,
+                dependency_binding: None,
             },
         ];
         let mut request = RegisterYieldRequest {
