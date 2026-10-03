@@ -200,14 +200,14 @@ fn stop_reason(
     }
 }
 
-struct ResumeCapabilityAndPersistence {
-    capability: TrustedHostSupervisorAttemptCapability,
-    supervisor_operation: ContinuityOperationId,
-    supervisor_receipt: ContinuityReceiptId,
-    yield_generation: ContinuityYieldGenerationId,
+pub(super) struct ResumeCapabilityAndPersistence {
+    pub(super) capability: TrustedHostSupervisorAttemptCapability,
+    pub(super) supervisor_operation: ContinuityOperationId,
+    pub(super) supervisor_receipt: ContinuityReceiptId,
+    pub(super) yield_generation: ContinuityYieldGenerationId,
 }
 
-fn consume_fresh_resume_directive(
+pub(super) fn consume_fresh_resume_directive(
     backend: &SqliteStateBackend,
     binding: &crate::trusted_host_supervisor::TrustedHostSupervisorBinding,
     identity: TrustedHostRedispatchIterationIdentity,

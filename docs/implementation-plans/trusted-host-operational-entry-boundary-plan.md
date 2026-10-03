@@ -1,9 +1,12 @@
 # Trusted-Host Operational Entry Boundary Plan
 
-Status: planning only. The bounded trusted-host redispatch loop is implemented
-and accepted as a private local SQLite slice. This plan defines the smallest
-future entry boundary that may obtain fresh initial authority and invoke that
-loop after a process start or restart. It does not implement runtime behavior.
+Status: implemented; focused implementation review pending. The bounded
+trusted-host redispatch loop is implemented and accepted as a private local
+SQLite slice. The private operational entry helper described here now
+classifies fresh and restarted entry from authoritative SQLite state, reuses
+the accepted registered-current-authority opening boundary, consumes fresh
+resume authority, and invokes the accepted loop. It is not connected to a
+public or automatic runtime caller.
 
 ## 1. Executive Summary
 
@@ -297,7 +300,7 @@ should use independent SQLite connections to prove one-winner behavior.
 
 ## 15. Test Plan
 
-Future focused tests should prove:
+The implementation and reused primitive coverage should prove:
 
 1. a fresh eligible run opens once and enters the existing loop;
 2. a restart at `ResumeNow` consumes one fresh directive and resumes;
@@ -319,18 +322,20 @@ Future focused tests should prove:
 17. existing opening, supervisor, reservation, redispatch, runtime, adapter,
     report, and persistence tests remain green.
 
-## 16. Proposed Implementation Sequence
+## 16. Implementation Sequence
 
-1. Perform a focused maintainer/security review of this plan.
-2. Add only the private entry classification and bounded outcome model.
-3. Compose existing opening, directive-consumption, and redispatch operations
-   without adding public APIs.
-4. Add restart, replay, ambiguity, concurrency, substitution, and privacy
-   tests.
-5. Run complete workspace validation.
-6. Perform a focused implementation review.
-7. Only after acceptance, plan a caller that can register typed waits and
-   reinvoke this boundary after lawful external changes.
+1. The focused maintainer/security plan review is complete.
+2. The private entry classification and bounded outcome composition is
+   implemented.
+3. Existing opening, directive-consumption, and redispatch operations are
+   reused without adding public APIs.
+4. Focused restart, blocked, terminal, missing-opening-context, substitution,
+   and privacy tests are implemented; reused primitive suites retain replay,
+   ambiguity, and concurrency proofs.
+5. Complete workspace validation is required for phase close.
+6. A focused implementation review remains next.
+7. Only after acceptance may a separate phase plan a caller that registers
+   typed waits and reinvokes this boundary after lawful external changes.
 
 ## 17. Open Questions
 
@@ -351,11 +356,12 @@ provider execution.
 
 ## 18. Final Recommendation
 
-Proceed next to a focused maintainer/security review of this plan. If accepted,
-implement only one crate-private local SQLite operational entry helper over
-the existing opening, directive, supervisor, reservation, and redispatch
-primitives.
+Proceed next to a focused maintainer/security implementation review of the
+private local SQLite operational entry helper. Verify that it obtains fresh
+authority only from the accepted opening or directive-consumption operations,
+never reconstructs capability, binds the exact invocation and executor, and
+returns bounded wait, blocked, or terminal posture without executor entry.
 
 Do not add a scheduler, daemon, public runtime API, CLI, SDK, schema, provider
 execution, provider mutation, OpenShell, nested harnesses, automatic approval,
-hosted behavior, or release posture in that implementation.
+hosted behavior, or release posture during that review.
