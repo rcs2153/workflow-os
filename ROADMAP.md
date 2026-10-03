@@ -598,8 +598,12 @@ current queue when they contain historical `next phase` language.
    from legacy direct wake, survives backend reopen, and rejects substituted
    handoff commitments without another executor entry. Provider,
    sandbox, nested-harness, public-config, CLI, SDK, and hosted integration
-   remain blocked. The next phase is focused maintainer/security review of
-   this private composition.
+   remain blocked. The focused maintainer/security [implementation
+   review](docs/concepts/TRUSTED_HOST_EXPLICIT_REINVOCATION_VERTICAL_SLICE_REVIEW.md)
+   accepts the private composition with non-blocking follow-ups. Full-path
+   concurrent-caller and transition-to-entry crash proofs are required before
+   scheduler implementation. The next phase is planning the smallest private
+   trusted-host scheduling boundary around this accepted explicit operation.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
