@@ -102,6 +102,10 @@ transaction-owned time observation, stable commitment coverage, exact replay,
 conflicting replay, concurrency behavior, and privacy posture before beginning
 the first private trusted-host caller integration.
 
+That review is complete in [Trusted Host TimeWindow Wait Binding Blocker Fix
+Review](TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_BLOCKER_FIX_REVIEW.md). It accepts
+both corrections and recommends the first private trusted-host caller phase.
+
 ## 10. Governed Phase Record
 
 - workflow: `dg/blocker`

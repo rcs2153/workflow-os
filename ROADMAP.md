@@ -538,8 +538,11 @@ current queue when they contain historical `next phase` language.
    fix](docs/concepts/TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_BLOCKER_FIX_REPORT.md)
    now uses the transaction's single trusted-time observation for deadline
    enforcement and admits exact operation replay before current-state
-   eligibility checks. The next P0 phase is a focused blocker-fix review;
-   caller integration remains blocked pending acceptance. Provider, sandbox,
+   eligibility checks. The focused [blocker-fix
+   review](docs/concepts/TRUSTED_HOST_TIME_WINDOW_WAIT_BINDING_BLOCKER_FIX_REVIEW.md)
+   accepted both corrections. The next P0 phase is the first private
+   trusted-host caller integration, limited to exact `TimeWindow` waits and the
+   accepted SQLite verifier boundary. Provider, sandbox,
    nested-harness, public-config, CLI, SDK, and hosted integration remain
    blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
