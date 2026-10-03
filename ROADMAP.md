@@ -489,11 +489,19 @@ current queue when they contain historical `next phase` language.
    completion, wait, or approval. The focused maintainer/security
    [implementation review](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_IMPLEMENTATION_REVIEW.md)
    accepts the private slice with non-blocking composition-level race and
-   fault-injection follow-ups. The next P0 phase is planning the smallest
-   local trusted-host operational entry boundary that can obtain fresh initial
-   authority and invoke the accepted loop without reconstructing capabilities
-   after restart. Provider, sandbox, nested-harness, public-config, CLI, SDK,
-   and hosted integration remain blocked.
+   fault-injection follow-ups. The smallest fresh-process and restart boundary
+   is now documented in the [Trusted-Host Operational Entry Boundary
+   Plan](docs/implementation-plans/trusted-host-operational-entry-boundary-plan.md)
+   and [planning
+   report](docs/concepts/TRUSTED_HOST_OPERATIONAL_ENTRY_BOUNDARY_PLAN_REPORT.md).
+   It rehydrates authoritative SQLite state, obtains fresh one-use authority
+   only from accepted opening or directive-consumption operations, validates
+   exact injected invocation and executor bindings, and surfaces typed wait,
+   blocked, or terminal posture without capability reconstruction. The next
+   P0 phase is focused maintainer/security review of that plan, especially the
+   fresh opening-authority source and committed-but-unused capability-loss
+   posture. Provider, sandbox, nested-harness, public-config, CLI, SDK, and
+   hosted integration remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
