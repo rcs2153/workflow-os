@@ -553,10 +553,12 @@ current queue when they contain historical `next phase` language.
    declaration; Core derives the exact trusted-time dependency binding and the
    existing SQLite continuity transaction atomically registers the yield and
    wait. Invalid versions and deadlines outside the authorized window fail
-   without a partial yield or wait. The next P0 phase is a focused
-   maintainer/security review of this registration boundary. Opaque wait
-   handoff follows acceptance. Provider, sandbox, nested-harness, public-config,
-   CLI, SDK, and hosted integration remain blocked.
+   without a partial yield or wait. The focused maintainer/security
+   [review](docs/concepts/TRUSTED_HOST_TIME_WINDOW_WAIT_REGISTRATION_REVIEW.md)
+   accepts the registration boundary with non-blocking direct race and elapsed
+   deadline test follow-ups. The next P0 phase is planning the smallest opaque,
+   non-authoritative wait handoff. Provider, sandbox, nested-harness,
+   public-config, CLI, SDK, and hosted integration remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
