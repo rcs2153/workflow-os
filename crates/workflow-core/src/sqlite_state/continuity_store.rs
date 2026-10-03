@@ -2978,6 +2978,12 @@ mod conformance_backend {
             time_window_dependency_binding, AuthorityUseCapability, ContinuityWakeSourceReference,
             ExpectedWaitRevision, SeedWait, WakeAssessmentCapability,
         };
+        use crate::sqlite_state::continuity_codec;
+        use crate::sqlite_state::trusted_host_operational_entry::TrustedHostOperationalEntryLocator;
+        use crate::sqlite_state::trusted_host_time_window_caller::{
+            apply_trusted_host_time_window_wake, apply_trusted_host_time_window_wake_with_verifier,
+            TrustedHostTimeWindowWakeInput, TrustedHostTimeWindowWakeStatus,
+        };
         use crate::{
             ActorId, AuthorizedExecutionAttemptId, AuthorizedExecutionAttemptOutcome,
             AuthorizedExecutionWaitConditionId, AuthorizedExecutionWakeTriggerKind,
@@ -3486,6 +3492,227 @@ mod conformance_backend {
                 expected_condition_version: 1,
                 expected_wait_revision: wait.revision,
             }
+        }
+
+        fn time_window_caller_input<'a>(
+            f: &'a Fixture,
+            operation: &str,
+            receipt: &str,
+        ) -> TrustedHostTimeWindowWakeInput<'a> {
+            time_window_caller_input_for_backend(
+                &f.backend.store.backend,
+                &f.window_id,
+                operation,
+                receipt,
+            )
+        }
+
+        fn time_window_caller_input_for_backend<'a>(
+            backend: &'a SqliteStateBackend,
+            window_id: &AuthorizedExecutionWindowId,
+            operation: &str,
+            receipt: &str,
+        ) -> TrustedHostTimeWindowWakeInput<'a> {
+            let state =
+                continuity_codec::load_snapshot(&backend.connection().expect("caller connection"))
+                    .expect("caller snapshot");
+            let window = state.windows.get(window_id).expect("window");
+            TrustedHostTimeWindowWakeInput {
+                backend,
+                locator: TrustedHostOperationalEntryLocator {
+                    workflow_id: window.workflow_id.clone(),
+                    run_id: window.run_id.clone(),
+                    step_id: window.step_id.clone(),
+                    window_id: window.window_id.clone(),
+                    subject_actor_id: window.subject_actor_id.clone(),
+                    immutable_run_bundle: window.immutable_run_bundle.clone(),
+                },
+                condition_id: AuthorizedExecutionWaitConditionId::new("wait/sqlite-time-window/1")
+                    .expect("wait"),
+                condition_version: 1,
+                operation_id: ContinuityOperationId::new(operation).expect("operation"),
+                receipt_id: ContinuityReceiptId::new(receipt).expect("receipt"),
+            }
+        }
+
+        #[test]
+        fn trusted_host_time_window_caller_derives_current_binding_and_transitions() {
+            let fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            fixture.backend.conformance_set_time(deadline);
+
+            let outcome = apply_trusted_host_time_window_wake_with_verifier(
+                time_window_caller_input(
+                    &fixture,
+                    "operation/trusted-host-time-window/1",
+                    "receipt/trusted-host-time-window/1",
+                ),
+                |request| fixture.backend.store.transition_time_window_wait(request),
+            )
+            .expect("caller transition");
+
+            assert_eq!(
+                outcome.status,
+                TrustedHostTimeWindowWakeStatus::Transitioned
+            );
+            assert_eq!(
+                outcome.disposition,
+                AuthoritativeContinuationDisposition::Blocked
+            );
+        }
+
+        #[test]
+        fn trusted_host_time_window_caller_recovers_exact_replay_after_restart() {
+            let fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            fixture.backend.conformance_set_time(deadline);
+            let operation = "operation/trusted-host-time-window/replay";
+            let receipt = "receipt/trusted-host-time-window/replay";
+            apply_trusted_host_time_window_wake_with_verifier(
+                time_window_caller_input(&fixture, operation, receipt),
+                |request| fixture.backend.store.transition_time_window_wait(request),
+            )
+            .expect("initial transition");
+
+            let reopened =
+                SqliteStateBackend::open(fixture.backend.store.backend.database_path.clone())
+                    .expect("reopen backend");
+            let state = continuity_codec::load_snapshot(
+                &reopened.connection().expect("reopened connection"),
+            )
+            .expect("reopened snapshot");
+            let window = state.windows.get(&fixture.window_id).expect("window");
+            let outcome = apply_trusted_host_time_window_wake(TrustedHostTimeWindowWakeInput {
+                backend: &reopened,
+                locator: TrustedHostOperationalEntryLocator {
+                    workflow_id: window.workflow_id.clone(),
+                    run_id: window.run_id.clone(),
+                    step_id: window.step_id.clone(),
+                    window_id: window.window_id.clone(),
+                    subject_actor_id: window.subject_actor_id.clone(),
+                    immutable_run_bundle: window.immutable_run_bundle.clone(),
+                },
+                condition_id: AuthorizedExecutionWaitConditionId::new("wait/sqlite-time-window/1")
+                    .expect("wait"),
+                condition_version: 1,
+                operation_id: ContinuityOperationId::new(operation).expect("operation"),
+                receipt_id: ContinuityReceiptId::new(receipt).expect("receipt"),
+            })
+            .expect("replay");
+
+            assert_eq!(outcome.status, TrustedHostTimeWindowWakeStatus::ExactReplay);
+            assert_eq!(
+                outcome.disposition,
+                AuthoritativeContinuationDisposition::Blocked
+            );
+        }
+
+        #[test]
+        fn trusted_host_time_window_caller_admits_one_competing_transition() {
+            let fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            fixture.backend.conformance_set_time(deadline);
+            let left = fixture.backend.clone();
+            let right = fixture.backend.clone();
+            let window_id = fixture.window_id.clone();
+            let barrier = Arc::new(Barrier::new(2));
+
+            let (left_result, right_result) = thread::scope(|scope| {
+                let left_barrier = Arc::clone(&barrier);
+                let left_window = window_id.clone();
+                let left_handle = scope.spawn(move || {
+                    let input = time_window_caller_input_for_backend(
+                        &left.store.backend,
+                        &left_window,
+                        "operation/time-caller-left",
+                        "receipt/time-caller-left",
+                    );
+                    apply_trusted_host_time_window_wake_with_verifier(input, |request| {
+                        left_barrier.wait();
+                        left.store.transition_time_window_wait(request)
+                    })
+                });
+                let right_barrier = Arc::clone(&barrier);
+                let right_handle = scope.spawn(move || {
+                    let input = time_window_caller_input_for_backend(
+                        &right.store.backend,
+                        &window_id,
+                        "operation/time-caller-right",
+                        "receipt/time-caller-right",
+                    );
+                    apply_trusted_host_time_window_wake_with_verifier(input, |request| {
+                        right_barrier.wait();
+                        right.store.transition_time_window_wait(request)
+                    })
+                });
+                (
+                    left_handle.join().expect("left caller"),
+                    right_handle.join().expect("right caller"),
+                )
+            });
+
+            assert_ne!(left_result.is_ok(), right_result.is_ok());
+            let winner = left_result.or(right_result).expect("one winner");
+            assert_eq!(winner.status, TrustedHostTimeWindowWakeStatus::Transitioned);
+        }
+
+        #[test]
+        fn trusted_host_time_window_caller_rejects_stale_locator_and_conflicting_replay() {
+            let fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            fixture.backend.conformance_set_time(deadline);
+            let operation = "operation/trusted-host-time-window/conflict";
+            apply_trusted_host_time_window_wake_with_verifier(
+                time_window_caller_input(
+                    &fixture,
+                    operation,
+                    "receipt/trusted-host-time-window/conflict",
+                ),
+                |request| fixture.backend.store.transition_time_window_wait(request),
+            )
+            .expect("initial transition");
+
+            let conflict = apply_trusted_host_time_window_wake(time_window_caller_input(
+                &fixture,
+                operation,
+                "receipt/trusted-host-time-window/changed",
+            ));
+            assert_eq!(
+                conflict.expect_err("conflict").code(),
+                "trusted_host_time_window_caller.operation_replay_conflict"
+            );
+
+            let mut stale = time_window_caller_input(
+                &fixture,
+                "operation/trusted-host-time-window/stale",
+                "receipt/trusted-host-time-window/stale",
+            );
+            stale.locator.run_id = WorkflowRunId::new("run/stale").expect("run");
+            assert_eq!(
+                apply_trusted_host_time_window_wake(stale)
+                    .expect_err("stale locator")
+                    .code(),
+                "trusted_host_time_window_caller.window_binding_mismatch"
+            );
+        }
+
+        #[test]
+        fn trusted_host_time_window_caller_debug_is_redaction_safe() {
+            let fixture = fixture(false, false);
+            register_time_window_wait(
+                &fixture,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let input =
+                time_window_caller_input(&fixture, "operation/time-debug", "receipt/time-debug");
+            let debug = format!("{input:?}");
+            assert!(debug.contains("[REDACTED]"));
+            assert!(!debug.contains("debug-secret"));
+            assert!(!debug.contains("sqlite-time-window"));
         }
 
         #[test]
