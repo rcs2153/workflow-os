@@ -489,11 +489,23 @@ current queue when they contain historical `next phase` language.
    completion, wait, or approval. The focused maintainer/security
    [implementation review](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_IMPLEMENTATION_REVIEW.md)
    accepts the private slice with non-blocking composition-level race and
-   fault-injection follow-ups. The next P0 phase is planning the smallest
-   local trusted-host operational entry boundary that can obtain fresh initial
-   authority and invoke the accepted loop without reconstructing capabilities
-   after restart. Provider, sandbox, nested-harness, public-config, CLI, SDK,
-   and hosted integration remain blocked.
+   fault-injection follow-ups. The smallest fresh-process and restart boundary
+   is now documented in the [Trusted-Host Operational Entry Boundary
+   Plan](docs/implementation-plans/trusted-host-operational-entry-boundary-plan.md)
+   and [planning
+   report](docs/concepts/TRUSTED_HOST_OPERATIONAL_ENTRY_BOUNDARY_PLAN_REPORT.md).
+   It rehydrates authoritative SQLite state, obtains fresh one-use authority
+   only from accepted opening or directive-consumption operations, validates
+   exact injected invocation and executor bindings, and surfaces typed wait,
+   blocked, or terminal posture without capability reconstruction. The next
+   focused maintainer/security
+   [review](docs/concepts/TRUSTED_HOST_OPERATIONAL_ENTRY_BOUNDARY_PLAN_REVIEW.md)
+   accepts the corrected plan with non-blocking follow-ups. The entry helper
+   must reuse `open_with_registered_current_authority` and may not construct
+   opening authorization itself. The next P0 phase is implementation of the
+   private local SQLite entry helper only, followed by focused review before
+   any caller integration. Provider, sandbox, nested-harness, public-config,
+   CLI, SDK, and hosted integration remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
