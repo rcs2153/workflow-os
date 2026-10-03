@@ -511,8 +511,21 @@ current queue when they contain historical `next phase` language.
    reconstruction. The focused maintainer/security [implementation
    review](docs/concepts/TRUSTED_HOST_OPERATIONAL_ENTRY_BOUNDARY_IMPLEMENTATION_REVIEW.md)
    accepts the private helper with non-blocking follow-ups. The next P0 phase
-   is planning the smallest private caller and typed-wait registration boundary
-   before any runtime integration. Provider, sandbox,
+   is documented in the [Private Trusted-Host Caller And Typed-Wait Boundary
+   Plan](docs/implementation-plans/trusted-host-private-caller-typed-wait-plan.md)
+   and [planning
+   report](docs/concepts/TRUSTED_HOST_PRIVATE_CALLER_TYPED_WAIT_PLAN_REPORT.md).
+   The plan identifies one prerequisite before caller integration: durable
+   waits must bind the exact dependency source, not only a wake-trigger class,
+   and the supervisor must support validated non-empty wait registration.
+   The focused maintainer/security [plan
+   review](docs/concepts/TRUSTED_HOST_PRIVATE_CALLER_TYPED_WAIT_PLAN_REVIEW.md)
+   accepts the corrected sequence. Executor declarations are untrusted
+   liveness requests, not authority, and `TimeWindow` is the first wake source
+   because it can be verified against the accepted trusted-time boundary
+   without caller-authored satisfaction. The next P0 implementation is exact
+   durable wait-dependency binding plus the private `TimeWindow` verifier only;
+   caller integration remains blocked. Provider, sandbox,
    nested-harness, public-config, CLI, SDK, and hosted integration remain
    blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
