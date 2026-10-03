@@ -575,7 +575,10 @@ current queue when they contain historical `next phase` language.
    report](docs/concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_BLOCKER_FIX_REPORT.md):
    observation uses an existing read-only SQLite connection, missing storage
    remains absent, and the focused state-movement, non-handoff, and corruption
-   matrix passes. The next P0 phase is focused blocker-fix review. Provider,
+   matrix passes. The focused [blocker-fix
+   review](docs/concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_BLOCKER_FIX_REVIEW.md)
+   accepts the corrected boundary. The next P0 phase is explicit reinvocation
+   vertical-slice planning from fresh authoritative classification. Provider,
    sandbox, nested-harness, public-config, CLI, SDK, and hosted integration
    remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,

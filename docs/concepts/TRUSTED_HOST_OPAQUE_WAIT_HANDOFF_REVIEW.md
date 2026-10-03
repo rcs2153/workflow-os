@@ -172,7 +172,8 @@ The two blockers are addressed in the [blocker-fix
 report](TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_BLOCKER_FIX_REPORT.md). Observation
 uses an existing read-only connection and the required focused security matrix
 is implemented. This note does not erase the original findings. Focused
-blocker-fix review remains required before reinvocation planning.
+[blocker-fix review](TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_BLOCKER_FIX_REVIEW.md)
+accepted the corrected boundary before reinvocation planning.
 
 ## 13. Validation
 
