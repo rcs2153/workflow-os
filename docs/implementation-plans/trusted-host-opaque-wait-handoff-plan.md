@@ -322,6 +322,25 @@ Do not implement wait satisfaction, polling, scheduling, automatic
 reinvocation, provider or sandbox execution, nested harnesses, public APIs,
 schemas, CLI, SDK, hosted behavior, writes, or release changes in that phase.
 
+## 18.1 Implementation Status
+
+The private model and coherent observation slice is implemented. Core now:
+
+- derives a dedicated opaque handoff ID from bounded authoritative posture;
+- commits the cursor rather than exposing it;
+- loads, classifies, and projects from one explicit SQLite read transaction;
+- returns a handoff only for a supported unsatisfied `TimeWindow` wait whose
+  coherent snapshot classifies as `AwaitCondition`;
+- returns ordinary non-handoff posture for blocked or resumed state;
+- exposes only `RequestFreshClassification` as the next-operation vocabulary;
+  and
+- performs no write, event append, wake transition, scheduling, or executor
+  invocation.
+
+The [implementation report](../concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_REPORT.md)
+records the completed scope and validation. Focused maintainer/security review
+is required before any reinvocation planning.
+
 ## 19. Governed Planning Record
 
 - workflow: `dg/d`

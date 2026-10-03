@@ -557,14 +557,21 @@ current queue when they contain historical `next phase` language.
    [review](docs/concepts/TRUSTED_HOST_TIME_WINDOW_WAIT_REGISTRATION_REVIEW.md)
    accepts the registration boundary with non-blocking direct race and elapsed
    deadline test follow-ups. The smallest opaque, non-authoritative wait
-   handoff is now defined in the [Trusted Host Opaque Wait Handoff
+   handoff is defined in the [Trusted Host Opaque Wait Handoff
    Plan](docs/implementation-plans/trusted-host-opaque-wait-handoff-plan.md).
    Its focused maintainer/security [review](docs/concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_PLAN_REVIEW.md)
-   accepts the plan with explicit coherent-read, type-separation, cursor-
-   commitment, and privacy constraints. The next P0 phase is the crate-private
-   handoff model and coherent SQLite observation implementation only. Provider,
-   sandbox, nested-harness, public-config, CLI, SDK, and hosted integration
-   remain blocked.
+   accepted the plan with explicit coherent-read, type-separation, cursor-
+   commitment, and privacy constraints. The crate-private handoff model and
+   coherent SQLite observation path are now implemented in the [phase
+   report](docs/concepts/TRUSTED_HOST_OPAQUE_WAIT_HANDOFF_REPORT.md). The
+   handoff is a deterministic inert projection derived inside one explicit
+   read transaction. It exposes only bounded `TimeWindow` posture and
+   `RequestFreshClassification`; it grants no authority and cannot satisfy a
+   wait, reserve dispatch, or invoke an executor. Focused restart, no-write,
+   redaction, blocked-posture, and concurrent old-or-new snapshot tests pass.
+   The next P0 phase is focused maintainer/security review before planning any
+   explicit reinvocation. Provider, sandbox, nested-harness, public-config,
+   CLI, SDK, and hosted integration remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
