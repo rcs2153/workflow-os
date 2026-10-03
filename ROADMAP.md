@@ -463,8 +463,9 @@ current queue when they contain historical `next phase` language.
    derived `ResumeNow` may consume a fresh directive, commit a one-winner
    dispatch reservation, and invoke one injected executor. Typed wait,
    blocked, terminal, ambiguous, corrupt, and security-rejected posture stop
-   the loop without fabricated progress. A finite host budget is explicit
-   process posture and must not masquerade as workflow completion or wait.
+   the loop without fabricated progress. The durable execution-window attempt
+   limit is the finite bound; no caller-selected host budget may masquerade as
+   workflow completion or wait.
    The focused maintainer/security
    [plan review](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_PLAN_REVIEW.md)
    found two blockers. The focused planning fix removes caller-selected budget
@@ -477,10 +478,17 @@ current queue when they contain historical `next phase` language.
    report](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_PLAN_BLOCKER_FIX_REPORT.md).
    The focused
    [blocker-fix review](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_PLAN_BLOCKER_FIX_REVIEW.md)
-   accepts both corrections. The next P0 phase is the private local SQLite
-   bounded redispatch-loop implementation, followed by a focused
-   maintainer/security review before any provider, sandbox, nested-harness,
-   public-config, CLI, SDK, or hosted integration.
+   accepts both corrections. The private local SQLite bounded redispatch loop
+   is now implemented in the [implementation
+   report](docs/concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_IMPLEMENTATION_REPORT.md).
+   It composes the accepted one-shot supervisor in one private helper, derives
+   every continuation posture freshly, consumes a distinct directive and
+   atomic dispatch reservation for each resumed attempt, reuses the exact
+   immutable invocation, and cannot return normally while Core still derives
+   `ResumeNow`. Exhausted attempt authority fails closed rather than becoming
+   completion, wait, or approval. Focused maintainer/security implementation
+   review is the next required P0 phase before any provider, sandbox,
+   nested-harness, public-config, CLI, SDK, or hosted integration.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

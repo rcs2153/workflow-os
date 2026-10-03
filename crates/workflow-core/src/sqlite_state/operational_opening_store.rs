@@ -637,6 +637,11 @@ mod tests {
     use crate::sqlite_state::dispatch_reservation_store::{
         inject_dispatch_commit_fault, InjectedDispatchCommitFault,
     };
+    use crate::sqlite_state::trusted_host_redispatch_loop::{
+        run_bounded_trusted_host_redispatch_loop, TrustedHostRedispatchIdentityProvider,
+        TrustedHostRedispatchIterationIdentity, TrustedHostRedispatchLoopInput,
+        TrustedHostRedispatchStopReason,
+    };
     use crate::trusted_host_supervisor::{
         inject_supervisor_persistence_fault, supervise_one_local_skill_attempt,
         InjectedSupervisorPersistenceFault, LocalSkillAttemptExecutor,
@@ -1353,6 +1358,66 @@ mod tests {
             _context: &TrustedHostAttemptExecutionContext<'_>,
         ) -> TrustedHostAttemptExecutionResult {
             TrustedHostAttemptExecutionResult::Yielded(AuthorizedExecutionYieldReason::TurnBoundary)
+        }
+    }
+
+    struct YieldThenSucceedExecutor<'a> {
+        calls: &'a AtomicUsize,
+        yields_before_success: usize,
+    }
+
+    impl TrustedHostAttemptExecutor for YieldThenSucceedExecutor<'_> {
+        fn binding_commitment(&self) -> SpecContentHash {
+            supervisor_executor_binding()
+        }
+
+        fn execute(
+            &self,
+            _context: &TrustedHostAttemptExecutionContext<'_>,
+        ) -> TrustedHostAttemptExecutionResult {
+            if self.calls.fetch_add(1, Ordering::Relaxed) < self.yields_before_success {
+                TrustedHostAttemptExecutionResult::Yielded(
+                    AuthorizedExecutionYieldReason::TurnBoundary,
+                )
+            } else {
+                TrustedHostAttemptExecutionResult::Succeeded(SkillOutput::new(
+                    BTreeMap::from([("status".to_owned(), "ok".to_owned())]),
+                    Some("bounded-redispatch-output".to_owned()),
+                ))
+            }
+        }
+    }
+
+    struct DeterministicRedispatchIdentityProvider {
+        calls: usize,
+    }
+
+    impl TrustedHostRedispatchIdentityProvider for DeterministicRedispatchIdentityProvider {
+        fn next_identity(
+            &mut self,
+            iteration: u32,
+        ) -> Result<TrustedHostRedispatchIterationIdentity, WorkflowOsError> {
+            self.calls += 1;
+            Ok(TrustedHostRedispatchIterationIdentity {
+                consume_operation: ContinuityOperationId::new(format!(
+                    "operation/redispatch-consume-{iteration}"
+                ))?,
+                consume_receipt: ContinuityReceiptId::new(format!(
+                    "receipt/redispatch-consume-{iteration}"
+                ))?,
+                generated_attempt: AuthorizedExecutionAttemptId::new(format!(
+                    "attempt/redispatch-{iteration}"
+                ))?,
+                supervisor_operation: ContinuityOperationId::new(format!(
+                    "operation/redispatch-supervisor-{iteration}"
+                ))?,
+                supervisor_receipt: ContinuityReceiptId::new(format!(
+                    "receipt/redispatch-supervisor-{iteration}"
+                ))?,
+                yield_generation: ContinuityYieldGenerationId::new(format!(
+                    "yield/redispatch-{iteration}"
+                ))?,
+            })
         }
     }
 
@@ -2086,6 +2151,196 @@ mod tests {
             "dispatch_reservation.recovery_required"
         );
         assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn bounded_redispatch_loop_yields_then_succeeds_without_false_stall() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/bounded-redispatch", 2);
+        let calls = AtomicUsize::new(0);
+        let executor = YieldThenSucceedExecutor {
+            calls: &calls,
+            yields_before_success: 1,
+        };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let outcome = run_bounded_trusted_host_redispatch_loop(TrustedHostRedispatchLoopInput {
+            backend: &fixture.backend,
+            initial_capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            initial_persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/bounded-redispatch-initial")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/bounded-redispatch-initial")
+                    .expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new("yield/bounded-redispatch-initial")
+                        .expect("generation"),
+                ),
+            },
+            identity_provider: &mut identity_provider,
+        })
+        .expect("bounded redispatch completes");
+
+        assert_eq!(
+            outcome.disposition,
+            crate::authorized_execution_continuity_state::internal::AuthoritativeContinuationDisposition::Terminal
+        );
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRedispatchStopReason::Terminal
+        );
+        assert_eq!(outcome.executor_entries, 2);
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+        assert_eq!(identity_provider.calls, 1);
+        assert_eq!(
+            outcome
+                .skill_output
+                .as_ref()
+                .and_then(|output| output.output_ref.as_deref()),
+            Some("bounded-redispatch-output")
+        );
+        let debug = format!("{outcome:?}");
+        assert!(!debug.contains("bounded-redispatch-output"));
+        assert!(!debug.contains("status"));
+        assert_eq!(
+            fixture
+                .backend
+                .rehydrate_run(&fixture.run_id)
+                .expect("run")
+                .snapshot
+                .status,
+            WorkflowRunStatus::Running
+        );
+    }
+
+    #[test]
+    fn bounded_redispatch_loop_consumes_distinct_authority_for_each_resume() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/repeated-redispatch", 3);
+        let calls = AtomicUsize::new(0);
+        let executor = YieldThenSucceedExecutor {
+            calls: &calls,
+            yields_before_success: 2,
+        };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let outcome = run_bounded_trusted_host_redispatch_loop(TrustedHostRedispatchLoopInput {
+            backend: &fixture.backend,
+            initial_capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            initial_persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/repeated-redispatch-initial")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/repeated-redispatch-initial")
+                    .expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new("yield/repeated-redispatch-initial")
+                        .expect("generation"),
+                ),
+            },
+            identity_provider: &mut identity_provider,
+        })
+        .expect("repeated redispatch completes");
+
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRedispatchStopReason::Terminal
+        );
+        assert_eq!(outcome.executor_entries, 3);
+        assert_eq!(calls.load(Ordering::Relaxed), 3);
+        assert_eq!(identity_provider.calls, 2);
+        assert_eq!(
+            outcome.skill_output.and_then(|output| output.output_ref),
+            Some("bounded-redispatch-output".to_owned())
+        );
+        assert_eq!(
+            fixture
+                .backend
+                .rehydrate_run(&fixture.run_id)
+                .expect("run")
+                .snapshot
+                .status,
+            WorkflowRunStatus::Running
+        );
+    }
+
+    #[test]
+    fn bounded_redispatch_loop_fails_closed_when_resume_exceeds_attempt_limit() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/redispatch-limit", 1);
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let error = run_bounded_trusted_host_redispatch_loop(TrustedHostRedispatchLoopInput {
+            backend: &fixture.backend,
+            initial_capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &YieldExecutor,
+            skill_input: skill_input(&fixture),
+            initial_persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/redispatch-limit")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/redispatch-limit").expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new("yield/redispatch-limit").expect("generation"),
+                ),
+            },
+            identity_provider: &mut identity_provider,
+        })
+        .expect_err("exhausted immediate continuation must fail closed");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host_redispatch.attempt_limit_inconsistent"
+        );
+        assert_eq!(identity_provider.calls, 0);
+        let debug = format!("{error:?}");
+        assert!(!debug.contains(fixture.run_id.as_str()));
+        assert!(!debug.contains("redispatch-limit"));
+    }
+
+    #[test]
+    fn bounded_redispatch_loop_rejects_substituted_input_before_executor_entry() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/redispatch-substitution", 2);
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let mut input = skill_input(&fixture);
+        input.values.insert(
+            "context".to_owned(),
+            "authorization=secret-redispatch-marker".to_owned(),
+        );
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let error = run_bounded_trusted_host_redispatch_loop(TrustedHostRedispatchLoopInput {
+            backend: &fixture.backend,
+            initial_capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &executor,
+            skill_input: input,
+            initial_persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/redispatch-substitution")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/redispatch-substitution")
+                    .expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new("yield/redispatch-substitution")
+                        .expect("generation"),
+                ),
+            },
+            identity_provider: &mut identity_provider,
+        })
+        .expect_err("substituted invocation must fail before executor entry");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host_supervisor.invocation_binding_mismatch"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(identity_provider.calls, 0);
+        let debug = format!("{error:?}");
+        assert!(!debug.contains("secret-redispatch-marker"));
+        assert!(!debug.contains("authorization"));
     }
 
     #[test]

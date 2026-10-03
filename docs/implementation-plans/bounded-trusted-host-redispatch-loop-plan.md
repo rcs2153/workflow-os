@@ -1,9 +1,12 @@
 # Bounded Trusted-Host Redispatch Loop Plan
 
-Status: planning only. Atomic dispatch reservation is implemented and accepted.
-This plan defines the next private local runtime boundary. It does not implement
-the loop, a scheduler, provider execution, OpenShell, nested harnesses, public
-configuration, CLI, SDK, schema, hosted behavior, or release changes.
+Status: implemented as a private local SQLite slice; focused implementation
+review pending. Atomic dispatch reservation is implemented and accepted. The
+implementation is documented in the [Bounded Trusted-Host Redispatch Loop
+Implementation
+Report](../concepts/BOUNDED_TRUSTED_HOST_REDISPATCH_LOOP_IMPLEMENTATION_REPORT.md).
+It does not add a scheduler, provider execution, OpenShell, nested harnesses,
+public configuration, CLI, SDK, schema, hosted behavior, or release changes.
 
 ## 1. Executive Summary
 
