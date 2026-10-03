@@ -139,7 +139,7 @@ fn observe_with_hook(
     observe_time: impl FnOnce() -> Result<TrustedTimeObservation, WorkflowOsError>,
     after_snapshot: impl FnOnce() -> Result<(), WorkflowOsError>,
 ) -> Result<TrustedHostWaitObservation, WorkflowOsError> {
-    let mut connection = backend.connection()?;
+    let mut connection = backend.existing_read_only_connection()?;
     let transaction = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)
         .map_err(|_| handoff_corrupt())?;
@@ -168,6 +168,15 @@ pub(super) fn observe_trusted_host_wait_with_time_and_hook(
     after_snapshot: impl FnOnce() -> Result<(), WorkflowOsError>,
 ) -> Result<TrustedHostWaitObservation, WorkflowOsError> {
     observe_with_hook(backend, locator, || Ok(observation), after_snapshot)
+}
+
+#[cfg(test)]
+pub(super) fn derive_trusted_host_wait_observation_for_test(
+    state: &ReferenceContinuityState,
+    locator: &TrustedHostOperationalEntryLocator,
+    observation: &TrustedTimeObservation,
+) -> Result<TrustedHostWaitObservation, WorkflowOsError> {
+    derive_observation(state, locator, observation)
 }
 
 fn derive_observation(
