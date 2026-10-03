@@ -33,7 +33,8 @@ use crate::{
     StateMigrationPlan, StateMigrationRecordCount, StateMigrationWriterCompatibility,
     StateMigrationWriterProtocolVersion, Timestamp, WorkReportArtifactRecord,
     WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactStore, WorkReportId, WorkflowId,
-    WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId,
+    WorkflowRunSnapshot,
 };
 
 const ADAPTER_SCHEMA_VERSION: u32 = 6;
@@ -1582,6 +1583,47 @@ impl SqliteStateBackend {
             .flatten()
             .ok_or_else(verification_failed)?;
         decode_json(&payload, "migration verification receipt").map_err(|_| verification_failed())
+    }
+
+    pub(crate) fn derive_time_window_wait_binding(
+        &self,
+        window_id: &crate::AuthorizedExecutionWindowId,
+        deadline: Timestamp,
+    ) -> Result<
+        crate::authorized_execution_continuity_state::internal::AuthoritativeWaitDependencyBinding,
+        WorkflowOsError,
+    > {
+        use crate::authorized_execution_continuity_state::internal::{
+            time_window_dependency_binding, AuthoritativeWindowState,
+            ContinuityInstanceEligibility, TrustedTimePosture,
+        };
+
+        let state = continuity_codec::load_snapshot(&self.connection()?)?;
+        let window = state.windows.get(window_id).ok_or_else(|| {
+            WorkflowOsError::new(
+                WorkflowOsErrorKind::InvalidState,
+                "sqlite_state.time_window_wait.window_missing",
+                "trusted-host time-window wait cannot bind to the current window",
+            )
+        })?;
+        if state.trusted_time.eligibility != ContinuityInstanceEligibility::LiveStateEligible
+            || state.trusted_time.posture == TrustedTimePosture::Quarantined
+            || window.state != AuthoritativeWindowState::Executing
+            || deadline <= window.trusted_time_watermark
+            || deadline > window.expires_at
+        {
+            return Err(WorkflowOsError::new(
+                WorkflowOsErrorKind::Security,
+                "sqlite_state.time_window_wait.binding_invalid",
+                "trusted-host time-window wait binding is not currently eligible",
+            ));
+        }
+        Ok(time_window_dependency_binding(
+            deadline,
+            state.trusted_time.source,
+            state.trusted_time.provenance_commitment,
+            state.trusted_time.epoch_id,
+        ))
     }
 
     fn connection(&self) -> Result<Connection, WorkflowOsError> {

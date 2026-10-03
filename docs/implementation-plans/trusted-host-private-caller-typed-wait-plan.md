@@ -28,9 +28,13 @@ non-blocking test follow-ups in
 Status: accepted after focused maintainer/security review with in-review
 corrections and non-blocking follow-ups. The private local SQLite operational
 entry boundary and first exact `TimeWindow` caller are implemented and
-accepted. This plan defines the remaining genuine wait-registration,
-wait-handoff, and explicit reinvocation boundaries. It does not authorize a
-scheduler or public runtime behavior. The planning review is recorded in
+accepted. The first private typed-wait registration slice is now implemented:
+the exact authorized executor may return zero or one bounded `TimeWindow`
+declaration, Core derives its trusted-time dependency binding, and the existing
+SQLite transaction atomically registers the yield and wait. This plan defines
+the remaining focused review, wait-handoff, and explicit reinvocation
+boundaries. It does not authorize a scheduler or public runtime behavior. The
+planning review is recorded in
 [Private Trusted-Host Caller And Typed-Wait Plan
 Review](../concepts/TRUSTED_HOST_PRIVATE_CALLER_TYPED_WAIT_PLAN_REVIEW.md).
 
@@ -357,6 +361,7 @@ verification errors must remain bounded and redaction-safe.
 4. Direct successful fresh-opening composition test for the accepted entry
    helper.
 5. Private typed wait declaration and atomic yield-registration integration.
+   Implemented for zero or one `TimeWindow` declaration only.
 6. Focused review.
 7. One source-specific local wake verifier and wait-transition composition.
 8. Focused review.

@@ -11,7 +11,7 @@ use crate::authorized_execution_continuity_state::internal::{
     ContinuityYieldGenerationId, ExpectedWindowBinding, MutationResult,
     ProjectedContinuityReconciliationResult, ReconcileOperationRequest,
     RecordAttemptOutcomeRequest, RecoverAmbiguousAttemptRequest, RegisterYieldRequest,
-    RegisterYieldResult,
+    RegisterYieldResult, SeedWait,
 };
 use crate::dispatch_reservation::{
     request_commitment as dispatch_request_commitment, DispatchReservationOperationId,
@@ -23,8 +23,10 @@ use crate::operational_execution_window_opening::{
     OperationalExecutionAttemptUseCapability,
 };
 use crate::{
-    AuthorizedExecutionAttemptOutcome, AuthorizedExecutionYieldReason, SkillHandler, SkillInput,
-    SkillOutput, SpecContentHash, SqliteStateBackend, WorkflowOsError, WorkflowOsErrorKind,
+    AuthorizedExecutionAttemptOutcome, AuthorizedExecutionWaitConditionId,
+    AuthorizedExecutionWakeTriggerKind, AuthorizedExecutionYieldReason, SkillHandler, SkillInput,
+    SkillOutput, SpecContentHash, SqliteStateBackend, Timestamp, WorkflowOsError,
+    WorkflowOsErrorKind,
 };
 
 pub(crate) trait TrustedHostAttemptExecutor {
@@ -83,8 +85,55 @@ pub(crate) enum TrustedHostAttemptExecutionResult {
     Succeeded(SkillOutput),
     RetryableFailure,
     TerminalFailure,
-    Yielded(AuthorizedExecutionYieldReason),
+    Yielded(TrustedHostYieldRequest),
     AmbiguousMayHaveStarted,
+}
+
+pub(crate) struct TrustedHostYieldRequest {
+    reason: AuthorizedExecutionYieldReason,
+    time_window_wait: Option<TrustedHostTimeWindowWaitDeclaration>,
+}
+
+impl TrustedHostYieldRequest {
+    pub(crate) fn without_wait(reason: AuthorizedExecutionYieldReason) -> Self {
+        Self {
+            reason,
+            time_window_wait: None,
+        }
+    }
+
+    pub(crate) fn with_time_window(
+        reason: AuthorizedExecutionYieldReason,
+        condition_id: AuthorizedExecutionWaitConditionId,
+        condition_version: u32,
+        deadline: Timestamp,
+    ) -> Self {
+        Self {
+            reason,
+            time_window_wait: Some(TrustedHostTimeWindowWaitDeclaration {
+                condition_id,
+                condition_version,
+                deadline,
+            }),
+        }
+    }
+}
+
+impl fmt::Debug for TrustedHostYieldRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedHostYieldRequest")
+            .field("reason", &self.reason)
+            .field("wait_count", &usize::from(self.time_window_wait.is_some()))
+            .field("binding", &"[REDACTED]")
+            .finish()
+    }
+}
+
+struct TrustedHostTimeWindowWaitDeclaration {
+    condition_id: AuthorizedExecutionWaitConditionId,
+    condition_version: u32,
+    deadline: Timestamp,
 }
 
 #[cfg(test)]
@@ -272,8 +321,8 @@ pub(crate) fn supervise_one_local_skill_attempt(
             &capability,
             AuthorizedExecutionAttemptOutcome::TerminalFailure,
         )?,
-        TrustedHostAttemptExecutionResult::Yielded(reason) => {
-            persist_yield(input.backend, &input.persistence, &capability, reason)?;
+        TrustedHostAttemptExecutionResult::Yielded(request) => {
+            persist_yield(input.backend, &input.persistence, &capability, request)?;
         }
         TrustedHostAttemptExecutionResult::AmbiguousMayHaveStarted => {
             persist_ambiguous(input.backend, &input.persistence, &capability)?;
@@ -358,7 +407,7 @@ fn persist_yield(
     backend: &SqliteStateBackend,
     persistence: &TrustedHostSupervisorPersistenceInput,
     capability: &SupervisorCapability,
-    reason: AuthorizedExecutionYieldReason,
+    yield_request: TrustedHostYieldRequest,
 ) -> Result<(), WorkflowOsError> {
     let generation_id = persistence.yield_generation.clone().ok_or_else(|| {
         supervisor_error(
@@ -367,6 +416,27 @@ fn persist_yield(
             "trusted-host yield requires a generation identity",
         )
     })?;
+    let waits = match yield_request.time_window_wait {
+        Some(declaration) => {
+            if declaration.condition_version == 0 {
+                return Err(supervisor_error(
+                    WorkflowOsErrorKind::Validation,
+                    "wait_declaration_invalid",
+                    "trusted-host wait declaration is invalid",
+                ));
+            }
+            vec![SeedWait {
+                condition_id: declaration.condition_id,
+                condition_version: declaration.condition_version,
+                wake_trigger: AuthorizedExecutionWakeTriggerKind::DeadlineReached,
+                dependency_binding: Some(backend.derive_time_window_wait_binding(
+                    &capability.capability.window_id,
+                    declaration.deadline,
+                )?),
+            }]
+        }
+        None => Vec::new(),
+    };
     let mut request = RegisterYieldRequest {
         operation_id: persistence.operation.clone(),
         request_commitment: SpecContentHash::from_text("pending supervisor yield"),
@@ -378,8 +448,8 @@ fn persist_yield(
         cursor: capability.capability.cursor.clone(),
         attempt_id: capability.capability.attempt_id.clone(),
         attempt_capability: &capability.capability,
-        reason,
-        waits: Vec::new(),
+        reason: yield_request.reason,
+        waits,
     };
     request.request_commitment = expected_register_yield_commitment(&request);
     let reconciliation = ReconcileOperationRequest {
