@@ -614,7 +614,15 @@ current queue when they contain historical `next phase` language.
    and never proves deadline satisfaction or carries authority. Before any
    scheduling implementation, the explicit reinvocation composition must gain
    reviewed full-path concurrent-caller and transition-to-entry crash-recovery
-   proofs. The next phase is focused maintainer/security review of this plan.
+   proofs. Focused maintainer/security [plan
+   review](docs/concepts/TRUSTED_HOST_PRIVATE_SCHEDULING_BOUNDARY_PLAN_REVIEW.md)
+   found planning blockers before implementation: ordinary early or spurious
+   timer wakes cannot flow directly into the accepted transition because an
+   unelapsed deadline is currently a durable security rejection, and the first
+   host clock representation is unresolved. The next phase is a focused
+   planning blocker fix defining a Core-owned non-mutating readiness assessment
+   and a private absolute UTC scheduling hint. Scheduling implementation
+   remains blocked until that fix and the two reinvocation proofs are reviewed.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
