@@ -104,6 +104,12 @@ The caller must not provide current revision, cursor, generation, wait state,
 trusted-time observation, resume directive, dispatch capability, or authority
 result. Core derives those values freshly.
 
+The implementation must split or wrap operational entry so the existing-window
+path does not require caller-supplied opening context or opening-persistence
+values. Those values apply only when no window exists and are irrelevant to a
+reinvocation of an already-registered wait. The reinvocation helper must not
+accept placeholders for them.
+
 The outcome should be one of the accepted operational entry outcomes:
 
 - executor result;
@@ -180,11 +186,21 @@ attempt and outcome semantics remain authoritative. The new helper must not
 invent an outcome, reuse consumed authority, or treat a missing response as a
 failed attempt.
 
-Open question for review: determine whether the existing durable operation
-record retains enough bounded material to bind exact replay to the original
-handoff identity. If it does not, the implementation must add a payload-free
-handoff commitment to the private operation replay envelope before composing
-the path. Caller memory is insufficient.
+Focused review determined that the existing durable operation record is not
+sufficient to bind exact replay to the supplied handoff. The committed request
+binds the exact transition facts, but its durable replay projection does not
+persist the opaque handoff identity. After a successful transition, the old
+handoff cannot be freshly re-derived because the wait is already satisfied.
+
+The implementation must therefore derive a payload-free handoff commitment
+inside Core and bind it into both the transition request commitment and the
+durable private request envelope. An exact replay must compare the supplied
+handoff commitment to that durable value before treating the operation as the
+same reinvocation. This is an internal replay-envelope change, not public serde
+or a new authoritative handoff record. Direct wake callers that do not claim
+handoff-based reinvocation must remain distinguishable and cannot be promoted
+to this composition by omission or a placeholder value. Caller memory is
+insufficient.
 
 ## 11. Concurrency And Idempotency
 
@@ -203,11 +219,14 @@ It must not add an in-memory lock as the correctness boundary.
 ## 12. Failure And Error Posture
 
 - Stale handoff, binding substitution, or ownership mismatch is a stable
-  security or invalid-state failure.
+  security or invalid-state failure and returns no current disposition.
 - Trusted-time unavailability or quarantine cannot fabricate satisfaction.
 - Commit ambiguity is reconciled through the accepted fresh-connection replay
   path.
 - Blocked or terminal posture never enters the executor.
+- A coherent ordinary posture change discovered before mutation may return a
+  newly classified bounded outcome. A security rejection must not include a
+  second disposition that could become a state oracle.
 - Another unsatisfied wait returns `AwaitCondition` with a newly projected
   handoff rather than reusing the old one.
 - No failure becomes workflow completion, approval, or a fake external wait.
@@ -274,15 +293,18 @@ Focused future tests must prove:
 
 ## 16. Open Questions For Review
 
-1. Does the current operation replay envelope durably bind enough material to
-   the original handoff, or is a payload-free handoff commitment required?
-2. Should operational-entry input be split so fresh reinvocation does not
-   carry values relevant only to a never-opened window?
-3. Should stale or security-rejected handoff input return only a stable error,
-   or an error plus a separately derived non-authorizing current disposition?
+Focused review resolves the planning questions:
 
-None of these questions may be resolved by trusting caller memory or widening
-the public surface.
+1. A payload-free handoff commitment is required in the transition request
+   commitment and durable private replay envelope.
+2. The existing-window operational-entry input must be split or wrapped so
+   reinvocation cannot carry irrelevant opening or opening-persistence values.
+3. Security rejection returns only a stable non-leaking error. A coherent
+   ordinary posture change may return a separately derived bounded outcome,
+   but errors do not carry a disposition oracle.
+
+None of these decisions may be implemented by trusting caller memory or
+widening the public surface.
 
 ## 17. Final Recommendation
 
