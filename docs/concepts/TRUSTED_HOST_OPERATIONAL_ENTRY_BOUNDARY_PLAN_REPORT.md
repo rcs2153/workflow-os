@@ -82,7 +82,9 @@ No Rust validation is required for this documentation-only planning phase.
 
 ## 8. Remaining Limitations
 
-- The exact internal source of fresh opening authorization requires review.
+- The first implementation must reuse the existing
+  `open_with_registered_current_authority` same-call boundary; the operational
+  entry helper may not construct opening authorization itself.
 - Committed-but-unused opening recovery may need an additional closed
   operation; capability reconstruction remains prohibited.
 - No accepted host yet registers typed waits or reinvokes the entry boundary.

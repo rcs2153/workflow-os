@@ -498,10 +498,14 @@ current queue when they contain historical `next phase` language.
    only from accepted opening or directive-consumption operations, validates
    exact injected invocation and executor bindings, and surfaces typed wait,
    blocked, or terminal posture without capability reconstruction. The next
-   P0 phase is focused maintainer/security review of that plan, especially the
-   fresh opening-authority source and committed-but-unused capability-loss
-   posture. Provider, sandbox, nested-harness, public-config, CLI, SDK, and
-   hosted integration remain blocked.
+   focused maintainer/security
+   [review](docs/concepts/TRUSTED_HOST_OPERATIONAL_ENTRY_BOUNDARY_PLAN_REVIEW.md)
+   accepts the corrected plan with non-blocking follow-ups. The entry helper
+   must reuse `open_with_registered_current_authority` and may not construct
+   opening authorization itself. The next P0 phase is implementation of the
+   private local SQLite entry helper only, followed by focused review before
+   any caller integration. Provider, sandbox, nested-harness, public-config,
+   CLI, SDK, and hosted integration remain blocked.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

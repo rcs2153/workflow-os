@@ -141,6 +141,10 @@ The entry input should contain:
 
 - a `SqliteStateBackend` reference;
 - an exact workflow/run/step or accepted window locator;
+- the existing private `RegisteredInMemoryCurrentAuthoritySource` required by
+  `open_with_registered_current_authority` for a fresh opening;
+- the existing required-context execution and contract bindings consumed by
+  that same-call authority path;
 - an injected trusted invocation source;
 - an injected `TrustedHostAttemptExecutor`;
 - an injected provider for fresh non-authorizing operation identities;
@@ -164,11 +168,14 @@ The future helper should perform this closed sequence:
 2. Load the immutable run bundle and current authoritative continuity state.
 3. Obtain the exact in-memory invocation and executor commitments from the
    injected sources and validate them against the immutable binding.
-4. If no execution window exists and the run is eligible, construct the exact
-   opening request from current authoritative facts and fresh non-authorizing
-   identities.
-5. Commit the accepted opening transaction once. Continue only when it returns
-   a fresh owned opening capability.
+4. If no execution window exists and the run is eligible, call the existing
+   `open_with_registered_current_authority` boundary with the registered
+   in-memory source, required-context bindings, exact invocation commitment,
+   current trusted time, and fresh non-authorizing identities. The entry helper
+   must not construct `OperationalExecutionWindowOpeningAuthorization`.
+5. Let that existing same-call authority use construct the private opening
+   authorization and commit the accepted opening transaction once. Continue
+   only when it returns a fresh owned opening capability.
 6. If a window exists, derive the current continuation disposition freshly.
 7. For `ResumeNow`, consume exactly one current directive and obtain a fresh
    resumed capability through the accepted projected operation.
@@ -188,8 +195,11 @@ entry posture that conflicts with durable state.
 ## 9. Initial Opening And Replay
 
 A new window may be opened only from current eligible run state and current
-authority validated by the existing opening operation. The operation returns
-an attempt-use capability only after an unambiguous commit.
+authority validated by the existing registered-current-authority same-call
+use. The entry helper must reuse `open_with_registered_current_authority`; it
+must not accept caller-authored opening authorization, governance commitment,
+or gate-readiness posture. The operation returns an attempt-use capability
+only after an unambiguous commit.
 
 Exact replay or fresh-connection reconciliation may prove that an opening was
 committed, but neither may mint another capability. If a process loses the
@@ -324,8 +334,6 @@ Future focused tests should prove:
 
 ## 17. Open Questions
 
-- Which accepted internal authority source should construct a fresh opening
-  authorization without widening delegated authority?
 - Is a committed-but-unused opening necessarily `recovery_required`, or does
   the existing continuity state need one additional closed recovery operation?
 - What is the smallest safe locator for a host to choose a run without making
