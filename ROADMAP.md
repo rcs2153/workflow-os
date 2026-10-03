@@ -604,6 +604,17 @@ current queue when they contain historical `next phase` language.
    concurrent-caller and transition-to-entry crash proofs are required before
    scheduler implementation. The next phase is planning the smallest private
    trusted-host scheduling boundary around this accepted explicit operation.
+   That boundary is now defined in the [Private Trusted-Host Scheduling
+   Boundary
+   Plan](docs/implementation-plans/trusted-host-private-scheduling-boundary-plan.md)
+   and [planning
+   report](docs/concepts/TRUSTED_HOST_PRIVATE_SCHEDULING_BOUNDARY_PLAN_REPORT.md).
+   The plan uses an inert Core-derived scheduling ticket and one injected
+   deadline waiter: a host wake requests fresh source-specific verification
+   and never proves deadline satisfaction or carries authority. Before any
+   scheduling implementation, the explicit reinvocation composition must gain
+   reviewed full-path concurrent-caller and transition-to-entry crash-recovery
+   proofs. The next phase is focused maintainer/security review of this plan.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
