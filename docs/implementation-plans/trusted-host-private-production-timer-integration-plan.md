@@ -1,8 +1,9 @@
 # Private Trusted-Host Production Timer Integration Plan
 
-Status: planning only. The crate-private bounded repeated scheduling driver is
-implemented and accepted. This plan does not implement a timer or runtime
-integration.
+Status: implemented pending focused maintainer/security review. The
+crate-private bounded repeated scheduling driver and private synchronous local
+timer primitive are implemented. No explicit production caller, automatic
+scheduling service, or public runtime integration is implemented.
 
 ## 1. Executive Summary
 

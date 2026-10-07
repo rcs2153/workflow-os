@@ -638,6 +638,9 @@ mod tests {
     use crate::sqlite_state::dispatch_reservation_store::{
         inject_dispatch_commit_fault, InjectedDispatchCommitFault,
     };
+    use crate::sqlite_state::trusted_host_local_timer::{
+        run_trusted_host_local_timer, TrustedHostLocalTimerCancellation, TrustedHostLocalTimerInput,
+    };
     use crate::sqlite_state::trusted_host_operational_entry::{
         enter_trusted_host_operation, TrustedHostOperationalEntryInput,
         TrustedHostOperationalEntryLocator,
@@ -1583,6 +1586,20 @@ mod tests {
                 receipt_id: ContinuityReceiptId::new(format!(
                     "receipt/repeated-wake-{wake_attempt}"
                 ))?,
+            })
+        }
+    }
+
+    struct DuplicateWakeIdentityProvider;
+
+    impl TrustedHostScheduleWakeIdentityProvider for DuplicateWakeIdentityProvider {
+        fn next_identity(
+            &mut self,
+            _wake_attempt: u32,
+        ) -> Result<TrustedHostScheduleWakeIdentity, WorkflowOsError> {
+            Ok(TrustedHostScheduleWakeIdentity {
+                operation_id: ContinuityOperationId::new("operation/local-timer-duplicate")?,
+                receipt_id: ContinuityReceiptId::new("receipt/local-timer-duplicate")?,
             })
         }
     }
@@ -2948,6 +2965,283 @@ mod tests {
         assert_eq!(waiter_calls.load(Ordering::Relaxed), 2);
         assert_eq!(executor_calls.load(Ordering::Relaxed), 2);
         assert_eq!(wake_identity_provider.calls, 2);
+    }
+
+    #[test]
+    fn local_timer_wrapper_waits_and_enters_executor_once() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+        );
+        let locator = register_supervisor_time_window_wait(&fixture, "local-timer", deadline);
+        let executor_calls = AtomicUsize::new(0);
+        let executor = CountingExecutor {
+            calls: &executor_calls,
+        };
+        let mut redispatch_identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let mut wake_identity_provider = DeterministicWakeIdentityProvider { calls: 0 };
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+
+        let outcome = run_trusted_host_local_timer(TrustedHostLocalTimerInput {
+            backend: &fixture.backend,
+            locator,
+            wake_budget: TrustedHostRepeatedWakeBudget::new(1).expect("budget"),
+            cancellation,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            redispatch_identity_provider: &mut redispatch_identity_provider,
+            wake_identity_provider: &mut wake_identity_provider,
+        })
+        .expect("local timer run");
+
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Terminal
+        );
+        assert_eq!(outcome.scheduled_wakes, 1);
+        assert_eq!(outcome.executor_entries, 1);
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn local_timer_wrapper_cancellation_is_zero_write() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::hours(1),
+        );
+        let locator =
+            register_supervisor_time_window_wait(&fixture, "local-timer-cancel", deadline);
+        let before = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot before cancellation");
+        let executor_calls = AtomicUsize::new(0);
+        let executor = CountingExecutor {
+            calls: &executor_calls,
+        };
+        let mut redispatch_identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let mut wake_identity_provider = DeterministicWakeIdentityProvider { calls: 0 };
+        let (cancellation, handle) = TrustedHostLocalTimerCancellation::new();
+        handle.cancel().expect("cancel");
+
+        let outcome = run_trusted_host_local_timer(TrustedHostLocalTimerInput {
+            backend: &fixture.backend,
+            locator,
+            wake_budget: TrustedHostRepeatedWakeBudget::new(2).expect("budget"),
+            cancellation,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            redispatch_identity_provider: &mut redispatch_identity_provider,
+            wake_identity_provider: &mut wake_identity_provider,
+        })
+        .expect("canceled local timer run");
+
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Canceled
+        );
+        assert_eq!(outcome.scheduled_wakes, 1);
+        assert_eq!(outcome.executor_entries, 0);
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 0);
+        let after = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot after cancellation");
+        assert!(
+            before == after,
+            "cancellation must not mutate continuity state"
+        );
+    }
+
+    #[test]
+    fn local_timer_wrapper_composes_two_real_deadlines() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+        );
+        let locator = register_supervisor_time_window_wait_with_attempts(
+            &fixture,
+            "local-timer-two-waits",
+            deadline,
+            3,
+        );
+        let executor_calls = AtomicUsize::new(0);
+        let executor = YieldTimeWindowThenFailExecutor {
+            calls: &executor_calls,
+        };
+        let mut redispatch_identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let mut wake_identity_provider = DeterministicWakeIdentityProvider { calls: 0 };
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+
+        let outcome = run_trusted_host_local_timer(TrustedHostLocalTimerInput {
+            backend: &fixture.backend,
+            locator,
+            wake_budget: TrustedHostRepeatedWakeBudget::new(2).expect("budget"),
+            cancellation,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            redispatch_identity_provider: &mut redispatch_identity_provider,
+            wake_identity_provider: &mut wake_identity_provider,
+        })
+        .expect("two local timer waits");
+
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Terminal
+        );
+        assert_eq!(outcome.scheduled_wakes, 2);
+        assert_eq!(outcome.executor_entries, 2);
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn local_timer_wrapper_reconstructs_after_backend_reopen() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+        );
+        let locator =
+            register_supervisor_time_window_wait(&fixture, "local-timer-restart", deadline);
+        let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen backend");
+        let executor_calls = AtomicUsize::new(0);
+        let executor = CountingExecutor {
+            calls: &executor_calls,
+        };
+        let mut redispatch_identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let mut wake_identity_provider = DeterministicWakeIdentityProvider { calls: 0 };
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+
+        let outcome = run_trusted_host_local_timer(TrustedHostLocalTimerInput {
+            backend: &reopened,
+            locator,
+            wake_budget: TrustedHostRepeatedWakeBudget::new(1).expect("budget"),
+            cancellation,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            redispatch_identity_provider: &mut redispatch_identity_provider,
+            wake_identity_provider: &mut wake_identity_provider,
+        })
+        .expect("reconstructed local timer");
+
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Terminal
+        );
+        assert_eq!(outcome.executor_entries, 1);
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn competing_local_timer_wrappers_enter_executor_at_most_once() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+        );
+        let locator = register_supervisor_time_window_wait(
+            &fixture,
+            "local-timer-competing-callers",
+            deadline,
+        );
+        let executor_calls = Arc::new(AtomicUsize::new(0));
+        let mut workers = Vec::new();
+
+        for _ in 0..2 {
+            let backend = fixture.backend.clone();
+            let locator = TrustedHostOperationalEntryLocator {
+                workflow_id: locator.workflow_id.clone(),
+                run_id: locator.run_id.clone(),
+                step_id: locator.step_id.clone(),
+                window_id: locator.window_id.clone(),
+                subject_actor_id: locator.subject_actor_id.clone(),
+                immutable_run_bundle: locator.immutable_run_bundle.clone(),
+            };
+            let input = skill_input(&fixture);
+            let executor_calls = Arc::clone(&executor_calls);
+            workers.push(std::thread::spawn(move || {
+                let executor = CountingExecutor {
+                    calls: &executor_calls,
+                };
+                let mut redispatch_identity_provider =
+                    DeterministicRedispatchIdentityProvider { calls: 0 };
+                let mut wake_identity_provider = DeterministicWakeIdentityProvider { calls: 0 };
+                let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+                run_trusted_host_local_timer(TrustedHostLocalTimerInput {
+                    backend: &backend,
+                    locator,
+                    wake_budget: TrustedHostRepeatedWakeBudget::new(1).expect("budget"),
+                    cancellation,
+                    executor: &executor,
+                    skill_input: input,
+                    redispatch_identity_provider: &mut redispatch_identity_provider,
+                    wake_identity_provider: &mut wake_identity_provider,
+                })
+            }));
+        }
+
+        let outcomes = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("worker"))
+            .collect::<Vec<_>>();
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter_map(|outcome| outcome.as_ref().ok())
+                .map(|outcome| outcome.executor_entries)
+                .sum::<u32>(),
+            1
+        );
+        assert!(outcomes.iter().all(|outcome| match outcome {
+            Ok(outcome) => outcome.executor_entries <= 1,
+            Err(error) => matches!(
+                error.code(),
+                "trusted_host_time_window_scheduling.ticket_stale"
+                    | "trusted_host_time_window_scheduling.posture_ineligible"
+                    | "trusted_host_redispatch.directive_replayed"
+                    | "trusted_host_redispatch.attempt_limit_inconsistent"
+                    | "trusted_host_time_window_caller.operation_replay_conflict"
+            ),
+        }));
+    }
+
+    #[test]
+    fn local_timer_wrapper_duplicate_wake_identity_fails_closed() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+        );
+        let locator = register_supervisor_time_window_wait_with_attempts(
+            &fixture,
+            "local-timer-duplicate-identity",
+            deadline,
+            3,
+        );
+        let executor_calls = AtomicUsize::new(0);
+        let executor = YieldTimeWindowThenFailExecutor {
+            calls: &executor_calls,
+        };
+        let mut redispatch_identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let mut wake_identity_provider = DuplicateWakeIdentityProvider;
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+
+        let error = run_trusted_host_local_timer(TrustedHostLocalTimerInput {
+            backend: &fixture.backend,
+            locator,
+            wake_budget: TrustedHostRepeatedWakeBudget::new(2).expect("budget"),
+            cancellation,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            redispatch_identity_provider: &mut redispatch_identity_provider,
+            wake_identity_provider: &mut wake_identity_provider,
+        })
+        .expect_err("duplicate wake identity must fail closed");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host_time_window_caller.operation_replay_conflict"
+        );
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 1);
+        assert!(!format!("{error:?}").contains(fixture.run_id.as_str()));
     }
 
     #[test]
