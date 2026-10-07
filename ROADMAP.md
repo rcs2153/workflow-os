@@ -724,8 +724,13 @@ current queue when they contain historical `next phase` language.
    cancellation, bounded non-authorizing identity generation, fixed finite
    wake-budget selection, restart reconstruction, and bounded operator stop
    posture. No caller is implemented. The next phase is focused
-   maintainer/security review of that plan. General scheduling, public
-   configuration, provider
+   maintainer/security review of that plan. That focused
+   [review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PRODUCTION_CALLER_PLAN_REVIEW.md)
+   found planning blockers in synchronous cancellation ownership, the exact
+   production entropy source, finite wake-budget selection, ambiguous
+   reconstruction advice, and current-authority wording. The next phase is one
+   documentation-only planning blocker fix followed by focused re-review.
+   General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
