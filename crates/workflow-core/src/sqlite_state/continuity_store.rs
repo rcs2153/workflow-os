@@ -3006,6 +3006,11 @@ mod conformance_backend {
             apply_trusted_host_time_window_wake, apply_trusted_host_time_window_wake_with_verifier,
             TrustedHostTimeWindowWakeInput, TrustedHostTimeWindowWakeStatus,
         };
+        use crate::sqlite_state::trusted_host_time_window_scheduling::{
+            assess_trusted_host_time_window_readiness_with_time,
+            observe_trusted_host_time_window_scheduling_with_time,
+            TrustedHostTimeWindowReadinessInput, TrustedHostTimeWindowReadinessStatus,
+        };
         use crate::sqlite_state::trusted_host_wait_handoff::{
             derive_trusted_host_wait_observation_for_test, observe_trusted_host_wait_with_time,
             observe_trusted_host_wait_with_time_and_hook, TrustedHostWaitHandoffId,
@@ -3650,6 +3655,215 @@ mod conformance_backend {
             ] {
                 assert!(!debug.contains(sensitive));
             }
+        }
+
+        #[test]
+        fn trusted_host_time_window_scheduling_observation_is_coherent_inert_and_redacted() {
+            let fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            let locator = time_window_locator(&fixture);
+            let before = fixture.backend.conformance_snapshot();
+
+            let first = observe_trusted_host_time_window_scheduling_with_time(
+                &fixture.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("first scheduling observation");
+            let second = observe_trusted_host_time_window_scheduling_with_time(
+                &fixture.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("second scheduling observation");
+            let after = fixture.backend.conformance_snapshot();
+
+            assert_eq!(
+                first.disposition,
+                AuthoritativeContinuationDisposition::AwaitCondition
+            );
+            assert_eq!(first, second);
+            let ticket = first.ticket.as_ref().expect("ticket");
+            assert_eq!(ticket.schedule_at(), deadline);
+            assert!(first.handoff.is_some());
+            assert!(before == after);
+            let debug = format!("{first:?} {ticket:?}");
+            assert!(!debug.contains("2026-08-15"));
+            assert!(!debug.contains(ticket.commitment().as_str()));
+            assert!(!debug.contains(locator.run_id.as_str()));
+        }
+
+        #[test]
+        fn trusted_host_time_window_readiness_is_zero_write_and_refreshes_early_wake() {
+            let current = fixture(false, false);
+            register_time_window_wait(
+                &current,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let locator = time_window_locator(&current);
+            let scheduling = observe_trusted_host_time_window_scheduling_with_time(
+                &current.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("scheduling observation");
+            let handoff = scheduling.handoff.as_ref().expect("handoff");
+            let ticket = scheduling.ticket.as_ref().expect("ticket");
+            let before = current.backend.conformance_snapshot();
+
+            let assessment = assess_trusted_host_time_window_readiness_with_time(
+                &TrustedHostTimeWindowReadinessInput {
+                    backend: &current.backend.store.backend,
+                    locator: &locator,
+                    handoff,
+                    ticket,
+                },
+                handoff_observation_time(),
+            )
+            .expect("early readiness");
+            let after = current.backend.conformance_snapshot();
+
+            assert_eq!(
+                assessment.status,
+                TrustedHostTimeWindowReadinessStatus::NotYetEligible
+            );
+            assert_eq!(assessment.refreshed_scheduling, Some(scheduling));
+            assert!(before == after);
+        }
+
+        #[test]
+        fn trusted_host_time_window_readiness_reports_eligible_without_authority_or_writes() {
+            let fixture = fixture(false, false);
+            register_time_window_wait(
+                &fixture,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let locator = time_window_locator(&fixture);
+            let scheduling = observe_trusted_host_time_window_scheduling_with_time(
+                &fixture.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("scheduling observation");
+            let before = fixture.backend.conformance_snapshot();
+
+            let assessment = assess_trusted_host_time_window_readiness_with_time(
+                &TrustedHostTimeWindowReadinessInput {
+                    backend: &fixture.backend.store.backend,
+                    locator: &locator,
+                    handoff: scheduling.handoff.as_ref().expect("handoff"),
+                    ticket: scheduling.ticket.as_ref().expect("ticket"),
+                },
+                trusted_time_observation(
+                    Timestamp::parse_rfc3339("2026-08-15T12:31:00Z").expect("time"),
+                    TrustedTimeSourceKind::CoreInjectedClockV1,
+                    expected_provenance().expect("provenance"),
+                    expected_epoch().expect("epoch"),
+                ),
+            )
+            .expect("eligible readiness");
+            let after = fixture.backend.conformance_snapshot();
+
+            assert_eq!(
+                assessment.status,
+                TrustedHostTimeWindowReadinessStatus::Eligible
+            );
+            assert!(assessment.refreshed_scheduling.is_none());
+            assert!(before == after);
+        }
+
+        #[test]
+        fn trusted_host_time_window_readiness_rejects_stale_ticket_and_time_binding() {
+            let current = fixture(false, false);
+            register_time_window_wait(
+                &current,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let locator = time_window_locator(&current);
+            let scheduling = observe_trusted_host_time_window_scheduling_with_time(
+                &current.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("scheduling observation");
+
+            let substitute = fixture(false, false);
+            register_time_window_wait(
+                &substitute,
+                Timestamp::parse_rfc3339("2026-08-15T12:45:00Z").expect("deadline"),
+            );
+            let substitute_locator = time_window_locator(&substitute);
+            let substitute_scheduling = observe_trusted_host_time_window_scheduling_with_time(
+                &substitute.backend.store.backend,
+                &substitute_locator,
+                handoff_observation_time(),
+            )
+            .expect("substitute scheduling observation");
+            let before = current.backend.conformance_snapshot();
+
+            let stale = assess_trusted_host_time_window_readiness_with_time(
+                &TrustedHostTimeWindowReadinessInput {
+                    backend: &current.backend.store.backend,
+                    locator: &locator,
+                    handoff: scheduling.handoff.as_ref().expect("handoff"),
+                    ticket: substitute_scheduling.ticket.as_ref().expect("ticket"),
+                },
+                handoff_observation_time(),
+            )
+            .expect_err("substituted ticket must fail");
+            assert_eq!(
+                stale.code(),
+                "trusted_host_time_window_scheduling.ticket_stale"
+            );
+
+            let wrong_time_binding = assess_trusted_host_time_window_readiness_with_time(
+                &TrustedHostTimeWindowReadinessInput {
+                    backend: &current.backend.store.backend,
+                    locator: &locator,
+                    handoff: scheduling.handoff.as_ref().expect("handoff"),
+                    ticket: scheduling.ticket.as_ref().expect("ticket"),
+                },
+                trusted_time_observation(
+                    Timestamp::parse_rfc3339("2026-08-15T12:15:00Z").expect("time"),
+                    TrustedTimeSourceKind::CoreInjectedClockV1,
+                    SpecContentHash::from_text("test-secret-wrong-provenance"),
+                    expected_epoch().expect("epoch"),
+                ),
+            )
+            .expect_err("wrong trusted-time binding must fail");
+            assert_eq!(
+                wrong_time_binding.code(),
+                "trusted_host_time_window_scheduling.trusted_time_binding_mismatch"
+            );
+            assert!(!format!("{wrong_time_binding:?}").contains("test-secret"));
+            assert!(before == current.backend.conformance_snapshot());
+        }
+
+        #[test]
+        fn trusted_host_time_window_scheduling_restart_derives_same_inert_ticket() {
+            let fixture = fixture(false, false);
+            register_time_window_wait(
+                &fixture,
+                Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline"),
+            );
+            let locator = time_window_locator(&fixture);
+            let first = observe_trusted_host_time_window_scheduling_with_time(
+                &fixture.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("first observation");
+
+            let reopened = fixture.backend.conformance_reopen_current();
+            let second = observe_trusted_host_time_window_scheduling_with_time(
+                &reopened.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("reopened observation");
+
+            assert_eq!(first, second);
         }
 
         fn handoff_identity_fixture() -> (
