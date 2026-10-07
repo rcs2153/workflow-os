@@ -846,8 +846,17 @@ current queue when they contain historical `next phase` language.
    accepts the closed loser classification after 640 repeated contention
    scenarios and the independent cancellation race pass. The blocker is
    resolved. The next phase is explicit local host application topology and
-   Core-to-application visibility planning; operational adoption remains
-   unimplemented.
+   Core-to-application visibility planning. That topology is now documented
+   in the [Trusted-Host Local Application Topology
+   Plan](docs/implementation-plans/trusted-host-local-application-topology-plan.md)
+   and [planning
+   report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_TOPOLOGY_PLAN_REPORT.md).
+   It selects an unpublished local-host package plus a narrow non-default,
+   unstable Core SPI built around opaque one-shot sessions. The first proposed
+   implementation is the Core SPI model and visibility slice only. No
+   application package, executable, command, session source, or operational
+   adoption is implemented, and focused maintainer/security review remains
+   required before implementation.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
