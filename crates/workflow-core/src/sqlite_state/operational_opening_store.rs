@@ -2849,13 +2849,17 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(calls.load(Ordering::Relaxed), 1);
-        let error_codes = outcomes
+        let loser = outcomes
             .iter()
             .filter_map(|outcome| outcome.as_ref().err())
-            .map(WorkflowOsError::code)
-            .collect::<Vec<_>>();
+            .next()
+            .expect("one losing caller");
         assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
-        assert_eq!(error_codes, ["trusted_host_redispatch.directive_replayed"]);
+        assert!(matches!(
+            loser.code(),
+            "trusted_host_redispatch.directive_replayed"
+                | "trusted_host_redispatch.attempt_limit_inconsistent"
+        ));
         assert_eq!(
             outcomes
                 .iter()

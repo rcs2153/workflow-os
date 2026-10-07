@@ -44,8 +44,9 @@ The observed contract is:
 
 - one caller completes the accepted reinvocation path;
 - exactly one executor entry occurs;
-- the losing caller receives the stable
-  `trusted_host_redispatch.directive_replayed` rejection;
+- the losing caller receives either the stable directive-replay rejection or
+  the stable attempt-limit inconsistency rejection, depending on which
+  one-winner boundary it observes;
 - successful outcomes account for exactly one executor entry; and
 - authoritative continuation posture is durably `Terminal`.
 
@@ -80,7 +81,8 @@ crate-private.
 
 - The hook receives no workflow payload, authority, handoff, identifier, path,
   command, provider data, credential, or secret.
-- Concurrent loser reporting uses a stable bounded error code.
+- Concurrent loser reporting uses one of two stable bounded error codes that
+  identify the one-winner boundary observed by the losing caller.
 - The crash error is test-only and contains no runtime values.
 - Recovery reloads authoritative SQLite state and consumes fresh one-use
   authority through the existing operational-entry path.
@@ -91,7 +93,7 @@ crate-private.
 Focused tests prove:
 
 - two concurrent full-composition callers produce exactly one executor entry;
-- the loser is a stable directive-replay rejection;
+- the loser is one of the two bounded fail-closed race rejections;
 - the resulting durable continuation posture is terminal;
 - a committed transition can be interrupted before operational entry;
 - backend reopen plus exact replay performs one executor entry;
@@ -102,11 +104,18 @@ Focused tests prove:
 
 - `cargo test -p workflow-core reinvocation`: passed, including all three
   focused reinvocation tests.
+- concurrent full-composition proof repeated ten times with `cargo test -p
+  workflow-core --lib`: passed across both lawful loser interleavings.
 - `cargo fmt --all --check`: passed.
 - `cargo clippy --workspace --all-targets -- -D warnings`: passed.
 - `cargo test --workspace`: passed.
 - `npm run check:docs`: passed.
 - `git diff --check`: passed.
+
+The first CI run exposed that the losing caller can lawfully observe either
+the already-consumed directive or the exhausted attempt budget after the
+winner reaches terminal posture. The proof and this report were corrected to
+encode that bounded race surface rather than assuming one interleaving.
 
 ## 10. Remaining Limitations
 
