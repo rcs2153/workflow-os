@@ -756,8 +756,13 @@ current queue when they contain historical `next phase` language.
    It selects one additive crate-private operational-entry composition: an
    already-authorized synchronous owner enters once and routes only an
    authoritative `AwaitCondition` result into the accepted production caller
-   with the same exact bindings. The next phase is focused maintainer/security
-   review of that plan.
+   with the same exact bindings. The focused
+   [maintainer/security review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_CALLER_ADOPTION_PLAN_REVIEW.md)
+   accepts the plan with no blocker and confirms that an awaiting initial
+   result cannot discard a successful skill output because yielded attempts
+   carry no `SkillOutput`. The next phase is implementation of only that
+   additive crate-private composition and its focused routing, binding,
+   cancellation, restart, concurrency, error, and privacy tests.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
