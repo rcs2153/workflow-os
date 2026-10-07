@@ -864,9 +864,13 @@ current queue when they contain historical `next phase` language.
    opaque one-shot session and cancellation vocabulary, fixed bounded
    outcomes, redacted Debug, compile-fail clone/serde coverage, and direct
    private-owner wrapping tests. Production code has no session-preparation
-   constructor, application package, or operational caller. The next phase is
-   a focused maintainer/security review of this SPI slice before any
-   preparation helper.
+   constructor, application package, or operational caller. The focused
+   [maintainer/security
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SPI_MODEL_REVIEW.md)
+   found one blocker: the public session currently returns the complete
+   `WorkflowOsError`, while the accepted cross-crate boundary permits only a
+   stable payload-free error code. The next phase is a bounded-failure blocker
+   fix before any preparation helper or application composition work.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
