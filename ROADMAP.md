@@ -828,9 +828,15 @@ current queue when they contain historical `next phase` language.
    Report](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_TEST_HARDENING_REPORT.md).
    It adds a repeated simultaneous cancellation-versus-entry race and complete
    competing-owner winner/loser classification with direct non-leakage
-   assertions, without changing production behavior. The next phase is focused
-   maintainer/security review of that hardening before local host application
-   topology planning.
+   assertions, without changing production behavior. The focused
+   [maintainer/security review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_TEST_HARDENING_REVIEW.md)
+   found a blocker: repeated independent execution observed the additional
+   losing-owner error `trusted_host_redispatch.directive_missing`, causing the
+   supposedly complete classification test to fail intermittently. The next
+   phase is a focused blocker fix that must determine whether this code is a
+   lawful bounded loser outcome or evidence of a redispatch invariant gap,
+   make the closed outcome set deterministic, and repeat stress validation.
+   Local host application topology planning remains blocked pending re-review.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
