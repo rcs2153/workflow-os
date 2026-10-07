@@ -647,7 +647,9 @@ mod tests {
     };
     #[cfg(feature = "trusted-host-application-spi")]
     use crate::sqlite_state::trusted_host_local_application_spi::{
+        prepare_trusted_host_local_application_session,
         TrustedHostLocalApplicationCancellationHandle, TrustedHostLocalApplicationOutcome,
+        TrustedHostLocalApplicationPreparationInput, TrustedHostLocalApplicationPreparationPosture,
         TrustedHostLocalApplicationSession,
     };
     use crate::sqlite_state::trusted_host_local_production_caller::{
@@ -658,7 +660,7 @@ mod tests {
     };
     use crate::sqlite_state::trusted_host_operational_entry::{
         enter_trusted_host_operation, TrustedHostOperationalEntryInput,
-        TrustedHostOperationalEntryLocator,
+        TrustedHostOperationalEntryLocator, TrustedHostOperationalEntryPosture,
     };
     use crate::sqlite_state::trusted_host_redispatch_loop::{
         run_bounded_trusted_host_redispatch_loop, TrustedHostRedispatchIdentityProvider,
@@ -2794,16 +2796,11 @@ mod tests {
         let outcome = enter_trusted_host_operation(TrustedHostOperationalEntryInput {
             backend: &fixture.backend,
             locator,
-            opening: None,
+            posture: TrustedHostOperationalEntryPosture::Existing,
             executor: &executor,
             skill_input: skill_input(&fixture),
-            opening_persistence: TrustedHostSupervisorPersistenceInput {
-                operation: ContinuityOperationId::new("operation/entry-blocked")
-                    .expect("operation"),
-                receipt: ContinuityReceiptId::new("receipt/entry-blocked").expect("receipt"),
-                yield_generation: None,
-            },
             identity_provider: &mut identity_provider,
+            expected_preparation_commitment: None,
         })
         .expect("executing window is a bounded block");
 
@@ -2821,7 +2818,7 @@ mod tests {
     }
 
     #[test]
-    fn operational_entry_requires_opening_context_for_fresh_scope() {
+    fn operational_entry_requires_existing_window_for_existing_posture() {
         let fixture = Fixture::new();
         let calls = AtomicUsize::new(0);
         let executor = CountingExecutor { calls: &calls };
@@ -2838,23 +2835,17 @@ mod tests {
                 subject_actor_id: ActorId::new("agent/opening-test").expect("actor"),
                 immutable_run_bundle: fixture.bundle.clone(),
             },
-            opening: None,
+            posture: TrustedHostOperationalEntryPosture::Existing,
             executor: &executor,
             skill_input: skill_input(&fixture),
-            opening_persistence: TrustedHostSupervisorPersistenceInput {
-                operation: ContinuityOperationId::new("operation/missing-opening-context")
-                    .expect("operation"),
-                receipt: ContinuityReceiptId::new("receipt/missing-opening-context")
-                    .expect("receipt"),
-                yield_generation: None,
-            },
             identity_provider: &mut identity_provider,
+            expected_preparation_commitment: None,
         })
         .expect_err("fresh scope without opening context must fail closed");
 
         assert_eq!(
             error.code(),
-            "trusted_host_operational_entry.opening_context_missing"
+            "trusted_host_operational_entry.existing_window_unavailable"
         );
         assert_eq!(calls.load(Ordering::Relaxed), 0);
         assert_eq!(identity_provider.calls, 0);
@@ -2892,16 +2883,11 @@ mod tests {
         let outcome = enter_trusted_host_operation(TrustedHostOperationalEntryInput {
             backend: &fixture.backend,
             locator,
-            opening: None,
+            posture: TrustedHostOperationalEntryPosture::Existing,
             executor: &executor,
             skill_input: skill_input(&fixture),
-            opening_persistence: TrustedHostSupervisorPersistenceInput {
-                operation: ContinuityOperationId::new("operation/unused-terminal")
-                    .expect("operation"),
-                receipt: ContinuityReceiptId::new("receipt/unused-terminal").expect("receipt"),
-                yield_generation: None,
-            },
             identity_provider: &mut identity_provider,
+            expected_preparation_commitment: None,
         })
         .expect("terminal window is a bounded terminal outcome");
 
@@ -2947,16 +2933,11 @@ mod tests {
         let outcome = enter_trusted_host_operation(TrustedHostOperationalEntryInput {
             backend: &fixture.backend,
             locator,
-            opening: None,
+            posture: TrustedHostOperationalEntryPosture::Existing,
             executor: &executor,
             skill_input: skill_input(&fixture),
-            opening_persistence: TrustedHostSupervisorPersistenceInput {
-                operation: ContinuityOperationId::new("operation/unused-opening")
-                    .expect("operation"),
-                receipt: ContinuityReceiptId::new("receipt/unused-opening").expect("receipt"),
-                yield_generation: None,
-            },
             identity_provider: &mut identity_provider,
+            expected_preparation_commitment: None,
         })
         .expect("fresh entry resumes current authority");
 
@@ -3335,17 +3316,11 @@ mod tests {
                 operational_entry: TrustedHostOperationalEntryInput {
                     backend: &fixture.backend,
                     locator,
-                    opening: None,
+                    posture: TrustedHostOperationalEntryPosture::Existing,
                     executor: &executor,
                     skill_input: skill_input(&fixture),
-                    opening_persistence: TrustedHostSupervisorPersistenceInput {
-                        operation: ContinuityOperationId::new("operation/unused-explicit-terminal")
-                            .expect("operation"),
-                        receipt: ContinuityReceiptId::new("receipt/unused-explicit-terminal")
-                            .expect("receipt"),
-                        yield_generation: None,
-                    },
                     identity_provider: &mut identity_provider,
+                    expected_preparation_commitment: None,
                 },
                 cancellation,
             })
@@ -3374,17 +3349,11 @@ mod tests {
                 operational_entry: TrustedHostOperationalEntryInput {
                     backend: &fixture.backend,
                     locator,
-                    opening: None,
+                    posture: TrustedHostOperationalEntryPosture::Existing,
                     executor: &executor,
                     skill_input: skill_input(&fixture),
-                    opening_persistence: TrustedHostSupervisorPersistenceInput {
-                        operation: ContinuityOperationId::new("operation/unused-explicit-window")
-                            .expect("operation"),
-                        receipt: ContinuityReceiptId::new("receipt/unused-explicit-window")
-                            .expect("receipt"),
-                        yield_generation: None,
-                    },
                     identity_provider: &mut identity_provider,
+                    expected_preparation_commitment: None,
                 },
                 cancellation,
             })
@@ -3418,17 +3387,11 @@ mod tests {
                 operational_entry: TrustedHostOperationalEntryInput {
                     backend: &fixture.backend,
                     locator,
-                    opening: None,
+                    posture: TrustedHostOperationalEntryPosture::Existing,
                     executor: &executor,
                     skill_input: skill_input(&fixture),
-                    opening_persistence: TrustedHostSupervisorPersistenceInput {
-                        operation: ContinuityOperationId::new("operation/unused-explicit-two")
-                            .expect("operation"),
-                        receipt: ContinuityReceiptId::new("receipt/unused-explicit-two")
-                            .expect("receipt"),
-                        yield_generation: None,
-                    },
                     identity_provider: &mut identity_provider,
+                    expected_preparation_commitment: None,
                 },
                 cancellation,
             })
@@ -3462,19 +3425,11 @@ mod tests {
                 operational_entry: TrustedHostOperationalEntryInput {
                     backend: &fixture.backend,
                     locator,
-                    opening: None,
+                    posture: TrustedHostOperationalEntryPosture::Existing,
                     executor: &executor,
                     skill_input: skill_input(&fixture),
-                    opening_persistence: TrustedHostSupervisorPersistenceInput {
-                        operation: ContinuityOperationId::new(
-                            "operation/unused-explicit-unsupported",
-                        )
-                        .expect("operation"),
-                        receipt: ContinuityReceiptId::new("receipt/unused-explicit-unsupported")
-                            .expect("receipt"),
-                        yield_generation: None,
-                    },
                     identity_provider: &mut identity_provider,
+                    expected_preparation_commitment: None,
                 },
                 cancellation,
             })
@@ -3513,17 +3468,11 @@ mod tests {
                 operational_entry: TrustedHostOperationalEntryInput {
                     backend: &fixture.backend,
                     locator,
-                    opening: None,
+                    posture: TrustedHostOperationalEntryPosture::Existing,
                     executor: &counting_executor,
                     skill_input: skill_input(&fixture),
-                    opening_persistence: TrustedHostSupervisorPersistenceInput {
-                        operation: ContinuityOperationId::new("operation/unused-explicit-cancel")
-                            .expect("operation"),
-                        receipt: ContinuityReceiptId::new("receipt/unused-explicit-cancel")
-                            .expect("receipt"),
-                        yield_generation: None,
-                    },
                     identity_provider: &mut identity_provider,
+                    expected_preparation_commitment: None,
                 },
                 cancellation,
             })
@@ -3558,17 +3507,11 @@ mod tests {
             operational_entry: TrustedHostOperationalEntryInput {
                 backend: &fixture.backend,
                 locator,
-                opening: None,
+                posture: TrustedHostOperationalEntryPosture::Existing,
                 executor: &executor,
                 skill_input: substituted,
-                opening_persistence: TrustedHostSupervisorPersistenceInput {
-                    operation: ContinuityOperationId::new("operation/unused-explicit-substitution")
-                        .expect("operation"),
-                    receipt: ContinuityReceiptId::new("receipt/unused-explicit-substitution")
-                        .expect("receipt"),
-                    yield_generation: None,
-                },
                 identity_provider: &mut identity_provider,
+                expected_preparation_commitment: None,
             },
             cancellation,
         };
@@ -3605,17 +3548,11 @@ mod tests {
                 operational_entry: TrustedHostOperationalEntryInput {
                     backend: &reopened,
                     locator,
-                    opening: None,
+                    posture: TrustedHostOperationalEntryPosture::Existing,
                     executor: &executor,
                     skill_input: skill_input(&fixture),
-                    opening_persistence: TrustedHostSupervisorPersistenceInput {
-                        operation: ContinuityOperationId::new("operation/unused-explicit-reopen")
-                            .expect("operation"),
-                        receipt: ContinuityReceiptId::new("receipt/unused-explicit-reopen")
-                            .expect("receipt"),
-                        yield_generation: None,
-                    },
                     identity_provider: &mut identity_provider,
+                    expected_preparation_commitment: None,
                 },
                 cancellation,
             })
@@ -3655,17 +3592,11 @@ mod tests {
             TrustedHostExplicitLocalProcessOwner::new(TrustedHostOperationalEntryInput {
                 backend: &fixture.backend,
                 locator,
-                opening: None,
+                posture: TrustedHostOperationalEntryPosture::Existing,
                 executor: &executor,
                 skill_input: skill_input(&fixture),
-                opening_persistence: TrustedHostSupervisorPersistenceInput {
-                    operation: ContinuityOperationId::new("operation/unused-owner-pre-cancel")
-                        .expect("operation"),
-                    receipt: ContinuityReceiptId::new("receipt/unused-owner-pre-cancel")
-                        .expect("receipt"),
-                    yield_generation: None,
-                },
                 identity_provider: &mut identity_provider,
+                expected_preparation_commitment: None,
             });
         let owner_debug = format!("{owner:?}");
         assert!(owner_debug.contains("[REDACTED]"));
@@ -3711,17 +3642,11 @@ mod tests {
             TrustedHostExplicitLocalProcessOwner::new(TrustedHostOperationalEntryInput {
                 backend: &fixture.backend,
                 locator,
-                opening: None,
+                posture: TrustedHostOperationalEntryPosture::Existing,
                 executor: &executor,
                 skill_input: skill_input(&fixture),
-                opening_persistence: TrustedHostSupervisorPersistenceInput {
-                    operation: ContinuityOperationId::new("operation/unused-application-spi")
-                        .expect("operation"),
-                    receipt: ContinuityReceiptId::new("receipt/unused-application-spi")
-                        .expect("receipt"),
-                    yield_generation: None,
-                },
                 identity_provider: &mut identity_provider,
+                expected_preparation_commitment: None,
             });
         let session = TrustedHostLocalApplicationSession::from_process_owner(owner);
         let handle = TrustedHostLocalApplicationCancellationHandle::from_timer_handle(timer_handle);
@@ -3742,6 +3667,194 @@ mod tests {
         )
         .expect("snapshot after session");
         assert!(before == after);
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn application_preparation_is_read_only_and_runs_one_existing_window() {
+        let fixture = Fixture::new();
+        let locator =
+            register_resumable_operational_entry(&fixture, "application-prepare-existing", 3);
+        let before = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot before preparation");
+        let events_before = fixture
+            .backend
+            .read_events(&fixture.run_id)
+            .expect("events before preparation")
+            .len();
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+
+        let prepared = prepare_trusted_host_local_application_session(
+            TrustedHostLocalApplicationPreparationInput {
+                backend: &fixture.backend,
+                locator,
+                posture: TrustedHostLocalApplicationPreparationPosture::Existing,
+                executor: &executor,
+                skill_input: skill_input(&fixture),
+            },
+        )
+        .expect("prepare existing session");
+
+        assert!(format!("{prepared:?}").contains("[REDACTED]"));
+        assert!(
+            crate::sqlite_state::continuity_codec::load_snapshot(
+                &fixture.backend.connection().expect("connection"),
+            )
+            .expect("snapshot after preparation")
+                == before
+        );
+        assert_eq!(
+            fixture
+                .backend
+                .read_events(&fixture.run_id)
+                .expect("events after preparation")
+                .len(),
+            events_before
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+        let (session, _handle) = prepared.into_parts();
+        assert_eq!(
+            session.run().expect("prepared session runs"),
+            TrustedHostLocalApplicationOutcome::EntryStopped(
+                crate::TrustedHostLocalApplicationEntryStopReason::Terminal,
+            )
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn dropping_application_preparation_is_zero_write() {
+        let fixture = Fixture::new();
+        let locator = register_resumable_operational_entry(&fixture, "application-prepare-drop", 3);
+        let before = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot before preparation");
+        let events_before = fixture
+            .backend
+            .read_events(&fixture.run_id)
+            .expect("events before preparation")
+            .len();
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+
+        let prepared = prepare_trusted_host_local_application_session(
+            TrustedHostLocalApplicationPreparationInput {
+                backend: &fixture.backend,
+                locator,
+                posture: TrustedHostLocalApplicationPreparationPosture::Existing,
+                executor: &executor,
+                skill_input: skill_input(&fixture),
+            },
+        )
+        .expect("prepare existing session");
+        drop(prepared);
+
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert!(
+            crate::sqlite_state::continuity_codec::load_snapshot(
+                &fixture.backend.connection().expect("connection"),
+            )
+            .expect("snapshot after dropped preparation")
+                == before
+        );
+        assert_eq!(
+            fixture
+                .backend
+                .read_events(&fixture.run_id)
+                .expect("events after dropped preparation")
+                .len(),
+            events_before
+        );
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn application_preparation_rejects_state_changed_before_run() {
+        let fixture = Fixture::new();
+        let locator =
+            register_resumable_operational_entry(&fixture, "application-prepare-stale", 3);
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let prepared = prepare_trusted_host_local_application_session(
+            TrustedHostLocalApplicationPreparationInput {
+                backend: &fixture.backend,
+                locator: TrustedHostOperationalEntryLocator {
+                    workflow_id: locator.workflow_id.clone(),
+                    run_id: locator.run_id.clone(),
+                    step_id: locator.step_id.clone(),
+                    window_id: locator.window_id.clone(),
+                    subject_actor_id: locator.subject_actor_id.clone(),
+                    immutable_run_bundle: locator.immutable_run_bundle.clone(),
+                },
+                posture: TrustedHostLocalApplicationPreparationPosture::Existing,
+                executor: &executor,
+                skill_input: skill_input(&fixture),
+            },
+        )
+        .expect("prepare existing session");
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        enter_trusted_host_operation(TrustedHostOperationalEntryInput {
+            backend: &fixture.backend,
+            locator,
+            posture: TrustedHostOperationalEntryPosture::Existing,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            identity_provider: &mut identity_provider,
+            expected_preparation_commitment: None,
+        })
+        .expect("advance state after preparation");
+
+        let (session, _handle) = prepared.into_parts();
+        assert_eq!(
+            session.run().expect_err("stale preparation must fail"),
+            crate::TrustedHostLocalApplicationFailure::Security
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn application_preparation_cancellation_before_run_is_zero_entry() {
+        let fixture = Fixture::new();
+        let locator =
+            register_resumable_operational_entry(&fixture, "application-prepare-cancel", 3);
+        let before = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot before preparation");
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let prepared = prepare_trusted_host_local_application_session(
+            TrustedHostLocalApplicationPreparationInput {
+                backend: &fixture.backend,
+                locator,
+                posture: TrustedHostLocalApplicationPreparationPosture::Existing,
+                executor: &executor,
+                skill_input: skill_input(&fixture),
+            },
+        )
+        .expect("prepare existing session");
+        let (session, handle) = prepared.into_parts();
+        handle.request_cancellation().expect("bounded cancellation");
+
+        assert_eq!(
+            session.run().expect("canceled session outcome"),
+            TrustedHostLocalApplicationOutcome::CanceledBeforeEntry
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert!(
+            crate::sqlite_state::continuity_codec::load_snapshot(
+                &fixture.backend.connection().expect("connection"),
+            )
+            .expect("snapshot after cancellation")
+                == before
+        );
     }
 
     #[test]
@@ -3769,19 +3882,11 @@ mod tests {
                     TrustedHostExplicitLocalProcessOwner::new(TrustedHostOperationalEntryInput {
                         backend: &backend,
                         locator,
-                        opening: None,
+                        posture: TrustedHostOperationalEntryPosture::Existing,
                         executor: &executor,
                         skill_input: input,
-                        opening_persistence: TrustedHostSupervisorPersistenceInput {
-                            operation: ContinuityOperationId::new(
-                                "operation/unused-owner-admitted",
-                            )
-                            .expect("operation"),
-                            receipt: ContinuityReceiptId::new("receipt/unused-owner-admitted")
-                                .expect("receipt"),
-                            yield_generation: None,
-                        },
                         identity_provider: &mut identity_provider,
+                        expected_preparation_commitment: None,
                     });
                 handle_sender.send(handle.clone()).expect("send handle");
                 owner.run()
@@ -3822,7 +3927,7 @@ mod tests {
         let barrier = Arc::new(Barrier::new(3));
         let mut workers = Vec::new();
 
-        for worker_index in 0..2 {
+        for _worker_index in 0..2 {
             let backend = fixture.backend.clone();
             let locator = TrustedHostOperationalEntryLocator {
                 workflow_id: locator.workflow_id.clone(),
@@ -3842,21 +3947,11 @@ mod tests {
                     TrustedHostExplicitLocalProcessOwner::new(TrustedHostOperationalEntryInput {
                         backend: &backend,
                         locator,
-                        opening: None,
+                        posture: TrustedHostOperationalEntryPosture::Existing,
                         executor: &executor,
                         skill_input: input,
-                        opening_persistence: TrustedHostSupervisorPersistenceInput {
-                            operation: ContinuityOperationId::new(format!(
-                                "operation/unused-owner-competing-{worker_index}"
-                            ))
-                            .expect("operation"),
-                            receipt: ContinuityReceiptId::new(format!(
-                                "receipt/unused-owner-competing-{worker_index}"
-                            ))
-                            .expect("receipt"),
-                            yield_generation: None,
-                        },
                         identity_provider: &mut identity_provider,
+                        expected_preparation_commitment: None,
                     });
                 barrier.wait();
                 owner.run()
@@ -5086,16 +5181,11 @@ mod tests {
         let error = enter_trusted_host_operation(TrustedHostOperationalEntryInput {
             backend: &fixture.backend,
             locator,
-            opening: None,
+            posture: TrustedHostOperationalEntryPosture::Existing,
             executor: &executor,
             skill_input: substituted,
-            opening_persistence: TrustedHostSupervisorPersistenceInput {
-                operation: ContinuityOperationId::new("operation/unused-substitution")
-                    .expect("operation"),
-                receipt: ContinuityReceiptId::new("receipt/unused-substitution").expect("receipt"),
-                yield_generation: None,
-            },
             identity_provider: &mut identity_provider,
+            expected_preparation_commitment: None,
         })
         .expect_err("changed invocation must fail before resume");
 

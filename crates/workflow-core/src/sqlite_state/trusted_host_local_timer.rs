@@ -95,7 +95,7 @@ impl TrustedHostLocalTimerCancellationHandle {
 
     #[cfg(test)]
     #[allow(clippy::expect_used, clippy::panic)]
-    fn poison(&self) {
+    pub(crate) fn poison(&self) {
         let shared = Arc::clone(&self.shared);
         let _ = std::thread::spawn(move || {
             let _guard = shared.state.lock().expect("test lock");

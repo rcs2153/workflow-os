@@ -3,17 +3,26 @@ use std::fmt;
 
 use crate::{WorkflowOsError, WorkflowOsErrorKind};
 
-#[cfg(test)]
 use super::trusted_host_explicit_local_operation::TrustedHostExplicitLocalOperationOutcome;
-#[cfg(test)]
 use super::trusted_host_explicit_local_process_owner::{
     TrustedHostExplicitLocalProcessOwner, TrustedHostExplicitLocalProcessOwnerOutcome,
 };
-use super::trusted_host_local_timer::TrustedHostLocalTimerCancellationHandle;
-#[cfg(test)]
+use super::trusted_host_local_production_caller::TrustedHostLocalProductionIdentitySource;
+use super::trusted_host_local_timer::{
+    TrustedHostLocalTimerCancellation, TrustedHostLocalTimerCancellationHandle,
+};
+use super::trusted_host_operational_entry::{
+    validate_trusted_host_operational_entry_preparation, TrustedHostOperationalEntryInput,
+    TrustedHostOperationalEntryLocator, TrustedHostOperationalEntryPosture,
+};
 use super::trusted_host_redispatch_loop::TrustedHostRedispatchStopReason;
-#[cfg(test)]
 use super::trusted_host_time_window_scheduling::TrustedHostRepeatedSchedulingStopReason;
+use super::SqliteStateBackend;
+use crate::operational_execution_window_opening::OperationalExecutionWindowOpeningUseInput;
+use crate::trusted_host_supervisor::{
+    TrustedHostAttemptExecutor, TrustedHostSupervisorPersistenceInput,
+};
+use crate::SkillInput;
 
 type SessionRunner<'a> =
     Box<dyn FnOnce() -> Result<TrustedHostLocalApplicationOutcome, WorkflowOsError> + 'a>;
@@ -57,6 +66,7 @@ impl TrustedHostLocalApplicationSession<'_> {
 }
 
 #[cfg(test)]
+#[allow(clippy::elidable_lifetime_names)]
 impl<'a> TrustedHostLocalApplicationSession<'a> {
     pub(crate) fn from_process_owner(owner: TrustedHostExplicitLocalProcessOwner<'a>) -> Self {
         Self {
@@ -87,7 +97,6 @@ pub struct TrustedHostLocalApplicationCancellationHandle {
 }
 
 impl TrustedHostLocalApplicationCancellationHandle {
-    #[cfg(test)]
     pub(crate) fn from_timer_handle(inner: TrustedHostLocalTimerCancellationHandle) -> Self {
         Self { inner }
     }
@@ -96,9 +105,11 @@ impl TrustedHostLocalApplicationCancellationHandle {
     ///
     /// # Errors
     ///
-    /// Returns a stable state error if the cancellation state cannot be read.
-    pub fn request_cancellation(&self) -> Result<(), WorkflowOsError> {
-        self.inner.cancel()
+    /// Returns a bounded failure if the private cancellation state cannot be read.
+    pub fn request_cancellation(&self) -> Result<(), TrustedHostLocalApplicationFailure> {
+        self.inner
+            .cancel()
+            .map_err(|error| TrustedHostLocalApplicationFailure::from_core_error(&error))
     }
 }
 
@@ -187,6 +198,105 @@ impl fmt::Display for TrustedHostLocalApplicationFailure {
 
 impl Error for TrustedHostLocalApplicationFailure {}
 
+pub(crate) enum TrustedHostLocalApplicationPreparationPosture<'a> {
+    Fresh {
+        opening: Box<OperationalExecutionWindowOpeningUseInput<'a>>,
+        persistence: TrustedHostSupervisorPersistenceInput,
+    },
+    Existing,
+}
+
+pub(crate) struct TrustedHostLocalApplicationPreparationInput<'a> {
+    pub(crate) backend: &'a SqliteStateBackend,
+    pub(crate) locator: TrustedHostOperationalEntryLocator,
+    pub(crate) posture: TrustedHostLocalApplicationPreparationPosture<'a>,
+    pub(crate) executor: &'a dyn TrustedHostAttemptExecutor,
+    pub(crate) skill_input: SkillInput,
+}
+
+pub(crate) struct TrustedHostLocalApplicationPreparedSession<'a> {
+    session: TrustedHostLocalApplicationSession<'a>,
+    cancellation_handle: TrustedHostLocalApplicationCancellationHandle,
+}
+
+impl<'a> TrustedHostLocalApplicationPreparedSession<'a> {
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        TrustedHostLocalApplicationSession<'a>,
+        TrustedHostLocalApplicationCancellationHandle,
+    ) {
+        (self.session, self.cancellation_handle)
+    }
+}
+
+impl fmt::Debug for TrustedHostLocalApplicationPreparedSession<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedHostLocalApplicationPreparedSession")
+            .field("binding", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) fn prepare_trusted_host_local_application_session(
+    input: TrustedHostLocalApplicationPreparationInput<'_>,
+) -> Result<TrustedHostLocalApplicationPreparedSession<'_>, WorkflowOsError> {
+    let TrustedHostLocalApplicationPreparationInput {
+        backend,
+        locator,
+        posture,
+        executor,
+        skill_input,
+    } = input;
+    let posture = match posture {
+        TrustedHostLocalApplicationPreparationPosture::Fresh {
+            opening,
+            persistence,
+        } => TrustedHostOperationalEntryPosture::Fresh {
+            opening,
+            persistence,
+        },
+        TrustedHostLocalApplicationPreparationPosture::Existing => {
+            TrustedHostOperationalEntryPosture::Existing
+        }
+    };
+    let preparation_binding = validate_trusted_host_operational_entry_preparation(
+        backend,
+        &locator,
+        &posture,
+        executor,
+        &skill_input,
+    )?;
+    let (cancellation, timer_handle) = TrustedHostLocalTimerCancellation::new();
+    let session = TrustedHostLocalApplicationSession {
+        runner: Box::new(move || {
+            let source = TrustedHostLocalProductionIdentitySource::new();
+            let mut identity_provider = source.redispatch_provider();
+            TrustedHostExplicitLocalProcessOwner::with_cancellation(
+                TrustedHostOperationalEntryInput {
+                    backend,
+                    locator,
+                    posture,
+                    executor,
+                    skill_input,
+                    identity_provider: &mut identity_provider,
+                    expected_preparation_commitment: Some(preparation_binding.commitment),
+                },
+                cancellation,
+            )
+            .run()
+            .map(map_owner_outcome)
+        }),
+    };
+    Ok(TrustedHostLocalApplicationPreparedSession {
+        session,
+        cancellation_handle: TrustedHostLocalApplicationCancellationHandle::from_timer_handle(
+            timer_handle,
+        ),
+    })
+}
+
 /// Bounded result of consuming one local application session.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum TrustedHostLocalApplicationOutcome {
@@ -242,7 +352,6 @@ pub enum TrustedHostLocalApplicationContinuationStopReason {
     WakeBudgetExhausted,
 }
 
-#[cfg(test)]
 fn map_owner_outcome(
     outcome: TrustedHostExplicitLocalProcessOwnerOutcome,
 ) -> TrustedHostLocalApplicationOutcome {
@@ -263,7 +372,6 @@ fn map_owner_outcome(
     }
 }
 
-#[cfg(test)]
 fn map_entry_stop_reason(
     reason: TrustedHostRedispatchStopReason,
 ) -> TrustedHostLocalApplicationEntryStopReason {
@@ -280,7 +388,6 @@ fn map_entry_stop_reason(
     }
 }
 
-#[cfg(test)]
 fn map_continuation_stop_reason(
     reason: TrustedHostRepeatedSchedulingStopReason,
 ) -> TrustedHostLocalApplicationContinuationStopReason {
@@ -356,6 +463,25 @@ mod tests {
             cancellation.begin_entry().expect("entry decision"),
             super::super::trusted_host_local_timer::TrustedHostLocalTimerEntryDecision::Canceled
         );
+    }
+
+    #[test]
+    fn cancellation_failure_is_bounded_and_payload_free() {
+        let (_cancellation, inner) = TrustedHostLocalTimerCancellation::new();
+        inner.poison();
+        let handle = TrustedHostLocalApplicationCancellationHandle::from_timer_handle(inner);
+
+        let failure = handle
+            .request_cancellation()
+            .expect_err("poisoned cancellation state must fail");
+
+        assert_eq!(failure, TrustedHostLocalApplicationFailure::Internal);
+        for output in [format!("{failure:?}"), failure.to_string()] {
+            assert!(output.contains(failure.code()));
+            assert!(!output.contains("poison"));
+            assert!(!output.contains("token"));
+            assert!(!output.contains("authorization"));
+        }
     }
 
     #[test]

@@ -28,12 +28,19 @@ impl<'a> TrustedHostExplicitLocalProcessOwner<'a> {
     ) -> (Self, TrustedHostLocalTimerCancellationHandle) {
         let (cancellation, handle) = TrustedHostLocalTimerCancellation::new();
         (
-            Self {
-                operational_entry,
-                cancellation,
-            },
+            Self::with_cancellation(operational_entry, cancellation),
             handle,
         )
+    }
+
+    pub(crate) fn with_cancellation(
+        operational_entry: TrustedHostOperationalEntryInput<'a>,
+        cancellation: TrustedHostLocalTimerCancellation,
+    ) -> Self {
+        Self {
+            operational_entry,
+            cancellation,
+        }
     }
 
     pub(crate) fn run(

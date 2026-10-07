@@ -6,7 +6,7 @@ use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeContinuationDisposition, AuthorizedExecutionContinuityStore, ExpectedWindowBinding,
 };
 use crate::operational_execution_window_opening::{
-    open_with_registered_current_authority, operation_binding_commitment,
+    open_with_registered_current_authority, operation_binding_commitment, run_snapshot_commitment,
     trusted_host_invocation_commitment, OperationalExecutionWindowOpeningResult,
     OperationalExecutionWindowOpeningUseInput,
 };
@@ -16,7 +16,7 @@ use crate::trusted_host_supervisor::{
 };
 use crate::{
     ActorId, AuthorizedExecutionWindowId, ImmutableRunBundleBinding, SkillInput, SpecContentHash,
-    StepId, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId,
+    StateBackend, StepId, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId,
 };
 
 use super::trusted_host_redispatch_loop::{
@@ -47,11 +47,23 @@ impl fmt::Debug for TrustedHostOperationalEntryLocator {
 pub(crate) struct TrustedHostOperationalEntryInput<'a> {
     pub(crate) backend: &'a SqliteStateBackend,
     pub(crate) locator: TrustedHostOperationalEntryLocator,
-    pub(crate) opening: Option<OperationalExecutionWindowOpeningUseInput<'a>>,
+    pub(crate) posture: TrustedHostOperationalEntryPosture<'a>,
     pub(crate) executor: &'a dyn TrustedHostAttemptExecutor,
     pub(crate) skill_input: SkillInput,
-    pub(crate) opening_persistence: TrustedHostSupervisorPersistenceInput,
     pub(crate) identity_provider: &'a mut dyn TrustedHostRedispatchIdentityProvider,
+    pub(crate) expected_preparation_commitment: Option<SpecContentHash>,
+}
+
+pub(crate) enum TrustedHostOperationalEntryPosture<'a> {
+    Fresh {
+        opening: Box<OperationalExecutionWindowOpeningUseInput<'a>>,
+        persistence: TrustedHostSupervisorPersistenceInput,
+    },
+    Existing,
+}
+
+pub(crate) struct TrustedHostOperationalEntryPreparationBinding {
+    pub(crate) commitment: SpecContentHash,
 }
 
 pub(crate) struct TrustedHostExistingOperationalEntryInput<'a> {
@@ -89,20 +101,27 @@ pub(crate) fn enter_trusted_host_operation(
     );
     validate_skill_identity(&input.locator, &input.skill_input)?;
 
-    let state = continuity_codec::load_snapshot(&input.backend.connection()?)?;
-    let matching = state
-        .windows
-        .values()
-        .filter(|window| {
-            window.workflow_id == input.locator.workflow_id
-                && window.run_id == input.locator.run_id
-                && window.step_id == input.locator.step_id
-        })
-        .collect::<Vec<_>>();
+    let current = current_preparation_context(
+        input.backend,
+        &input.locator,
+        &input.posture,
+        &invocation_commitment,
+    )?;
+    if input
+        .expected_preparation_commitment
+        .as_ref()
+        .is_some_and(|expected| expected != &current.binding.commitment)
+    {
+        return Err(entry_error(
+            WorkflowOsErrorKind::Security,
+            "preparation_binding_changed",
+            "trusted-host operational preparation binding changed",
+        ));
+    }
 
-    let (initial_capability, initial_persistence) = match matching.as_slice() {
-        [] => open_initial_attempt(&input, &invocation_commitment)?,
-        [window] => {
+    let (initial_capability, initial_persistence) = match current.window.as_ref() {
+        None => open_initial_attempt(&input, &invocation_commitment)?,
+        Some(window) => {
             if window.window_id != input.locator.window_id {
                 return Err(entry_error(
                     WorkflowOsErrorKind::Security,
@@ -124,13 +143,6 @@ pub(crate) fn enter_trusted_host_operation(
                 input.identity_provider,
             )?
         }
-        _ => {
-            return Err(entry_error(
-                WorkflowOsErrorKind::InvalidState,
-                "window_ambiguous",
-                "trusted-host operational entry state is ambiguous",
-            ));
-        }
     };
 
     run_bounded_trusted_host_redispatch_loop(TrustedHostRedispatchLoopInput {
@@ -140,6 +152,130 @@ pub(crate) fn enter_trusted_host_operation(
         skill_input: input.skill_input,
         initial_persistence,
         identity_provider: input.identity_provider,
+    })
+}
+
+pub(crate) fn validate_trusted_host_operational_entry_preparation(
+    backend: &SqliteStateBackend,
+    locator: &TrustedHostOperationalEntryLocator,
+    posture: &TrustedHostOperationalEntryPosture<'_>,
+    executor: &dyn TrustedHostAttemptExecutor,
+    skill_input: &SkillInput,
+) -> Result<TrustedHostOperationalEntryPreparationBinding, WorkflowOsError> {
+    let invocation_commitment =
+        trusted_host_invocation_commitment(skill_input, &executor.binding_commitment());
+    validate_skill_identity(locator, skill_input)?;
+    current_preparation_context(backend, locator, posture, &invocation_commitment)
+        .map(|current| current.binding)
+}
+
+struct TrustedHostOperationalEntryPreparationContext {
+    binding: TrustedHostOperationalEntryPreparationBinding,
+    window:
+        Option<crate::authorized_execution_continuity_state::internal::AuthoritativeWindowRecord>,
+}
+
+fn current_preparation_context(
+    backend: &SqliteStateBackend,
+    locator: &TrustedHostOperationalEntryLocator,
+    posture: &TrustedHostOperationalEntryPosture<'_>,
+    invocation_commitment: &SpecContentHash,
+) -> Result<TrustedHostOperationalEntryPreparationContext, WorkflowOsError> {
+    let run = backend.rehydrate_run(&locator.run_id)?;
+    if run.snapshot.identity.workflow_id != locator.workflow_id
+        || !matches!(
+            run.snapshot.status,
+            crate::WorkflowRunStatus::Running | crate::WorkflowRunStatus::Retrying
+        )
+        || run.snapshot.identity.immutable_run_bundle.as_ref()
+            != Some(&locator.immutable_run_bundle)
+    {
+        return Err(entry_error(
+            WorkflowOsErrorKind::InvalidState,
+            "run_not_eligible",
+            "trusted-host operational run is not eligible",
+        ));
+    }
+    let snapshot_commitment = run_snapshot_commitment(&run.snapshot)?;
+    let state = continuity_codec::load_snapshot(&backend.connection()?)?;
+    let matching = state
+        .windows
+        .values()
+        .filter(|window| {
+            window.workflow_id == locator.workflow_id
+                && window.run_id == locator.run_id
+                && window.step_id == locator.step_id
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let (posture_label, window, disposition, operation_binding) =
+        match (posture, matching.as_slice()) {
+            (TrustedHostOperationalEntryPosture::Fresh { opening, .. }, []) => {
+                validate_opening_binding(backend, locator, opening, invocation_commitment)?;
+                ("fresh", None, None, None)
+            }
+            (TrustedHostOperationalEntryPosture::Existing, [window]) => {
+                if window.window_id != locator.window_id {
+                    return Err(entry_error(
+                        WorkflowOsErrorKind::Security,
+                        "window_identity_mismatch",
+                        "trusted-host operational entry binding is invalid",
+                    ));
+                }
+                let operation_binding = read_opening_operation_binding(backend, &window.window_id)?;
+                let disposition = backend.continuation_disposition(&window.window_id)?;
+                (
+                    "existing",
+                    Some(window.clone()),
+                    Some(disposition),
+                    Some(operation_binding),
+                )
+            }
+            (TrustedHostOperationalEntryPosture::Fresh { .. }, [_]) => {
+                return Err(entry_error(
+                    WorkflowOsErrorKind::Security,
+                    "preparation_posture_changed",
+                    "trusted-host operational preparation posture changed",
+                ));
+            }
+            (TrustedHostOperationalEntryPosture::Existing, []) => {
+                return Err(entry_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "existing_window_unavailable",
+                    "trusted-host existing operational window is unavailable",
+                ));
+            }
+            (_, _) => {
+                return Err(entry_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "window_ambiguous",
+                    "trusted-host operational entry state is ambiguous",
+                ));
+            }
+        };
+
+    let payload = serde_json::to_vec(&(
+        "workflow-os/trusted-host-operational-preparation/v1",
+        posture_label,
+        &snapshot_commitment,
+        invocation_commitment,
+        &locator.workflow_id,
+        &locator.run_id,
+        &locator.step_id,
+        &locator.window_id,
+        &locator.subject_actor_id,
+        &locator.immutable_run_bundle,
+        &window,
+        disposition,
+        operation_binding,
+    ))
+    .map_err(|_| entry_corrupt())?;
+    Ok(TrustedHostOperationalEntryPreparationContext {
+        binding: TrustedHostOperationalEntryPreparationBinding {
+            commitment: SpecContentHash::from_bytes(payload),
+        },
+        window,
     })
 }
 
@@ -234,37 +370,32 @@ fn open_initial_attempt(
     ),
     WorkflowOsError,
 > {
-    let opening = input.opening.as_ref().ok_or_else(|| {
-        entry_error(
+    let TrustedHostOperationalEntryPosture::Fresh {
+        opening,
+        persistence,
+    } = &input.posture
+    else {
+        return Err(entry_error(
             WorkflowOsErrorKind::InvalidState,
             "opening_context_missing",
             "trusted-host operational opening context is unavailable",
-        )
-    })?;
-    if !std::ptr::eq(opening.backend, input.backend)
-        || opening.execution_binding.workflow_id() != &input.locator.workflow_id
-        || opening.execution_binding.run_id() != &input.locator.run_id
-        || opening.execution_binding.step_id() != &input.locator.step_id
-        || opening.execution_binding.actor() != &input.locator.subject_actor_id
-        || opening.execution_binding.immutable_run_bundle() != &input.locator.immutable_run_bundle
-        || opening.window_id != input.locator.window_id
-        || opening.invocation_binding_commitment != invocation_commitment
-    {
-        return Err(entry_error(
-            WorkflowOsErrorKind::Security,
-            "opening_binding_mismatch",
-            "trusted-host operational opening binding is invalid",
         ));
-    }
+    };
+    validate_opening_binding(
+        input.backend,
+        &input.locator,
+        opening,
+        invocation_commitment,
+    )?;
 
     let opened = open_with_registered_current_authority(opening)?;
     match opened.result {
         OperationalExecutionWindowOpeningResult::Opened { capability, .. } => Ok((
             TrustedHostSupervisorAttemptCapability::Opened(capability),
             TrustedHostSupervisorPersistenceInput {
-                operation: input.opening_persistence.operation.clone(),
-                receipt: input.opening_persistence.receipt.clone(),
-                yield_generation: input.opening_persistence.yield_generation.clone(),
+                operation: persistence.operation.clone(),
+                receipt: persistence.receipt.clone(),
+                yield_generation: persistence.yield_generation.clone(),
             },
         )),
         OperationalExecutionWindowOpeningResult::ExactReplay(_) => Err(entry_error(
@@ -273,6 +404,30 @@ fn open_initial_attempt(
             "trusted-host operational opening authority is unavailable",
         )),
     }
+}
+
+fn validate_opening_binding(
+    backend: &SqliteStateBackend,
+    locator: &TrustedHostOperationalEntryLocator,
+    opening: &OperationalExecutionWindowOpeningUseInput<'_>,
+    invocation_commitment: &SpecContentHash,
+) -> Result<(), WorkflowOsError> {
+    if !std::ptr::eq(opening.backend, backend)
+        || opening.execution_binding.workflow_id() != &locator.workflow_id
+        || opening.execution_binding.run_id() != &locator.run_id
+        || opening.execution_binding.step_id() != &locator.step_id
+        || opening.execution_binding.actor() != &locator.subject_actor_id
+        || opening.execution_binding.immutable_run_bundle() != &locator.immutable_run_bundle
+        || opening.window_id != locator.window_id
+        || opening.invocation_binding_commitment != invocation_commitment
+    {
+        return Err(entry_error(
+            WorkflowOsErrorKind::Security,
+            "opening_binding_mismatch",
+            "trusted-host operational opening binding is invalid",
+        ));
+    }
+    Ok(())
 }
 
 fn existing_window_binding(
