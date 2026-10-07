@@ -767,8 +767,13 @@ current queue when they contain historical `next phase` language.
    authoritative `AwaitCondition` into the accepted synchronous production
    caller, and returns every other bounded entry posture unchanged. A
    no-wait `ResumeNow` yield remains inside operational entry rather than being
-   misclassified as scheduled waiting. The next phase is focused
-   implementation/security review before any wider owner or operator surface.
+   misclassified as scheduled waiting. The focused
+   [implementation/security review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_CALLER_ADOPTION_REVIEW.md)
+   accepts the composition with non-blocking follow-ups. The private function
+   still has no process owner and is not automatic runtime continuation. The
+   next phase is planning the smallest explicit process-owned local owner
+   boundary that can invoke this exact composition without adding run
+   discovery, startup scanning, detached work, or public configuration.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
