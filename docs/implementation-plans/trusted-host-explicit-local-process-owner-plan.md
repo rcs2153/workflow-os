@@ -1,14 +1,14 @@
 # Trusted-Host Explicit Local Process Owner Plan
 
-Status: focused maintainer/security review found planning blockers in the
-pre-entry cancellation, process-shutdown, canceled-result, and cancellation
-race contracts. The documentation-only blocker fix below defines an atomic
+Status: accepted after documentation-only blocker correction and focused
+maintainer/security re-review. The corrected contract defines an atomic
 pre-entry cancellation linearization point, a truthful owner-level canceled
-outcome, and the non-interruptible active-attempt boundary. Focused re-review
-is required before implementation. This plan does not implement runtime
-behavior. See the
+outcome, and the non-interruptible active-attempt boundary. The next phase is
+the crate-private owner implementation exactly within this plan. This plan
+does not itself implement runtime behavior. See the
 [focused review](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_REVIEW.md)
-and [blocker-fix report](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_BLOCKER_FIX_REPORT.md).
+the [blocker-fix report](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_BLOCKER_FIX_REPORT.md),
+and the [blocker-fix re-review](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_BLOCKER_FIX_REVIEW.md).
 
 ## 1. Executive Summary
 
@@ -308,7 +308,8 @@ fabricating capabilities or editing state by hand.
 
 ## 14. Candidate Implementation Sequence
 
-1. Focused maintainer/security review of this plan.
+1. Focused maintainer/security review of this plan. Complete after blocker
+   correction and re-review.
 2. Add the one-shot private owner type and constructor.
 3. Add the shared private pre-entry linearization operation and minimal
    owner-level outcome.
@@ -350,8 +351,9 @@ No Rust behavior changes in this phase.
 
 ## 17. Final Recommendation
 
-Proceed next to a focused maintainer/security re-review of the corrected plan.
+Proceed next to the crate-private process-owner implementation exactly within
+this corrected plan.
 
-Do not implement the owner until review confirms that cancellation ownership,
-one-shot lifecycle, exact-input retention, direct competing-owner proof, and
-manual operator boundary are sufficiently explicit.
+Do not combine owner implementation with an application adoption site,
+discovery, signal orchestration, background execution, public surfaces, or
+automatic continuation.
