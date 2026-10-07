@@ -836,7 +836,13 @@ current queue when they contain historical `next phase` language.
    phase is a focused blocker fix that must determine whether this code is a
    lawful bounded loser outcome or evidence of a redispatch invariant gap,
    make the closed outcome set deterministic, and repeat stress validation.
-   Local host application topology planning remains blocked pending re-review.
+   That focused [blocker
+   fix](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_TEST_HARDENING_BLOCKER_FIX_REPORT.md)
+   now proves `directive_missing` is the lawful snapshot-after-consumption
+   loser posture, adds it to the closed accepted set, and repeats the complete
+   contention scenario 32 times per ordinary test invocation. Production
+   behavior is unchanged. Local host application topology planning remains
+   blocked pending focused re-review.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
