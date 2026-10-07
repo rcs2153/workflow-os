@@ -250,7 +250,7 @@ fn entry_already_started_error() -> WorkflowOsError {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use std::sync::mpsc;
+    use std::sync::{mpsc, Arc, Barrier};
     use std::time::{Duration, Instant};
 
     use super::*;
@@ -321,6 +321,50 @@ mod tests {
             started.begin_entry().expect_err("entry is one-shot").code(),
             "trusted_host_local_timer.entry_already_started"
         );
+    }
+
+    #[test]
+    fn simultaneous_cancellation_and_entry_remain_linearized() {
+        for _ in 0..128 {
+            let (cancellation, handle) = TrustedHostLocalTimerCancellation::new();
+            let barrier = Arc::new(Barrier::new(3));
+            let entry_barrier = Arc::clone(&barrier);
+            let cancel_barrier = Arc::clone(&barrier);
+
+            let ((decision, cancellation), cancel_result) = std::thread::scope(|scope| {
+                let entry = scope.spawn(move || {
+                    entry_barrier.wait();
+                    let decision = cancellation.begin_entry();
+                    (decision, cancellation)
+                });
+                let cancel = scope.spawn(move || {
+                    cancel_barrier.wait();
+                    handle.cancel()
+                });
+                barrier.wait();
+                (
+                    entry.join().expect("entry racer"),
+                    cancel.join().expect("cancel racer"),
+                )
+            });
+
+            cancel_result.expect("simultaneous cancellation");
+            match decision.expect("simultaneous entry decision") {
+                TrustedHostLocalTimerEntryDecision::Canceled => assert_eq!(
+                    cancellation
+                        .begin_entry()
+                        .expect("canceled remains canceled"),
+                    TrustedHostLocalTimerEntryDecision::Canceled
+                ),
+                TrustedHostLocalTimerEntryDecision::Started => assert_eq!(
+                    cancellation
+                        .begin_entry()
+                        .expect_err("started entry remains one-shot")
+                        .code(),
+                    "trusted_host_local_timer.entry_already_started"
+                ),
+            }
+        }
     }
 
     #[test]

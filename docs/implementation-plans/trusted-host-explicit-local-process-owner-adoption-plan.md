@@ -1,10 +1,12 @@
 # Trusted-Host Explicit Local Process Owner Adoption Plan
 
 Status: planning completed with an application-topology blocker. The accepted
-private process owner is not adopted by an application in this phase. Repository
-inspection found no current process that both owns the complete SQLite
-trusted-host operational binding and can retain the cooperative cancellation
-handle without crossing a deferred public or backend boundary.
+private process owner is not adopted by an application in this phase.
+Repository inspection found no current process that both owns the complete
+SQLite trusted-host operational binding and can retain the cooperative
+cancellation handle without crossing a deferred public or backend boundary.
+The two prerequisite private-owner test-hardening follow-ups are now
+implemented; focused review remains next.
 
 ## 1. Executive Summary
 
@@ -198,6 +200,7 @@ The adoption implementation must then add process-boundary tests for:
 ## 11. Proposed Resolution Sequence
 
 1. Implement and review the two private-owner test-hardening follow-ups.
+   Implementation is complete; focused review remains pending.
 2. Plan the local host application topology and Core-to-application visibility
    boundary.
 3. Review that topology for state, authority, shutdown, privacy, and release
@@ -238,4 +241,3 @@ the private race tests, then plan the explicit local host application topology.
 The owner remains accepted and useful, but making it reachable through the
 wrong process would weaken the very authority, backend, and lifecycle
 boundaries it was built to preserve.
-
