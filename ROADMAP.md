@@ -711,10 +711,13 @@ current queue when they contain historical `next phase` language.
    duplicate-identity, restart, concurrency, clock, cancellation, and privacy
    proofs are now implemented in
    [this phase](docs/concepts/TRUSTED_HOST_PRIVATE_PRODUCTION_TIMER_REPORT.md).
-   The next phase is focused maintainer/security review of that implementation.
-   General scheduling, public configuration, provider mutation, OpenShell,
-   nested harnesses, automatic approval, CLI, SDK, and schema exposure remain
-   blocked.
+   The focused
+   [maintainer/security review](docs/concepts/TRUSTED_HOST_PRIVATE_PRODUCTION_TIMER_REVIEW.md)
+   accepts that implementation with no blocker. The next trusted-host phase is
+   planning one explicit local production caller without widening the timer or
+   scheduler surface. General scheduling, public configuration, provider
+   mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
+   schema exposure remain blocked.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
