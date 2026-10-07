@@ -42,12 +42,14 @@ and receipt identities.
 
 The observed contract is:
 
-- one caller completes the accepted reinvocation path;
+- one caller completes an accepted reinvocation path with one executor entry;
 - exactly one executor entry occurs;
-- the losing caller receives either the stable directive-replay rejection or
-  the stable attempt-limit inconsistency rejection, depending on which
-  one-winner boundary it observes;
-- successful outcomes account for exactly one executor entry; and
+- the losing caller receives either a stable directive-replay rejection, a
+  stable attempt-limit inconsistency rejection, or a successful terminal
+  observation with zero executor entries, depending on which one-winner
+  boundary it observes;
+- every successful outcome is terminal and successful outcomes account for
+  exactly one aggregate executor entry; and
 - authoritative continuation posture is durably `Terminal`.
 
 The loser is therefore explainable rather than silently dropped or admitted a
@@ -93,7 +95,8 @@ crate-private.
 Focused tests prove:
 
 - two concurrent full-composition callers produce exactly one executor entry;
-- the loser is one of the two bounded fail-closed race rejections;
+- the loser is either one of the two bounded fail-closed race rejections or a
+  terminal successful outcome with zero executor entries;
 - the resulting durable continuation posture is terminal;
 - a committed transition can be interrupted before operational entry;
 - backend reopen plus exact replay performs one executor entry;
@@ -116,6 +119,12 @@ The first CI run exposed that the losing caller can lawfully observe either
 the already-consumed directive or the exhausted attempt budget after the
 winner reaches terminal posture. The proof and this report were corrected to
 encode that bounded race surface rather than assuming one interleaving.
+
+Focused maintainer/security review then identified a third lawful
+interleaving: the loser can observe terminal posture before attempting
+authority consumption and return a successful zero-entry outcome. The
+blocker-fix proof now classifies all three bounded loser surfaces while
+requiring exactly one aggregate executor entry.
 
 ## 10. Remaining Limitations
 
