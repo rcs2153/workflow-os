@@ -34,6 +34,12 @@ Independent 128-bit partitions, operation-family prefixes, lowercase fixed
 hexadecimal encoding, typed validation, and no automatic retry provide a clear
 and testable contract.
 
+Fix-forward note: final implementation audit established that `getrandom` 0.4
+requires Rust 1.85 and therefore conflicts with Workflow OS's Rust 1.78
+contract. The implementation uses the direct 0.2.17 line with equivalent
+all-or-nothing OS entropy semantics. This compatibility correction does not
+change the accepted authority or identity boundary.
+
 The dependency must be direct in `workflow-core`, locked by the workspace, and
 used only for non-authorizing identity material. Test-only deterministic byte
 filling must not be reachable from production exports.

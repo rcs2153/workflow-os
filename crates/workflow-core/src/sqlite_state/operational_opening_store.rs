@@ -638,6 +638,9 @@ mod tests {
     use crate::sqlite_state::dispatch_reservation_store::{
         inject_dispatch_commit_fault, InjectedDispatchCommitFault,
     };
+    use crate::sqlite_state::trusted_host_local_production_caller::{
+        run_trusted_host_local_production_caller, TrustedHostLocalProductionCallerInput,
+    };
     use crate::sqlite_state::trusted_host_local_timer::{
         run_trusted_host_local_timer, TrustedHostLocalTimerCancellation, TrustedHostLocalTimerInput,
     };
@@ -3001,6 +3004,162 @@ mod tests {
         assert_eq!(outcome.scheduled_wakes, 1);
         assert_eq!(outcome.executor_entries, 1);
         assert_eq!(executor_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn local_production_caller_uses_fixed_boundary_and_enters_executor_once() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+        );
+        let locator =
+            register_supervisor_time_window_wait(&fixture, "local-production-caller", deadline);
+        let executor_calls = AtomicUsize::new(0);
+        let executor = CountingExecutor {
+            calls: &executor_calls,
+        };
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+
+        let outcome =
+            run_trusted_host_local_production_caller(TrustedHostLocalProductionCallerInput {
+                backend: &fixture.backend,
+                locator,
+                cancellation,
+                executor: &executor,
+                skill_input: skill_input(&fixture),
+            })
+            .expect("local production caller");
+
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Terminal
+        );
+        assert_eq!(outcome.scheduled_wakes, 1);
+        assert_eq!(outcome.executor_entries, 1);
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn local_production_caller_cancellation_is_owner_reachable_and_zero_write() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::hours(1),
+        );
+        let locator = register_supervisor_time_window_wait(
+            &fixture,
+            "local-production-caller-cancel",
+            deadline,
+        );
+        let before = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot before cancellation");
+        let executor_calls = AtomicUsize::new(0);
+        let executor = CountingExecutor {
+            calls: &executor_calls,
+        };
+        let (cancellation, handle) = TrustedHostLocalTimerCancellation::new();
+        handle.cancel().expect("cancel");
+
+        let outcome =
+            run_trusted_host_local_production_caller(TrustedHostLocalProductionCallerInput {
+                backend: &fixture.backend,
+                locator,
+                cancellation,
+                executor: &executor,
+                skill_input: skill_input(&fixture),
+            })
+            .expect("canceled local production caller");
+
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Canceled
+        );
+        assert_eq!(outcome.scheduled_wakes, 1);
+        assert_eq!(outcome.executor_entries, 0);
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 0);
+        let after = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot after cancellation");
+        assert!(
+            before == after,
+            "production caller cancellation must not mutate continuity state"
+        );
+    }
+
+    #[test]
+    fn local_production_caller_reopens_backend_and_preserves_outcome_shape() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+        );
+        let locator = register_supervisor_time_window_wait(
+            &fixture,
+            "local-production-caller-restart",
+            deadline,
+        );
+        let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen backend");
+        let executor_calls = AtomicUsize::new(0);
+        let executor = CountingExecutor {
+            calls: &executor_calls,
+        };
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+
+        let outcome =
+            run_trusted_host_local_production_caller(TrustedHostLocalProductionCallerInput {
+                backend: &reopened,
+                locator,
+                cancellation,
+                executor: &executor,
+                skill_input: skill_input(&fixture),
+            })
+            .expect("reconstructed local production caller");
+
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Terminal
+        );
+        assert_eq!(outcome.scheduled_wakes, 1);
+        assert_eq!(outcome.executor_entries, 1);
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn local_production_caller_uses_exactly_two_wakes() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+        );
+        let locator = register_supervisor_time_window_wait_with_attempts(
+            &fixture,
+            "local-production-caller-two-wakes",
+            deadline,
+            3,
+        );
+        let executor_calls = AtomicUsize::new(0);
+        let executor = YieldTimeWindowThenFailExecutor {
+            calls: &executor_calls,
+        };
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+
+        let outcome =
+            run_trusted_host_local_production_caller(TrustedHostLocalProductionCallerInput {
+                backend: &fixture.backend,
+                locator,
+                cancellation,
+                executor: &executor,
+                skill_input: skill_input(&fixture),
+            })
+            .expect("two-wake local production caller");
+
+        assert_eq!(
+            outcome.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Terminal
+        );
+        assert_eq!(outcome.scheduled_wakes, 2);
+        assert_eq!(outcome.executor_entries, 2);
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 2);
     }
 
     #[test]

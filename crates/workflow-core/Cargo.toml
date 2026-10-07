@@ -14,6 +14,7 @@ path = "src/lib.rs"
 [dependencies]
 base64 = "0.22"
 fs2 = "0.4"
+getrandom = "0.2.17"
 log = { version = "0.4", features = ["max_level_info", "release_max_level_info"] }
 postgres = "0.19.14"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
