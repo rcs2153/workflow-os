@@ -729,7 +729,13 @@ current queue when they contain historical `next phase` language.
    found planning blockers in synchronous cancellation ownership, the exact
    production entropy source, finite wake-budget selection, ambiguous
    reconstruction advice, and current-authority wording. The next phase is one
-   documentation-only planning blocker fix followed by focused re-review.
+   documentation-only planning blocker fix followed by focused re-review. That
+   [blocker fix](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PRODUCTION_CALLER_PLAN_BLOCKER_FIX_REPORT.md)
+   now defines the owner-created private cancellation pair, direct
+   `getrandom` 0.4 identity source, all-or-nothing bounded identity sets, fixed
+   two-wake budget, existing repeated-scheduling outcome without resume advice,
+   and corrected current-authority language. No runtime code is added. The next
+   phase is focused maintainer/security re-review of the corrected plan.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

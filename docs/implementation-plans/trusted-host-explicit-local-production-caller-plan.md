@@ -1,8 +1,12 @@
 # Explicit Local Trusted-Host Production Caller Plan
 
 Status: planning only. The private synchronous local timer and bounded repeated
-scheduling driver are implemented and accepted. No production caller is
-implemented.
+scheduling driver are implemented and accepted. Focused review found five
+planning blockers; this plan now resolves them with an owner-created private
+cancellation pair, a direct `getrandom` 0.4 identity source, all-or-nothing
+identity-set construction, a fixed two-wake budget, the existing bounded
+repeated-scheduling outcome, and corrected current-authority language. Focused
+re-review remains required. No production caller is implemented.
 
 ## 1. Executive Summary
 
@@ -13,10 +17,10 @@ crate-private and has no explicit production-shaped caller.
 
 The next slice should add one synchronous, process-owned local caller inside
 `workflow-core`. The caller receives an already-selected durable operational
-locator plus exact executor and invocation inputs, creates process-local
-cancellation and fresh bounded operation identities, chooses one fixed finite
-wake budget, calls the accepted private timer once, and projects the result
-into a bounded operator disposition.
+locator plus exact executor and invocation inputs, consumes one owner-created
+private cancellation receiver, creates fresh bounded operation identities,
+uses a fixed two-wake budget, calls the accepted private timer once, and
+returns its bounded outcome unchanged.
 
 This is not a scheduler, daemon, run-discovery service, public API, or CLI
 feature. Core remains authoritative for every wait, transition, dispatch, and
@@ -24,11 +28,11 @@ execution decision. This plan does not implement anything.
 
 ## 2. Goals
 
-- Define one explicit synchronous caller for an already-authorized local run.
+- Define one explicit synchronous caller for an already-selected local run.
 - Keep ownership on the calling process and thread.
 - Define an explicit cancellation owner and owner-loss posture.
 - Generate fresh operation and receipt identities without granting authority.
-- Select a fixed, validated finite wake budget.
+- Select a fixed, validated two-wake budget.
 - Reenter only through `run_trusted_host_local_timer`.
 - Return a bounded operator-facing outcome without leaking invocation data.
 - Reconstruct safely after process restart from durable Core state.
@@ -90,10 +94,7 @@ by the CLI or hosted crates in this phase.
 Use the smallest private API needed, such as:
 
 - `TrustedHostLocalProductionCallerInput`;
-- `TrustedHostLocalProductionCallerCancellationHandle` if the existing timer
-  handle cannot be returned without widening ownership;
-- `TrustedHostLocalProductionCallerOutcome`;
-- `TrustedHostLocalProductionCallerStopReason`; and
+- `TrustedHostLocalProductionIdentitySource`;
 - `run_trusted_host_local_production_caller`.
 
 The input should contain only:
@@ -102,10 +103,10 @@ The input should contain only:
 - one `TrustedHostOperationalEntryLocator`;
 - one exact `&dyn TrustedHostAttemptExecutor`;
 - one exact `SkillInput`;
-- one validated finite caller policy selected by Core-owned code or a private
-  constant; and
-- one injected entropy/nonce source only if deterministic test substitution is
-  required.
+- one `TrustedHostLocalTimerCancellation` created by the private owner-facing
+  pair factory; and
+- one private identity source, production by default and deterministically
+  injectable only in focused tests.
 
 The caller must not accept caller-authored authority, a claimed current
 disposition, a claimed satisfied deadline, approval state, or mutable workflow
@@ -116,10 +117,13 @@ definitions.
 The first caller is synchronous. The invoking thread remains the sole owner
 until the function returns.
 
-The caller should create the timer cancellation pair internally and expose the
-handle only through an explicit scoped callback or owner object whose lifetime
-cannot outlive the synchronous call accidentally. If a separate cancellation
-handle is necessary, tests must prove that:
+The explicit local owner creates the existing private cancellation pair before
+calling the synchronous function. The owner retains
+`TrustedHostLocalTimerCancellationHandle`; the caller input consumes
+`TrustedHostLocalTimerCancellation`. The production caller creates no thread,
+callback, trait object, or second cancellation abstraction.
+
+Tests must prove that:
 
 - cancellation is idempotent;
 - cancellation wakes a current wait promptly;
@@ -139,17 +143,29 @@ The production caller must satisfy the existing
 `TrustedHostScheduleWakeIdentityProvider` contracts without turning identity
 generation into authority.
 
-The first production identity source should:
+The first production identity source must use a direct `getrandom` 0.4
+dependency. Production construction is private. Focused tests may inject a
+deterministic byte-filling function through a test-only constructor.
 
-- use a process-local cryptographically strong random source already available
-  in the workspace, or a narrowly justified standard/dependency boundary;
-- prefix every identifier by domain and operation family;
+For every redispatch iteration, the source performs one all-or-nothing fill of
+96 bytes and partitions it into six independent 128-bit values for consume
+operation, consume receipt, generated attempt, supervisor operation,
+supervisor receipt, and yield generation. For every scheduled wake, it performs
+one all-or-nothing fill of 32 bytes for the wake operation and receipt. It
+validates the complete typed identity set before returning any part of it.
+
+The source must:
+
+- prefix every identifier with a short fixed operation-family domain;
 - remain within existing 128-byte identifier bounds;
 - produce independent operation, receipt, attempt, supervisor, yield, and wake
   identifiers;
 - never derive identities from secret material, paths, prompts, payloads, or
   timestamps alone;
-- surface entropy failure as a stable non-leaking error; and
+- encode random bytes as fixed-width lowercase hexadecimal;
+- surface entropy failure as one stable non-leaking error;
+- expose no partially constructed identity set after entropy or validation
+  failure; and
 - permit deterministic injected generation in focused tests.
 
 Duplicate identity remains a Core replay conflict. The caller must not catch
@@ -158,14 +174,11 @@ about whether a durable operation committed.
 
 ## 9. Wake Budget
 
-The caller must use one private, reviewed finite wake budget. It must not accept
-an arbitrary unbounded integer from a user or environment variable.
-
-The first implementation should use the smallest budget that proves lawful
-multi-wait continuation while preserving a short synchronous ownership window.
-The existing maximum of eight is an upper bound, not a required default. The
-implementation review should require a concrete justification for the selected
-value.
+The caller uses a private constant of exactly **two wakes**, constructed through
+`TrustedHostRepeatedWakeBudget::new(2)`. It accepts no wake budget from a user,
+environment variable, config file, or caller input. Two is the smallest value
+that proves repeated lawful waiting rather than only schedule-once behavior.
+Any later increase requires a separate reviewed change.
 
 Budget exhaustion is a non-terminal host stop. It does not fail or complete the
 workflow and must be surfaced as requiring a fresh explicit caller decision.
@@ -189,23 +202,25 @@ event may be converted back into in-memory authority.
 
 ## 11. Operator Outcome
 
-The caller should return one bounded, redaction-safe outcome containing only:
+The caller returns the existing `TrustedHostRepeatedSchedulingOutcome`
+unchanged. It contains only:
 
 - current authoritative continuation disposition;
 - number of scheduled wakes;
 - number of executor entries;
-- a closed stop reason; and
-- whether explicit reconstruction may be considered.
+- a closed stop reason.
 
-Candidate stop reasons are:
+Accepted stop reasons remain:
 
 - `Canceled`;
 - `Blocked`;
 - `Terminal`;
 - `UnsupportedWait`;
-- `WakeBudgetExhausted`; and
-- `Failed` only when represented by the existing structured error rather than
-  a misleading workflow disposition.
+- `WakeBudgetExhausted`.
+
+Failures remain `WorkflowOsError`; they are not converted into a stop reason.
+The caller returns no reconstruction, retry, or resume-advice boolean. A later
+owner decision must reenter Core and cannot be inferred from caller output.
 
 The outcome must not contain prompts, source content, commands, credentials,
 approval reasons, evidence bodies, raw skill output, provider payloads, file
@@ -244,25 +259,30 @@ Future focused tests should prove:
 1. an already-eligible exact run enters the executor at most once;
 2. one and multiple `TimeWindow` waits use the accepted timer path;
 3. fresh identities are distinct, bounded, and domain-separated;
-4. deterministic injected identities make tests reproducible;
-5. duplicate identities fail closed without a hidden retry;
-6. entropy failure is stable and non-leaking;
-7. cancellation before and during waiting creates no unauthorized mutation;
-8. the fixed wake budget cannot be widened by input;
-9. budget exhaustion is non-terminal and explicitly disclosed;
-10. blocked, terminal, unsupported, stale, corrupt, and security-rejected
+4. deterministic test-only byte filling makes tests reproducible;
+5. each identity family receives independent random material;
+6. duplicate identities fail closed without a hidden retry;
+7. entropy or typed-validation failure exposes no partial identity set;
+8. cancellation is reachable through the owner-retained handle while the
+   synchronous caller is blocked;
+9. cancellation before and during waiting creates no unauthorized mutation;
+10. the fixed two-wake budget cannot be widened by input;
+11. budget exhaustion is non-terminal and explicitly disclosed;
+12. blocked, terminal, unsupported, stale, corrupt, and security-rejected
     posture remain distinct;
-11. restart uses a reopened backend and fresh process-local state;
-12. competing callers preserve aggregate at-most-once executor entry;
-13. Debug and error output omit bindings, paths, payloads, and secrets;
-14. no public export, CLI command, schema, background thread, or durable host
+13. restart uses a reopened backend and fresh process-local state;
+14. competing callers preserve aggregate at-most-once executor entry;
+15. Debug and error output omit bindings, paths, payloads, and secrets;
+16. no reconstruction or resume-advice boolean exists in the outcome;
+17. no public export, CLI command, schema, background thread, or durable host
     job is added; and
-15. existing trusted-host and workspace tests continue to pass.
+18. existing trusted-host and workspace tests continue to pass.
 
 ## 15. Implementation Sequence
 
 1. Perform focused maintainer/security review of this plan.
-2. Implement the private production identity source and focused tests.
+2. Add the direct `getrandom` 0.4 dependency and implement the private
+   all-or-nothing production identity source with focused tests.
 3. Implement the synchronous caller as a thin owner over the accepted timer.
 4. Add restart, cancellation, concurrency, budget, and privacy tests.
 5. Run full repository validation.
@@ -272,17 +292,12 @@ Future focused tests should prove:
 Each item remains a separate governed phase where repository practice requires
 it. The caller implementation must not silently become its own adoption site.
 
-## 16. Open Questions
+## 16. Deferred Questions
 
-- Which existing workspace entropy source can produce bounded random identities
-  without adding an unjustified dependency?
-- Should the first caller hard-code a budget of two, four, or another reviewed
-  value below the maximum of eight?
-- Can the existing timer cancellation handle remain entirely internal while
-  still giving the owning process a useful cancellation mechanism?
 - Which private internal adoption site, if any, should follow implementation?
 - What operator surface should later receive non-terminal budget exhaustion
   without implying a public scheduler?
+- What owner-loss contract is needed before any detached caller exists?
 
 ## 17. Final Recommendation
 
