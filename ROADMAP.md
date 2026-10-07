@@ -792,8 +792,12 @@ current queue when they contain historical `next phase` language.
    now defines an atomic process-local cancellation-versus-entry linearization
    point, a truthful pre-entry-canceled owner outcome, and the
    non-interruptible active-attempt boundary. It no longer describes timer
-   cancellation as general process shutdown. The next phase is focused
-   maintainer/security re-review of the corrected plan.
+   cancellation as general process shutdown. The focused
+   [blocker-fix re-review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_BLOCKER_FIX_REVIEW.md)
+   accepts the corrected plan with no remaining blocker. The next phase is
+   implementing the crate-private one-shot process owner exactly within the
+   accepted boundary; application adoption, signal orchestration, discovery,
+   and public runtime surfaces remain deferred.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
