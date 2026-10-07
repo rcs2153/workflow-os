@@ -175,6 +175,8 @@ mod continuity_store;
 mod dispatch_reservation_store;
 mod operational_opening_store;
 #[allow(dead_code)]
+mod trusted_host_explicit_local_operation;
+#[allow(dead_code)]
 mod trusted_host_local_production_caller;
 #[allow(dead_code)]
 mod trusted_host_local_timer;
