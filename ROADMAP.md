@@ -735,7 +735,12 @@ current queue when they contain historical `next phase` language.
    `getrandom` 0.4 identity source, all-or-nothing bounded identity sets, fixed
    two-wake budget, existing repeated-scheduling outcome without resume advice,
    and corrected current-authority language. No runtime code is added. The next
-   phase is focused maintainer/security re-review of the corrected plan.
+   phase is focused maintainer/security re-review of the corrected plan. That
+   focused [re-review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PRODUCTION_CALLER_PLAN_BLOCKER_FIX_REVIEW.md)
+   accepts all five corrections with no remaining planning blocker. The next
+   phase is one crate-private synchronous caller and production identity-source
+   implementation exactly within the corrected plan. It must not add an
+   adoption site or widen any public or automatic scheduling surface.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
