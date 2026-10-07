@@ -618,7 +618,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-    use std::sync::{Arc, Barrier};
+    use std::sync::{mpsc, Arc, Barrier, Condvar, Mutex};
 
     use rusqlite::Connection;
 
@@ -641,6 +641,9 @@ mod tests {
     use crate::sqlite_state::trusted_host_explicit_local_operation::{
         run_explicit_trusted_host_local_operation, TrustedHostExplicitLocalOperationInput,
         TrustedHostExplicitLocalOperationOutcome,
+    };
+    use crate::sqlite_state::trusted_host_explicit_local_process_owner::{
+        TrustedHostExplicitLocalProcessOwner, TrustedHostExplicitLocalProcessOwnerOutcome,
     };
     use crate::sqlite_state::trusted_host_local_production_caller::{
         run_trusted_host_local_production_caller, TrustedHostLocalProductionCallerInput,
@@ -1480,6 +1483,12 @@ mod tests {
         calls: &'a AtomicUsize,
     }
 
+    struct BlockingTimeWindowExecutor {
+        calls: Arc<AtomicUsize>,
+        entered: mpsc::Sender<()>,
+        release: Arc<(Mutex<bool>, Condvar)>,
+    }
+
     struct CountingBindingExecutor<'a> {
         calls: &'a AtomicUsize,
         delegate: &'a dyn TrustedHostAttemptExecutor,
@@ -1579,6 +1588,34 @@ mod tests {
         ) -> TrustedHostAttemptExecutionResult {
             self.calls.fetch_add(1, Ordering::Relaxed);
             TrustedHostAttemptExecutionResult::TerminalFailure
+        }
+    }
+
+    impl TrustedHostAttemptExecutor for BlockingTimeWindowExecutor {
+        fn binding_commitment(&self) -> SpecContentHash {
+            supervisor_executor_binding()
+        }
+
+        fn execute(
+            &self,
+            _context: &TrustedHostAttemptExecutionContext<'_>,
+        ) -> TrustedHostAttemptExecutionResult {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            self.entered.send(()).expect("signal executor entry");
+            let (lock, signal) = &*self.release;
+            let mut released = lock.lock().expect("release lock");
+            while !*released {
+                released = signal.wait(released).expect("release wait");
+            }
+            TrustedHostAttemptExecutionResult::Yielded(TrustedHostYieldRequest::with_time_window(
+                AuthorizedExecutionYieldReason::ContextBudget,
+                crate::AuthorizedExecutionWaitConditionId::new("wait/owner-active-attempt")
+                    .expect("condition"),
+                1,
+                Timestamp::from_offset_date_time(
+                    Timestamp::now_utc().as_offset_date_time() + time::Duration::hours(1),
+                ),
+            ))
         }
     }
 
@@ -3591,6 +3628,197 @@ mod tests {
             TrustedHostRepeatedSchedulingStopReason::Terminal
         );
         assert_eq!(calls.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn process_owner_canceled_before_entry_is_zero_write_and_redacted() {
+        let fixture = Fixture::new();
+        let locator = register_resumable_operational_entry(&fixture, "owner-pre-cancel", 3);
+        let before = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot before owner");
+        let events_before = fixture
+            .backend
+            .read_events(&fixture.run_id)
+            .expect("events before owner")
+            .len();
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let (owner, handle) =
+            TrustedHostExplicitLocalProcessOwner::new(TrustedHostOperationalEntryInput {
+                backend: &fixture.backend,
+                locator,
+                opening: None,
+                executor: &executor,
+                skill_input: skill_input(&fixture),
+                opening_persistence: TrustedHostSupervisorPersistenceInput {
+                    operation: ContinuityOperationId::new("operation/unused-owner-pre-cancel")
+                        .expect("operation"),
+                    receipt: ContinuityReceiptId::new("receipt/unused-owner-pre-cancel")
+                        .expect("receipt"),
+                    yield_generation: None,
+                },
+                identity_provider: &mut identity_provider,
+            });
+        let owner_debug = format!("{owner:?}");
+        assert!(owner_debug.contains("[REDACTED]"));
+        assert!(!owner_debug.contains(fixture.run_id.as_str()));
+        handle.cancel().expect("cancel before entry");
+
+        let outcome = owner.run().expect("bounded canceled outcome");
+
+        assert!(matches!(
+            outcome,
+            TrustedHostExplicitLocalProcessOwnerOutcome::CanceledBeforeEntry
+        ));
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(identity_provider.calls, 0);
+        let after = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot after owner");
+        assert!(before == after);
+        assert_eq!(
+            fixture
+                .backend
+                .read_events(&fixture.run_id)
+                .expect("events after owner")
+                .len(),
+            events_before
+        );
+    }
+
+    #[test]
+    fn process_owner_admitted_attempt_is_not_interrupted_by_later_cancellation() {
+        let fixture = Fixture::new();
+        let locator = register_resumable_operational_entry(&fixture, "owner-admitted", 3);
+        let backend = fixture.backend.clone();
+        let input = skill_input(&fixture);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let (entered_sender, entered_receiver) = mpsc::channel();
+        let (handle_sender, handle_receiver) = mpsc::channel();
+
+        let (outcome, retained_handle) = std::thread::scope(|scope| {
+            let calls = Arc::clone(&calls);
+            let release_for_worker = Arc::clone(&release);
+            let worker = scope.spawn(move || {
+                let executor = BlockingTimeWindowExecutor {
+                    calls,
+                    entered: entered_sender,
+                    release: release_for_worker,
+                };
+                let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+                let (owner, handle) =
+                    TrustedHostExplicitLocalProcessOwner::new(TrustedHostOperationalEntryInput {
+                        backend: &backend,
+                        locator,
+                        opening: None,
+                        executor: &executor,
+                        skill_input: input,
+                        opening_persistence: TrustedHostSupervisorPersistenceInput {
+                            operation: ContinuityOperationId::new(
+                                "operation/unused-owner-admitted",
+                            )
+                            .expect("operation"),
+                            receipt: ContinuityReceiptId::new("receipt/unused-owner-admitted")
+                                .expect("receipt"),
+                            yield_generation: None,
+                        },
+                        identity_provider: &mut identity_provider,
+                    });
+                handle_sender.send(handle.clone()).expect("send handle");
+                owner.run()
+            });
+            let handle = handle_receiver.recv().expect("receive handle");
+            entered_receiver.recv().expect("executor entered");
+            handle.cancel().expect("cancel admitted owner");
+            let (lock, signal) = &*release;
+            *lock.lock().expect("release lock") = true;
+            signal.notify_all();
+            (
+                worker.join().expect("owner worker").expect("owner outcome"),
+                handle,
+            )
+        });
+
+        let TrustedHostExplicitLocalProcessOwnerOutcome::OperationStopped(
+            TrustedHostExplicitLocalOperationOutcome::ContinuationStopped(continuation),
+        ) = outcome
+        else {
+            panic!("admitted yield must reach cancellation-aware timer continuation");
+        };
+        assert_eq!(
+            continuation.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Canceled
+        );
+        assert_eq!(continuation.executor_entries, 0);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        retained_handle
+            .cancel()
+            .expect("post-return cancellation remains idempotent");
+    }
+
+    #[test]
+    fn competing_process_owners_admit_at_most_one_executor_entry() {
+        let fixture = Fixture::new();
+        let locator = register_resumable_operational_entry(&fixture, "owner-competing", 3);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let barrier = Arc::new(Barrier::new(3));
+        let mut workers = Vec::new();
+
+        for worker_index in 0..2 {
+            let backend = fixture.backend.clone();
+            let locator = TrustedHostOperationalEntryLocator {
+                workflow_id: locator.workflow_id.clone(),
+                run_id: locator.run_id.clone(),
+                step_id: locator.step_id.clone(),
+                window_id: locator.window_id.clone(),
+                subject_actor_id: locator.subject_actor_id.clone(),
+                immutable_run_bundle: locator.immutable_run_bundle.clone(),
+            };
+            let input = skill_input(&fixture);
+            let calls = Arc::clone(&calls);
+            let barrier = Arc::clone(&barrier);
+            workers.push(std::thread::spawn(move || {
+                let executor = CountingExecutor { calls: &calls };
+                let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+                let (owner, _handle) =
+                    TrustedHostExplicitLocalProcessOwner::new(TrustedHostOperationalEntryInput {
+                        backend: &backend,
+                        locator,
+                        opening: None,
+                        executor: &executor,
+                        skill_input: input,
+                        opening_persistence: TrustedHostSupervisorPersistenceInput {
+                            operation: ContinuityOperationId::new(format!(
+                                "operation/unused-owner-competing-{worker_index}"
+                            ))
+                            .expect("operation"),
+                            receipt: ContinuityReceiptId::new(format!(
+                                "receipt/unused-owner-competing-{worker_index}"
+                            ))
+                            .expect("receipt"),
+                            yield_generation: None,
+                        },
+                        identity_provider: &mut identity_provider,
+                    });
+                barrier.wait();
+                owner.run()
+            }));
+        }
+
+        barrier.wait();
+        let outcomes = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("owner worker"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(outcomes.len(), 2);
+        assert!(outcomes.iter().any(Result::is_ok));
     }
 
     #[test]

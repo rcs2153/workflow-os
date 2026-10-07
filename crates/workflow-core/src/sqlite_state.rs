@@ -177,6 +177,8 @@ mod operational_opening_store;
 #[allow(dead_code)]
 mod trusted_host_explicit_local_operation;
 #[allow(dead_code)]
+mod trusted_host_explicit_local_process_owner;
+#[allow(dead_code)]
 mod trusted_host_local_production_caller;
 #[allow(dead_code)]
 mod trusted_host_local_timer;
