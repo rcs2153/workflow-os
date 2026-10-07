@@ -220,3 +220,11 @@ release changes.
   diff checks passed
 - out-of-kernel work: source, feature graph, tests, plans, and reports were
   inspected and this review was authored outside the kernel
+
+## 17. Fix-Forward Status
+
+The blocker is now implemented for review. The public session returns the
+fixed `TrustedHostLocalApplicationFailure` vocabulary, and private Core error
+messages, diagnostics, sources, identifiers, and payloads are discarded before
+the result crosses the feature boundary. This note does not erase the original
+finding or constitute acceptance of the fix.

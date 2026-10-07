@@ -869,8 +869,12 @@ current queue when they contain historical `next phase` language.
    review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SPI_MODEL_REVIEW.md)
    found one blocker: the public session currently returns the complete
    `WorkflowOsError`, while the accepted cross-crate boundary permits only a
-   stable payload-free error code. The next phase is a bounded-failure blocker
-   fix before any preparation helper or application composition work.
+   stable payload-free error code. The bounded-failure blocker fix is now
+   implemented: the private runner may retain rich Core errors internally,
+   while the public session projects every error kind into a fixed,
+   non-serializable application failure with stable codes and no message,
+   diagnostics, source, or payload. The next phase is a focused blocker-fix
+   review before any preparation helper or application composition work.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

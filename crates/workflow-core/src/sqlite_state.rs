@@ -201,7 +201,8 @@ mod trusted_host_wait_handoff;
 pub use trusted_host_local_application_spi::{
     TrustedHostLocalApplicationCancellationHandle,
     TrustedHostLocalApplicationContinuationStopReason, TrustedHostLocalApplicationEntryStopReason,
-    TrustedHostLocalApplicationOutcome, TrustedHostLocalApplicationSession,
+    TrustedHostLocalApplicationFailure, TrustedHostLocalApplicationOutcome,
+    TrustedHostLocalApplicationSession,
 };
 
 /// Opt-in embedded `SQLite` durable-state backend.
