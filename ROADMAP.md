@@ -715,7 +715,17 @@ current queue when they contain historical `next phase` language.
    [maintainer/security review](docs/concepts/TRUSTED_HOST_PRIVATE_PRODUCTION_TIMER_REVIEW.md)
    accepts that implementation with no blocker. The next trusted-host phase is
    planning one explicit local production caller without widening the timer or
-   scheduler surface. General scheduling, public configuration, provider
+   scheduler surface. That planning is now documented in the [Explicit Local
+   Trusted-Host Production Caller
+   Plan](docs/implementation-plans/trusted-host-explicit-local-production-caller-plan.md)
+   and [planning
+   report](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PRODUCTION_CALLER_PLAN_REPORT.md).
+   It defines one synchronous process-owned private caller, explicit
+   cancellation, bounded non-authorizing identity generation, fixed finite
+   wake-budget selection, restart reconstruction, and bounded operator stop
+   posture. No caller is implemented. The next phase is focused
+   maintainer/security review of that plan. General scheduling, public
+   configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
