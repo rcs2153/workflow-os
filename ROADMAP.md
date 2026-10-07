@@ -905,8 +905,20 @@ current queue when they contain historical `next phase` language.
    use remains unavailable to an application because no accepted production
    current-authority source constructs that context. See the [implementation
    report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_REPORT.md).
-   The next phase is focused maintainer/security review before any local-host
-   package or caller composition.
+   The focused [maintainer/security
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_REVIEW.md)
+   found a blocker before local-host composition. Existing-window preparation
+   currently issues a pair before comparing the persisted window actor and
+   immutable bundle with the locator or comparing the persisted operation
+   binding with the current invocation/executor commitment. Those mismatches
+   fail later at consumed `run`, but the accepted boundary requires them to
+   fail before issuance. The explicit fresh variant is implemented but has no
+   direct preparation proof because no accepted production current-authority
+   source constructs that context. The next phase is a focused blocker fix:
+   complete pre-issuance existing binding validation, add direct substitution
+   coverage, and add a private test-only fresh fixture proving read-only
+   prepare, drop, and one consumed run without exposing production authority.
+   No local-host package or caller composition may begin first.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
