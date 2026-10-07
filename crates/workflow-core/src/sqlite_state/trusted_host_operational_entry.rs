@@ -223,13 +223,14 @@ fn current_preparation_context(
                         "trusted-host operational entry binding is invalid",
                     ));
                 }
-                let operation_binding = read_opening_operation_binding(backend, &window.window_id)?;
+                let binding =
+                    existing_window_binding(backend, locator, window, invocation_commitment)?;
                 let disposition = backend.continuation_disposition(&window.window_id)?;
                 (
                     "existing",
                     Some(window.clone()),
                     Some(disposition),
-                    Some(operation_binding),
+                    Some(binding.operation_binding_commitment),
                 )
             }
             (TrustedHostOperationalEntryPosture::Fresh { .. }, [_]) => {
