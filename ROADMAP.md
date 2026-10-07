@@ -684,13 +684,18 @@ current queue when they contain historical `next phase` language.
    waits, blocked or terminal posture, failure, or budget exhaustion. The next
    focused maintainer/security
    [review](docs/concepts/TRUSTED_HOST_PRIVATE_REPEATED_SCHEDULING_PLAN_REVIEW.md)
-   accepts the plan with no blocker. The next phase is implementation of only
-   the crate-private bounded repeated scheduling driver, private wake budget,
-   fresh per-wake identity provider, focused proofs, and phase report. No
-   repeated driver is implemented yet.
-   Repeated scheduling, provider mutation, OpenShell, nested harnesses,
-   automatic approval, public runtime configuration, CLI, SDK, and schema
-   exposure remain blocked.
+   accepts the plan with no blocker. The crate-private bounded repeated
+   scheduling driver is now implemented in the [phase
+   report](docs/concepts/TRUSTED_HOST_PRIVATE_REPEATED_SCHEDULING_REPORT.md).
+   It composes the accepted schedule-once helper for at most eight host wakes,
+   obtains fresh operation and receipt identity for every attempted wake,
+   rehydrates every subsequent wait from Core, and stops explicitly on
+   cancellation, blocked or terminal posture, unsupported waits, host failure,
+   or budget exhaustion. It retains no scheduling authority or skill payload.
+   The next phase is focused maintainer/security review of this private
+   repeated driver. Production timer integration, provider mutation,
+   OpenShell, nested harnesses, automatic approval, public runtime
+   configuration, CLI, SDK, and schema exposure remain blocked.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport

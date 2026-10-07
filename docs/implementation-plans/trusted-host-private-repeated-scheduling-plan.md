@@ -1,7 +1,8 @@
 # Private Trusted-Host Repeated Scheduling Plan
 
-Status: planning only. The private schedule-once helper is implemented and
-accepted. This plan does not implement repeated scheduling.
+Status: implemented as a crate-private bounded composition. Focused
+maintainer/security review is next. No production timer or public scheduling
+surface is implemented.
 
 ## 1. Executive Summary
 
@@ -293,7 +294,7 @@ telemetry requires separate review.
 
 ## 16. Test Plan
 
-Future focused tests must prove:
+The implementation and accepted lower-boundary suites prove:
 
 1. two sequential elapsed `TimeWindow` waits are handled in one bounded driver
    call without a new agent turn;
@@ -321,15 +322,17 @@ Future focused tests must prove:
 
 ## 17. Proposed Implementation Sequence
 
-1. Add the private bounded wake-budget and per-wake identity-provider models.
-2. Add one private repeated scheduling helper that exclusively composes the
-   accepted schedule-once helper.
-3. Add sequential-wait, early-wake budget, cancellation, host-failure,
-   unsupported-wait, restart, stale-state, and concurrent-driver tests.
-4. Create an implementation report and update the roadmap honestly.
-5. Perform focused maintainer/security review.
-6. Only after acceptance, consider a private production timer implementation
-   or another wake family as a separate phase.
+1. Completed: add the private bounded wake-budget and per-wake
+   identity-provider models.
+2. Completed: add one private repeated scheduling helper that exclusively
+   composes the accepted schedule-once helper.
+3. Completed: add focused sequential-wait, early-wake budget, cancellation,
+   host-failure, unsupported-wait, identity, and redaction tests while retaining
+   the accepted lower restart, stale-state, and concurrent-callback proofs.
+4. Completed: create an implementation report and update the roadmap honestly.
+5. Next: perform focused maintainer/security review.
+6. Deferred: only after acceptance, consider a private production timer
+   implementation or another wake family as a separate phase.
 
 No public host integration should begin in this sequence.
 
@@ -348,11 +351,10 @@ No public host integration should begin in this sequence.
 
 ## 19. Final Recommendation
 
-After focused review of this plan, implement only the crate-private bounded
-repeated scheduling driver and its focused proofs. Reuse the accepted
-schedule-once composition for every iteration. Keep the wake budget finite,
-derive every next wait from fresh Core state, and stop explicitly whenever
-Core cannot prove one exact supported `TimeWindow` path.
+The crate-private bounded repeated scheduling driver and focused proofs are
+implemented. The next phase should review the implementation for boundedness,
+fresh-state derivation, identity uniqueness, cancellation, concurrency,
+restart, and non-leakage before any production host integration is considered.
 
 Do not implement a general scheduler, public configuration, model-turn
 automation, automatic approval, provider execution, OpenShell, nested
