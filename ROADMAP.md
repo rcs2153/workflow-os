@@ -873,8 +873,14 @@ current queue when they contain historical `next phase` language.
    implemented: the private runner may retain rich Core errors internally,
    while the public session projects every error kind into a fixed,
    non-serializable application failure with stable codes and no message,
-   diagnostics, source, or payload. The next phase is a focused blocker-fix
-   review before any preparation helper or application composition work.
+   diagnostics, source, or payload. The focused [blocker-fix
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SPI_BOUNDED_FAILURE_FIX_REVIEW.md)
+   accepts that correction with no remaining blocker for the `run` failure
+   boundary. Before a production preparation helper can issue the public
+   cancellation handle, its remaining broad `WorkflowOsError` return must be
+   projected to bounded application vocabulary. The next phase is
+   session-preparation helper planning, including that pre-adoption condition,
+   before any preparation implementation or application composition work.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
