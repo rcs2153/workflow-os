@@ -1,15 +1,17 @@
 # Trusted-Host Explicit Local Process Owner Plan
 
-Status: implemented within the accepted crate-private boundary after
-documentation-only blocker correction and focused maintainer/security
-re-review. The implementation adds the atomic pre-entry cancellation
-linearization point, truthful owner-level canceled outcome, and explicit
-non-interruptible active-attempt boundary defined here. It does not add an
-application adoption site or automatic runtime behavior. See the
+Status: implemented and accepted with non-blocking follow-ups after
+documentation-only blocker correction, focused maintainer/security re-review,
+and focused implementation/security review. The implementation adds the
+atomic pre-entry cancellation linearization point, truthful owner-level
+canceled outcome, and explicit non-interruptible active-attempt boundary
+defined here. It does not add an application adoption site or automatic
+runtime behavior. See the
 [focused review](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_REVIEW.md)
 the [blocker-fix report](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_BLOCKER_FIX_REPORT.md),
 the [blocker-fix re-review](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_BLOCKER_FIX_REVIEW.md),
-and the [implementation report](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_REPORT.md).
+the [implementation report](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_REPORT.md),
+and the [implementation review](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_REVIEW.md).
 
 ## 1. Executive Summary
 
@@ -359,9 +361,11 @@ work around the local cache condition.
 
 ## 17. Final Recommendation
 
-Proceed next to focused maintainer/security review of the crate-private
-process-owner implementation.
+Proceed next to planning one explicit application adoption site for the
+accepted crate-private process owner. The plan must require direct simultaneous
+cancel-versus-entry stress coverage and complete bounded losing-owner outcome
+assertions before or within adoption implementation.
 
-Do not combine that review with an application adoption site, discovery,
-signal orchestration, background execution, public surfaces, or automatic
+Do not combine planning with adoption implementation, discovery, signal
+orchestration, background execution, public surfaces, or automatic
 continuation.

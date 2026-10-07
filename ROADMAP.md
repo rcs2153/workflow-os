@@ -803,9 +803,14 @@ current queue when they contain historical `next phase` language.
    explicit local composition. Direct tests prove zero-write pre-entry
    cancellation, active-attempt non-interruption followed by timer-wait
    cancellation, and at-most-one executor admission across competing owners.
-   The next phase is focused maintainer/security review of this implementation;
-   application adoption, signal orchestration, discovery, and public runtime
-   surfaces remain deferred.
+   The focused [implementation/security
+   review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_REVIEW.md)
+   accepts the private owner with non-blocking test-hardening follow-ups. The
+   next phase is planning one exact application adoption site. That plan must
+   require direct simultaneous cancellation-versus-entry stress coverage and
+   complete bounded losing-owner assertions before operational adoption;
+   signal orchestration, discovery, detached work, and public runtime surfaces
+   remain deferred.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
