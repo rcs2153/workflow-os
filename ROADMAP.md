@@ -2787,15 +2787,16 @@ The review confirms that agent-instruction preservation, safe metadata-aware
 onboarding, concise/verbose first-run output, mock-demo separation, independent
 proportional-governance decision axes, deterministic workload derivation, input
 fingerprint invalidation, and immutable run binding are already implemented for
-their accepted boundaries. Exact retry and approval-resume reassessment are now
-implemented for the explicit opt-in local path. Registered source-bound runtime
-fact freshness is implemented and reviewed as a same-call Core model/helper,
-but executor adoption and durable replay semantics remain open. The remaining
-load-bearing gaps are independent check attestation, one explicit executor
-consumer for fresh source-bound facts, actor-bound time-of-use authority
-enforcement, and broader integrity-safe report/export composition. Capability
-resolution and pure step projection are accepted; no new provider mutation
-family should precede these authority and proof boundaries.
+their accepted boundaries. Exact retry and approval-resume reassessment,
+one canonical authoritative local-check consumer, all four source-bound
+proportional-governance routes, authoritative terminal WorkReport artifact
+persistence, and selected actor-bound time-of-use authority are now implemented
+and reviewed. These remain explicit selected paths, not broad defaults or
+enterprise RBAC. The next load-bearing boundary is the narrow local-host caller
+composition authorized by the accepted trusted-host preparation review,
+followed by carefully reviewed expansion of proof-bearing consumers and
+integrity-safe report/export behavior. No new provider mutation family should
+precede these concrete authority and proof boundaries.
 
 ## Current Product Boundary
 
