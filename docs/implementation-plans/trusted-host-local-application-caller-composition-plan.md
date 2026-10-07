@@ -1,7 +1,8 @@
 # Trusted-Host Local Application Caller Composition Plan
 
-Status: planning complete; no package, caller, or operational adoption is
-implemented by this document.
+Status: accepted with non-blocking follow-ups by the focused
+[maintainer/security review](../concepts/TRUSTED_HOST_LOCAL_APPLICATION_CALLER_COMPOSITION_PLAN_REVIEW.md).
+No package, caller, or operational adoption is implemented by this document.
 
 ## 1. Executive Summary
 
@@ -95,6 +96,13 @@ The package must:
 The library becomes process-relevant only when a separately reviewed
 embedding application invokes it. Merely joining the workspace does not make
 trusted-host execution automatic.
+
+Workspace-wide validation will intentionally compile Core with the feature
+because the new package requests it. That Cargo feature unification is not
+evidence that `workflow-cli` or `workflow-hosted` enables the feature in its
+own package build or release graph. Feature-isolation tests must therefore
+use package-specific build and metadata checks rather than claiming the
+feature is absent from `cargo test --workspace`.
 
 ## 6. Core Visibility Decision
 
@@ -262,7 +270,9 @@ The first implementation should combine three proof layers:
 
 The implementation must also prove:
 
-- workspace default tests do not activate the SPI for unrelated packages;
+- package-specific default builds for Core, CLI, and hosted do not request the
+  SPI, while workspace-wide validation intentionally covers the local-host
+  feature consumer;
 - the package creates no file, event, backend write, thread, process, or
   command on construction;
 - cancellation clones, if added, address one shared scoped cancellation state;

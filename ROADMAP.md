@@ -941,8 +941,10 @@ current queue when they contain historical `next phase` language.
    the unconstructible prepared pair, one synchronous foreground wrapper, and
    scoped cooperative-cancellation custody. No package, production
    preparation source, embedding caller, or operational adoption is
-   implemented yet. The next implementation is the bounded library and
-   visibility slice only.
+   implemented yet. The focused [maintainer/security
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_CALLER_COMPOSITION_PLAN_REVIEW.md)
+   accepts the plan after clarifying Cargo feature unification. The next
+   implementation is the bounded library and visibility slice only.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
