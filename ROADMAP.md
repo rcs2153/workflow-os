@@ -961,10 +961,23 @@ current queue when they contain historical `next phase` language.
    The focused [plan review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_PREPARATION_SOURCE_PLAN_REVIEW.md)
    blocks that standalone implementation because a source with only a
    test-only issuer would be an unused production abstraction and would not
-   close the runtime-composition gap. The next phase is a planning blocker fix
-   that selects one actual Core-owned issuance and embedding boundary, then
-   scopes one end-to-end source-to-operation vertical slice without adding
-   discovery or scheduling.
+   close the runtime-composition gap. The subsequent [planning blocker
+   fix](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_PREPARATION_SOURCE_PLAN_BLOCKER_FIX_REPORT.md)
+   confirms that no current process owns the required SQLite run-admission
+   moment: CLI is filesystem-backed, hosted is PostgreSQL-backed, Core is not
+   an application lifecycle, and the local-host package consumes only an
+   already-prepared pair. The standalone source plan is therefore superseded.
+   The next phase is trusted-host local application admission planning. It must
+   select the exact Core transition that yields one runnable operation and the
+   foreground local-host process that consumes it, then scope one end-to-end
+   admission-to-operation slice. A source may be introduced only inside that
+   accepted path, not as independent vocabulary or a test-only issuer.
+   The focused [blocker-fix
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_PREPARATION_SOURCE_PLAN_BLOCKER_FIX_REVIEW.md)
+   accepts this correction. It confirms that implementation remains blocked
+   until the local-host application admission plan identifies the real process
+   entry, SQLite lifecycle, Core admission transition, executor/input
+   provenance, and exact cross-crate handoff.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

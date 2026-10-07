@@ -1,321 +1,235 @@
 # Trusted-Host Local Application Preparation Source Plan
 
-Status: planning only and not authorized for implementation. The focused
+Status: superseded as a standalone implementation plan. The focused
 [plan review](../concepts/TRUSTED_HOST_LOCAL_APPLICATION_PREPARATION_SOURCE_PLAN_REVIEW.md)
-found that the proposed standalone source and test-only issuer would be an
-unused production abstraction. A blocker-fix planning phase must identify one
-actual Core-owned issuance and embedding boundary before implementation.
+found that a source with only a test issuer would be an unused production
+abstraction. The subsequent [blocker-fix
+report](../concepts/TRUSTED_HOST_LOCAL_APPLICATION_PREPARATION_SOURCE_PLAN_BLOCKER_FIX_REPORT.md)
+confirms that no current application owns the SQLite run-admission moment
+required to issue the source lawfully.
+
+This document now records the rejected standalone boundary and the
+prerequisites for reconsidering a source. It does not authorize implementation.
 
 ## 1. Executive Summary
 
 Core can privately prepare one opaque trusted-host local application session,
 and the unpublished `workflow-local-host` package can consume that prepared
-pair. No lawful cross-crate source currently connects those boundaries. Making
-the private preparation function public would expose authority assembly.
-Passing identifiers, locators, backend handles, executor internals, or current
-authority into the local-host package would create a second execution truth.
+pair. The repository has no lawful production path connecting those
+boundaries.
 
-The next implementation should add one opaque, Core-issued, one-shot
-`TrustedHostLocalApplicationPreparationSource`. Core alone constructs the
-source from an already-resolved private preparation input. The local-host
-library may consume it, causing Core to perform the existing read-only
-preparation and return only the existing prepared pair or bounded
-application failure.
+The missing piece is not another wrapper. It is application-owned admission:
+one process must own the SQLite backend and foreground lifecycle while Core
+selects one exact runnable operation and derives its current authority,
+immutable run, actor, executor, and skill-input bindings.
 
-The first source slice remains non-operational. It adds no public resolver,
-production issuer call site, embedding application, discovery, scheduling, or
-automatic execution.
+No current application does this:
 
-## 2. Goals
+- `workflow-cli` owns a filesystem-backed executor;
+- `workflow-hosted` owns PostgreSQL claims, leases, and fencing;
+- `workflow-core` owns SQLite authority but is not a process lifecycle; and
+- `workflow-local-host` owns only prepared-operation consumption.
 
-- Connect private Core preparation to the unpublished local-host composition
-  library without exporting preparation inputs.
-- Keep Core authoritative for current context, preparation, revalidation,
-  authority use, state, and lifecycle truth.
-- Make source custody one-shot, lifetime-bound, non-cloneable, non-serde, and
-  Debug-redacted.
-- Project preparation failure to the existing fixed, payload-free application
-  failure vocabulary before it crosses the Core boundary.
-- Preserve the prepared pair's unconstructible and one-shot properties.
-- Prove that local-host can consume one opaque source without accepting
-  locator, backend, authority, executor, or skill-binding parameters.
-- Keep actual source issuance and operational adoption separate.
+The next phase is trusted-host local application admission planning. A future
+preparation source may be introduced only as part of an accepted end-to-end
+admission-to-operation path.
 
-## 3. Non-Goals
+## 2. Original Goal
 
-The first implementation must not add:
+The original plan attempted to add an opaque, Core-issued, one-shot
+preparation source that privately owned an already-resolved preparation input
+and returned only the existing prepared pair or bounded application failure.
 
-- a public resolver or factory that accepts caller-authored identifiers;
-- a production issuer call site or embedding application;
-- a binary, CLI command, SDK method, workflow field, schema, or runtime config;
-- run discovery, project scanning, queue polling, scheduling, redispatch
-  selection, background tasks, or automatic invocation;
-- public backend, locator, authority, current-context, executor, or skill-input
-  assembly;
-- provider reads or mutations, OpenShell, nested harnesses, or broader writes;
-- signal installation, active-attempt interruption, process recovery, or
-  hosted parity;
-- automatic approval, inferred authority, or capability broadening; or
-- release posture or stable compatibility promises.
+That shape preserved authority opacity, dependency direction, bounded failure,
+one-shot ownership, and privacy. It did not identify a production issuer or
+embedding caller, so its first implementation would have been unreachable.
 
-## 4. Accepted Starting Boundary
+## 3. Why Standalone Implementation Is Rejected
 
-Behind `trusted-host-application-spi`, Core currently provides:
+A standalone source would fail the repository engineering standard because:
 
-- private `TrustedHostLocalApplicationPreparationInput` and fresh/existing
-  posture variants;
-- private `prepare_trusted_host_local_application_session`;
-- public but unconstructible
-  `TrustedHostLocalApplicationPreparedSession`;
-- one-shot session, scoped cancellation handle, bounded outcomes, and bounded
-  failures; and
-- direct tests for read-only preparation, exact bindings, substitution,
-  cancellation, staleness, and consumed execution.
+1. its only issuer would be a test seam;
+2. no production code could obtain or consume it;
+3. package tests would still simulate the decisive Core-to-application path;
+4. the runtime-composition gap would remain unchanged; and
+5. the roadmap could incorrectly imply operational progress.
 
-The unpublished local-host package currently accepts only the prepared pair.
-It cannot invoke preparation or construct authority.
+Making the source publicly constructible is not an alternative. Accepting
+backend handles, locators, identifiers, authority facts, executor internals,
+or current-context claims would create a second execution truth outside Core.
 
-## 5. Dependency And Ownership Constraint
+## 4. Repository Ownership Findings
 
-`workflow-local-host` depends on `workflow-core`; Core must not depend back on
-the local-host package. The source therefore belongs in Core and returns the
-Core prepared pair. The local-host package consumes the source through a
-concrete convenience method and wraps the resulting pair.
+### 4.1 Core
 
-The source is not a service locator, scheduler, backend facade, or process
-owner. It is one in-memory custody object for one already-resolved preparation
-attempt.
+Core owns:
 
-## 6. Core Source Model
+- `SqliteStateBackend` and current continuity state;
+- immutable run-bundle and operational-window validation;
+- fresh and existing preparation posture;
+- executor and `SkillInput` commitment checks;
+- read-only preparation and consumed-execution revalidation;
+- identity generation, redispatch, timer continuation, and authority use.
 
-Add a feature-gated source conceptually shaped as:
+Core does not own foreground process lifetime, cancellation-handle custody, or
+operator invocation timing.
 
-```text
-TrustedHostLocalApplicationPreparationSource<'a>
-  - privately owns one TrustedHostLocalApplicationPreparationInput<'a>
-  - has no public constructor
-  - is non-cloneable and non-serializable
-  - exposes consuming prepare(self)
+### 4.2 Local host
 
-prepare(self)
-  -> Result<TrustedHostLocalApplicationPreparedSession<'a>,
-            TrustedHostLocalApplicationFailure>
-```
+`workflow-local-host` owns one synchronous prepared operation and scoped
+cooperative cancellation. It accepts no identifiers, backend, authority,
+executor, or skill input. It does not start or resume runs, choose runnable
+steps, evaluate policy or approvals, or create SQLite state.
 
-Exact names may follow repository conventions. `prepare` must call the
-existing private preparation function once and map every private Core error to
-the existing bounded application failure. No raw `WorkflowOsError` may cross
-the source boundary.
+### 4.3 CLI
 
-The source must be `#[doc(hidden)]` or equivalently marked unstable and must
-use fixed redacted Debug output.
+The CLI runs the established filesystem-backed executor. Its SQLite surface is
+limited to explicit migration and health operations. Adopting the source in an
+existing command would bridge runtime state models. Adding a new command would
+create a public product surface before the local SQLite application contract
+is ready.
 
-## 7. Issuance Boundary
+### 4.4 Hosted
 
-Core may add one crate-private constructor or issuance helper that accepts the
-existing private preparation input by value and returns the opaque source.
-That helper exists to prove ownership and source semantics inside Core tests.
+The hosted worker is PostgreSQL-backed and depends on hosted claim, lease, and
+fencing semantics. A SQLite source would bypass those contracts and falsely
+imply hosted parity.
 
-The first implementation must not call the issuer from production code. This
-is deliberate. An actual issuer call site must later prove where all of these
-already-resolved facts come from:
+## 5. Required Admission Owner
 
-- exact SQLite backend instance;
-- workflow, run, step, window, and actor binding;
-- immutable run bundle;
-- fresh or existing continuation posture;
-- current authority and required context for a fresh opening;
-- exact attempt executor and invocation commitment;
+The future foreground owner is the local-host application boundary, not the
+current library by itself. Before implementation, a reviewed plan must define
+how that application:
+
+1. owns one SQLite backend for its foreground lifetime;
+2. starts or resumes one exact governed run through Core;
+3. receives one Core-selected runnable operation without scanning or arbitrary
+   identifier selection;
+4. obtains the exact reviewed executor and validated `SkillInput` from that
+   admitted operation;
+5. retains cancellation custody while admitted work executes synchronously;
+   and
+6. returns bounded posture without inventing workflow truth.
+
+Naming `workflow-local-host` as owner is not enough. The plan must identify the
+actual application entry and the Core transition that yields the operation.
+
+## 6. Required Core Issuance Point
+
+The future issuer must sit immediately after one authoritative local
+run-admission transition has established:
+
+- workflow, run, step, window, and actor identity;
+- immutable run-bundle binding;
+- fresh opening or existing continuation posture;
+- current authority and approval/policy eligibility;
+- exact executor commitment;
 - validated skill input; and
-- opening persistence posture when required.
+- required opening persistence identities.
 
-Until that call site is separately planned and reviewed, no external caller
-can obtain a source.
+Core may then package those private facts into one opaque, one-shot source or
+prepare the pair directly. The application must not reconstruct them from
+strings, files, stale snapshots, or copied event data.
 
-## 8. Local-Host Consumption API
+No such local run-admission transition currently connects to an application.
+That is the prerequisite to plan and review next.
 
-Add one concrete method to `workflow-local-host`, conceptually:
+## 7. Dependency Direction
+
+`workflow-local-host` depends on `workflow-core`; Core must not depend on the
+local-host package. A future admitted operation therefore originates in Core
+and is consumed by local host through a narrow non-default unstable SPI.
+
+Dependency inversion must not be used to hide missing ownership. A trait,
+callback, provider, resolver, token, or source is still speculative unless a
+real Core transition issues it and a real foreground component consumes it.
+
+## 8. Preserved Source Requirements
+
+If the admission plan later justifies a preparation source, it must be:
+
+- constructed only by Core from already-resolved current state;
+- one-shot, non-cloneable, non-serde, and lifetime-bound;
+- Debug-redacted;
+- weaker than successful preparation and consumed execution;
+- zero-write on construction, failed preparation, and drop;
+- mapped to fixed payload-free application failure before crossing Core; and
+- incapable of carrying reusable authority or caller-authored context.
+
+Session consumption remains the authoritative revalidation and authority-use
+edge. State drift must fail closed rather than refresh or broaden the request.
+
+## 9. Explicit Non-Goals
+
+This superseded plan does not authorize:
+
+- a source, issuer, resolver, factory, binary, application, or command;
+- Rust implementation or a new crate;
+- run discovery, durable-state scanning, queue polling, startup replay, or
+  automatic scheduling;
+- public backend, locator, authority, executor, or skill-input assembly;
+- CLI or hosted adoption;
+- provider reads or mutations, OpenShell, nested harnesses, or broader writes;
+- signal installation, active-attempt interruption, or process recovery;
+- schemas, SDKs, runtime configuration, or release changes; or
+- automatic approval or authority broadening.
+
+## 10. Required Next Plan
+
+The trusted-host local application admission plan must answer:
+
+- What starts the local SQLite run and owns its backend lifecycle?
+- Which Core transition identifies the exact runnable step?
+- How are policy, approval, actor, immutable bundle, executor, and skill input
+  bound before preparation?
+- What opaque admitted-operation value, if any, crosses Core?
+- How are fresh opening and existing continuation paths separated?
+- Which foreground component retains cancellation and waits for return?
+- How does one production-shaped integration test exercise the same path
+  without a public authority factory?
+- What operator surface remains absent from the first slice?
+
+The plan must not simply rename the source or add another type-only bridge.
+
+## 11. Future End-To-End Test Requirement
+
+The first accepted implementation must prove one real path:
 
 ```text
-LocalHostPreparedOperation::prepare(
-  source: TrustedHostLocalApplicationPreparationSource
-) -> Result<LocalHostPreparedOperation,
-            TrustedHostLocalApplicationFailure>
+Core local admission
+  -> exact current runnable operation
+  -> Core preparation
+  -> local-host prepared operation
+  -> synchronous consumed execution
+  -> bounded returned posture
 ```
 
-The method consumes the source, asks Core to prepare once, and delegates to
-the existing `from_prepared` constructor. It accepts no additional fields.
-`from_prepared` may remain available as unstable composition vocabulary unless
-the implementation review finds that narrowing it is required.
+The test must use production constructors and ownership boundaries. It must
+prove zero writes on admission/preparation failure and drop, fail-closed state
+drift, exactly-once executor admission, no source reuse, bounded errors, and no
+public test authority factory.
 
-The package must not inspect, refresh, retry, log, persist, or reinterpret the
-source or preparation failure.
+## 12. Deferred Questions
 
-## 9. Current-Authority Boundary
+- Whether the admitted operation should contain a separate source or return a
+  prepared pair directly.
+- Whether the first foreground application remains unpublished indefinitely.
+- What bounded metrics or audit references application ownership requires.
+- How process loss is observed before any restart claim is made.
+- When, if ever, a public operator surface is justified.
 
-The source is not itself current authority. It owns one exact private request
-to read and validate current authority through the existing preparation path.
-Successful source issuance is weaker than successful preparation, and
-successful preparation is weaker than successful consumed execution.
+## 13. Validation
 
-Preparation remains read-only. Session consumption remains the authoritative
-revalidation and authority-use edge. State or authority drift after source
-issuance or preparation must fail closed rather than refresh or broaden the
-request.
+This blocker-fix phase requires:
 
-## 10. Failure And Atomicity
+- `npm run check:docs`; and
+- `git diff --check`.
 
-- Source construction performs no state write or authority use.
-- Dropping an unconsumed source performs no work and makes no lifecycle claim.
-- Consuming a source invokes preparation at most once.
-- Preparation failure returns no pair and only a bounded application failure.
-- Dropping a successfully prepared but unrun operation remains zero-write.
-- No source or pair can be reconstructed from identifiers after process loss.
-- The package must not retry failed preparation automatically.
+No Rust changes are authorized.
 
-## 11. Privacy And Redaction
+## 14. Final Recommendation
 
-- Source Debug exposes only a fixed type name and `[REDACTED]` binding marker.
-- Source, input, pair, operation, and cancellation values remain non-serde.
-- No workflow identity, locator, authority fact, state payload, path, command
-  output, provider value, credential, or raw Core error crosses the boundary.
-- Compile errors, Display, and Debug tests must use secret-like fixtures and
-  prove non-leakage.
-
-## 12. Feature And Compatibility Posture
-
-The source is available only with the existing non-default SPI feature. Core,
-CLI, and hosted default package graphs must remain unchanged. The local-host
-package intentionally activates the feature. Workspace feature unification
-remains expected.
-
-The source is unstable application SPI, not a public product contract. No
-schema, CLI, SDK, or semver compatibility promise is added.
-
-## 13. Test Plan
-
-### 13.1 Core tests
-
-- source has no public construction path;
-- source creation is zero-write;
-- source drop is zero-write;
-- source consumption invokes preparation once;
-- private preparation errors map exhaustively to bounded failures;
-- no pair escapes on failure;
-- source Debug is redacted;
-- source cannot be cloned, serialized, or deserialized; and
-- existing fresh/existing, substitution, staleness, cancellation, and
-  consumed-execution proofs still pass.
-
-### 13.2 Local-host tests
-
-- one opaque source can produce one operation through a private test seam;
-- preparation failure propagates unchanged and creates no operation;
-- no automatic retry occurs;
-- source and operation cannot be consumed twice; and
-- the public method accepts no caller-authored binding or authority fields.
-
-### 13.3 External and package checks
-
-- default Core consumers cannot name the source without the feature;
-- an explicit-feature consumer can type-check source-to-operation composition
-  without constructing a source;
-- CLI and hosted package graphs do not request the feature;
-- no production call site invokes source issuance or source consumption; and
-- workspace tests intentionally cover the feature-bearing package.
-
-## 14. Validation Commands
-
-- `cargo fmt --all --check`
-- `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo test --workspace`
-- workspace rustdoc with warnings denied
-- package-specific feature graph checks for Core, CLI, hosted, and local-host
-- `npm run check:docs`
-- `git diff --check`
-
-## 15. First Implementation Scope
-
-The first implementation should contain only:
-
-1. the opaque Core source and crate-private issuer;
-2. exhaustive bounded error projection through the source;
-3. one local-host `prepare` composition method;
-4. Core, package-private, external, and compile-fail tests;
-5. honest roadmap and plan updates; and
-6. an implementation report.
-
-It must stop before adding any production issuer or caller.
-
-## 16. Subsequent Sequence
-
-1. Implement the non-operational source bridge.
-2. Perform a focused maintainer/security review.
-3. Plan one actual Core-owned issuer call site from already-resolved current
-   authority and execution context.
-4. Implement and review that issuer without discovery or scheduling.
-5. Plan one embedding application boundary that receives the opaque source and
-   invokes the local-host package explicitly.
-6. Only after those reviews, consider process control, signal handling, or
-   operational adoption.
-
-Provider mutation broadening, OpenShell, nested harnesses, hosted parity, and
-public configuration remain separate roadmap decisions.
-
-## 17. Alternatives Rejected
-
-- **Make private preparation public:** exposes authority assembly and private
-  Core errors.
-- **Pass private preparation fields to local-host:** creates caller-authored
-  execution truth and leaks Core internals.
-- **Add a public resolver taking IDs:** becomes discovery and permits arbitrary
-  target selection before an authority source exists.
-- **Have Core depend on local-host:** creates a dependency cycle and reverses
-  ownership.
-- **Add a public test factory:** makes forgeable production-looking authority
-  for test convenience.
-- **Adopt the source in CLI or hosted now:** selects the wrong lifecycle and
-  backend semantics before an embedding boundary is designed.
-- **Combine source, issuer, and application in one phase:** hides the most
-  security-sensitive authority transition inside a large operational change.
-
-## 18. Open Questions For Review
-
-- Should `from_prepared` remain visible after source composition exists, or be
-  narrowed in a later breaking SPI cleanup?
-- Should the Core source's consuming method be named `prepare`, `into_prepared`,
-  or use a sealed helper to keep the ordinary API surface smaller?
-- Is a crate-private issuer wrapper meaningful enough, or should source
-  construction occur directly at the later accepted issuer call site?
-- Which checked-in negative fixture best proves default consumers cannot name
-  the source without relying only on manual Cargo graph inspection?
-- Can lifetime borrowing remain sufficient without accidental `Send`, `Sync`,
-  or `'static` claims?
-
-## 19. Final Recommendation
-
-Proceed next with a focused maintainer/security review of this plan. If
-accepted, implement only the opaque non-operational source bridge and tests.
-Do not add a production issuer, embedding caller, discovery, scheduling,
-provider behavior, OpenShell, nested harnesses, hosted adoption, or release
-change.
-
-## 20. Governed Planning Record
-
-- workflow: `dg/d`
-- run: `run-1791389192666100000-2`
-- approval: `approval/run-1791389192666100000-2/planning-approved`
-- presentation: `presentation/b75989c297190ce9`
-- presentation hash:
-  `b75989c297190ce98ff79ecf7ae2717c4262a23ebf37b841af46142609ae75a8`
-- approval outcome: granted by delegated maintainer through persisted
-  presentation proof
-- approved boundary: preparation-source planning and roadmap update only
-- phase status: completed
-- event summary: 39 ordered events, one approval, zero retries, and zero
-  escalations; approval-presentation proof was enforced with one presentation
-  record
-- validation summary: `npm run check:docs` and `git diff --check` passed
-- out-of-kernel work: architecture and source inspection, plan and roadmap
-  authoring, documentation validation, and later git or pull-request work
-- report posture: no runtime WorkReport artifact was generated or persisted
+Do not implement the standalone preparation source. Plan and review one local
+application admission vertical slice first. Introduce a source only if it is
+required by that real end-to-end path and can be issued and consumed without
+discovery, state translation, or caller-authored authority.
