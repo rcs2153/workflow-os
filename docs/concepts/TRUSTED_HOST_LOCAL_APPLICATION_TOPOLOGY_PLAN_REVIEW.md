@@ -140,6 +140,9 @@ helper, binary, command, operational source, or runtime adoption yet.
 
 - `npm run check:docs`: passed
 - `git diff --check`: passed
+- focused trusted-host competing-timer contention test: passed 25 consecutive
+  local runs after one non-reproducing CI failure on the documentation-only
+  branch
 
 ## 15. Governed Review Record
 
