@@ -130,13 +130,14 @@ All required validation passed:
 
 ## 12. Recommended Next Phase
 
-Perform a focused maintainer/security review of this implementation. Review
-the host/Core boundary, cancellation, synchronization failure, clock movement,
-restart, identity reuse, competing callers, privacy, tests, and scope.
+The focused
+[maintainer/security review](TRUSTED_HOST_PRIVATE_PRODUCTION_TIMER_REVIEW.md)
+accepted this implementation with non-blocking follow-ups. Plan one explicit
+local production caller without widening the private timer into a scheduler.
 
-Do not add a production caller, general scheduler, public configuration,
-provider mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK,
-schema, hosted scheduling, or release changes during that review.
+Do not add a general scheduler, public configuration, provider mutation,
+OpenShell, nested harnesses, automatic approval, CLI, SDK, schema, hosted
+scheduling, or release changes in that planning phase.
 
 ## 13. Governed Phase Record
 
