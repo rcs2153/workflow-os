@@ -773,7 +773,16 @@ current queue when they contain historical `next phase` language.
    still has no process owner and is not automatic runtime continuation. The
    next phase is planning the smallest explicit process-owned local owner
    boundary that can invoke this exact composition without adding run
-   discovery, startup scanning, detached work, or public configuration.
+   discovery, startup scanning, detached work, or public configuration. That
+   planning is now documented in the [Trusted-Host Explicit Local Process
+   Owner Plan](docs/implementation-plans/trusted-host-explicit-local-process-owner-plan.md)
+   and its [planning
+   report](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_REPORT.md).
+   It selects one crate-private, one-shot, synchronous owner that creates the
+   existing cancellation pair, returns the handle to process control, consumes
+   one exact preselected operation, and delegates once to the accepted private
+   composition. It does not discover work or own a durable job. The next phase
+   is focused maintainer/security review before implementation.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
