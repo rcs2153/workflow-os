@@ -1842,6 +1842,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "workflow-local-host"
+version = "0.2.0-preview.1"
+dependencies = [
+ "workflow-core",
+]
+
+[[package]]
 name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

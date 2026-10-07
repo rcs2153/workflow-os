@@ -92,6 +92,7 @@ impl fmt::Debug for TrustedHostLocalApplicationSession<'_> {
 ///
 /// This handle cannot be constructed outside Core and does not interrupt an
 /// already admitted executor attempt.
+#[derive(Clone)]
 pub struct TrustedHostLocalApplicationCancellationHandle {
     inner: TrustedHostLocalTimerCancellationHandle,
 }
@@ -214,13 +215,38 @@ pub(crate) struct TrustedHostLocalApplicationPreparationInput<'a> {
     pub(crate) skill_input: SkillInput,
 }
 
-pub(crate) struct TrustedHostLocalApplicationPreparedSession<'a> {
+/// Opaque Core-issued session and cancellation pair for the unstable local-host SPI.
+///
+/// The pair has no public constructor. Enabling the feature permits a reviewed
+/// consumer to receive and consume a prepared pair, but does not grant authority
+/// to prepare one.
+///
+/// Prepared pairs cannot be cloned:
+///
+/// ```compile_fail
+/// fn duplicate(pair: workflow_core::TrustedHostLocalApplicationPreparedSession<'_>) {
+///     let _copy = pair.clone();
+/// }
+/// ```
+///
+/// Prepared pairs cannot be serialized:
+///
+/// ```compile_fail
+/// fn serialize(pair: &workflow_core::TrustedHostLocalApplicationPreparedSession<'_>) {
+///     let _json = serde_json::to_string(pair).unwrap();
+/// }
+/// ```
+#[doc(hidden)]
+pub struct TrustedHostLocalApplicationPreparedSession<'a> {
     session: TrustedHostLocalApplicationSession<'a>,
     cancellation_handle: TrustedHostLocalApplicationCancellationHandle,
 }
 
 impl<'a> TrustedHostLocalApplicationPreparedSession<'a> {
-    pub(crate) fn into_parts(
+    /// Consumes the unforgeable pair into its one-shot session and scoped
+    /// cooperative-cancellation handle.
+    #[must_use]
+    pub fn into_parts(
         self,
     ) -> (
         TrustedHostLocalApplicationSession<'a>,
@@ -459,6 +485,23 @@ mod tests {
 
         handle.request_cancellation().expect("first cancellation");
         handle.request_cancellation().expect("second cancellation");
+        assert_eq!(
+            cancellation.begin_entry().expect("entry decision"),
+            super::super::trusted_host_local_timer::TrustedHostLocalTimerEntryDecision::Canceled
+        );
+    }
+
+    #[test]
+    fn cloned_cancellation_handles_share_one_scoped_cancellation_state() {
+        let (cancellation, inner) = TrustedHostLocalTimerCancellation::new();
+        let handle = TrustedHostLocalApplicationCancellationHandle::from_timer_handle(inner);
+        let clone = handle.clone();
+
+        clone.request_cancellation().expect("cloned cancellation");
+        handle
+            .request_cancellation()
+            .expect("original cancellation");
+
         assert_eq!(
             cancellation.begin_entry().expect("entry decision"),
             super::super::trusted_host_local_timer::TrustedHostLocalTimerEntryDecision::Canceled
