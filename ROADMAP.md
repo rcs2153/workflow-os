@@ -931,9 +931,11 @@ current queue when they contain historical `next phase` language.
    invocation/executor, opening-shape, and trusted-time substitution behavior.
    The direct tests exposed and closed two pre-issuance semantic gaps for an
    unusable opening request shape and incompatible trusted-time context;
-   authority consumption remains atomic at consumed execution. The next phase
-   is a focused maintainer/security re-review. No local-host package or caller
-   composition may begin before that proof is reviewed and accepted.
+   authority consumption remains atomic at consumed execution. The focused
+   [fresh-proof blocker-fix review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_FRESH_PROOF_BLOCKER_FIX_REVIEW.md)
+   accepts the direct proof and read-only preflight. The next phase is
+   local-host caller composition planning around an injected prepared pair.
+   No package or operational caller is implemented yet.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

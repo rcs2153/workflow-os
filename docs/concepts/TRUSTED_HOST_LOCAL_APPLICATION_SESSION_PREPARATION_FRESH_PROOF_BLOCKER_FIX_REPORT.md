@@ -152,6 +152,13 @@ preflight, stable non-leaking failures, and preservation of atomic consumed-
 run authority use. Do not begin local-host caller composition before review
 acceptance.
 
+Fix-forward: the focused [maintainer/security
+review](TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_FRESH_PROOF_BLOCKER_FIX_REVIEW.md)
+accepts the blocker fix. The direct proof and read-only preflight are
+sufficient to proceed to local-host caller composition planning while atomic
+authority consumption and durable identity uniqueness remain at consumed
+execution.
+
 ## 12. Governed Fix Record
 
 - workflow: `dg/blocker`

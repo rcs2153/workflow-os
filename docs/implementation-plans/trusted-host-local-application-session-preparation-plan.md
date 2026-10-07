@@ -3,9 +3,9 @@
 Status: implemented as a private, feature-gated Core boundary. The production
 pre-issuance blockers and the direct fresh-path proof blocker are fixed. Fresh
 drop, pre-run cancellation, context substitution, opening-shape, and trusted-
-time tests now prove the documented zero-write boundary. Focused review is
-required before local-host composition. No operational application path is
-implemented.
+time tests now prove the documented zero-write boundary. The focused proof
+review is accepted. Local-host caller composition may proceed through a
+separate plan; no operational application path is implemented here.
 
 ## 1. Executive Summary
 
