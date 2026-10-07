@@ -1,7 +1,10 @@
 # Trusted-Host Explicit Local Process Owner Plan
 
-Status: planning complete, pending focused maintainer/security review. This
-plan does not implement runtime behavior.
+Status: focused maintainer/security review found planning blockers in the
+pre-entry cancellation, process-shutdown, canceled-result, and cancellation
+race contracts. A documentation-only blocker fix is required before
+implementation. This plan does not implement runtime behavior. See the
+[focused review](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_REVIEW.md).
 
 ## 1. Executive Summary
 
