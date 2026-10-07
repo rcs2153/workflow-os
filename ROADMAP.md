@@ -855,8 +855,13 @@ current queue when they contain historical `next phase` language.
    unstable Core SPI built around opaque one-shot sessions. The first proposed
    implementation is the Core SPI model and visibility slice only. No
    application package, executable, command, session source, or operational
-   adoption is implemented, and focused maintainer/security review remains
-   required before implementation.
+   adoption is implemented. The focused [maintainer/security
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_TOPOLOGY_PLAN_REVIEW.md)
+   accepts the plan with no blocker for the Core SPI model and visibility
+   slice. It clarifies that an unpublished library is a composition boundary,
+   not yet a process owner. The next phase is the non-default Core SPI model,
+   opaque one-shot session and bounded outcome vocabulary, and direct
+   construction/privacy tests only.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
