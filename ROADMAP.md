@@ -744,7 +744,11 @@ current queue when they contain historical `next phase` language.
    all-or-nothing typed identity sets, owner-reachable cancellation, the fixed
    two-wake budget, and
    the existing bounded outcome. No adoption site or public/automatic scheduling
-   surface was added. The next phase is focused implementation/security review.
+   surface was added. The focused
+   [implementation/security review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PRODUCTION_CALLER_REVIEW.md)
+   accepts the caller with no blocker and records non-blocking caller-level
+   coverage and workspace dependency/MSRV follow-ups. The next phase is
+   planning one explicit internal adoption site.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
