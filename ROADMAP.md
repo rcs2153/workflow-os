@@ -639,9 +639,15 @@ current queue when they contain historical `next phase` language.
    caller with one of the bounded fail-closed race rejections and terminal
    durable posture, and the injected post-transition crash recovers after
    SQLite reopen through exact replay without reconstructing authority or
-   duplicating entry. The next
-   phase is focused maintainer/security review of these proofs. Scheduling
-   models and behavior remain deferred until that review accepts them.
+   duplicating entry. Focused maintainer/security
+   [review](docs/concepts/TRUSTED_HOST_EXPLICIT_REINVOCATION_PREREQUISITE_PROOFS_REVIEW.md)
+   accepts the crash-recovery and authority proof but identifies one proof
+   blocker before scheduling: the concurrent test requires an error loser even
+   though the existing entry contract can lawfully return a terminal
+   zero-entry loser after the winner completes. The next phase is a focused
+   test-and-report blocker fix that bounds all lawful loser outcomes while
+   preserving exactly one aggregate executor entry. Scheduling models and
+   behavior remain deferred until that fix is reviewed and accepted.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
