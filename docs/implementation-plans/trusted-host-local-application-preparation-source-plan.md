@@ -1,8 +1,10 @@
 # Trusted-Host Local Application Preparation Source Plan
 
-Status: planning only. The bounded `workflow-local-host` library and its
-focused implementation review are complete. This document defines the next
-non-operational Core-to-library bridge; it implements nothing.
+Status: planning only and not authorized for implementation. The focused
+[plan review](../concepts/TRUSTED_HOST_LOCAL_APPLICATION_PREPARATION_SOURCE_PLAN_REVIEW.md)
+found that the proposed standalone source and test-only issuer would be an
+unused production abstraction. A blocker-fix planning phase must identify one
+actual Core-owned issuance and embedding boundary before implementation.
 
 ## 1. Executive Summary
 

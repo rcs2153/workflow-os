@@ -958,6 +958,13 @@ current queue when they contain historical `next phase` language.
    bounded failure to `workflow-local-host`. The first implementation remains
    non-operational: it adds no public resolver, production issuer call site,
    embedding application, discovery, scheduling, CLI, or provider behavior.
+   The focused [plan review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_PREPARATION_SOURCE_PLAN_REVIEW.md)
+   blocks that standalone implementation because a source with only a
+   test-only issuer would be an unused production abstraction and would not
+   close the runtime-composition gap. The next phase is a planning blocker fix
+   that selects one actual Core-owned issuance and embedding boundary, then
+   scopes one end-to-end source-to-operation vertical slice without adding
+   discovery or scheduling.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
