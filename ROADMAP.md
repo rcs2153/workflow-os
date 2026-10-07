@@ -787,7 +787,13 @@ current queue when they contain historical `next phase` language.
    executor admission when canceled before `run`, cannot interrupt an active
    attempt, and therefore cannot yet be described as a general process-shutdown
    control. The next phase is one documentation-only blocker fix followed by
-   focused re-review; implementation remains blocked.
+   focused re-review; implementation remains blocked. That
+   [blocker fix](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_BLOCKER_FIX_REPORT.md)
+   now defines an atomic process-local cancellation-versus-entry linearization
+   point, a truthful pre-entry-canceled owner outcome, and the
+   non-interruptible active-attempt boundary. It no longer describes timer
+   cancellation as general process shutdown. The next phase is focused
+   maintainer/security re-review of the corrected plan.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
