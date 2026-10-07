@@ -732,15 +732,19 @@ current queue when they contain historical `next phase` language.
    documentation-only planning blocker fix followed by focused re-review. That
    [blocker fix](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PRODUCTION_CALLER_PLAN_BLOCKER_FIX_REPORT.md)
    now defines the owner-created private cancellation pair, direct
-   `getrandom` 0.4 identity source, all-or-nothing bounded identity sets, fixed
+   `getrandom` identity source, all-or-nothing bounded identity sets, fixed
    two-wake budget, existing repeated-scheduling outcome without resume advice,
    and corrected current-authority language. No runtime code is added. The next
    phase is focused maintainer/security re-review of the corrected plan. That
    focused [re-review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PRODUCTION_CALLER_PLAN_BLOCKER_FIX_REVIEW.md)
    accepts all five corrections with no remaining planning blocker. The next
-   phase is one crate-private synchronous caller and production identity-source
-   implementation exactly within the corrected plan. It must not add an
-   adoption site or widen any public or automatic scheduling surface.
+   phase was one crate-private synchronous caller and production identity-source
+   implementation exactly within the corrected plan. That implementation now
+   exists with direct Rust-1.78-compatible `getrandom` 0.2.17 identity material,
+   all-or-nothing typed identity sets, owner-reachable cancellation, the fixed
+   two-wake budget, and
+   the existing bounded outcome. No adoption site or public/automatic scheduling
+   surface was added. The next phase is focused implementation/security review.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

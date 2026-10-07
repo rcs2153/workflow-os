@@ -25,6 +25,11 @@ No runtime code or dependency change was made.
 6. “Already-authorized” wording is corrected to “already-selected”; only Core
    may establish current authority in the same call.
 
+Fix-forward note: final implementation audit later established that the 0.4
+line requires Rust 1.85. The implementation uses direct `getrandom` 0.2.17 to
+preserve the repository's Rust 1.78 contract without changing the planned
+all-or-nothing OS entropy semantics.
+
 ## 3. Scope Preserved
 
 The fix remains documentation-only. It adds no caller, entropy dependency,

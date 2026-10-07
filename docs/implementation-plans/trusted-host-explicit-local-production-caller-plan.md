@@ -1,12 +1,11 @@
 # Explicit Local Trusted-Host Production Caller Plan
 
-Status: planning only. The private synchronous local timer and bounded repeated
-scheduling driver are implemented and accepted. Focused review found five
-planning blockers; this plan now resolves them with an owner-created private
-cancellation pair, a direct `getrandom` 0.4 identity source, all-or-nothing
-identity-set construction, a fixed two-wake budget, the existing bounded
-repeated-scheduling outcome, and corrected current-authority language. Focused
-re-review remains required. No production caller is implemented.
+Status: implemented, pending focused implementation/security review. The
+crate-private synchronous caller now composes the accepted local timer with an
+owner-created cancellation pair, a direct `getrandom` 0.2.17 identity source,
+all-or-nothing identity-set construction, a fixed two-wake budget, and the
+existing bounded repeated-scheduling outcome. No adoption site, public API, or
+automatic scheduling path is implemented.
 
 ## 1. Executive Summary
 
@@ -143,9 +142,12 @@ The production caller must satisfy the existing
 `TrustedHostScheduleWakeIdentityProvider` contracts without turning identity
 generation into authority.
 
-The first production identity source must use a direct `getrandom` 0.4
-dependency. Production construction is private. Focused tests may inject a
-deterministic byte-filling function through a test-only constructor.
+The first production identity source must use a direct `getrandom` 0.2.17
+dependency, which preserves the repository's Rust 1.78 compatibility contract.
+The previously reviewed 0.4 line requires Rust 1.85 and was rejected during
+the final implementation audit. Production construction is private. Focused
+tests may inject a deterministic byte-filling function through a test-only
+constructor.
 
 For every redispatch iteration, the source performs one all-or-nothing fill of
 96 bytes and partitions it into six independent 128-bit values for consume
@@ -281,7 +283,7 @@ Future focused tests should prove:
 ## 15. Implementation Sequence
 
 1. Perform focused maintainer/security review of this plan.
-2. Add the direct `getrandom` 0.4 dependency and implement the private
+2. Add the direct `getrandom` 0.2.17 dependency and implement the private
    all-or-nothing production identity source with focused tests.
 3. Implement the synchronous caller as a thin owner over the accepted timer.
 4. Add restart, cancellation, concurrency, budget, and privacy tests.
@@ -301,9 +303,9 @@ it. The caller implementation must not silently become its own adoption site.
 
 ## 17. Final Recommendation
 
-Proceed next to focused maintainer/security review of this plan. If accepted,
-implement one crate-private synchronous local caller and production identity
-source only.
+Proceed next to focused maintainer/security review of the private caller
+implementation. Do not add an adoption site until that review accepts the
+implementation.
 
 Do not add run discovery, a daemon, detached scheduling, public configuration,
 CLI, SDK, schemas, automatic approval, provider mutation, OpenShell, nested
