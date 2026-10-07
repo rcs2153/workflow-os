@@ -810,7 +810,19 @@ current queue when they contain historical `next phase` language.
    require direct simultaneous cancellation-versus-entry stress coverage and
    complete bounded losing-owner assertions before operational adoption;
    signal orchestration, discovery, detached work, and public runtime surfaces
-   remain deferred.
+   remain deferred. That planning is now documented in the
+   [Trusted-Host Explicit Local Process Owner Adoption
+   Plan](docs/implementation-plans/trusted-host-explicit-local-process-owner-adoption-plan.md)
+   and its [planning
+   report](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_ADOPTION_PLAN_REPORT.md).
+   Repository inspection found an application-topology blocker: the CLI uses
+   the filesystem-backed local executor, the hosted worker is PostgreSQL, and
+   Core is not an application lifecycle. No current process owns the complete
+   SQLite trusted-host binding and cooperative cancellation handle. The owner
+   therefore remains private and uncalled. The next phase is to implement and
+   review the two private-owner test-hardening follow-ups, then plan an
+   explicit local host application topology and internal visibility boundary.
+   No state bridge, hidden CLI command, or backend mismatch is authorized.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
