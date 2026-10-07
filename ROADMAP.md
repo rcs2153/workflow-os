@@ -888,8 +888,16 @@ current queue when they contain historical `next phase` language.
    session-and-handle issuance, Core-owned identity generation, authoritative
    revalidation at session consumption, and bounded cancellation failure as
    one direct-tested Core boundary. No helper, application package, caller,
-   or operational behavior is implemented. The next phase is focused
-   maintainer/security review of that preparation plan.
+   or operational behavior is implemented. The focused [maintainer/security
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_PLAN_REVIEW.md)
+   accepts the plan with binding clarifications. The prepared-pair wrapper
+   remains private, fresh and existing-window posture must use explicit
+   private variants, preparation proves only read-only current coherence, and
+   consumed `run` remains the authoritative revalidation and authority-use
+   edge. The next phase is one Core-only implementation slice covering
+   bounded cancellation failure, private read-only preparation, one-shot
+   session-and-handle issuance, Core-owned identity generation, and direct
+   state-invariance and stale-binding tests.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
