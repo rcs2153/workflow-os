@@ -978,6 +978,38 @@ current queue when they contain historical `next phase` language.
    until the local-host application admission plan identifies the real process
    entry, SQLite lifecycle, Core admission transition, executor/input
    provenance, and exact cross-crate handoff.
+   That admission boundary is now defined in the [Trusted-Host Local
+   Application Admission
+   Plan](docs/implementation-plans/trusted-host-local-application-admission-plan.md)
+   and its [planning
+   report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_PLAN_REPORT.md).
+   The plan selects an unpublished foreground `workflow-local-host` entry,
+   one SQLite backend lifecycle, a Core-owned admission transition, and the
+   existing closed no-write docs-check profile for the first end-to-end slice.
+   Core must derive current run, step, immutable input, policy, approval,
+   authority, executor, and `SkillInput` bindings before returning only the
+   opaque prepared pair. The focused maintainer/security review is next; no
+   operational admission path is implemented yet. That focused [plan
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_PLAN_REVIEW.md)
+   finds three planning blockers: the real foreground process entry is still
+   undecided, the authoritative provenance of the complete registered
+   current-authority inventories is unspecified, and lawful prepared,
+   waiting, terminal, blocked, and failure admission outcomes need an explicit
+   shape. The next phase is a documentation-only planning blocker fix followed
+   by re-review. That [blocker
+   fix](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_PLAN_BLOCKER_FIX_REPORT.md)
+   now selects an unpublished `workflow-local-host` binary, permits only a
+   Core-proven complete empty current-authority inventory for an exact
+   obligation-free docs-check contract, and defines typed prepared, waiting,
+   terminal, blocked, denied, and failure outcomes. The focused blocker-fix
+   review is next. Rust implementation remains blocked until it accepts these
+   boundaries. The focused [blocker-fix
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_PLAN_BLOCKER_FIX_REVIEW.md)
+   accepts the corrected boundary with one mandatory implementation condition:
+   the closed docs-check profile must explicitly declare zero current-authority
+   facts rather than relying on absent fields. The next phase is the complete
+   unpublished binary-to-Core-admission-to-local-host-operation Rust vertical
+   slice. Broader profiles and runtime surfaces remain blocked.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
