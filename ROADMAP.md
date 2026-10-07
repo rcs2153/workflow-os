@@ -972,6 +972,12 @@ current queue when they contain historical `next phase` language.
    foreground local-host process that consumes it, then scope one end-to-end
    admission-to-operation slice. A source may be introduced only inside that
    accepted path, not as independent vocabulary or a test-only issuer.
+   The focused [blocker-fix
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_PREPARATION_SOURCE_PLAN_BLOCKER_FIX_REVIEW.md)
+   accepts this correction. It confirms that implementation remains blocked
+   until the local-host application admission plan identifies the real process
+   entry, SQLite lifecycle, Core admission transition, executor/input
+   provenance, and exact cross-crate handoff.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
