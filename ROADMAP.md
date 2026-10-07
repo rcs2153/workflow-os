@@ -682,8 +682,12 @@ current queue when they contain historical `next phase` language.
    wake, derives every next wait from fresh Core state, uses fresh operation
    identities, and stops explicitly on cancellation, shutdown, unsupported
    waits, blocked or terminal posture, failure, or budget exhaustion. The next
-   phase is focused maintainer/security review of the plan; no repeated driver
-   is implemented yet.
+   focused maintainer/security
+   [review](docs/concepts/TRUSTED_HOST_PRIVATE_REPEATED_SCHEDULING_PLAN_REVIEW.md)
+   accepts the plan with no blocker. The next phase is implementation of only
+   the crate-private bounded repeated scheduling driver, private wake budget,
+   fresh per-wake identity provider, focused proofs, and phase report. No
+   repeated driver is implemented yet.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
