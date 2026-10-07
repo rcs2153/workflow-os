@@ -881,6 +881,15 @@ current queue when they contain historical `next phase` language.
    projected to bounded application vocabulary. The next phase is
    session-preparation helper planning, including that pre-adoption condition,
    before any preparation implementation or application composition work.
+   That [plan](docs/implementation-plans/trusted-host-local-application-session-preparation-plan.md)
+   and [planning
+   report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_PLAN_REPORT.md)
+   now define read-only preparation, exact current binding validation, opaque
+   session-and-handle issuance, Core-owned identity generation, authoritative
+   revalidation at session consumption, and bounded cancellation failure as
+   one direct-tested Core boundary. No helper, application package, caller,
+   or operational behavior is implemented. The next phase is focused
+   maintainer/security review of that preparation plan.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
