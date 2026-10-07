@@ -569,7 +569,8 @@ pub use sqlite_state::{
 pub use sqlite_state::{
     TrustedHostLocalApplicationCancellationHandle,
     TrustedHostLocalApplicationContinuationStopReason, TrustedHostLocalApplicationEntryStopReason,
-    TrustedHostLocalApplicationOutcome, TrustedHostLocalApplicationSession,
+    TrustedHostLocalApplicationFailure, TrustedHostLocalApplicationOutcome,
+    TrustedHostLocalApplicationSession,
 };
 pub use state::{
     AdapterTelemetryStore, ApprovalPresentationRecordStore, ApprovalStore, BackendHealthCheck,

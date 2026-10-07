@@ -141,3 +141,12 @@ of operational adoption before planning or implementing a preparation helper.
   checks, and diff checks passed
 - out-of-kernel work: source inspection, code and documentation edits,
   validation commands, and later git or pull-request work
+
+## 13. Fix-Forward Note
+
+The subsequent maintainer/security review found that the public session
+returned the complete `WorkflowOsError`, which exceeded the accepted bounded
+cross-crate failure contract. The focused bounded-failure fix now projects
+private Core errors into `TrustedHostLocalApplicationFailure` before they
+cross the SPI. The original implementation scope and validation record above
+remain unchanged.

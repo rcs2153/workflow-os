@@ -1,6 +1,7 @@
+use std::error::Error;
 use std::fmt;
 
-use crate::WorkflowOsError;
+use crate::{WorkflowOsError, WorkflowOsErrorKind};
 
 #[cfg(test)]
 use super::trusted_host_explicit_local_operation::TrustedHostExplicitLocalOperationOutcome;
@@ -46,9 +47,12 @@ impl TrustedHostLocalApplicationSession<'_> {
     ///
     /// # Errors
     ///
-    /// Returns the stable Core error produced by the bound owner operation.
-    pub fn run(self) -> Result<TrustedHostLocalApplicationOutcome, WorkflowOsError> {
-        (self.runner)()
+    /// Returns a bounded application failure projected from the private Core
+    /// error. Messages, diagnostics, and source values do not cross the SPI.
+    pub fn run(
+        self,
+    ) -> Result<TrustedHostLocalApplicationOutcome, TrustedHostLocalApplicationFailure> {
+        (self.runner)().map_err(|error| TrustedHostLocalApplicationFailure::from_core_error(&error))
     }
 }
 
@@ -106,6 +110,82 @@ impl fmt::Debug for TrustedHostLocalApplicationCancellationHandle {
             .finish_non_exhaustive()
     }
 }
+
+/// Fixed, payload-free failure projected at the local application boundary.
+///
+/// The failure intentionally retains only the stable Core error category. It
+/// does not store or expose the original code, message, diagnostics, source,
+/// path, identifier, payload, or serialized error.
+///
+/// Failures cannot be serialized:
+///
+/// ```compile_fail
+/// fn serialize(failure: &workflow_core::TrustedHostLocalApplicationFailure) {
+///     let _json = serde_json::to_string(failure).unwrap();
+/// }
+/// ```
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum TrustedHostLocalApplicationFailure {
+    /// Private Core input could not be parsed.
+    Parse,
+    /// Private Core input failed validation.
+    Validation,
+    /// The private operation is unsupported.
+    Unsupported,
+    /// Policy denied the private operation.
+    PolicyDenied,
+    /// Current private Core state is invalid or ambiguous.
+    InvalidState,
+    /// A private security boundary rejected the operation.
+    Security,
+    /// A private internal invariant failed.
+    Internal,
+}
+
+impl TrustedHostLocalApplicationFailure {
+    fn from_core_error(error: &WorkflowOsError) -> Self {
+        match error.kind() {
+            WorkflowOsErrorKind::Parse => Self::Parse,
+            WorkflowOsErrorKind::Validation => Self::Validation,
+            WorkflowOsErrorKind::Unsupported => Self::Unsupported,
+            WorkflowOsErrorKind::PolicyDenied => Self::PolicyDenied,
+            WorkflowOsErrorKind::InvalidState => Self::InvalidState,
+            WorkflowOsErrorKind::Security => Self::Security,
+            WorkflowOsErrorKind::Internal => Self::Internal,
+        }
+    }
+
+    /// Returns the fixed stable application failure code.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Parse => "trusted_host_local_application.failure.parse",
+            Self::Validation => "trusted_host_local_application.failure.validation",
+            Self::Unsupported => "trusted_host_local_application.failure.unsupported",
+            Self::PolicyDenied => "trusted_host_local_application.failure.policy_denied",
+            Self::InvalidState => "trusted_host_local_application.failure.invalid_state",
+            Self::Security => "trusted_host_local_application.failure.security",
+            Self::Internal => "trusted_host_local_application.failure.internal",
+        }
+    }
+}
+
+impl fmt::Debug for TrustedHostLocalApplicationFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("TrustedHostLocalApplicationFailure")
+            .field(&self.code())
+            .finish()
+    }
+}
+
+impl fmt::Display for TrustedHostLocalApplicationFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.code())
+    }
+}
+
+impl Error for TrustedHostLocalApplicationFailure {}
 
 /// Bounded result of consuming one local application session.
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -296,6 +376,62 @@ mod tests {
             assert!(!debug.contains("workflow/"));
             assert!(!debug.contains("run/"));
             assert!(!debug.contains("token"));
+        }
+    }
+
+    #[test]
+    fn internal_error_projection_is_exhaustive_and_payload_free() {
+        let cases = [
+            (
+                WorkflowOsErrorKind::Parse,
+                TrustedHostLocalApplicationFailure::Parse,
+            ),
+            (
+                WorkflowOsErrorKind::Validation,
+                TrustedHostLocalApplicationFailure::Validation,
+            ),
+            (
+                WorkflowOsErrorKind::Unsupported,
+                TrustedHostLocalApplicationFailure::Unsupported,
+            ),
+            (
+                WorkflowOsErrorKind::PolicyDenied,
+                TrustedHostLocalApplicationFailure::PolicyDenied,
+            ),
+            (
+                WorkflowOsErrorKind::InvalidState,
+                TrustedHostLocalApplicationFailure::InvalidState,
+            ),
+            (
+                WorkflowOsErrorKind::Security,
+                TrustedHostLocalApplicationFailure::Security,
+            ),
+            (
+                WorkflowOsErrorKind::Internal,
+                TrustedHostLocalApplicationFailure::Internal,
+            ),
+        ];
+
+        for (kind, expected) in cases {
+            let session =
+                TrustedHostLocalApplicationSession::from_test_runner(Box::new(move || {
+                    Err(WorkflowOsError::new(
+                        kind,
+                        "private.token.path",
+                        "authorization bearer secret-private-diagnostic",
+                    ))
+                }));
+            let failure = session.run().expect_err("private error must fail");
+
+            assert_eq!(failure, expected);
+            for output in [format!("{failure:?}"), failure.to_string()] {
+                assert!(output.contains(failure.code()));
+                assert!(!output.contains("private"));
+                assert!(!output.contains("authorization"));
+                assert!(!output.contains("bearer"));
+                assert!(!output.contains("secret"));
+                assert!(!output.contains("diagnostic"));
+            }
         }
     }
 }
