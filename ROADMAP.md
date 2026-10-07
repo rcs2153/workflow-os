@@ -692,10 +692,15 @@ current queue when they contain historical `next phase` language.
    rehydrates every subsequent wait from Core, and stops explicitly on
    cancellation, blocked or terminal posture, unsupported waits, host failure,
    or budget exhaustion. It retains no scheduling authority or skill payload.
-   The next phase is focused maintainer/security review of this private
-   repeated driver. Production timer integration, provider mutation,
-   OpenShell, nested harnesses, automatic approval, public runtime
-   configuration, CLI, SDK, and schema exposure remain blocked.
+   Focused maintainer/security
+   [review](docs/concepts/TRUSTED_HOST_PRIVATE_REPEATED_SCHEDULING_REVIEW.md)
+   accepts the private repeated driver with non-blocking follow-ups for direct
+   competing-driver, restart, duplicate-identity, and deterministic-time
+   proofs. The next phase is planning for one private production trusted-host
+   timer integration that remains authority-free and exclusively calls the
+   accepted repeated driver. General scheduling, public configuration,
+   provider mutation, OpenShell, nested harnesses, automatic approval, CLI,
+   SDK, and schema exposure remain blocked.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
