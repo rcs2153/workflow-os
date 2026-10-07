@@ -2849,16 +2849,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(calls.load(Ordering::Relaxed), 1);
-        let loser = outcomes
-            .iter()
-            .find_map(|outcome| outcome.as_ref().err())
-            .expect("one losing caller");
-        assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
-        assert!(matches!(
-            loser.code(),
-            "trusted_host_redispatch.directive_replayed"
-                | "trusted_host_redispatch.attempt_limit_inconsistent"
-        ));
         assert_eq!(
             outcomes
                 .iter()
@@ -2867,15 +2857,29 @@ mod tests {
                 .sum::<u32>(),
             1
         );
-        assert!(outcomes.iter().filter_map(|outcome| outcome.as_ref().ok()).all(
-            |outcome| {
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter_map(|outcome| outcome.as_ref().ok())
+                .filter(|outcome| outcome.execution.executor_entries == 1)
+                .count(),
+            1
+        );
+        assert!(outcomes.iter().all(|outcome| match outcome {
+            Ok(outcome) => {
                 matches!(
                     outcome.wake_status,
                     crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::Transitioned
                         | crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::ExactReplay
                 ) && outcome.execution.stop_reason == TrustedHostRedispatchStopReason::Terminal
+                    && outcome.execution.executor_entries <= 1
             }
-        ));
+            Err(error) => matches!(
+                error.code(),
+                "trusted_host_redispatch.directive_replayed"
+                    | "trusted_host_redispatch.attempt_limit_inconsistent"
+            ),
+        }));
         assert_eq!(
             fixture
                 .backend

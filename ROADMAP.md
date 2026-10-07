@@ -646,8 +646,13 @@ current queue when they contain historical `next phase` language.
    though the existing entry contract can lawfully return a terminal
    zero-entry loser after the winner completes. The next phase is a focused
    test-and-report blocker fix that bounds all lawful loser outcomes while
-   preserving exactly one aggregate executor entry. Scheduling models and
-   behavior remain deferred until that fix is reviewed and accepted.
+   preserving exactly one aggregate executor entry. That focused fix is now
+   implemented in the [blocker-fix
+   report](docs/concepts/TRUSTED_HOST_EXPLICIT_REINVOCATION_PREREQUISITE_PROOFS_BLOCKER_FIX_REPORT.md):
+   successful outcomes must be terminal and account for exactly one aggregate
+   entry, while the loser may be a bounded fail-closed error or a terminal
+   zero-entry observation. Scheduling models and behavior remain deferred
+   until focused review accepts the fix.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
