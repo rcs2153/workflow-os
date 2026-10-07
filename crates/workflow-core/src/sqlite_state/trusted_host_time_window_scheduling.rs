@@ -4,9 +4,9 @@ use sha2::{Digest, Sha256};
 
 use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeContinuationDisposition, AuthoritativeWaitDependencyBinding,
-    AuthoritativeWaitState, AuthoritativeWindowState, ContinuityInstanceEligibility,
-    ContinuityOperationId, ContinuityReceiptId, ContinuityRevision, ReferenceContinuityState,
-    TrustedTimeObservation, TrustedTimePosture, TrustedTimeSourceKind,
+    AuthoritativeWaitState, AuthoritativeWindowState, AuthorizedExecutionContinuityStore,
+    ContinuityInstanceEligibility, ContinuityOperationId, ContinuityReceiptId, ContinuityRevision,
+    ReferenceContinuityState, TrustedTimeObservation, TrustedTimePosture, TrustedTimeSourceKind,
 };
 use crate::trusted_host_supervisor::TrustedHostAttemptExecutor;
 use crate::{
@@ -17,6 +17,7 @@ use crate::{
 use super::continuity_store::observe_continuity_trusted_time;
 use super::trusted_host_operational_entry::TrustedHostOperationalEntryLocator;
 use super::trusted_host_redispatch_loop::TrustedHostRedispatchIdentityProvider;
+use super::trusted_host_redispatch_loop::TrustedHostRedispatchStopReason;
 use super::trusted_host_time_window_reinvocation::{
     reinvoke_after_time_window_wait, TrustedHostTimeWindowReinvocationInput,
     TrustedHostTimeWindowReinvocationOutcome,
@@ -27,6 +28,7 @@ use super::trusted_host_wait_handoff::{
 use super::{continuity_codec, SqliteStateBackend};
 
 const TICKET_COMMITMENT_DOMAIN: &str = "workflow-os/trusted-host-time-window-schedule-ticket/v1";
+const MAX_TRUSTED_HOST_SCHEDULED_WAKES: u32 = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TrustedHostTimeWindowScheduleNextOperation {
@@ -171,6 +173,247 @@ pub(crate) enum TrustedHostScheduleOnceOutcome {
         refreshed_scheduling: Box<TrustedHostTimeWindowSchedulingObservation>,
     },
     Reinvoked(TrustedHostTimeWindowReinvocationOutcome),
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) struct TrustedHostRepeatedWakeBudget(u32);
+
+impl TrustedHostRepeatedWakeBudget {
+    pub(crate) fn new(value: u32) -> Result<Self, WorkflowOsError> {
+        if value == 0 || value > MAX_TRUSTED_HOST_SCHEDULED_WAKES {
+            return Err(repeated_scheduling_error(
+                WorkflowOsErrorKind::Validation,
+                "wake_budget_invalid",
+                "trusted-host repeated scheduling wake budget is invalid",
+            ));
+        }
+        Ok(Self(value))
+    }
+
+    const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Debug for TrustedHostRepeatedWakeBudget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("TrustedHostRepeatedWakeBudget")
+            .field(&self.0)
+            .finish()
+    }
+}
+
+pub(crate) struct TrustedHostScheduleWakeIdentity {
+    pub(crate) operation_id: ContinuityOperationId,
+    pub(crate) receipt_id: ContinuityReceiptId,
+}
+
+impl fmt::Debug for TrustedHostScheduleWakeIdentity {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedHostScheduleWakeIdentity")
+            .field("binding", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) trait TrustedHostScheduleWakeIdentityProvider {
+    fn next_identity(
+        &mut self,
+        wake_attempt: u32,
+    ) -> Result<TrustedHostScheduleWakeIdentity, WorkflowOsError>;
+}
+
+pub(crate) struct TrustedHostRepeatedSchedulingInput<'a> {
+    pub(crate) backend: &'a SqliteStateBackend,
+    pub(crate) locator: TrustedHostOperationalEntryLocator,
+    pub(crate) wake_budget: TrustedHostRepeatedWakeBudget,
+    pub(crate) deadline_waiter: &'a mut dyn TrustedHostDeadlineWaiter,
+    pub(crate) executor: &'a dyn TrustedHostAttemptExecutor,
+    pub(crate) skill_input: SkillInput,
+    pub(crate) redispatch_identity_provider: &'a mut dyn TrustedHostRedispatchIdentityProvider,
+    pub(crate) wake_identity_provider: &'a mut dyn TrustedHostScheduleWakeIdentityProvider,
+}
+
+impl fmt::Debug for TrustedHostRepeatedSchedulingInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedHostRepeatedSchedulingInput")
+            .field("wake_budget", &self.wake_budget)
+            .field("binding", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TrustedHostRepeatedSchedulingStopReason {
+    Canceled,
+    Blocked,
+    Terminal,
+    UnsupportedWait,
+    WakeBudgetExhausted,
+}
+
+pub(crate) struct TrustedHostRepeatedSchedulingOutcome {
+    pub(crate) disposition: AuthoritativeContinuationDisposition,
+    pub(crate) scheduled_wakes: u32,
+    pub(crate) executor_entries: u32,
+    pub(crate) stop_reason: TrustedHostRepeatedSchedulingStopReason,
+}
+
+impl fmt::Debug for TrustedHostRepeatedSchedulingOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedHostRepeatedSchedulingOutcome")
+            .field("disposition", &self.disposition)
+            .field("scheduled_wakes", &self.scheduled_wakes)
+            .field("executor_entries", &self.executor_entries)
+            .field("stop_reason", &self.stop_reason)
+            .finish()
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+pub(crate) fn run_bounded_trusted_host_repeated_scheduling(
+    input: TrustedHostRepeatedSchedulingInput<'_>,
+) -> Result<TrustedHostRepeatedSchedulingOutcome, WorkflowOsError> {
+    let TrustedHostRepeatedSchedulingInput {
+        backend,
+        locator,
+        wake_budget,
+        deadline_waiter,
+        executor,
+        skill_input,
+        redispatch_identity_provider,
+        wake_identity_provider,
+    } = input;
+    let mut scheduled_wakes = 0_u32;
+    let mut executor_entries = 0_u32;
+
+    for wake_attempt in 1..=wake_budget.get() {
+        let identity = wake_identity_provider.next_identity(wake_attempt)?;
+        let result = schedule_trusted_host_time_window_once(TrustedHostScheduleOnceInput {
+            backend,
+            locator: clone_locator(&locator),
+            operation_id: identity.operation_id,
+            receipt_id: identity.receipt_id,
+            deadline_waiter: &mut *deadline_waiter,
+            executor,
+            skill_input: skill_input.clone(),
+            identity_provider: &mut *redispatch_identity_provider,
+        });
+
+        let outcome = match result {
+            Ok(outcome) => outcome,
+            Err(error)
+                if error.code() == "trusted_host_time_window_scheduling.posture_unsupported" =>
+            {
+                let disposition = backend.continuation_disposition(&locator.window_id)?;
+                return Ok(TrustedHostRepeatedSchedulingOutcome {
+                    disposition,
+                    scheduled_wakes,
+                    executor_entries,
+                    stop_reason: TrustedHostRepeatedSchedulingStopReason::UnsupportedWait,
+                });
+            }
+            Err(error)
+                if error.code() == "trusted_host_time_window_scheduling.posture_ineligible" =>
+            {
+                let disposition = backend.continuation_disposition(&locator.window_id)?;
+                let stop_reason = match disposition {
+                    AuthoritativeContinuationDisposition::Blocked => {
+                        TrustedHostRepeatedSchedulingStopReason::Blocked
+                    }
+                    AuthoritativeContinuationDisposition::Terminal => {
+                        TrustedHostRepeatedSchedulingStopReason::Terminal
+                    }
+                    AuthoritativeContinuationDisposition::AwaitCondition
+                    | AuthoritativeContinuationDisposition::ResumeNow => {
+                        TrustedHostRepeatedSchedulingStopReason::UnsupportedWait
+                    }
+                };
+                return Ok(TrustedHostRepeatedSchedulingOutcome {
+                    disposition,
+                    scheduled_wakes,
+                    executor_entries,
+                    stop_reason,
+                });
+            }
+            Err(error) => return Err(error),
+        };
+
+        scheduled_wakes = scheduled_wakes.checked_add(1).ok_or_else(|| {
+            repeated_scheduling_error(
+                WorkflowOsErrorKind::InvalidState,
+                "wake_count_exhausted",
+                "trusted-host repeated scheduling wake count is invalid",
+            )
+        })?;
+
+        match outcome {
+            TrustedHostScheduleOnceOutcome::Canceled => {
+                let disposition = backend.continuation_disposition(&locator.window_id)?;
+                return Ok(TrustedHostRepeatedSchedulingOutcome {
+                    disposition,
+                    scheduled_wakes,
+                    executor_entries,
+                    stop_reason: TrustedHostRepeatedSchedulingStopReason::Canceled,
+                });
+            }
+            TrustedHostScheduleOnceOutcome::NotYetEligible { .. } => {}
+            TrustedHostScheduleOnceOutcome::Reinvoked(outcome) => {
+                executor_entries = executor_entries
+                    .checked_add(outcome.execution.executor_entries)
+                    .ok_or_else(|| {
+                        repeated_scheduling_error(
+                            WorkflowOsErrorKind::InvalidState,
+                            "executor_entry_count_exhausted",
+                            "trusted-host repeated scheduling executor entry count is invalid",
+                        )
+                    })?;
+                match outcome.execution.stop_reason {
+                    TrustedHostRedispatchStopReason::AwaitCondition => {}
+                    TrustedHostRedispatchStopReason::Blocked => {
+                        return Ok(TrustedHostRepeatedSchedulingOutcome {
+                            disposition: outcome.execution.disposition,
+                            scheduled_wakes,
+                            executor_entries,
+                            stop_reason: TrustedHostRepeatedSchedulingStopReason::Blocked,
+                        });
+                    }
+                    TrustedHostRedispatchStopReason::Terminal => {
+                        return Ok(TrustedHostRepeatedSchedulingOutcome {
+                            disposition: outcome.execution.disposition,
+                            scheduled_wakes,
+                            executor_entries,
+                            stop_reason: TrustedHostRepeatedSchedulingStopReason::Terminal,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(TrustedHostRepeatedSchedulingOutcome {
+        disposition: AuthoritativeContinuationDisposition::AwaitCondition,
+        scheduled_wakes,
+        executor_entries,
+        stop_reason: TrustedHostRepeatedSchedulingStopReason::WakeBudgetExhausted,
+    })
+}
+
+fn clone_locator(
+    locator: &TrustedHostOperationalEntryLocator,
+) -> TrustedHostOperationalEntryLocator {
+    TrustedHostOperationalEntryLocator {
+        workflow_id: locator.workflow_id.clone(),
+        run_id: locator.run_id.clone(),
+        step_id: locator.step_id.clone(),
+        window_id: locator.window_id.clone(),
+        subject_actor_id: locator.subject_actor_id.clone(),
+        immutable_run_bundle: locator.immutable_run_bundle.clone(),
+    }
 }
 
 impl fmt::Debug for TrustedHostScheduleOnceOutcome {
@@ -563,6 +806,18 @@ fn scheduling_error(
     WorkflowOsError::new(
         kind,
         format!("trusted_host_time_window_scheduling.{suffix}"),
+        message,
+    )
+}
+
+fn repeated_scheduling_error(
+    kind: WorkflowOsErrorKind,
+    suffix: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    WorkflowOsError::new(
+        kind,
+        format!("trusted_host_repeated_scheduling.{suffix}"),
         message,
     )
 }
