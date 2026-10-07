@@ -917,9 +917,16 @@ current queue when they contain historical `next phase` language.
    authority fixture proves fresh preparation is read-only and one consumed
    session opens and enters exactly once. See the [blocker-fix
    report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_BLOCKER_FIX_REPORT.md).
-   A focused blocker-fix maintainer/security review is next. No local-host
-   package or caller composition may begin before that review accepts the
-   corrected boundary.
+   The focused blocker-fix [maintainer/security
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_BLOCKER_FIX_REVIEW.md)
+   accepts the production pre-issuance correction but finds the fresh-path
+   proof incomplete. The authority-backed fixture proves read-only preparation
+   and one consumed run, but it does not directly prove fresh drop,
+   pre-run cancellation, or fresh-context substitution behavior required by
+   the prior review. The next phase is one test-only blocker fix that completes
+   those direct proofs without changing production behavior. No local-host
+   package or caller composition may begin before that proof is reviewed and
+   accepted.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

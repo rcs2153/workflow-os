@@ -1,8 +1,10 @@
 # Trusted-Host Local Application Session Preparation Plan
 
-Status: implemented as a private, feature-gated Core boundary. The focused
-maintainer/security review found two blockers; the focused blocker fix is now
-implemented and awaits review. No operational application path is implemented.
+Status: implemented as a private, feature-gated Core boundary. The production
+pre-issuance blocker is fixed, but the focused blocker-fix review found that
+the direct fresh-path proof remains incomplete. One test-only blocker fix is
+required before local-host composition. No operational application path is
+implemented.
 
 ## 1. Executive Summary
 

@@ -148,3 +148,16 @@ Do not begin local-host package or caller composition before that review.
   clippy and tests, documentation, and diff hygiene passed
 - out-of-kernel work: code and documentation edits, validation commands, and
   later git or pull-request work
+
+## 12. Review-Forward Note
+
+The focused blocker-fix review accepts the production pre-issuance binding
+correction but finds that the direct fresh-path proof required by the original
+review is incomplete. The authority-backed fixture proves read-only fresh
+preparation and one consumed run; it does not directly exercise fresh drop,
+pre-run cancellation, or fresh-context substitution behavior.
+
+See [Trusted-Host Local Application Session Preparation Blocker Fix
+Review](TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_BLOCKER_FIX_REVIEW.md).
+This note preserves the original implementation record while preventing its
+opening claim from being read as final phase acceptance.
