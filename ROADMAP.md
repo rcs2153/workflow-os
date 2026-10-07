@@ -781,8 +781,13 @@ current queue when they contain historical `next phase` language.
    It selects one crate-private, one-shot, synchronous owner that creates the
    existing cancellation pair, returns the handle to process control, consumes
    one exact preselected operation, and delegates once to the accepted private
-   composition. It does not discover work or own a durable job. The next phase
-   is focused maintainer/security review before implementation.
+   composition. It does not discover work or own a durable job. The focused
+   [maintainer/security review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_REVIEW.md)
+   found planning blockers: the reused timer handle does not prevent initial
+   executor admission when canceled before `run`, cannot interrupt an active
+   attempt, and therefore cannot yet be described as a general process-shutdown
+   control. The next phase is one documentation-only blocker fix followed by
+   focused re-review; implementation remains blocked.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
