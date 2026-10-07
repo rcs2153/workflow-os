@@ -859,9 +859,14 @@ current queue when they contain historical `next phase` language.
    review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_TOPOLOGY_PLAN_REVIEW.md)
    accepts the plan with no blocker for the Core SPI model and visibility
    slice. It clarifies that an unpublished library is a composition boundary,
-   not yet a process owner. The next phase is the non-default Core SPI model,
-   opaque one-shot session and bounded outcome vocabulary, and direct
-   construction/privacy tests only.
+   not yet a process owner. The non-default Core SPI model and visibility
+   slice is now implemented behind `trusted-host-application-spi`, including
+   opaque one-shot session and cancellation vocabulary, fixed bounded
+   outcomes, redacted Debug, compile-fail clone/serde coverage, and direct
+   private-owner wrapping tests. Production code has no session-preparation
+   constructor, application package, or operational caller. The next phase is
+   a focused maintainer/security review of this SPI slice before any
+   preparation helper.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
