@@ -1,8 +1,10 @@
 # Trusted-Host Explicit Local Caller Adoption Plan
 
-Status: planning complete, pending focused maintainer/security review. This
-document plans one additive crate-private operational-entry composition. It
-does not implement caller adoption or change runtime behavior.
+Status: implementation complete, pending focused implementation/security
+review. The accepted plan is implemented as one additive crate-private
+operational-entry composition. It does not create automatic scheduling, a
+public owner surface, or a new authority path. See the
+[implementation report](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_CALLER_ADOPTION_REPORT.md).
 
 ## 1. Executive Summary
 
@@ -271,11 +273,10 @@ Focused implementation tests should prove:
 
 ## 16. Final Recommendation
 
-Proceed next to focused maintainer/security review of this plan. If accepted,
-implement only the additive crate-private explicit operational-entry
-composition.
+Perform focused maintainer/security review of the implemented additive
+crate-private explicit operational-entry composition before any wider owner,
+operator, discovery, or automatic scheduling surface is considered.
 
 Do not add run discovery, a daemon, background ownership, public
 configuration, CLI, SDK, schemas, automatic approval, provider mutation,
 OpenShell, nested harnesses, hosted scheduling, or release changes.
-

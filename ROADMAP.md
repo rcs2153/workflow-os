@@ -760,9 +760,15 @@ current queue when they contain historical `next phase` language.
    [maintainer/security review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_CALLER_ADOPTION_PLAN_REVIEW.md)
    accepts the plan with no blocker and confirms that an awaiting initial
    result cannot discard a successful skill output because yielded attempts
-   carry no `SkillOutput`. The next phase is implementation of only that
-   additive crate-private composition and its focused routing, binding,
-   cancellation, restart, concurrency, error, and privacy tests.
+   carry no `SkillOutput`. That additive crate-private composition is now
+   implemented in the [Trusted-Host Explicit Local Caller Adoption
+   Report](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_CALLER_ADOPTION_REPORT.md).
+   It enters the accepted operational boundary once, routes only an
+   authoritative `AwaitCondition` into the accepted synchronous production
+   caller, and returns every other bounded entry posture unchanged. A
+   no-wait `ResumeNow` yield remains inside operational entry rather than being
+   misclassified as scheduled waiting. The next phase is focused
+   implementation/security review before any wider owner or operator surface.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

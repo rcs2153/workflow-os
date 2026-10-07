@@ -638,6 +638,10 @@ mod tests {
     use crate::sqlite_state::dispatch_reservation_store::{
         inject_dispatch_commit_fault, InjectedDispatchCommitFault,
     };
+    use crate::sqlite_state::trusted_host_explicit_local_operation::{
+        run_explicit_trusted_host_local_operation, TrustedHostExplicitLocalOperationInput,
+        TrustedHostExplicitLocalOperationOutcome,
+    };
     use crate::sqlite_state::trusted_host_local_production_caller::{
         run_trusted_host_local_production_caller, TrustedHostLocalProductionCallerInput,
     };
@@ -1476,7 +1480,30 @@ mod tests {
         calls: &'a AtomicUsize,
     }
 
+    struct CountingBindingExecutor<'a> {
+        calls: &'a AtomicUsize,
+        delegate: &'a dyn TrustedHostAttemptExecutor,
+    }
+
+    impl TrustedHostAttemptExecutor for CountingBindingExecutor<'_> {
+        fn binding_commitment(&self) -> SpecContentHash {
+            self.delegate.binding_commitment()
+        }
+
+        fn execute(
+            &self,
+            context: &TrustedHostAttemptExecutionContext<'_>,
+        ) -> TrustedHostAttemptExecutionResult {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            self.delegate.execute(context)
+        }
+    }
+
     struct YieldTimeWindowThenFailExecutor<'a> {
+        calls: &'a AtomicUsize,
+    }
+
+    struct YieldTwoTimeWindowsThenFailExecutor<'a> {
         calls: &'a AtomicUsize,
     }
 
@@ -1501,6 +1528,37 @@ mod tests {
                         Timestamp::from_offset_date_time(
                             Timestamp::now_utc().as_offset_date_time()
                                 + time::Duration::milliseconds(200),
+                        ),
+                    ),
+                )
+            } else {
+                TrustedHostAttemptExecutionResult::TerminalFailure
+            }
+        }
+    }
+
+    impl TrustedHostAttemptExecutor for YieldTwoTimeWindowsThenFailExecutor<'_> {
+        fn binding_commitment(&self) -> SpecContentHash {
+            supervisor_executor_binding()
+        }
+
+        fn execute(
+            &self,
+            _context: &TrustedHostAttemptExecutionContext<'_>,
+        ) -> TrustedHostAttemptExecutionResult {
+            let call = self.calls.fetch_add(1, Ordering::Relaxed);
+            if call < 2 {
+                TrustedHostAttemptExecutionResult::Yielded(
+                    TrustedHostYieldRequest::with_time_window(
+                        AuthorizedExecutionYieldReason::ContextBudget,
+                        crate::AuthorizedExecutionWaitConditionId::new(format!(
+                            "wait/explicit-local-operation-{call}"
+                        ))
+                        .expect("condition"),
+                        1,
+                        Timestamp::from_offset_date_time(
+                            Timestamp::now_utc().as_offset_date_time()
+                                + time::Duration::milliseconds(500),
                         ),
                     ),
                 )
@@ -1786,6 +1844,44 @@ mod tests {
             },
         })
         .expect("initial attempt yields");
+        locator
+    }
+
+    fn register_resumable_operational_entry(
+        fixture: &Fixture,
+        operation: &str,
+        maximum_attempts: u32,
+    ) -> TrustedHostOperationalEntryLocator {
+        let capability = open_supervisor_attempt(fixture, operation, maximum_attempts);
+        let locator = TrustedHostOperationalEntryLocator {
+            workflow_id: fixture.workflow_id.clone(),
+            run_id: fixture.run_id.clone(),
+            step_id: fixture.step_id.clone(),
+            window_id: capability.window_id.clone(),
+            subject_actor_id: capability.subject_actor_id.clone(),
+            immutable_run_bundle: fixture.bundle.clone(),
+        };
+        let result = supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &YieldExecutor,
+            skill_input: skill_input(fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new(format!("operation/{operation}-yield"))
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new(format!("receipt/{operation}-yield"))
+                    .expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new(format!("yield/{operation}-resume"))
+                        .expect("yield generation"),
+                ),
+            },
+        })
+        .expect("resumable yielded attempt");
+        assert_eq!(
+            result.disposition,
+            AuthoritativeContinuationDisposition::ResumeNow
+        );
         locator
     }
 
@@ -3160,6 +3256,341 @@ mod tests {
         assert_eq!(outcome.scheduled_wakes, 2);
         assert_eq!(outcome.executor_entries, 2);
         assert_eq!(executor_calls.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn explicit_local_operation_returns_terminal_entry_without_scheduling() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/explicit-terminal", 1);
+        let locator = TrustedHostOperationalEntryLocator {
+            workflow_id: fixture.workflow_id.clone(),
+            run_id: fixture.run_id.clone(),
+            step_id: fixture.step_id.clone(),
+            window_id: capability.window_id.clone(),
+            subject_actor_id: capability.subject_actor_id.clone(),
+            immutable_run_bundle: fixture.bundle.clone(),
+        };
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/explicit-terminal")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/explicit-terminal").expect("receipt"),
+                yield_generation: None,
+            },
+        })
+        .expect("terminal attempt");
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+
+        let outcome =
+            run_explicit_trusted_host_local_operation(TrustedHostExplicitLocalOperationInput {
+                operational_entry: TrustedHostOperationalEntryInput {
+                    backend: &fixture.backend,
+                    locator,
+                    opening: None,
+                    executor: &executor,
+                    skill_input: skill_input(&fixture),
+                    opening_persistence: TrustedHostSupervisorPersistenceInput {
+                        operation: ContinuityOperationId::new("operation/unused-explicit-terminal")
+                            .expect("operation"),
+                        receipt: ContinuityReceiptId::new("receipt/unused-explicit-terminal")
+                            .expect("receipt"),
+                        yield_generation: None,
+                    },
+                    identity_provider: &mut identity_provider,
+                },
+                cancellation,
+            })
+            .expect("terminal entry is returned");
+
+        let TrustedHostExplicitLocalOperationOutcome::EntryStopped(entry) = outcome else {
+            panic!("terminal entry must bypass continuation scheduling");
+        };
+        assert_eq!(entry.stop_reason, TrustedHostRedispatchStopReason::Terminal);
+        assert_eq!(entry.executor_entries, 0);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(identity_provider.calls, 0);
+    }
+
+    #[test]
+    fn explicit_local_operation_routes_time_window_yield_to_production_caller() {
+        let fixture = Fixture::new();
+        let locator = register_resumable_operational_entry(&fixture, "explicit-time-window", 3);
+        let calls = AtomicUsize::new(0);
+        let executor = YieldTimeWindowThenFailExecutor { calls: &calls };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+
+        let outcome =
+            run_explicit_trusted_host_local_operation(TrustedHostExplicitLocalOperationInput {
+                operational_entry: TrustedHostOperationalEntryInput {
+                    backend: &fixture.backend,
+                    locator,
+                    opening: None,
+                    executor: &executor,
+                    skill_input: skill_input(&fixture),
+                    opening_persistence: TrustedHostSupervisorPersistenceInput {
+                        operation: ContinuityOperationId::new("operation/unused-explicit-window")
+                            .expect("operation"),
+                        receipt: ContinuityReceiptId::new("receipt/unused-explicit-window")
+                            .expect("receipt"),
+                        yield_generation: None,
+                    },
+                    identity_provider: &mut identity_provider,
+                },
+                cancellation,
+            })
+            .expect("time-window continuation");
+
+        let TrustedHostExplicitLocalOperationOutcome::ContinuationStopped(continuation) = outcome
+        else {
+            panic!("time-window yield must route to the production caller");
+        };
+        assert_eq!(
+            continuation.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Terminal
+        );
+        assert_eq!(continuation.scheduled_wakes, 1);
+        assert_eq!(continuation.executor_entries, 1);
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+        assert_eq!(identity_provider.calls, 1);
+    }
+
+    #[test]
+    fn explicit_local_operation_preserves_fixed_two_wake_budget() {
+        let fixture = Fixture::new();
+        let locator = register_resumable_operational_entry(&fixture, "explicit-two-wakes", 4);
+        let calls = AtomicUsize::new(0);
+        let executor = YieldTwoTimeWindowsThenFailExecutor { calls: &calls };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+
+        let outcome =
+            run_explicit_trusted_host_local_operation(TrustedHostExplicitLocalOperationInput {
+                operational_entry: TrustedHostOperationalEntryInput {
+                    backend: &fixture.backend,
+                    locator,
+                    opening: None,
+                    executor: &executor,
+                    skill_input: skill_input(&fixture),
+                    opening_persistence: TrustedHostSupervisorPersistenceInput {
+                        operation: ContinuityOperationId::new("operation/unused-explicit-two")
+                            .expect("operation"),
+                        receipt: ContinuityReceiptId::new("receipt/unused-explicit-two")
+                            .expect("receipt"),
+                        yield_generation: None,
+                    },
+                    identity_provider: &mut identity_provider,
+                },
+                cancellation,
+            })
+            .expect("two-wake continuation");
+
+        let TrustedHostExplicitLocalOperationOutcome::ContinuationStopped(continuation) = outcome
+        else {
+            panic!("awaiting entry must route to continuation scheduling");
+        };
+        assert_eq!(
+            continuation.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Terminal
+        );
+        assert_eq!(continuation.scheduled_wakes, 2);
+        assert_eq!(continuation.executor_entries, 2);
+        assert_eq!(calls.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn explicit_local_operation_does_not_route_resumable_yield_as_wait() {
+        let fixture = Fixture::new();
+        let locator =
+            register_supervisor_unsupported_wait(&fixture, "explicit-operation-unsupported");
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+
+        let outcome =
+            run_explicit_trusted_host_local_operation(TrustedHostExplicitLocalOperationInput {
+                operational_entry: TrustedHostOperationalEntryInput {
+                    backend: &fixture.backend,
+                    locator,
+                    opening: None,
+                    executor: &executor,
+                    skill_input: skill_input(&fixture),
+                    opening_persistence: TrustedHostSupervisorPersistenceInput {
+                        operation: ContinuityOperationId::new(
+                            "operation/unused-explicit-unsupported",
+                        )
+                        .expect("operation"),
+                        receipt: ContinuityReceiptId::new("receipt/unused-explicit-unsupported")
+                            .expect("receipt"),
+                        yield_generation: None,
+                    },
+                    identity_provider: &mut identity_provider,
+                },
+                cancellation,
+            })
+            .expect("unsupported wait posture");
+
+        let TrustedHostExplicitLocalOperationOutcome::EntryStopped(entry) = outcome else {
+            panic!("resumable yield must remain in operational entry");
+        };
+        assert_eq!(entry.stop_reason, TrustedHostRedispatchStopReason::Terminal);
+        assert_eq!(entry.executor_entries, 1);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(identity_provider.calls, 1);
+    }
+
+    #[test]
+    fn explicit_local_operation_owner_cancellation_stops_after_initial_yield() {
+        let fixture = Fixture::new();
+        let locator = register_resumable_operational_entry(&fixture, "explicit-cancel", 3);
+        let calls = AtomicUsize::new(0);
+        let executor = TimeWindowYieldExecutor {
+            condition_version: 1,
+            deadline: Timestamp::from_offset_date_time(
+                Timestamp::now_utc().as_offset_date_time() + time::Duration::hours(1),
+            ),
+        };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let (cancellation, handle) = TrustedHostLocalTimerCancellation::new();
+        handle.cancel().expect("cancel");
+        let counting_executor = CountingBindingExecutor {
+            calls: &calls,
+            delegate: &executor,
+        };
+
+        let outcome =
+            run_explicit_trusted_host_local_operation(TrustedHostExplicitLocalOperationInput {
+                operational_entry: TrustedHostOperationalEntryInput {
+                    backend: &fixture.backend,
+                    locator,
+                    opening: None,
+                    executor: &counting_executor,
+                    skill_input: skill_input(&fixture),
+                    opening_persistence: TrustedHostSupervisorPersistenceInput {
+                        operation: ContinuityOperationId::new("operation/unused-explicit-cancel")
+                            .expect("operation"),
+                        receipt: ContinuityReceiptId::new("receipt/unused-explicit-cancel")
+                            .expect("receipt"),
+                        yield_generation: None,
+                    },
+                    identity_provider: &mut identity_provider,
+                },
+                cancellation,
+            })
+            .expect("owner cancellation");
+
+        let TrustedHostExplicitLocalOperationOutcome::ContinuationStopped(continuation) = outcome
+        else {
+            panic!("initial time-window yield must reach cancellation-aware caller");
+        };
+        assert_eq!(
+            continuation.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Canceled
+        );
+        assert_eq!(continuation.executor_entries, 0);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn explicit_local_operation_rejects_substituted_input_without_leaking_debug() {
+        let fixture = Fixture::new();
+        let locator = register_resumable_operational_entry(&fixture, "explicit-substitution", 3);
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+        let mut substituted = skill_input(&fixture);
+        substituted.values.insert(
+            "context".to_owned(),
+            "authorization=secret-explicit-operation-marker".to_owned(),
+        );
+        let input = TrustedHostExplicitLocalOperationInput {
+            operational_entry: TrustedHostOperationalEntryInput {
+                backend: &fixture.backend,
+                locator,
+                opening: None,
+                executor: &executor,
+                skill_input: substituted,
+                opening_persistence: TrustedHostSupervisorPersistenceInput {
+                    operation: ContinuityOperationId::new("operation/unused-explicit-substitution")
+                        .expect("operation"),
+                    receipt: ContinuityReceiptId::new("receipt/unused-explicit-substitution")
+                        .expect("receipt"),
+                    yield_generation: None,
+                },
+                identity_provider: &mut identity_provider,
+            },
+            cancellation,
+        };
+        let input_debug = format!("{input:?}");
+        assert!(!input_debug.contains("secret-explicit-operation-marker"));
+        assert!(!input_debug.contains(fixture.run_id.as_str()));
+
+        let error = run_explicit_trusted_host_local_operation(input)
+            .expect_err("substituted skill input must fail closed");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host_operational_entry.invocation_binding_mismatch"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(identity_provider.calls, 0);
+        let error_debug = format!("{error:?}");
+        assert!(!error_debug.contains("secret-explicit-operation-marker"));
+        assert!(!error_debug.contains(fixture.run_id.as_str()));
+    }
+
+    #[test]
+    fn explicit_local_operation_reopened_backend_preserves_binding_and_debug() {
+        let fixture = Fixture::new();
+        let locator = register_resumable_operational_entry(&fixture, "explicit-reopen", 3);
+        let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen backend");
+        let calls = AtomicUsize::new(0);
+        let executor = YieldTimeWindowThenFailExecutor { calls: &calls };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let (cancellation, _handle) = TrustedHostLocalTimerCancellation::new();
+
+        let outcome =
+            run_explicit_trusted_host_local_operation(TrustedHostExplicitLocalOperationInput {
+                operational_entry: TrustedHostOperationalEntryInput {
+                    backend: &reopened,
+                    locator,
+                    opening: None,
+                    executor: &executor,
+                    skill_input: skill_input(&fixture),
+                    opening_persistence: TrustedHostSupervisorPersistenceInput {
+                        operation: ContinuityOperationId::new("operation/unused-explicit-reopen")
+                            .expect("operation"),
+                        receipt: ContinuityReceiptId::new("receipt/unused-explicit-reopen")
+                            .expect("receipt"),
+                        yield_generation: None,
+                    },
+                    identity_provider: &mut identity_provider,
+                },
+                cancellation,
+            })
+            .expect("reopened explicit operation");
+
+        let debug = format!("{outcome:?}");
+        assert!(!debug.contains(fixture.run_id.as_str()));
+        assert!(!debug.contains("local-supervisor-output"));
+        let TrustedHostExplicitLocalOperationOutcome::ContinuationStopped(continuation) = outcome
+        else {
+            panic!("reopened awaiting operation must continue");
+        };
+        assert_eq!(
+            continuation.stop_reason,
+            TrustedHostRepeatedSchedulingStopReason::Terminal
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
     }
 
     #[test]
