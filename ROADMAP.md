@@ -923,10 +923,17 @@ current queue when they contain historical `next phase` language.
    proof incomplete. The authority-backed fixture proves read-only preparation
    and one consumed run, but it does not directly prove fresh drop,
    pre-run cancellation, or fresh-context substitution behavior required by
-   the prior review. The next phase is one test-only blocker fix that completes
-   those direct proofs without changing production behavior. No local-host
-   package or caller composition may begin before that proof is reviewed and
-   accepted.
+   the prior review. That focused blocker fix is now implemented in the [Fresh
+   Preparation Proof Blocker Fix
+   Report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_FRESH_PROOF_BLOCKER_FIX_REPORT.md).
+   Direct authority-backed tests now prove zero-write fresh drop and pre-run
+   cancellation plus fail-closed backend, actor, bundle,
+   invocation/executor, opening-shape, and trusted-time substitution behavior.
+   The direct tests exposed and closed two pre-issuance semantic gaps for an
+   unusable opening request shape and incompatible trusted-time context;
+   authority consumption remains atomic at consumed execution. The next phase
+   is a focused maintainer/security re-review. No local-host package or caller
+   composition may begin before that proof is reviewed and accepted.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

@@ -634,6 +634,7 @@ mod tests {
     #[cfg(feature = "trusted-host-application-spi")]
     use crate::current_authority_source::{
         registered_current_authority_test_fixture, registered_current_authority_test_source,
+        RegisteredInMemoryCurrentAuthoritySource,
     };
     #[cfg(feature = "trusted-host-application-spi")]
     use crate::operational_execution_window_opening::OperationalExecutionWindowOpeningUseInput;
@@ -702,7 +703,9 @@ mod tests {
     };
     use crate::{AuthorizedExecutionYieldReason, CorrelationId, SpecContentHash};
     #[cfg(feature = "trusted-host-application-spi")]
-    use crate::{RedactionMetadata, RequiredContextExecutionBinding};
+    use crate::{
+        RedactionMetadata, RequiredContextContractBinding, RequiredContextExecutionBinding,
+    };
 
     static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 
@@ -937,6 +940,114 @@ mod tests {
     impl Drop for Fixture {
         fn drop(&mut self) {
             cleanup_database(&self.path);
+        }
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    struct FreshApplicationFixture {
+        contract: RequiredContextContractBinding,
+        binding: RequiredContextExecutionBinding,
+        source: RegisteredInMemoryCurrentAuthoritySource,
+        runtime: Fixture,
+        redaction: RedactionMetadata,
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    impl FreshApplicationFixture {
+        fn new() -> Self {
+            let (contract, binding) = registered_current_authority_test_fixture();
+            let source = registered_current_authority_test_source(&contract);
+            let runtime = Fixture::from_required_context_binding(&binding);
+            Self {
+                contract,
+                binding,
+                source,
+                runtime,
+                redaction: RedactionMetadata::empty(),
+            }
+        }
+
+        fn locator(&self) -> TrustedHostOperationalEntryLocator {
+            TrustedHostOperationalEntryLocator {
+                workflow_id: self.runtime.workflow_id.clone(),
+                run_id: self.runtime.run_id.clone(),
+                step_id: self.runtime.step_id.clone(),
+                window_id: AuthorizedExecutionWindowId::new("window/application-prepare-fresh")
+                    .expect("window"),
+                subject_actor_id: self.binding.actor().clone(),
+                immutable_run_bundle: self.runtime.bundle.clone(),
+            }
+        }
+
+        fn input<'a>(
+            &'a self,
+            executor: &'a dyn TrustedHostAttemptExecutor,
+            invocation_commitment: &'a SpecContentHash,
+        ) -> TrustedHostLocalApplicationPreparationInput<'a> {
+            let locator = self.locator();
+            TrustedHostLocalApplicationPreparationInput {
+                backend: &self.runtime.backend,
+                posture: TrustedHostLocalApplicationPreparationPosture::Fresh {
+                    opening: Box::new(OperationalExecutionWindowOpeningUseInput {
+                        source: &self.source,
+                        backend: &self.runtime.backend,
+                        execution_binding: &self.binding,
+                        contract: &self.contract,
+                        invocation_binding_commitment: invocation_commitment,
+                        operation_id: OperationalExecutionWindowOpeningOperationId::new(
+                            "opening/application-prepare-fresh",
+                        )
+                        .expect("operation"),
+                        receipt_id: OperationalExecutionWindowOpeningReceiptId::new(
+                            "receipt/application-prepare-fresh",
+                        )
+                        .expect("receipt"),
+                        window_id: locator.window_id.clone(),
+                        attempt_id: AuthorizedExecutionAttemptId::new(
+                            "attempt/application-prepare-fresh",
+                        )
+                        .expect("attempt"),
+                        expires_at: Timestamp::parse_rfc3339("2099-07-26T11:00:00Z")
+                            .expect("expiry"),
+                        maximum_attempts: 1,
+                        trusted_time: trusted_time_observation(
+                            Timestamp::parse_rfc3339("2026-07-26T10:25:00Z").expect("observed"),
+                            TrustedTimeSourceKind::CoreInjectedClockV1,
+                            SpecContentHash::new(super::super::CONTINUITY_CLOCK_PROVENANCE)
+                                .expect("provenance"),
+                            ContinuityTrustedTimeEpochId::new(super::super::CONTINUITY_CLOCK_EPOCH)
+                                .expect("epoch"),
+                        ),
+                        evaluated_at: Timestamp::parse_rfc3339("2026-07-26T10:25:00Z")
+                            .expect("evaluated"),
+                        redaction: &self.redaction,
+                    }),
+                    persistence: TrustedHostSupervisorPersistenceInput {
+                        operation: ContinuityOperationId::new(
+                            "operation/application-prepare-fresh-supervisor",
+                        )
+                        .expect("operation"),
+                        receipt: ContinuityReceiptId::new(
+                            "receipt/application-prepare-fresh-supervisor",
+                        )
+                        .expect("receipt"),
+                        yield_generation: None,
+                    },
+                },
+                executor,
+                skill_input: skill_input(&self.runtime),
+                locator,
+            }
+        }
+
+        fn invocation_commitment(
+            &self,
+            executor: &dyn TrustedHostAttemptExecutor,
+        ) -> SpecContentHash {
+            trusted_host_invocation_commitment(
+                &skill_input(&self.runtime),
+                &executor.binding_commitment(),
+            )
         }
     }
 
@@ -3973,110 +4084,44 @@ mod tests {
 
     #[cfg(feature = "trusted-host-application-spi")]
     #[test]
-    #[allow(clippy::too_many_lines)]
     fn application_preparation_is_read_only_and_runs_one_fresh_window() {
-        let (contract, binding) = registered_current_authority_test_fixture();
-        let source = registered_current_authority_test_source(&contract);
-        let fixture = Fixture::from_required_context_binding(&binding);
+        let fixture = FreshApplicationFixture::new();
         let calls = AtomicUsize::new(0);
         let executor = CountingExecutor { calls: &calls };
-        let input = skill_input(&fixture);
-        let invocation_commitment =
-            trusted_host_invocation_commitment(&input, &executor.binding_commitment());
-        let window_id =
-            AuthorizedExecutionWindowId::new("window/application-prepare-fresh").expect("window");
-        let locator = TrustedHostOperationalEntryLocator {
-            workflow_id: fixture.workflow_id.clone(),
-            run_id: fixture.run_id.clone(),
-            step_id: fixture.step_id.clone(),
-            window_id: window_id.clone(),
-            subject_actor_id: binding.actor().clone(),
-            immutable_run_bundle: fixture.bundle.clone(),
-        };
-        let redaction = RedactionMetadata::empty();
+        let invocation_commitment = fixture.invocation_commitment(&executor);
         let before = crate::sqlite_state::continuity_codec::load_snapshot(
-            &fixture.backend.connection().expect("connection"),
+            &fixture.runtime.backend.connection().expect("connection"),
         )
         .expect("snapshot before preparation");
         let events_before = fixture
+            .runtime
             .backend
-            .read_events(&fixture.run_id)
+            .read_events(&fixture.runtime.run_id)
             .expect("events before preparation")
             .len();
 
         let prepared = prepare_trusted_host_local_application_session(
-            TrustedHostLocalApplicationPreparationInput {
-                backend: &fixture.backend,
-                locator,
-                posture: TrustedHostLocalApplicationPreparationPosture::Fresh {
-                    opening: Box::new(OperationalExecutionWindowOpeningUseInput {
-                        source: &source,
-                        backend: &fixture.backend,
-                        execution_binding: &binding,
-                        contract: &contract,
-                        invocation_binding_commitment: &invocation_commitment,
-                        operation_id: OperationalExecutionWindowOpeningOperationId::new(
-                            "opening/application-prepare-fresh",
-                        )
-                        .expect("operation"),
-                        receipt_id: OperationalExecutionWindowOpeningReceiptId::new(
-                            "receipt/application-prepare-fresh",
-                        )
-                        .expect("receipt"),
-                        window_id,
-                        attempt_id: AuthorizedExecutionAttemptId::new(
-                            "attempt/application-prepare-fresh",
-                        )
-                        .expect("attempt"),
-                        expires_at: Timestamp::parse_rfc3339("2099-07-26T11:00:00Z")
-                            .expect("expiry"),
-                        maximum_attempts: 1,
-                        trusted_time: trusted_time_observation(
-                            Timestamp::parse_rfc3339("2026-07-26T10:25:00Z").expect("observed"),
-                            TrustedTimeSourceKind::CoreInjectedClockV1,
-                            SpecContentHash::new(super::super::CONTINUITY_CLOCK_PROVENANCE)
-                                .expect("provenance"),
-                            ContinuityTrustedTimeEpochId::new(super::super::CONTINUITY_CLOCK_EPOCH)
-                                .expect("epoch"),
-                        ),
-                        evaluated_at: Timestamp::parse_rfc3339("2026-07-26T10:25:00Z")
-                            .expect("evaluated"),
-                        redaction: &redaction,
-                    }),
-                    persistence: TrustedHostSupervisorPersistenceInput {
-                        operation: ContinuityOperationId::new(
-                            "operation/application-prepare-fresh-supervisor",
-                        )
-                        .expect("operation"),
-                        receipt: ContinuityReceiptId::new(
-                            "receipt/application-prepare-fresh-supervisor",
-                        )
-                        .expect("receipt"),
-                        yield_generation: None,
-                    },
-                },
-                executor: &executor,
-                skill_input: input,
-            },
+            fixture.input(&executor, &invocation_commitment),
         )
         .expect("prepare fresh session");
 
         assert!(
             crate::sqlite_state::continuity_codec::load_snapshot(
-                &fixture.backend.connection().expect("connection"),
+                &fixture.runtime.backend.connection().expect("connection"),
             )
             .expect("snapshot after preparation")
                 == before
         );
         assert_eq!(
             fixture
+                .runtime
                 .backend
-                .read_events(&fixture.run_id)
+                .read_events(&fixture.runtime.run_id)
                 .expect("events after preparation")
                 .len(),
             events_before
         );
-        assert_eq!(fixture.counts(), (0, 0, 0, 0));
+        assert_eq!(fixture.runtime.counts(), (0, 0, 0, 0));
         assert_eq!(calls.load(Ordering::Relaxed), 0);
 
         let (session, _handle) = prepared.into_parts();
@@ -4087,7 +4132,251 @@ mod tests {
             )
         );
         assert_eq!(calls.load(Ordering::Relaxed), 1);
-        assert_eq!(fixture.counts(), (1, 1, 1, 1));
+        assert_eq!(fixture.runtime.counts(), (1, 1, 1, 1));
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn dropping_fresh_application_preparation_is_zero_write() {
+        let fixture = FreshApplicationFixture::new();
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let invocation_commitment = fixture.invocation_commitment(&executor);
+        let before = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.runtime.backend.connection().expect("connection"),
+        )
+        .expect("snapshot before preparation");
+        let events_before = fixture
+            .runtime
+            .backend
+            .read_events(&fixture.runtime.run_id)
+            .expect("events before preparation")
+            .len();
+
+        let prepared = prepare_trusted_host_local_application_session(
+            fixture.input(&executor, &invocation_commitment),
+        )
+        .expect("prepare fresh session");
+        drop(prepared);
+
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.runtime.counts(), (0, 0, 0, 0));
+        assert!(
+            crate::sqlite_state::continuity_codec::load_snapshot(
+                &fixture.runtime.backend.connection().expect("connection"),
+            )
+            .expect("snapshot after preparation")
+                == before
+        );
+        assert_eq!(
+            fixture
+                .runtime
+                .backend
+                .read_events(&fixture.runtime.run_id)
+                .expect("events after preparation")
+                .len(),
+            events_before
+        );
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn fresh_application_preparation_cancellation_before_run_is_zero_entry() {
+        let fixture = FreshApplicationFixture::new();
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let invocation_commitment = fixture.invocation_commitment(&executor);
+        let before = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.runtime.backend.connection().expect("connection"),
+        )
+        .expect("snapshot before preparation");
+        let events_before = fixture
+            .runtime
+            .backend
+            .read_events(&fixture.runtime.run_id)
+            .expect("events before preparation")
+            .len();
+        let prepared = prepare_trusted_host_local_application_session(
+            fixture.input(&executor, &invocation_commitment),
+        )
+        .expect("prepare fresh session");
+        let (session, handle) = prepared.into_parts();
+        handle.request_cancellation().expect("bounded cancellation");
+
+        assert_eq!(
+            session.run().expect("canceled session outcome"),
+            TrustedHostLocalApplicationOutcome::CanceledBeforeEntry
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.runtime.counts(), (0, 0, 0, 0));
+        assert!(
+            crate::sqlite_state::continuity_codec::load_snapshot(
+                &fixture.runtime.backend.connection().expect("connection"),
+            )
+            .expect("snapshot after cancellation")
+                == before
+        );
+        assert_eq!(
+            fixture
+                .runtime
+                .backend
+                .read_events(&fixture.runtime.run_id)
+                .expect("events after cancellation")
+                .len(),
+            events_before
+        );
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn fresh_application_preparation_rejects_backend_substitution_before_issuance() {
+        let fixture = FreshApplicationFixture::new();
+        let substituted_backend = Fixture::new();
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let invocation_commitment = fixture.invocation_commitment(&executor);
+        let mut input = fixture.input(&executor, &invocation_commitment);
+        let TrustedHostLocalApplicationPreparationPosture::Fresh { opening, .. } =
+            &mut input.posture
+        else {
+            panic!("fresh preparation posture");
+        };
+        opening.backend = &substituted_backend.backend;
+
+        let error = prepare_trusted_host_local_application_session(input)
+            .expect_err("backend substitution must fail before issuance");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host_operational_entry.opening_binding_mismatch"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.runtime.counts(), (0, 0, 0, 0));
+        assert_eq!(substituted_backend.counts(), (0, 0, 0, 0));
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn fresh_application_preparation_rejects_actor_substitution_before_issuance() {
+        let fixture = FreshApplicationFixture::new();
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let invocation_commitment = fixture.invocation_commitment(&executor);
+        let mut input = fixture.input(&executor, &invocation_commitment);
+        input.locator.subject_actor_id = ActorId::new("agent/substituted-actor").expect("actor");
+
+        let error = prepare_trusted_host_local_application_session(input)
+            .expect_err("actor substitution must fail before issuance");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host_operational_entry.opening_binding_mismatch"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.runtime.counts(), (0, 0, 0, 0));
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn fresh_application_preparation_rejects_bundle_substitution_before_issuance() {
+        let fixture = FreshApplicationFixture::new();
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let invocation_commitment = fixture.invocation_commitment(&executor);
+        let mut input = fixture.input(&executor, &invocation_commitment);
+        input.locator.immutable_run_bundle = input
+            .locator
+            .immutable_run_bundle
+            .with_test_root_hash(SpecContentHash::from_text("substituted fresh bundle"));
+
+        let error = prepare_trusted_host_local_application_session(input)
+            .expect_err("bundle substitution must fail before issuance");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host_operational_entry.run_not_eligible"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.runtime.counts(), (0, 0, 0, 0));
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn fresh_application_preparation_rejects_invocation_substitution_before_issuance() {
+        let fixture = FreshApplicationFixture::new();
+        let calls = AtomicUsize::new(0);
+        let committed_executor = CountingExecutor { calls: &calls };
+        let substituted_executor = DifferentBindingExecutor { calls: &calls };
+        let invocation_commitment = fixture.invocation_commitment(&committed_executor);
+
+        let error = prepare_trusted_host_local_application_session(
+            fixture.input(&substituted_executor, &invocation_commitment),
+        )
+        .expect_err("invocation substitution must fail before issuance");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host_operational_entry.opening_binding_mismatch"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.runtime.counts(), (0, 0, 0, 0));
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn fresh_application_preparation_rejects_invalid_opening_shape_before_issuance() {
+        let fixture = FreshApplicationFixture::new();
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let invocation_commitment = fixture.invocation_commitment(&executor);
+        let mut input = fixture.input(&executor, &invocation_commitment);
+        let TrustedHostLocalApplicationPreparationPosture::Fresh { opening, .. } =
+            &mut input.posture
+        else {
+            panic!("fresh preparation posture");
+        };
+        opening.maximum_attempts = 0;
+
+        let error = prepare_trusted_host_local_application_session(input)
+            .expect_err("invalid opening shape must fail before issuance");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host_operational_entry.opening_context_invalid"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.runtime.counts(), (0, 0, 0, 0));
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn fresh_application_preparation_rejects_trusted_time_substitution_before_issuance() {
+        let fixture = FreshApplicationFixture::new();
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let invocation_commitment = fixture.invocation_commitment(&executor);
+        let mut input = fixture.input(&executor, &invocation_commitment);
+        let TrustedHostLocalApplicationPreparationPosture::Fresh { opening, .. } =
+            &mut input.posture
+        else {
+            panic!("fresh preparation posture");
+        };
+        opening.trusted_time = trusted_time_observation(
+            Timestamp::parse_rfc3339("2026-07-26T10:25:00Z").expect("observed"),
+            TrustedTimeSourceKind::CoreInjectedClockV1,
+            SpecContentHash::from_text("substituted trusted-time provenance"),
+            ContinuityTrustedTimeEpochId::new(super::super::CONTINUITY_CLOCK_EPOCH).expect("epoch"),
+        );
+
+        let error = prepare_trusted_host_local_application_session(input)
+            .expect_err("trusted-time substitution must fail before issuance");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host_operational_entry.opening_trusted_time_invalid"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.runtime.counts(), (0, 0, 0, 0));
     }
 
     #[cfg(feature = "trusted-host-application-spi")]

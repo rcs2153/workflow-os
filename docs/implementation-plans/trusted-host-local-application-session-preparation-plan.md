@@ -1,8 +1,9 @@
 # Trusted-Host Local Application Session Preparation Plan
 
 Status: implemented as a private, feature-gated Core boundary. The production
-pre-issuance blocker is fixed, but the focused blocker-fix review found that
-the direct fresh-path proof remains incomplete. One test-only blocker fix is
+pre-issuance blockers and the direct fresh-path proof blocker are fixed. Fresh
+drop, pre-run cancellation, context substitution, opening-shape, and trusted-
+time tests now prove the documented zero-write boundary. Focused review is
 required before local-host composition. No operational application path is
 implemented.
 

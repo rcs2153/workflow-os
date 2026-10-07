@@ -224,3 +224,13 @@ Do not begin local-host package or production caller composition first.
   clippy and tests, documentation, and diff hygiene
 - out-of-kernel work: implementation and test inspection, review authoring,
   validation commands, and later git or pull-request work
+
+## 17. Fix-Forward Status
+
+The additional blocker fix requested by this review is implemented and
+reported in [Trusted-Host Local Application Session Preparation Fresh Proof
+Blocker Fix
+Report](TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_FRESH_PROOF_BLOCKER_FIX_REPORT.md).
+The original verdict remains the historical verdict for the reviewed commit.
+A separate focused re-review must decide whether the new direct proof is
+sufficient before local-host composition begins.
