@@ -2851,8 +2851,7 @@ mod tests {
         assert_eq!(calls.load(Ordering::Relaxed), 1);
         let loser = outcomes
             .iter()
-            .filter_map(|outcome| outcome.as_ref().err())
-            .next()
+            .find_map(|outcome| outcome.as_ref().err())
             .expect("one losing caller");
         assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
         assert!(matches!(
