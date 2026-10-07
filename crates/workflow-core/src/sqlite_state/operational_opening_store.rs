@@ -3818,7 +3818,43 @@ mod tests {
 
         assert_eq!(calls.load(Ordering::Relaxed), 1);
         assert_eq!(outcomes.len(), 2);
-        assert!(outcomes.iter().any(Result::is_ok));
+        let mut winners = 0;
+        let mut bounded_losers = 0;
+        for outcome in outcomes {
+            let debug = format!("{outcome:?}");
+            assert!(!debug.contains(fixture.run_id.as_str()));
+            assert!(!debug.contains("local-supervisor-output"));
+            match outcome {
+                Ok(TrustedHostExplicitLocalProcessOwnerOutcome::OperationStopped(
+                    TrustedHostExplicitLocalOperationOutcome::EntryStopped(entry),
+                )) if entry.disposition == AuthoritativeContinuationDisposition::Terminal
+                    && entry.stop_reason == TrustedHostRedispatchStopReason::Terminal
+                    && entry.executor_entries == 1 =>
+                {
+                    winners += 1;
+                }
+                Ok(TrustedHostExplicitLocalProcessOwnerOutcome::OperationStopped(
+                    TrustedHostExplicitLocalOperationOutcome::EntryStopped(entry),
+                )) if entry.disposition == AuthoritativeContinuationDisposition::Blocked
+                    && entry.stop_reason == TrustedHostRedispatchStopReason::Blocked
+                    && entry.executor_entries == 0 =>
+                {
+                    bounded_losers += 1;
+                }
+                Err(error)
+                    if matches!(
+                        error.code(),
+                        "trusted_host_redispatch.directive_replayed"
+                            | "trusted_host_redispatch.active_yield_missing"
+                    ) =>
+                {
+                    bounded_losers += 1;
+                }
+                other => panic!("unexpected competing-owner result: {other:?}"),
+            }
+        }
+        assert_eq!(winners, 1);
+        assert_eq!(bounded_losers, 1);
     }
 
     #[test]

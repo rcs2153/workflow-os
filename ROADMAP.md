@@ -823,6 +823,14 @@ current queue when they contain historical `next phase` language.
    review the two private-owner test-hardening follow-ups, then plan an
    explicit local host application topology and internal visibility boundary.
    No state bridge, hidden CLI command, or backend mismatch is authorized.
+   The test-hardening implementation is now complete in the
+   [Trusted-Host Explicit Local Process Owner Test Hardening
+   Report](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_TEST_HARDENING_REPORT.md).
+   It adds a repeated simultaneous cancellation-versus-entry race and complete
+   competing-owner winner/loser classification with direct non-leakage
+   assertions, without changing production behavior. The next phase is focused
+   maintainer/security review of that hardening before local host application
+   topology planning.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

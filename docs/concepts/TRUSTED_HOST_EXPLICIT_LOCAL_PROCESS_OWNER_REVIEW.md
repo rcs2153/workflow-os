@@ -1,5 +1,11 @@
 # Trusted-Host Explicit Local Process Owner Review
 
+Fix-forward note: the simultaneous cancellation-versus-entry race and complete
+competing-owner loser classification requested by this review are now
+implemented in the [test hardening
+report](TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_TEST_HARDENING_REPORT.md).
+The original findings below remain unchanged as the historical review record.
+
 ## 1. Executive Verdict
 
 **Phase accepted with non-blocking follow-ups. Proceed to planning one exact
