@@ -116,7 +116,10 @@ Focused tests cover:
 - compile-time rejection of cloning and serialization for the prepared pair;
 - compile-time rejection of operation cloning;
 - redacted Core session, handle, and prepared-pair Debug behavior; and
-- package-specific feature and dependency inspection for CLI and hosted.
+- redacted public composition types and bounded fixed failures.
+
+Validation separately inspects package-specific feature and dependency graphs
+for Core, CLI, hosted, and the local-host package.
 
 The authoritative state, authority, substitution, zero-write, and consumed
 execution proofs remain in Core rather than being replaced by a fake public
