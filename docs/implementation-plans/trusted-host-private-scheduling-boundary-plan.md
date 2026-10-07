@@ -1,6 +1,7 @@
 # Private Trusted-Host Scheduling Boundary Plan
 
-Status: accepted plan with the first private implementation slice complete.
+Status: accepted plan with the first private implementation slice complete
+and accepted by focused maintainer/security review.
 The crate-private coherent scheduling observation, inert absolute-UTC ticket,
 and non-mutating `TimeWindow` readiness assessment are implemented. No
 deadline waiter, schedule-once host helper, scheduler, timer driver,
@@ -375,7 +376,8 @@ For the later private scheduling slice, focused tests must prove:
 3. Perform focused maintainer/security review of those prerequisite proofs.
 4. Add the crate-private coherent scheduling observation, absolute UTC inert
    ticket, and non-mutating readiness assessment. **Implemented.**
-5. Add one injected deadline-wait interface and schedule-once helper.
+5. Add one injected deadline-wait interface and schedule-once helper. **Next
+   accepted implementation phase.**
 6. Add early, late, cancellation, duplicate, restart, binding, privacy, and
    non-polling tests.
 7. Create an implementation report.

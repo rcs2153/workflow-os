@@ -661,8 +661,11 @@ current queue when they contain historical `next phase` language.
    one coherent Core-owned observation derives an inert absolute-UTC ticket,
    and a read-only source-specific assessment returns `Eligible` or
    `NotYetEligible` without mutation or authority. The next phase is focused
-   maintainer/security review. The injected deadline waiter and schedule-once
-   host helper remain deferred until that slice is accepted.
+   maintainer/security review. That focused
+   [review](docs/concepts/TRUSTED_HOST_PRIVATE_SCHEDULING_OBSERVATION_REVIEW.md)
+   accepts the slice with no blocker. The next phase may implement one private
+   injected deadline-wait interface and one schedule-once helper, preserving
+   fresh Core verification and the existing atomic transition boundary.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
