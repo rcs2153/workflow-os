@@ -663,9 +663,16 @@ current queue when they contain historical `next phase` language.
    `NotYetEligible` without mutation or authority. The next phase is focused
    maintainer/security review. That focused
    [review](docs/concepts/TRUSTED_HOST_PRIVATE_SCHEDULING_OBSERVATION_REVIEW.md)
-   accepts the slice with no blocker. The next phase may implement one private
-   injected deadline-wait interface and one schedule-once helper, preserving
-   fresh Core verification and the existing atomic transition boundary.
+   accepts the slice with no blocker. One private injected deadline-wait
+   interface and one schedule-once helper are now implemented in the [phase
+   report](docs/concepts/TRUSTED_HOST_PRIVATE_SCHEDULE_ONCE_HELPER_REPORT.md).
+   The helper observes one current inert ticket, waits once without Core
+   polling, reassesses readiness once, and either returns cancellation,
+   returns refreshed `NotYetEligible` posture without mutation, or invokes the
+   accepted explicit reinvocation exactly once. Focused restart and concurrent
+   callback proofs preserve fresh rehydration and at-most-once executor entry.
+   The next phase is focused maintainer/security review of this private
+   schedule-once composition.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

@@ -1,12 +1,13 @@
 # Private Trusted-Host Scheduling Boundary Plan
 
-Status: accepted plan with the first private implementation slice complete
-and accepted by focused maintainer/security review.
+Status: accepted plan with the first two private implementation slices
+complete. The coherent observation slice is accepted by focused
+maintainer/security review; the schedule-once helper awaits focused review.
 The crate-private coherent scheduling observation, inert absolute-UTC ticket,
-and non-mutating `TimeWindow` readiness assessment are implemented. No
-deadline waiter, schedule-once host helper, scheduler, timer driver,
-background worker, automatic model turn, public configuration, or hosted
-runtime is implemented.
+non-mutating `TimeWindow` readiness assessment, injected deadline-wait
+interface, and one-shot host composition are implemented. No repeated
+scheduler, timer driver, background worker, automatic model turn, public
+configuration, or hosted runtime is implemented.
 
 ## 1. Executive Summary
 
@@ -376,12 +377,12 @@ For the later private scheduling slice, focused tests must prove:
 3. Perform focused maintainer/security review of those prerequisite proofs.
 4. Add the crate-private coherent scheduling observation, absolute UTC inert
    ticket, and non-mutating readiness assessment. **Implemented.**
-5. Add one injected deadline-wait interface and schedule-once helper. **Next
-   accepted implementation phase.**
+5. Add one injected deadline-wait interface and schedule-once helper.
+   **Implemented.**
 6. Add early, late, cancellation, duplicate, restart, binding, privacy, and
-   non-polling tests.
-7. Create an implementation report.
-8. Perform focused maintainer/security review.
+   non-polling tests. **Implemented for the schedule-once boundary.**
+7. Create an implementation report. **Implemented.**
+8. Perform focused maintainer/security review. **Next phase.**
 9. Only after acceptance, consider repeated private scheduling, another wake
    family, or a public host integration as separate phases.
 
@@ -398,10 +399,9 @@ For the later private scheduling slice, focused tests must prove:
 
 ## 19. Final Recommendation
 
-After focused review of this plan, complete and review the two prerequisite
-reinvocation proofs. Then implement one crate-private local SQLite
-schedule-once boundary with an injected deadline waiter and inert Core-derived
-ticket.
+Perform focused maintainer/security review of the implemented crate-private
+local SQLite schedule-once boundary, injected deadline waiter, and inert
+Core-derived ticket composition.
 
 Do not implement a scheduler daemon, repeated scheduling, automatic model
 turns, automatic approval, provider or sandbox execution, OpenShell, nested
