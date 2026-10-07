@@ -748,7 +748,16 @@ current queue when they contain historical `next phase` language.
    [implementation/security review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PRODUCTION_CALLER_REVIEW.md)
    accepts the caller with no blocker and records non-blocking caller-level
    coverage and workspace dependency/MSRV follow-ups. The next phase is
-   planning one explicit internal adoption site.
+   planning one explicit internal adoption site. That planning is now
+   documented in the [Trusted-Host Explicit Local Caller Adoption
+   Plan](docs/implementation-plans/trusted-host-explicit-local-caller-adoption-plan.md)
+   and its [planning
+   report](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_CALLER_ADOPTION_PLAN_REPORT.md).
+   It selects one additive crate-private operational-entry composition: an
+   already-authorized synchronous owner enters once and routes only an
+   authoritative `AwaitCondition` result into the accepted production caller
+   with the same exact bindings. The next phase is focused maintainer/security
+   review of that plan.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
