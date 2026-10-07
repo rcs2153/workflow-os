@@ -179,6 +179,7 @@ mod trusted_host_explicit_local_operation;
 #[allow(dead_code)]
 mod trusted_host_explicit_local_process_owner;
 #[cfg(feature = "trusted-host-application-spi")]
+#[allow(dead_code)]
 mod trusted_host_local_application_spi;
 #[allow(dead_code)]
 mod trusted_host_local_production_caller;

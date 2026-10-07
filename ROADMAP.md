@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-10-06.
+Status date: 2026-10-07.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -887,17 +887,26 @@ current queue when they contain historical `next phase` language.
    now define read-only preparation, exact current binding validation, opaque
    session-and-handle issuance, Core-owned identity generation, authoritative
    revalidation at session consumption, and bounded cancellation failure as
-   one direct-tested Core boundary. No helper, application package, caller,
-   or operational behavior is implemented. The focused [maintainer/security
+   one direct-tested Core boundary. At that planning milestone, no helper,
+   application package, caller, or operational behavior was implemented. The focused [maintainer/security
    review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_PLAN_REVIEW.md)
    accepts the plan with binding clarifications. The prepared-pair wrapper
    remains private, fresh and existing-window posture must use explicit
    private variants, preparation proves only read-only current coherence, and
    consumed `run` remains the authoritative revalidation and authority-use
-   edge. The next phase is one Core-only implementation slice covering
-   bounded cancellation failure, private read-only preparation, one-shot
-   session-and-handle issuance, Core-owned identity generation, and direct
-   state-invariance and stale-binding tests.
+   edge. That Core-only implementation slice is now complete. It projects
+   cancellation errors into bounded application failure vocabulary, adds
+   explicit private fresh/existing preparation variants, performs read-only
+   current-state validation, binds one opaque session-and-handle pair to a
+   deterministic preparation commitment, creates redispatch identity inside
+   Core, and revalidates authoritative state when the session is consumed.
+   Existing-window tests prove zero-write preparation and drop, cancellation
+   before entry, one executor entry, and fail-closed state drift. Fresh-opening
+   use remains unavailable to an application because no accepted production
+   current-authority source constructs that context. See the [implementation
+   report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_REPORT.md).
+   The next phase is focused maintainer/security review before any local-host
+   package or caller composition.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

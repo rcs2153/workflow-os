@@ -63,7 +63,7 @@ impl TrustedHostLocalProductionIdentitySource {
         }
     }
 
-    fn redispatch_provider(&self) -> RedispatchIdentityProvider<'_> {
+    pub(crate) fn redispatch_provider(&self) -> RedispatchIdentityProvider<'_> {
         RedispatchIdentityProvider { source: self }
     }
 
@@ -87,7 +87,7 @@ impl fmt::Debug for TrustedHostLocalProductionIdentitySource {
     }
 }
 
-struct RedispatchIdentityProvider<'a> {
+pub(crate) struct RedispatchIdentityProvider<'a> {
     source: &'a TrustedHostLocalProductionIdentitySource,
 }
 

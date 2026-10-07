@@ -1,7 +1,8 @@
 # Trusted-Host Local Application Session Preparation Plan
 
-Status: planning only; no preparation helper or operational application path
-is implemented by this document.
+Status: implemented as a private, feature-gated Core boundary; focused
+maintainer/security review is next. No operational application path is
+implemented.
 
 ## 1. Executive Summary
 
@@ -312,18 +313,14 @@ any operational caller.
 
 ## 17. Validation
 
-This planning phase requires:
-
-- `npm run check:docs`; and
-- `git diff --check`.
-
-No Rust change is authorized.
+The implementation is validated with feature-focused clippy and tests in
+addition to the ordinary repository formatting, workspace clippy, workspace
+test, documentation, and diff-hygiene checks.
 
 ## 18. Final Recommendation
 
-After focused review of this plan, implement the private preparation helper,
-opaque prepared pair, and bounded cancellation failure as one direct-tested
-Core slice. Do not add an application package, executable, caller, discovery,
-provider behavior, writes, schemas, SDK behavior, hosted parity, or release
-change.
-
+Perform a focused maintainer/security review of the implemented private
+preparation helper, opaque prepared pair, bounded cancellation failure,
+read-only preparation commitment, and authoritative run-time revalidation.
+Do not add an application package, executable, caller, discovery, provider
+behavior, writes, schemas, SDK behavior, hosted parity, or release change.

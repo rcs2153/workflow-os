@@ -59,11 +59,11 @@ pub(crate) fn run_explicit_trusted_host_local_operation(
     let TrustedHostOperationalEntryInput {
         backend,
         locator,
-        opening,
+        posture,
         executor,
         skill_input,
-        opening_persistence,
         identity_provider,
+        expected_preparation_commitment,
     } = operational_entry;
     let continuation_locator = clone_locator(&locator);
     let continuation_skill_input = skill_input.clone();
@@ -71,11 +71,11 @@ pub(crate) fn run_explicit_trusted_host_local_operation(
     let entry = enter_trusted_host_operation(TrustedHostOperationalEntryInput {
         backend,
         locator,
-        opening,
+        posture,
         executor,
         skill_input,
-        opening_persistence,
         identity_provider,
+        expected_preparation_commitment,
     })?;
 
     if entry.stop_reason != TrustedHostRedispatchStopReason::AwaitCondition {
