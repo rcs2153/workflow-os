@@ -33,10 +33,10 @@ preview kernel, not a mature build orchestrator or enterprise control plane.
 | Governance should be reevaluated when relevant workload inputs change | Resolved for the explicit opt-in local path | A versioned payload-free fingerprint covers decision-relevant facts and immutable definition roots. Exact retry and approval resume now re-read the stored immutable bundle, reassess current typed facts, and require exact durable binding equality before rehydration or approval mutation. Default paths and trusted fact freshness remain open. |
 | Approval resume can execute changed workflow content | Resolved | Immutable run bundles are stored and explicitly bound to local execution; approval/resume no longer depends on silently reloading mutable workflow definitions for the accepted path. |
 | Run specifications should remain frozen during an active run | Resolved for the accepted local binding path | Immutable run bundle core, store, and executor-binding phases are accepted. Broader runtime paths must adopt the same invariant before expansion. |
-| The kernel does not independently prove real engineering checks | Open | Local check models and selected handler/report plumbing exist, but general independent check attestation, freshness, provenance, and default execution remain incomplete. Mock skill success is not execution evidence. |
-| Actor and role enforcement are weaker than workflow semantics imply | Open | High-assurance approval and scoped capability vocabulary exist, but general actor-bound runtime authority, RBAC, IdP, and enterprise stewardship are not implemented. |
-| Artifact capture and machine-readable reporting need strengthening | Partially resolved | WorkReport, report artifacts, evidence citations, SideEffect linkage, and selected machine-readable projections exist. Default runtime artifact production and broad export/tailing remain deferred. |
-| Preview CLI edges remain | Ongoing product hardening | Real-repository tests continue to identify bounded CLI ergonomics issues. These should be fixed when reproducible without displacing runtime correctness work. |
+| The kernel does not independently prove real engineering checks | Resolved for one explicit authoritative local profile; open generally | The accepted authoritative `DocsCheck` path executes the canonical check, verifies same-call provenance and freshness against the immutable run, derives source-bound governance, and rejects mock or caller-asserted success as proof. Automatic/default checks and additional check families remain unsupported. |
+| Actor and role enforcement are weaker than workflow semantics imply | Partially resolved for selected runtime paths; enterprise control remains open | Scoped grants, current-authority resolution, required-context consumption, operational windows, and trusted-host entry bind selected actors at time of use. General RBAC, IdP, organizational stewardship, and broad executor adoption remain unimplemented. |
+| Artifact capture and machine-readable reporting need strengthening | Resolved for the selected authoritative local path; broad export remains open | Authoritative terminal paths can persist gated WorkReport artifacts, reconcile exact retries, and expose bounded JSON and metadata inspection. Ordinary undeclared runs, report-body export/publication, and broad automatic artifact production remain deferred. |
+| Preview CLI edges remain | Specific reported edges resolved; ongoing product hardening | Missing-manifest diagnostics have an exact no-duplicate regression. The accepted authoritative artifact phase reran integration checks under Node 20 and Node 24. Other reproducible preview ergonomics issues remain valid bounded follow-ups. |
 
 ## 3. Proportional Governance Product Decision
 
@@ -90,16 +90,22 @@ activate generated workflows.
 
 The following work remains load-bearing:
 
-1. **Independent check attestation.** Bind check identity, invocation,
-   structured result, provenance, freshness, and immutable run context without
-   treating raw command output or mock success as proof.
-2. **Actor-bound authority enforcement.** Compose scoped grants, approvals,
-   policy, capability availability, and run/step/resource identity before tool
-   projection or invocation. Enterprise RBAC and IdP remain later layers.
-3. **Default artifact/report composition only after review.** Broaden
-   machine-readable artifact and event export only after integrity,
-   authorization, and privacy boundaries are accepted for the selected path.
-4. **Incremental onboarding depth.** Continue deriving concrete review-only
+1. **Production caller composition for accepted trusted-host boundaries.**
+   Connect the reviewed private preparation/session boundary to the smallest
+   unpublished local-host caller without moving authority construction,
+   current-state revalidation, or identity ownership into application code.
+2. **Broader actor-bound authority adoption.** Compose scoped grants,
+   approvals, policy, capability availability, and run/step/resource identity
+   in each additional concrete consumer before tool projection or invocation.
+   Enterprise RBAC and IdP remain later layers.
+3. **Broader check-proof and artifact coverage.** Extend the accepted
+   authoritative `DocsCheck` and terminal artifact pattern only through
+   separately reviewed profiles. Do not treat mock success, arbitrary handler
+   output, or artifact presence as proof.
+4. **Integrity-safe reporting and export.** Add report-body inspection,
+   export, or broader event streaming only after authorization, sensitivity,
+   retention, and privacy boundaries are explicit.
+5. **Incremental onboarding depth.** Continue deriving concrete review-only
    workflow and validation recommendations from safe metadata, while keeping
    unresolved authority, sensitivity, approval, and mutation decisions explicit
    and reviewable.
@@ -109,17 +115,17 @@ runtime behavior. They do not authorize a new provider mutation family.
 
 ## 6. Sequencing Decision
 
-Capability grant, availability, resolution, request review, pure step-scoped
-projection, immutable run binding, and opt-in proportional-governance
-reassessment are now implemented for their accepted boundaries. The next
-cross-cutting phase should plan independent check attestation, then implement
-the smallest model and explicit local proof path needed to distinguish real
-engineering checks from mock or caller-asserted success.
+Capability grant, current-authority resolution, required-context consumption,
+immutable run binding, source-bound proportional-governance routing, one
+authoritative local-check consumer, and authoritative terminal artifact
+persistence are implemented for their accepted boundaries. The next phase is
+not another independent-check model. It is the narrow local-host caller
+composition planning authorized by the accepted trusted-host preparation
+review.
 
-Governed context-access projection remains the next phase inside the scoped
-authority lane, but it should not displace the more immediate check-proof gap.
 No broader provider mutation family or default executor write should precede
-independent check attestation and actor-bound time-of-use enforcement.
+concrete actor-bound time-of-use adoption and proof-bearing execution at the
+selected consumer boundary.
 
 ## 7. Explicit Non-Goals
 
@@ -176,3 +182,65 @@ Current governed review:
 - Out-of-kernel work: current-main documentation, accepted reports, roadmap,
   and implementation evidence were inspected; only reconciliation and roadmap
   priority wording were changed.
+
+## 10. Current Kernel User Review Reconciliation
+
+A later user review describes Workflow OS as a useful constitutional control
+plane that separates scope, execution, validation, closure, and publication.
+That is the intended product identity and remains a stronger description than
+"build orchestrator." The review also identifies check proof, immutable run
+inputs, actor enforcement, artifact capture, reporting, and preview tooling as
+areas to strengthen.
+
+The review is directionally sound but mixes current and historical posture:
+
+- The approval/resume resolved-context TOCTOU finding was valid at its pinned
+  older commit. Current main binds approval to a payload-free resolved-context
+  commitment and rejects changed context before grant-side mutation.
+- Active-run specification freezing is implemented for the accepted immutable-
+  bundle paths and enforced by selected authoritative consumers. It is not yet
+  a universal wrapper around every external action.
+- Current main independently executes and verifies one canonical local
+  `DocsCheck` in the same authoritative call. This is real execution evidence,
+  unlike `--mock-all-local-skills`; it is intentionally not automatic or a
+  general build-command runner.
+- Actor-bound current-authority, required-context, operational-window, and
+  trusted-host boundaries now exist for selected paths. General RBAC, IdP,
+  groups, and enterprise administration remain absent.
+- Authoritative terminal WorkReport artifacts and bounded machine-readable
+  output are implemented for the selected local profile. Broad export,
+  publication, shared artifact governance, and ordinary-run defaults remain
+  deferred.
+- The reported duplicate missing-manifest diagnostic has a regression proving
+  one rendering. The accepted artifact phase also records passing Node 20 and
+  Node 24 integration checks.
+
+The downstream "arbitrary binary override" report is not attributable to a
+Workflow OS kernel path from the supplied evidence. It should be treated as a
+serious integration warning, but not recorded as a kernel defect until the
+wrapper, command, or handler boundary can be reproduced against current main.
+Workflow OS should continue to require canonical handler and invocation
+bindings so a downstream wrapper cannot silently substitute execution.
+
+This review does not justify a new primitive family or a detour into general
+orchestration. It validates the current sequence: finish the trusted-host
+application boundary, then broaden proof-bearing consumers deliberately. The
+product should continue to optimize for low-friction governed execution, not
+for becoming an ambient shell runner.
+
+Current governed review:
+
+- Workflow: `dg/review`.
+- Run ID: `run-1791386827785120000-2`.
+- Approval ID:
+  `approval/run-1791386827785120000-2/review-scope-approved`.
+- Presentation ID: `presentation/0d6d716b419d0ac0`.
+- Approval outcome: granted with persisted presentation proof under delegated
+  maintainer authority.
+- Event summary: 39 ordered events, one approval, no retry or escalation;
+  approval-presentation proof was enforced.
+- Validation summary: `npm run check:docs` and `git diff --check` passed.
+- Out-of-kernel work: current-main source, tests, roadmap, implementation
+  plans, reports, and reviews were inspected; this reconciliation and roadmap
+  wording were updated.
+- Report posture: no runtime WorkReport artifact was generated or persisted.
