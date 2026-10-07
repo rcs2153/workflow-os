@@ -5,16 +5,22 @@ use sha2::{Digest, Sha256};
 use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeContinuationDisposition, AuthoritativeWaitDependencyBinding,
     AuthoritativeWaitState, AuthoritativeWindowState, ContinuityInstanceEligibility,
-    ContinuityRevision, ReferenceContinuityState, TrustedTimeObservation, TrustedTimePosture,
-    TrustedTimeSourceKind,
+    ContinuityOperationId, ContinuityReceiptId, ContinuityRevision, ReferenceContinuityState,
+    TrustedTimeObservation, TrustedTimePosture, TrustedTimeSourceKind,
 };
+use crate::trusted_host_supervisor::TrustedHostAttemptExecutor;
 use crate::{
-    AuthorizedExecutionWaitConditionId, SpecContentHash, Timestamp, WorkflowOsError,
+    AuthorizedExecutionWaitConditionId, SkillInput, SpecContentHash, Timestamp, WorkflowOsError,
     WorkflowOsErrorKind,
 };
 
 use super::continuity_store::observe_continuity_trusted_time;
 use super::trusted_host_operational_entry::TrustedHostOperationalEntryLocator;
+use super::trusted_host_redispatch_loop::TrustedHostRedispatchIdentityProvider;
+use super::trusted_host_time_window_reinvocation::{
+    reinvoke_after_time_window_wait, TrustedHostTimeWindowReinvocationInput,
+    TrustedHostTimeWindowReinvocationOutcome,
+};
 use super::trusted_host_wait_handoff::{
     derive_handoff, derive_observation, validate_locator, TrustedHostWaitHandoff,
 };
@@ -50,12 +56,12 @@ impl fmt::Debug for TrustedHostTimeWindowScheduleTicket {
     }
 }
 
-#[cfg(test)]
 impl TrustedHostTimeWindowScheduleTicket {
     pub(super) const fn schedule_at(&self) -> Timestamp {
         self.schedule_at
     }
 
+    #[cfg(test)]
     pub(super) fn commitment(&self) -> &SpecContentHash {
         &self.ticket_commitment
     }
@@ -120,6 +126,69 @@ impl fmt::Debug for TrustedHostTimeWindowReadinessAssessment {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TrustedHostDeadlineWaitOutcome {
+    Woke,
+    Canceled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TrustedHostDeadlineWaitFailure {
+    Unavailable,
+    Failed,
+}
+
+pub(crate) trait TrustedHostDeadlineWaiter {
+    fn wait_until(
+        &mut self,
+        schedule_at: Timestamp,
+    ) -> Result<TrustedHostDeadlineWaitOutcome, TrustedHostDeadlineWaitFailure>;
+}
+
+pub(crate) struct TrustedHostScheduleOnceInput<'a> {
+    pub(crate) backend: &'a SqliteStateBackend,
+    pub(crate) locator: TrustedHostOperationalEntryLocator,
+    pub(crate) operation_id: ContinuityOperationId,
+    pub(crate) receipt_id: ContinuityReceiptId,
+    pub(crate) deadline_waiter: &'a mut dyn TrustedHostDeadlineWaiter,
+    pub(crate) executor: &'a dyn TrustedHostAttemptExecutor,
+    pub(crate) skill_input: SkillInput,
+    pub(crate) identity_provider: &'a mut dyn TrustedHostRedispatchIdentityProvider,
+}
+
+impl fmt::Debug for TrustedHostScheduleOnceInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedHostScheduleOnceInput")
+            .field("binding", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) enum TrustedHostScheduleOnceOutcome {
+    Canceled,
+    NotYetEligible {
+        refreshed_scheduling: Box<TrustedHostTimeWindowSchedulingObservation>,
+    },
+    Reinvoked(TrustedHostTimeWindowReinvocationOutcome),
+}
+
+impl fmt::Debug for TrustedHostScheduleOnceOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Canceled => formatter.write_str("TrustedHostScheduleOnceOutcome::Canceled"),
+            Self::NotYetEligible { .. } => formatter
+                .debug_struct("TrustedHostScheduleOnceOutcome::NotYetEligible")
+                .field("refreshed_scheduling", &"[REDACTED]")
+                .finish(),
+            Self::Reinvoked(outcome) => formatter
+                .debug_tuple("TrustedHostScheduleOnceOutcome::Reinvoked")
+                .field(outcome)
+                .finish(),
+        }
+    }
+}
+
 pub(crate) fn observe_trusted_host_time_window_scheduling(
     backend: &SqliteStateBackend,
     locator: &TrustedHostOperationalEntryLocator,
@@ -131,6 +200,61 @@ pub(crate) fn assess_trusted_host_time_window_readiness(
     input: &TrustedHostTimeWindowReadinessInput<'_>,
 ) -> Result<TrustedHostTimeWindowReadinessAssessment, WorkflowOsError> {
     assess_readiness_with(input, observe_continuity_trusted_time)
+}
+
+pub(crate) fn schedule_trusted_host_time_window_once(
+    input: TrustedHostScheduleOnceInput<'_>,
+) -> Result<TrustedHostScheduleOnceOutcome, WorkflowOsError> {
+    let scheduling = observe_trusted_host_time_window_scheduling(input.backend, &input.locator)?;
+    let handoff = scheduling.handoff.ok_or_else(scheduling_ineligible)?;
+    let ticket = scheduling.ticket.ok_or_else(scheduling_ineligible)?;
+
+    match input.deadline_waiter.wait_until(ticket.schedule_at()) {
+        Ok(TrustedHostDeadlineWaitOutcome::Canceled) => {
+            return Ok(TrustedHostScheduleOnceOutcome::Canceled);
+        }
+        Err(failure) => return Err(deadline_wait_error(failure)),
+        Ok(TrustedHostDeadlineWaitOutcome::Woke) => {}
+    }
+
+    let readiness =
+        assess_trusted_host_time_window_readiness(&TrustedHostTimeWindowReadinessInput {
+            backend: input.backend,
+            locator: &input.locator,
+            handoff: &handoff,
+            ticket: &ticket,
+        })?;
+    match readiness.status {
+        TrustedHostTimeWindowReadinessStatus::NotYetEligible => {
+            let refreshed_scheduling = readiness
+                .refreshed_scheduling
+                .ok_or_else(scheduling_corrupt)?;
+            Ok(TrustedHostScheduleOnceOutcome::NotYetEligible {
+                refreshed_scheduling: Box::new(refreshed_scheduling),
+            })
+        }
+        TrustedHostTimeWindowReadinessStatus::Eligible => {
+            if readiness.refreshed_scheduling.is_some() {
+                return Err(scheduling_corrupt());
+            }
+            let condition_id = ticket.condition_id.clone();
+            let condition_version = ticket.condition_version;
+            let outcome =
+                reinvoke_after_time_window_wait(TrustedHostTimeWindowReinvocationInput {
+                    backend: input.backend,
+                    handoff,
+                    locator: input.locator,
+                    condition_id,
+                    condition_version,
+                    operation_id: input.operation_id,
+                    receipt_id: input.receipt_id,
+                    executor: input.executor,
+                    skill_input: input.skill_input,
+                    identity_provider: input.identity_provider,
+                })?;
+            Ok(TrustedHostScheduleOnceOutcome::Reinvoked(outcome))
+        }
+    }
 }
 
 fn observe_scheduling_with(
@@ -414,6 +538,21 @@ fn scheduling_source_mismatch() -> WorkflowOsError {
         "trusted_time_binding_mismatch",
         "trusted-host TimeWindow scheduling trusted-time binding is invalid",
     )
+}
+
+fn deadline_wait_error(failure: TrustedHostDeadlineWaitFailure) -> WorkflowOsError {
+    match failure {
+        TrustedHostDeadlineWaitFailure::Unavailable => scheduling_error(
+            WorkflowOsErrorKind::Unsupported,
+            "deadline_wait_unavailable",
+            "trusted-host deadline wait is unavailable",
+        ),
+        TrustedHostDeadlineWaitFailure::Failed => scheduling_error(
+            WorkflowOsErrorKind::Internal,
+            "deadline_wait_failed",
+            "trusted-host deadline wait failed",
+        ),
+    }
 }
 
 fn scheduling_error(

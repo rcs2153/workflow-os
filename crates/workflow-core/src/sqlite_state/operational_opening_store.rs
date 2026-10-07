@@ -651,6 +651,11 @@ mod tests {
         reinvoke_after_time_window_wait, reinvoke_after_time_window_wait_with_test_transition_hook,
         TrustedHostTimeWindowReinvocationInput,
     };
+    use crate::sqlite_state::trusted_host_time_window_scheduling::{
+        schedule_trusted_host_time_window_once, TrustedHostDeadlineWaitFailure,
+        TrustedHostDeadlineWaitOutcome, TrustedHostDeadlineWaiter, TrustedHostScheduleOnceInput,
+        TrustedHostScheduleOnceOutcome,
+    };
     use crate::sqlite_state::trusted_host_wait_handoff::observe_trusted_host_wait_with_time;
     use crate::trusted_host_supervisor::{
         inject_supervisor_persistence_fault, supervise_one_local_skill_attempt,
@@ -1475,6 +1480,41 @@ mod tests {
         }
     }
 
+    struct RecordingDeadlineWaiter<'a> {
+        calls: &'a AtomicUsize,
+        expected_deadline: Timestamp,
+        outcome: Result<TrustedHostDeadlineWaitOutcome, TrustedHostDeadlineWaitFailure>,
+    }
+
+    impl TrustedHostDeadlineWaiter for RecordingDeadlineWaiter<'_> {
+        fn wait_until(
+            &mut self,
+            schedule_at: Timestamp,
+        ) -> Result<TrustedHostDeadlineWaitOutcome, TrustedHostDeadlineWaitFailure> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            assert_eq!(schedule_at, self.expected_deadline);
+            self.outcome
+        }
+    }
+
+    struct BarrierDeadlineWaiter {
+        calls: Arc<AtomicUsize>,
+        barrier: Arc<Barrier>,
+        expected_deadline: Timestamp,
+    }
+
+    impl TrustedHostDeadlineWaiter for BarrierDeadlineWaiter {
+        fn wait_until(
+            &mut self,
+            schedule_at: Timestamp,
+        ) -> Result<TrustedHostDeadlineWaitOutcome, TrustedHostDeadlineWaitFailure> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            assert_eq!(schedule_at, self.expected_deadline);
+            self.barrier.wait();
+            Ok(TrustedHostDeadlineWaitOutcome::Woke)
+        }
+    }
+
     struct SnapshotTamperingExecutor<'a> {
         calls: &'a AtomicUsize,
         database_path: &'a PathBuf,
@@ -1591,6 +1631,43 @@ mod tests {
             panic!("opening must return one-use capability");
         };
         capability
+    }
+
+    fn register_supervisor_time_window_wait(
+        fixture: &Fixture,
+        operation: &str,
+        deadline: Timestamp,
+    ) -> TrustedHostOperationalEntryLocator {
+        let capability = open_supervisor_attempt(fixture, operation, 2);
+        let locator = TrustedHostOperationalEntryLocator {
+            workflow_id: fixture.workflow_id.clone(),
+            run_id: fixture.run_id.clone(),
+            step_id: fixture.step_id.clone(),
+            window_id: capability.window_id.clone(),
+            subject_actor_id: capability.subject_actor_id.clone(),
+            immutable_run_bundle: fixture.bundle.clone(),
+        };
+        supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &TimeWindowYieldExecutor {
+                condition_version: 1,
+                deadline,
+            },
+            skill_input: skill_input(fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new(format!("operation/{operation}-yield"))
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new(format!("receipt/{operation}-yield"))
+                    .expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new(format!("yield/{operation}"))
+                        .expect("generation"),
+                ),
+            },
+        })
+        .expect("initial attempt yields");
+        locator
     }
 
     fn clone_opened_capability(
@@ -2608,6 +2685,345 @@ mod tests {
                 .snapshot
                 .status,
             WorkflowRunStatus::Running
+        );
+    }
+
+    #[test]
+    fn schedule_once_elapsed_wake_reinvokes_exactly_once() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+        );
+        let locator =
+            register_supervisor_time_window_wait(&fixture, "schedule-once-elapsed", deadline);
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        let window_id = locator.window_id.clone();
+        let waiter_calls = AtomicUsize::new(0);
+        let executor_calls = AtomicUsize::new(0);
+        let mut waiter = RecordingDeadlineWaiter {
+            calls: &waiter_calls,
+            expected_deadline: deadline,
+            outcome: Ok(TrustedHostDeadlineWaitOutcome::Woke),
+        };
+        let executor = CountingExecutor {
+            calls: &executor_calls,
+        };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let outcome = schedule_trusted_host_time_window_once(TrustedHostScheduleOnceInput {
+            backend: &fixture.backend,
+            locator,
+            operation_id: ContinuityOperationId::new("operation/schedule-once-elapsed-wake")
+                .expect("operation"),
+            receipt_id: ContinuityReceiptId::new("receipt/schedule-once-elapsed-wake")
+                .expect("receipt"),
+            deadline_waiter: &mut waiter,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            identity_provider: &mut identity_provider,
+        })
+        .expect("elapsed deadline is reinvoked");
+
+        let TrustedHostScheduleOnceOutcome::Reinvoked(outcome) = outcome else {
+            panic!("elapsed wake must reinvoke");
+        };
+        assert_eq!(waiter_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(identity_provider.calls, 1);
+        assert_eq!(outcome.execution.executor_entries, 1);
+        assert_eq!(
+            outcome.execution.stop_reason,
+            TrustedHostRedispatchStopReason::Terminal
+        );
+        assert_eq!(
+            fixture
+                .backend
+                .continuation_disposition(&window_id)
+                .expect("durable disposition"),
+            AuthoritativeContinuationDisposition::Terminal
+        );
+    }
+
+    #[test]
+    fn schedule_once_early_wake_is_zero_write_and_does_not_rearm() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::hours(1),
+        );
+        let locator =
+            register_supervisor_time_window_wait(&fixture, "schedule-once-early", deadline);
+        let before = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot before early wake");
+        let waiter_calls = AtomicUsize::new(0);
+        let executor_calls = AtomicUsize::new(0);
+        let mut waiter = RecordingDeadlineWaiter {
+            calls: &waiter_calls,
+            expected_deadline: deadline,
+            outcome: Ok(TrustedHostDeadlineWaitOutcome::Woke),
+        };
+        let executor = CountingExecutor {
+            calls: &executor_calls,
+        };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let outcome = schedule_trusted_host_time_window_once(TrustedHostScheduleOnceInput {
+            backend: &fixture.backend,
+            locator,
+            operation_id: ContinuityOperationId::new("operation/schedule-once-early-wake")
+                .expect("operation"),
+            receipt_id: ContinuityReceiptId::new("receipt/schedule-once-early-wake")
+                .expect("receipt"),
+            deadline_waiter: &mut waiter,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            identity_provider: &mut identity_provider,
+        })
+        .expect("early wake remains inert");
+
+        let TrustedHostScheduleOnceOutcome::NotYetEligible {
+            refreshed_scheduling,
+        } = outcome
+        else {
+            panic!("early wake must remain not yet eligible");
+        };
+        assert_eq!(
+            refreshed_scheduling.disposition,
+            AuthoritativeContinuationDisposition::AwaitCondition
+        );
+        assert!(refreshed_scheduling.handoff.is_some());
+        assert!(refreshed_scheduling.ticket.is_some());
+        assert_eq!(waiter_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 0);
+        assert_eq!(identity_provider.calls, 0);
+        let after = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot after early wake");
+        assert!(
+            before == after,
+            "early wake must not mutate continuity state"
+        );
+    }
+
+    #[test]
+    fn schedule_once_cancellation_and_wait_failures_are_zero_write() {
+        let cases = [
+            (Ok(TrustedHostDeadlineWaitOutcome::Canceled), None),
+            (
+                Err(TrustedHostDeadlineWaitFailure::Unavailable),
+                Some("trusted_host_time_window_scheduling.deadline_wait_unavailable"),
+            ),
+            (
+                Err(TrustedHostDeadlineWaitFailure::Failed),
+                Some("trusted_host_time_window_scheduling.deadline_wait_failed"),
+            ),
+        ];
+
+        for (index, (wait_outcome, expected_error)) in cases.into_iter().enumerate() {
+            let fixture = Fixture::new();
+            let deadline = Timestamp::from_offset_date_time(
+                Timestamp::now_utc().as_offset_date_time() + time::Duration::hours(1),
+            );
+            let locator = register_supervisor_time_window_wait(
+                &fixture,
+                &format!("schedule-once-stop-{index}"),
+                deadline,
+            );
+            let before = crate::sqlite_state::continuity_codec::load_snapshot(
+                &fixture.backend.connection().expect("connection"),
+            )
+            .expect("snapshot before stop");
+            let waiter_calls = AtomicUsize::new(0);
+            let executor_calls = AtomicUsize::new(0);
+            let mut waiter = RecordingDeadlineWaiter {
+                calls: &waiter_calls,
+                expected_deadline: deadline,
+                outcome: wait_outcome,
+            };
+            let executor = CountingExecutor {
+                calls: &executor_calls,
+            };
+            let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+            let result = schedule_trusted_host_time_window_once(TrustedHostScheduleOnceInput {
+                backend: &fixture.backend,
+                locator,
+                operation_id: ContinuityOperationId::new(format!(
+                    "operation/schedule-once-stop-{index}"
+                ))
+                .expect("operation"),
+                receipt_id: ContinuityReceiptId::new(format!("receipt/schedule-once-stop-{index}"))
+                    .expect("receipt"),
+                deadline_waiter: &mut waiter,
+                executor: &executor,
+                skill_input: skill_input(&fixture),
+                identity_provider: &mut identity_provider,
+            });
+
+            match expected_error {
+                Some(code) => assert_eq!(result.expect_err("wait failure").code(), code),
+                None => assert!(matches!(
+                    result.expect("cancellation outcome"),
+                    TrustedHostScheduleOnceOutcome::Canceled
+                )),
+            }
+            assert_eq!(waiter_calls.load(Ordering::Relaxed), 1);
+            assert_eq!(executor_calls.load(Ordering::Relaxed), 0);
+            assert_eq!(identity_provider.calls, 0);
+            let after = crate::sqlite_state::continuity_codec::load_snapshot(
+                &fixture.backend.connection().expect("connection"),
+            )
+            .expect("snapshot after stop");
+            assert!(
+                before == after,
+                "stop outcome must not mutate continuity state"
+            );
+        }
+    }
+
+    #[test]
+    fn schedule_once_rehydrates_after_restart() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+        );
+        let locator =
+            register_supervisor_time_window_wait(&fixture, "schedule-once-restart", deadline);
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen backend");
+        let waiter_calls = AtomicUsize::new(0);
+        let executor_calls = AtomicUsize::new(0);
+        let mut waiter = RecordingDeadlineWaiter {
+            calls: &waiter_calls,
+            expected_deadline: deadline,
+            outcome: Ok(TrustedHostDeadlineWaitOutcome::Woke),
+        };
+        let executor = CountingExecutor {
+            calls: &executor_calls,
+        };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let outcome = schedule_trusted_host_time_window_once(TrustedHostScheduleOnceInput {
+            backend: &reopened,
+            locator,
+            operation_id: ContinuityOperationId::new("operation/schedule-once-restart")
+                .expect("operation"),
+            receipt_id: ContinuityReceiptId::new("receipt/schedule-once-restart").expect("receipt"),
+            deadline_waiter: &mut waiter,
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            identity_provider: &mut identity_provider,
+        })
+        .expect("restart reinvocation");
+
+        assert!(matches!(
+            outcome,
+            TrustedHostScheduleOnceOutcome::Reinvoked(_)
+        ));
+        assert_eq!(waiter_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(identity_provider.calls, 1);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn concurrent_schedule_once_callbacks_enter_executor_at_most_once() {
+        let fixture = Fixture::new();
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+        );
+        let locator =
+            register_supervisor_time_window_wait(&fixture, "schedule-once-concurrent", deadline);
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        let waiter_calls = Arc::new(AtomicUsize::new(0));
+        let executor_calls = Arc::new(AtomicUsize::new(0));
+        let barrier = Arc::new(Barrier::new(2));
+        let window_id = locator.window_id.clone();
+        let mut workers = Vec::new();
+
+        for _ in 0..2 {
+            let backend = fixture.backend.clone();
+            let locator = TrustedHostOperationalEntryLocator {
+                workflow_id: locator.workflow_id.clone(),
+                run_id: locator.run_id.clone(),
+                step_id: locator.step_id.clone(),
+                window_id: locator.window_id.clone(),
+                subject_actor_id: locator.subject_actor_id.clone(),
+                immutable_run_bundle: locator.immutable_run_bundle.clone(),
+            };
+            let input = skill_input(&fixture);
+            let waiter_calls = Arc::clone(&waiter_calls);
+            let executor_calls = Arc::clone(&executor_calls);
+            let barrier = Arc::clone(&barrier);
+            workers.push(std::thread::spawn(move || {
+                let mut waiter = BarrierDeadlineWaiter {
+                    calls: waiter_calls,
+                    barrier,
+                    expected_deadline: deadline,
+                };
+                let executor = CountingExecutor {
+                    calls: &executor_calls,
+                };
+                let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+                schedule_trusted_host_time_window_once(TrustedHostScheduleOnceInput {
+                    backend: &backend,
+                    locator,
+                    operation_id: ContinuityOperationId::new("operation/schedule-once-concurrent")
+                        .expect("operation"),
+                    receipt_id: ContinuityReceiptId::new("receipt/schedule-once-concurrent")
+                        .expect("receipt"),
+                    deadline_waiter: &mut waiter,
+                    executor: &executor,
+                    skill_input: input,
+                    identity_provider: &mut identity_provider,
+                })
+            }));
+        }
+
+        let outcomes = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("worker"))
+            .collect::<Vec<_>>();
+        assert_eq!(waiter_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(executor_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter_map(|outcome| outcome.as_ref().ok())
+                .filter_map(|outcome| match outcome {
+                    TrustedHostScheduleOnceOutcome::Reinvoked(outcome) => {
+                        Some(outcome.execution.executor_entries)
+                    }
+                    _ => None,
+                })
+                .sum::<u32>(),
+            1
+        );
+        assert!(outcomes.iter().all(|outcome| match outcome {
+            Ok(TrustedHostScheduleOnceOutcome::Reinvoked(outcome)) => {
+                outcome.execution.stop_reason == TrustedHostRedispatchStopReason::Terminal
+                    && outcome.execution.executor_entries <= 1
+            }
+            Err(error) => matches!(
+                error.code(),
+                "trusted_host_time_window_scheduling.ticket_stale"
+                    | "trusted_host_time_window_scheduling.posture_ineligible"
+                    | "trusted_host_redispatch.directive_replayed"
+                    | "trusted_host_redispatch.attempt_limit_inconsistent"
+            ),
+            Ok(
+                TrustedHostScheduleOnceOutcome::Canceled
+                | TrustedHostScheduleOnceOutcome::NotYetEligible { .. },
+            ) => false,
+        }));
+        assert_eq!(
+            fixture
+                .backend
+                .continuation_disposition(&window_id)
+                .expect("durable disposition"),
+            AuthoritativeContinuationDisposition::Terminal
         );
     }
 
