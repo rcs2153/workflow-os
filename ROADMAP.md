@@ -841,8 +841,13 @@ current queue when they contain historical `next phase` language.
    now proves `directive_missing` is the lawful snapshot-after-consumption
    loser posture, adds it to the closed accepted set, and repeats the complete
    contention scenario 32 times per ordinary test invocation. Production
-   behavior is unchanged. Local host application topology planning remains
-   blocked pending focused re-review.
+   behavior is unchanged. The focused [blocker-fix
+   re-review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_TEST_HARDENING_BLOCKER_FIX_REVIEW.md)
+   accepts the closed loser classification after 640 repeated contention
+   scenarios and the independent cancellation race pass. The blocker is
+   resolved. The next phase is explicit local host application topology and
+   Core-to-application visibility planning; operational adoption remains
+   unimplemented.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
