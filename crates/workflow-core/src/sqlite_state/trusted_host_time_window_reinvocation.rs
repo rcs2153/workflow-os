@@ -60,6 +60,13 @@ impl fmt::Debug for TrustedHostTimeWindowReinvocationOutcome {
 pub(crate) fn reinvoke_after_time_window_wait(
     input: TrustedHostTimeWindowReinvocationInput<'_>,
 ) -> Result<TrustedHostTimeWindowReinvocationOutcome, WorkflowOsError> {
+    reinvoke_after_time_window_wait_with_transition_hook(input, || Ok(()))
+}
+
+fn reinvoke_after_time_window_wait_with_transition_hook(
+    input: TrustedHostTimeWindowReinvocationInput<'_>,
+    after_transition: impl FnOnce() -> Result<(), WorkflowOsError>,
+) -> Result<TrustedHostTimeWindowReinvocationOutcome, WorkflowOsError> {
     let wake_status = apply_trusted_host_time_window_wake(TrustedHostTimeWindowWakeInput {
         backend: input.backend,
         locator: TrustedHostOperationalEntryLocator {
@@ -84,6 +91,7 @@ pub(crate) fn reinvoke_after_time_window_wait(
             "trusted-host reinvocation wake was rejected",
         ));
     }
+    after_transition()?;
     let execution =
         enter_existing_trusted_host_operation(TrustedHostExistingOperationalEntryInput {
             backend: input.backend,
@@ -96,6 +104,14 @@ pub(crate) fn reinvoke_after_time_window_wait(
         wake_status,
         execution,
     })
+}
+
+#[cfg(test)]
+pub(crate) fn reinvoke_after_time_window_wait_with_test_transition_hook(
+    input: TrustedHostTimeWindowReinvocationInput<'_>,
+    after_transition: impl FnOnce() -> Result<(), WorkflowOsError>,
+) -> Result<TrustedHostTimeWindowReinvocationOutcome, WorkflowOsError> {
+    reinvoke_after_time_window_wait_with_transition_hook(input, after_transition)
 }
 
 fn reinvocation_error(
