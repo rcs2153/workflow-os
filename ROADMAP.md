@@ -908,17 +908,18 @@ current queue when they contain historical `next phase` language.
    The focused [maintainer/security
    review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_REVIEW.md)
    found a blocker before local-host composition. Existing-window preparation
-   currently issues a pair before comparing the persisted window actor and
+   previously issued a pair before comparing the persisted window actor and
    immutable bundle with the locator or comparing the persisted operation
-   binding with the current invocation/executor commitment. Those mismatches
-   fail later at consumed `run`, but the accepted boundary requires them to
-   fail before issuance. The explicit fresh variant is implemented but has no
-   direct preparation proof because no accepted production current-authority
-   source constructs that context. The next phase is a focused blocker fix:
-   complete pre-issuance existing binding validation, add direct substitution
-   coverage, and add a private test-only fresh fixture proving read-only
-   prepare, drop, and one consumed run without exposing production authority.
-   No local-host package or caller composition may begin first.
+   binding with the current invocation/executor commitment. The focused
+   blocker fix now reuses the exact existing-window binding validator before
+   pair issuance. Direct actor, bundle, and invocation substitution tests
+   prove fail-closed zero-write behavior, and a private test-only current-
+   authority fixture proves fresh preparation is read-only and one consumed
+   session opens and enters exactly once. See the [blocker-fix
+   report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_BLOCKER_FIX_REPORT.md).
+   A focused blocker-fix maintainer/security review is next. No local-host
+   package or caller composition may begin before that review accepts the
+   corrected boundary.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

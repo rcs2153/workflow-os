@@ -1,8 +1,8 @@
 # Trusted-Host Local Application Session Preparation Plan
 
-Status: implemented as a private, feature-gated Core boundary; focused
-maintainer/security review is next. No operational application path is
-implemented.
+Status: implemented as a private, feature-gated Core boundary. The focused
+maintainer/security review found two blockers; the focused blocker fix is now
+implemented and awaits review. No operational application path is implemented.
 
 ## 1. Executive Summary
 

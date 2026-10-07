@@ -178,3 +178,16 @@ production caller before planning a local-host package.
   clippy, tests, documentation, and diff hygiene passed
 - out-of-kernel work: code and documentation edits, validation commands, and
   later git or pull-request work
+
+## 14. Fix-Forward Note
+
+The focused maintainer/security review subsequently found two blockers that
+this original report did not classify strongly enough: exact existing-window
+actor, bundle, and operation-binding validation occurred only at consumed
+`run`, after the prepared pair had been issued, and the fresh preparation
+branch lacked direct proof.
+
+The focused blocker fix is documented in
+[Trusted-Host Local Application Session Preparation Blocker Fix Report](TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_BLOCKER_FIX_REPORT.md).
+The original findings and limitations above are preserved as the historical
+phase record; this note does not erase them.

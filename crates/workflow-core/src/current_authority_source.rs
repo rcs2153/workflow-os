@@ -18,6 +18,12 @@ pub(crate) use registered_in_memory_source::{
     SuccessfulWorkReportMetadataReadProof,
 };
 
+#[cfg(all(test, feature = "trusted-host-application-spi"))]
+pub(crate) use registered_in_memory_source::tests::{
+    fixture as registered_current_authority_test_fixture,
+    ready_source as registered_current_authority_test_source,
+};
+
 const SOURCE_ID_MAX_BYTES: usize = 128;
 const SOURCE_VERSION_MAX_BYTES: usize = 64;
 const SNAPSHOT_TOKEN_MAX_BYTES: usize = 192;

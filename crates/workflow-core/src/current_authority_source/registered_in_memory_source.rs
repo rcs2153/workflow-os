@@ -1609,7 +1609,7 @@ fn ensure_no_receipt_proof(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #![allow(clippy::expect_used)]
 
     use std::fs;
@@ -1686,7 +1686,7 @@ mod tests {
         Timestamp::parse_rfc3339(value).expect("timestamp")
     }
 
-    fn fixture() -> (
+    pub(crate) fn fixture() -> (
         RequiredContextContractBinding,
         RequiredContextExecutionBinding,
     ) {
@@ -2130,7 +2130,7 @@ mod tests {
         WorkReportArtifactRecord::new(report).expect("artifact")
     }
 
-    fn ready_source(
+    pub(crate) fn ready_source(
         contract: &RequiredContextContractBinding,
     ) -> RegisteredInMemoryCurrentAuthoritySource {
         source_with_inventory(

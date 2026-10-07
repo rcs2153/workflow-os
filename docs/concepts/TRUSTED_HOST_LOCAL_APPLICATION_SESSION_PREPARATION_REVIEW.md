@@ -252,3 +252,11 @@ nested harnesses, OpenShell, or release changes.
   clippy and tests, documentation, and diff hygiene passed
 - out-of-kernel work: implementation and test inspection, review authoring,
   validation commands, and later git or pull-request work
+
+## 19. Fix-Forward Note
+
+The two blockers identified by this review are now addressed in
+[Trusted-Host Local Application Session Preparation Blocker Fix Report](TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_BLOCKER_FIX_REPORT.md).
+This review remains the authoritative record of the original findings. A
+separate focused blocker-fix review must verify the correction before any
+local-host package or caller composition begins.
