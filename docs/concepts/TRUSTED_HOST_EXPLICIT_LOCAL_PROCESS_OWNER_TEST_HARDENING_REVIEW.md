@@ -1,5 +1,13 @@
 # Trusted-Host Explicit Local Process Owner Test Hardening Review
 
+Fix-forward note: the intermittent `directive_missing` loser is now proven as
+a lawful post-consumption snapshot outcome and included in the closed loser
+set. The full contention scenario now repeats 32 times inside the ordinary
+test. See the [blocker fix
+report](TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_TEST_HARDENING_BLOCKER_FIX_REPORT.md).
+The original blocker finding below remains unchanged as the historical review
+record.
+
 ## 1. Executive Verdict
 
 **Needs blocker fixes. Do not proceed to local host application topology

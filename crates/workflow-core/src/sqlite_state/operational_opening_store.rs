@@ -3761,8 +3761,7 @@ mod tests {
             .expect("post-return cancellation remains idempotent");
     }
 
-    #[test]
-    fn competing_process_owners_admit_at_most_one_executor_entry() {
+    fn assert_competing_process_owners_admit_at_most_one_executor_entry() {
         let fixture = Fixture::new();
         let locator = register_resumable_operational_entry(&fixture, "owner-competing", 3);
         let calls = Arc::new(AtomicUsize::new(0));
@@ -3845,6 +3844,7 @@ mod tests {
                     if matches!(
                         error.code(),
                         "trusted_host_redispatch.directive_replayed"
+                            | "trusted_host_redispatch.directive_missing"
                             | "trusted_host_redispatch.active_yield_missing"
                     ) =>
                 {
@@ -3855,6 +3855,13 @@ mod tests {
         }
         assert_eq!(winners, 1);
         assert_eq!(bounded_losers, 1);
+    }
+
+    #[test]
+    fn competing_process_owners_admit_at_most_one_executor_entry() {
+        for _ in 0..32 {
+            assert_competing_process_owners_admit_at_most_one_executor_entry();
+        }
     }
 
     #[test]
