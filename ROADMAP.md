@@ -671,8 +671,13 @@ current queue when they contain historical `next phase` language.
    returns refreshed `NotYetEligible` posture without mutation, or invokes the
    accepted explicit reinvocation exactly once. Focused restart and concurrent
    callback proofs preserve fresh rehydration and at-most-once executor entry.
-   The next phase is focused maintainer/security review of this private
-   schedule-once composition.
+   Focused maintainer/security
+   [review](docs/concepts/TRUSTED_HOST_PRIVATE_SCHEDULE_ONCE_HELPER_REVIEW.md)
+   accepts this private schedule-once composition with no blocker. The next
+   phase is planning for the smallest private repeated scheduling boundary
+   needed to resume lawful local work without an agent turn. Each callback
+   must remain one-shot and every next wait must derive from fresh Core state;
+   cancellation, shutdown, and non-polling behavior must be explicit.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
