@@ -706,12 +706,15 @@ current queue when they contain historical `next phase` language.
    and direct restart/concurrency proofs. The next phase is focused
    maintainer/security review of that plan. That focused
    [review](docs/concepts/TRUSTED_HOST_PRIVATE_PRODUCTION_TIMER_PLAN_REVIEW.md)
-   accepts the plan with no blocker. The next phase is implementation of only
-   the crate-private synchronous local timer, explicit cancellation, thin
-   repeated-driver wrapper, and focused duplicate-identity, restart,
-   concurrency, clock, cancellation, and privacy proofs. General scheduling,
-   public configuration, provider mutation, OpenShell, nested harnesses,
-   automatic approval, CLI, SDK, and schema exposure remain blocked.
+   accepts the plan with no blocker. The crate-private synchronous local timer,
+   explicit cancellation, thin repeated-driver wrapper, and focused
+   duplicate-identity, restart, concurrency, clock, cancellation, and privacy
+   proofs are now implemented in
+   [this phase](docs/concepts/TRUSTED_HOST_PRIVATE_PRODUCTION_TIMER_REPORT.md).
+   The next phase is focused maintainer/security review of that implementation.
+   General scheduling, public configuration, provider mutation, OpenShell,
+   nested harnesses, automatic approval, CLI, SDK, and schema exposure remain
+   blocked.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
