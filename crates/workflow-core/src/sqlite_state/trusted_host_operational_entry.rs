@@ -3,7 +3,9 @@ use std::fmt;
 use rusqlite::OptionalExtension;
 
 use crate::authorized_execution_continuity_state::internal::{
-    AuthoritativeContinuationDisposition, AuthorizedExecutionContinuityStore, ExpectedWindowBinding,
+    AuthoritativeContinuationDisposition, AuthorizedExecutionContinuityStore,
+    ContinuityInstanceEligibility, ExpectedWindowBinding, TrustedTimePosture,
+    TrustedTimeSourceKind,
 };
 use crate::operational_execution_window_opening::{
     open_with_registered_current_authority, operation_binding_commitment, run_snapshot_commitment,
@@ -181,22 +183,7 @@ fn current_preparation_context(
     posture: &TrustedHostOperationalEntryPosture<'_>,
     invocation_commitment: &SpecContentHash,
 ) -> Result<TrustedHostOperationalEntryPreparationContext, WorkflowOsError> {
-    let run = backend.rehydrate_run(&locator.run_id)?;
-    if run.snapshot.identity.workflow_id != locator.workflow_id
-        || !matches!(
-            run.snapshot.status,
-            crate::WorkflowRunStatus::Running | crate::WorkflowRunStatus::Retrying
-        )
-        || run.snapshot.identity.immutable_run_bundle.as_ref()
-            != Some(&locator.immutable_run_bundle)
-    {
-        return Err(entry_error(
-            WorkflowOsErrorKind::InvalidState,
-            "run_not_eligible",
-            "trusted-host operational run is not eligible",
-        ));
-    }
-    let snapshot_commitment = run_snapshot_commitment(&run.snapshot)?;
+    let snapshot_commitment = validate_preparation_run(backend, locator)?;
     let state = continuity_codec::load_snapshot(&backend.connection()?)?;
     let matching = state
         .windows
@@ -212,7 +199,13 @@ fn current_preparation_context(
     let (posture_label, window, disposition, operation_binding) =
         match (posture, matching.as_slice()) {
             (TrustedHostOperationalEntryPosture::Fresh { opening, .. }, []) => {
-                validate_opening_binding(backend, locator, opening, invocation_commitment)?;
+                validate_fresh_opening_preparation(
+                    backend,
+                    locator,
+                    opening,
+                    invocation_commitment,
+                    &state,
+                )?;
                 ("fresh", None, None, None)
             }
             (TrustedHostOperationalEntryPosture::Existing, [window]) => {
@@ -278,6 +271,28 @@ fn current_preparation_context(
         },
         window,
     })
+}
+
+fn validate_preparation_run(
+    backend: &SqliteStateBackend,
+    locator: &TrustedHostOperationalEntryLocator,
+) -> Result<SpecContentHash, WorkflowOsError> {
+    let run = backend.rehydrate_run(&locator.run_id)?;
+    if run.snapshot.identity.workflow_id != locator.workflow_id
+        || !matches!(
+            run.snapshot.status,
+            crate::WorkflowRunStatus::Running | crate::WorkflowRunStatus::Retrying
+        )
+        || run.snapshot.identity.immutable_run_bundle.as_ref()
+            != Some(&locator.immutable_run_bundle)
+    {
+        return Err(entry_error(
+            WorkflowOsErrorKind::InvalidState,
+            "run_not_eligible",
+            "trusted-host operational run is not eligible",
+        ));
+    }
+    run_snapshot_commitment(&run.snapshot)
 }
 
 pub(crate) fn enter_existing_trusted_host_operation(
@@ -426,6 +441,41 @@ fn validate_opening_binding(
             WorkflowOsErrorKind::Security,
             "opening_binding_mismatch",
             "trusted-host operational opening binding is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_fresh_opening_preparation(
+    backend: &SqliteStateBackend,
+    locator: &TrustedHostOperationalEntryLocator,
+    opening: &OperationalExecutionWindowOpeningUseInput<'_>,
+    invocation_commitment: &SpecContentHash,
+    state: &crate::authorized_execution_continuity_state::internal::ReferenceContinuityState,
+) -> Result<(), WorkflowOsError> {
+    validate_opening_binding(backend, locator, opening, invocation_commitment)?;
+    if opening.maximum_attempts == 0 || opening.expires_at <= opening.trusted_time.observed_at() {
+        return Err(entry_error(
+            WorkflowOsErrorKind::Validation,
+            "opening_context_invalid",
+            "trusted-host operational opening context is invalid",
+        ));
+    }
+    let trusted = &state.trusted_time;
+    if trusted.source != TrustedTimeSourceKind::CoreInjectedClockV1
+        || opening.trusted_time.source() != trusted.source
+        || opening.trusted_time.provenance_commitment() != &trusted.provenance_commitment
+        || opening.trusted_time.epoch_id() != &trusted.epoch_id
+        || trusted.eligibility != ContinuityInstanceEligibility::LiveStateEligible
+        || trusted.posture == TrustedTimePosture::Quarantined
+        || trusted
+            .last_observed_at
+            .is_some_and(|last| opening.trusted_time.observed_at() < last)
+    {
+        return Err(entry_error(
+            WorkflowOsErrorKind::Security,
+            "opening_trusted_time_invalid",
+            "trusted-host operational opening trusted time is invalid",
         ));
     }
     Ok(())

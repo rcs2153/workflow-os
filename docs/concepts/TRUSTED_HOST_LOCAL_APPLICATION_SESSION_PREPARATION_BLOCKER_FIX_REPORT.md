@@ -148,3 +148,31 @@ Do not begin local-host package or caller composition before that review.
   clippy and tests, documentation, and diff hygiene passed
 - out-of-kernel work: code and documentation edits, validation commands, and
   later git or pull-request work
+
+## 12. Review-Forward Note
+
+The focused blocker-fix review accepts the production pre-issuance binding
+correction but finds that the direct fresh-path proof required by the original
+review is incomplete. The authority-backed fixture proves read-only fresh
+preparation and one consumed run; it does not directly exercise fresh drop,
+pre-run cancellation, or fresh-context substitution behavior.
+
+See [Trusted-Host Local Application Session Preparation Blocker Fix
+Review](TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_BLOCKER_FIX_REVIEW.md).
+This note preserves the original implementation record while preventing its
+opening claim from being read as final phase acceptance.
+
+## 13. Second Fix-Forward Note
+
+The missing direct fresh-path proof is now implemented in the focused
+[Fresh Preparation Proof Blocker Fix
+Report](TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_FRESH_PROOF_BLOCKER_FIX_REPORT.md).
+That phase adds authority-backed fresh drop, pre-run cancellation, backend,
+actor, bundle, invocation/executor, opening-shape, and trusted-time tests.
+
+The direct tests exposed two semantic inputs that were not validated before
+pair issuance: an unusable opening request shape and trusted-time context that
+did not match the current continuity instance. The preparation helper now
+rejects both with stable payload-free errors while leaving atomic authority
+consumption at the consumed-session boundary. This note does not erase the
+original review finding; focused re-review remains required.

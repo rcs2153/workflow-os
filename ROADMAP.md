@@ -917,9 +917,25 @@ current queue when they contain historical `next phase` language.
    authority fixture proves fresh preparation is read-only and one consumed
    session opens and enters exactly once. See the [blocker-fix
    report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_BLOCKER_FIX_REPORT.md).
-   A focused blocker-fix maintainer/security review is next. No local-host
-   package or caller composition may begin before that review accepts the
-   corrected boundary.
+   The focused blocker-fix [maintainer/security
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_BLOCKER_FIX_REVIEW.md)
+   accepts the production pre-issuance correction but finds the fresh-path
+   proof incomplete. The authority-backed fixture proves read-only preparation
+   and one consumed run, but it does not directly prove fresh drop,
+   pre-run cancellation, or fresh-context substitution behavior required by
+   the prior review. That focused blocker fix is now implemented in the [Fresh
+   Preparation Proof Blocker Fix
+   Report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_FRESH_PROOF_BLOCKER_FIX_REPORT.md).
+   Direct authority-backed tests now prove zero-write fresh drop and pre-run
+   cancellation plus fail-closed backend, actor, bundle,
+   invocation/executor, opening-shape, and trusted-time substitution behavior.
+   The direct tests exposed and closed two pre-issuance semantic gaps for an
+   unusable opening request shape and incompatible trusted-time context;
+   authority consumption remains atomic at consumed execution. The focused
+   [fresh-proof blocker-fix review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_FRESH_PROOF_BLOCKER_FIX_REVIEW.md)
+   accepts the direct proof and read-only preflight. The next phase is
+   local-host caller composition planning around an injected prepared pair.
+   No package or operational caller is implemented yet.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
