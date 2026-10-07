@@ -698,9 +698,15 @@ current queue when they contain historical `next phase` language.
    competing-driver, restart, duplicate-identity, and deterministic-time
    proofs. The next phase is planning for one private production trusted-host
    timer integration that remains authority-free and exclusively calls the
-   accepted repeated driver. General scheduling, public configuration,
-   provider mutation, OpenShell, nested harnesses, automatic approval, CLI,
-   SDK, and schema exposure remain blocked.
+   accepted repeated driver. That planning is now documented in the [Private
+   Trusted-Host Production Timer Integration
+   Plan](docs/implementation-plans/trusted-host-private-production-timer-integration-plan.md).
+   It proposes one synchronous crate-private `Condvar` deadline waiter,
+   explicit cancellation, no persistent host job, injected fresh identities,
+   and direct restart/concurrency proofs. The next phase is focused
+   maintainer/security review of that plan. General scheduling, public
+   configuration, provider mutation, OpenShell, nested harnesses, automatic
+   approval, CLI, SDK, and schema exposure remain blocked.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
