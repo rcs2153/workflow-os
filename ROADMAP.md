@@ -939,12 +939,17 @@ current queue when they contain historical `next phase` language.
    around an injected prepared pair. That plan selects an unpublished,
    library-only `workflow-local-host` package, feature-gated visibility for
    the unconstructible prepared pair, one synchronous foreground wrapper, and
-   scoped cooperative-cancellation custody. No package, production
-   preparation source, embedding caller, or operational adoption is
-   implemented yet. The focused [maintainer/security
+   scoped cooperative-cancellation custody. The bounded library and
+   visibility slice are now implemented in the [phase
+   report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_CALLER_COMPOSITION_REPORT.md).
+   The package can consume one Core-issued pair and expose scoped cooperative
+   cancellation, but no production preparation source, embedding caller,
+   discovery, scheduling, or operational adoption exists. The focused [maintainer/security
    review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_CALLER_COMPOSITION_PLAN_REVIEW.md)
    accepts the plan after clarifying Cargo feature unification. The next
-   implementation is the bounded library and visibility slice only.
+   implementation review is next and must assess authority opacity, one-shot
+   ownership, cancellation cloning, feature isolation, privacy, and test
+   quality before any production source or caller is planned.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

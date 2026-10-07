@@ -1,0 +1,19 @@
+[package]
+name = "workflow-local-host"
+version = "0.2.0-preview.1"
+description = "Unpublished local trusted-host composition boundary for Workflow OS."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+workflow-core = { path = "../workflow-core", features = ["trusted-host-application-spi"] }
+
+[lints]
+workspace = true

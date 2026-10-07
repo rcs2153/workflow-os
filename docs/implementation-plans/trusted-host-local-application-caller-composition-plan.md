@@ -2,7 +2,11 @@
 
 Status: accepted with non-blocking follow-ups by the focused
 [maintainer/security review](../concepts/TRUSTED_HOST_LOCAL_APPLICATION_CALLER_COMPOSITION_PLAN_REVIEW.md).
-No package, caller, or operational adoption is implemented by this document.
+The bounded unpublished library and prepared-pair visibility slice are now
+implemented and documented in the
+[implementation report](../concepts/TRUSTED_HOST_LOCAL_APPLICATION_CALLER_COMPOSITION_REPORT.md).
+No production preparation source, embedding caller, discovery, scheduling, or
+operational adoption is implemented.
 
 ## 1. Executive Summary
 

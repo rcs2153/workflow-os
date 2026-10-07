@@ -203,7 +203,7 @@ pub use trusted_host_local_application_spi::{
     TrustedHostLocalApplicationCancellationHandle,
     TrustedHostLocalApplicationContinuationStopReason, TrustedHostLocalApplicationEntryStopReason,
     TrustedHostLocalApplicationFailure, TrustedHostLocalApplicationOutcome,
-    TrustedHostLocalApplicationSession,
+    TrustedHostLocalApplicationPreparedSession, TrustedHostLocalApplicationSession,
 };
 
 /// Opt-in embedded `SQLite` durable-state backend.
