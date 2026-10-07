@@ -1,9 +1,11 @@
 # Private Trusted-Host Scheduling Boundary Plan
 
-Status: planning only, corrected after focused security review. The explicit
-crate-private `TimeWindow` reinvocation slice is implemented and accepted. No
-scheduler, timer driver, background worker, automatic model turn, public
-configuration, or hosted runtime is implemented by this plan.
+Status: accepted plan with the first private implementation slice complete.
+The crate-private coherent scheduling observation, inert absolute-UTC ticket,
+and non-mutating `TimeWindow` readiness assessment are implemented. No
+deadline waiter, schedule-once host helper, scheduler, timer driver,
+background worker, automatic model turn, public configuration, or hosted
+runtime is implemented.
 
 ## 1. Executive Summary
 
@@ -372,7 +374,7 @@ For the later private scheduling slice, focused tests must prove:
 2. Implement transition-to-entry crash fault injection and recovery proof.
 3. Perform focused maintainer/security review of those prerequisite proofs.
 4. Add the crate-private coherent scheduling observation, absolute UTC inert
-   ticket, and non-mutating readiness assessment.
+   ticket, and non-mutating readiness assessment. **Implemented.**
 5. Add one injected deadline-wait interface and schedule-once helper.
 6. Add early, late, cancellation, duplicate, restart, binding, privacy, and
    non-polling tests.

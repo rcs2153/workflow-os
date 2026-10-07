@@ -655,10 +655,14 @@ current queue when they contain historical `next phase` language.
    until focused review accepts the fix. That focused
    [review](docs/concepts/TRUSTED_HOST_EXPLICIT_REINVOCATION_PREREQUISITE_PROOFS_BLOCKER_FIX_REVIEW.md)
    now accepts the corrected proof with no remaining blocker. The next phase
-   is the first private scheduling implementation slice: coherent Core-owned
-   scheduling observation, inert absolute-UTC ticket, and non-mutating
-   source-specific readiness assessment only. The injected deadline waiter and
-   schedule-once host helper remain deferred until that slice is reviewed.
+   was the first private scheduling implementation slice. That slice is now
+   implemented in the [phase
+   report](docs/concepts/TRUSTED_HOST_PRIVATE_SCHEDULING_OBSERVATION_REPORT.md):
+   one coherent Core-owned observation derives an inert absolute-UTC ticket,
+   and a read-only source-specific assessment returns `Eligible` or
+   `NotYetEligible` without mutation or authority. The next phase is focused
+   maintainer/security review. The injected deadline waiter and schedule-once
+   host helper remain deferred until that slice is accepted.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

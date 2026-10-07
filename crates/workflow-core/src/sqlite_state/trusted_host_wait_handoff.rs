@@ -211,7 +211,7 @@ pub(super) fn derive_trusted_host_wait_observation_for_test(
     derive_observation(state, locator, observation)
 }
 
-fn derive_observation(
+pub(super) fn derive_observation(
     state: &ReferenceContinuityState,
     locator: &TrustedHostOperationalEntryLocator,
     observation: &TrustedTimeObservation,
@@ -253,7 +253,7 @@ fn derive_observation(
     })
 }
 
-fn derive_handoff(
+pub(super) fn derive_handoff(
     state: &ReferenceContinuityState,
     window: &crate::authorized_execution_continuity_state::internal::AuthoritativeWindowRecord,
     active_yield: &crate::authorized_execution_continuity_state::internal::AuthoritativeYieldRecord,
@@ -367,7 +367,7 @@ fn hash_frame(hasher: &mut Sha256, value: &str) {
     hasher.update(value.as_bytes());
 }
 
-fn validate_locator(
+pub(super) fn validate_locator(
     locator: &TrustedHostOperationalEntryLocator,
     window: &crate::authorized_execution_continuity_state::internal::AuthoritativeWindowRecord,
 ) -> Result<(), WorkflowOsError> {
