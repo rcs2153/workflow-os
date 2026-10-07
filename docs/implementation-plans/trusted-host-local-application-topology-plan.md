@@ -1,7 +1,11 @@
 # Trusted-Host Local Application Topology Plan
 
-Status: Core SPI model and visibility slice implemented; session preparation,
-application composition, and operational adoption remain unimplemented.
+Status: Core SPI model, bounded-failure correction, and private session
+preparation are implemented and reviewed. The fresh-path proof blocker is
+fixed. Local caller composition is now documented in the
+[Trusted-Host Local Application Caller Composition
+Plan](trusted-host-local-application-caller-composition-plan.md); the package,
+production caller, and operational adoption remain unimplemented.
 
 ## 1. Executive Summary
 

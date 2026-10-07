@@ -934,8 +934,15 @@ current queue when they contain historical `next phase` language.
    authority consumption remains atomic at consumed execution. The focused
    [fresh-proof blocker-fix review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_SESSION_PREPARATION_FRESH_PROOF_BLOCKER_FIX_REVIEW.md)
    accepts the direct proof and read-only preflight. The next phase is
-   local-host caller composition planning around an injected prepared pair.
-   No package or operational caller is implemented yet.
+   the [local-host caller composition
+   plan](docs/implementation-plans/trusted-host-local-application-caller-composition-plan.md)
+   around an injected prepared pair. That plan selects an unpublished,
+   library-only `workflow-local-host` package, feature-gated visibility for
+   the unconstructible prepared pair, one synchronous foreground wrapper, and
+   scoped cooperative-cancellation custody. No package, production
+   preparation source, embedding caller, or operational adoption is
+   implemented yet. The next implementation is the bounded library and
+   visibility slice only.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

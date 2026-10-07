@@ -5,7 +5,9 @@ pre-issuance blockers and the direct fresh-path proof blocker are fixed. Fresh
 drop, pre-run cancellation, context substitution, opening-shape, and trusted-
 time tests now prove the documented zero-write boundary. The focused proof
 review is accepted. Local-host caller composition may proceed through a
-separate plan; no operational application path is implemented here.
+separate [caller-composition
+plan](trusted-host-local-application-caller-composition-plan.md); no package,
+production caller, or operational application path is implemented here.
 
 ## 1. Executive Summary
 
@@ -322,8 +324,8 @@ test, documentation, and diff-hygiene checks.
 
 ## 18. Final Recommendation
 
-Perform a focused maintainer/security review of the implemented private
-preparation helper, opaque prepared pair, bounded cancellation failure,
-read-only preparation commitment, and authoritative run-time revalidation.
-Do not add an application package, executable, caller, discovery, provider
+The private preparation boundary and fresh proof are accepted. Proceed through
+the separate caller-composition plan with the bounded unpublished local-host
+library and prepared-pair visibility slice only. Do not add an executable,
+production preparation source, operational caller, discovery, provider
 behavior, writes, schemas, SDK behavior, hosted parity, or release change.
