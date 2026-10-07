@@ -17,6 +17,7 @@ use super::SqliteStateBackend;
 
 struct CancellationState {
     canceled: bool,
+    entry_started: bool,
 }
 
 struct SharedCancellation {
@@ -33,10 +34,19 @@ pub(crate) struct TrustedHostLocalTimerCancellationHandle {
     shared: Arc<SharedCancellation>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TrustedHostLocalTimerEntryDecision {
+    Started,
+    Canceled,
+}
+
 impl TrustedHostLocalTimerCancellation {
     pub(crate) fn new() -> (Self, TrustedHostLocalTimerCancellationHandle) {
         let shared = Arc::new(SharedCancellation {
-            state: Mutex::new(CancellationState { canceled: false }),
+            state: Mutex::new(CancellationState {
+                canceled: false,
+                entry_started: false,
+            }),
             signal: Condvar::new(),
         });
         (
@@ -45,6 +55,20 @@ impl TrustedHostLocalTimerCancellation {
             },
             TrustedHostLocalTimerCancellationHandle { shared },
         )
+    }
+
+    pub(crate) fn begin_entry(
+        &self,
+    ) -> Result<TrustedHostLocalTimerEntryDecision, WorkflowOsError> {
+        let mut state = self.shared.state.lock().map_err(|_| timer_state_error())?;
+        if state.entry_started {
+            return Err(entry_already_started_error());
+        }
+        if state.canceled {
+            return Ok(TrustedHostLocalTimerEntryDecision::Canceled);
+        }
+        state.entry_started = true;
+        Ok(TrustedHostLocalTimerEntryDecision::Started)
     }
 }
 
@@ -215,6 +239,14 @@ fn timer_state_error() -> WorkflowOsError {
     )
 }
 
+fn entry_already_started_error() -> WorkflowOsError {
+    WorkflowOsError::new(
+        WorkflowOsErrorKind::InvalidState,
+        "trusted_host_local_timer.entry_already_started",
+        "trusted-host local timer operational entry has already started",
+    )
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
@@ -267,6 +299,27 @@ mod tests {
         assert_eq!(
             waiter.wait_until(deadline).expect("canceled wait"),
             TrustedHostDeadlineWaitOutcome::Canceled
+        );
+    }
+
+    #[test]
+    fn cancellation_and_entry_have_one_linearized_decision() {
+        let (canceled, canceled_handle) = TrustedHostLocalTimerCancellation::new();
+        canceled_handle.cancel().expect("cancel before entry");
+        assert_eq!(
+            canceled.begin_entry().expect("canceled decision"),
+            TrustedHostLocalTimerEntryDecision::Canceled
+        );
+
+        let (started, started_handle) = TrustedHostLocalTimerCancellation::new();
+        assert_eq!(
+            started.begin_entry().expect("started decision"),
+            TrustedHostLocalTimerEntryDecision::Started
+        );
+        started_handle.cancel().expect("cancel after entry");
+        assert_eq!(
+            started.begin_entry().expect_err("entry is one-shot").code(),
+            "trusted_host_local_timer.entry_already_started"
         );
     }
 

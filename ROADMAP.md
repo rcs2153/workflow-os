@@ -795,9 +795,17 @@ current queue when they contain historical `next phase` language.
    cancellation as general process shutdown. The focused
    [blocker-fix re-review](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_BLOCKER_FIX_REVIEW.md)
    accepts the corrected plan with no remaining blocker. The next phase is
-   implementing the crate-private one-shot process owner exactly within the
-   accepted boundary; application adoption, signal orchestration, discovery,
-   and public runtime surfaces remain deferred.
+   now implemented in the [Trusted-Host Explicit Local Process Owner
+   Report](docs/concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_REPORT.md).
+   The private one-shot owner creates the existing cancellation pair, returns
+   its handle to process control, atomically linearizes pre-entry cancellation
+   against operational entry, and delegates admitted work once to the accepted
+   explicit local composition. Direct tests prove zero-write pre-entry
+   cancellation, active-attempt non-interruption followed by timer-wait
+   cancellation, and at-most-one executor admission across competing owners.
+   The next phase is focused maintainer/security review of this implementation;
+   application adoption, signal orchestration, discovery, and public runtime
+   surfaces remain deferred.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

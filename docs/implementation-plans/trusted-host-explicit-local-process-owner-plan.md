@@ -1,14 +1,15 @@
 # Trusted-Host Explicit Local Process Owner Plan
 
-Status: accepted after documentation-only blocker correction and focused
-maintainer/security re-review. The corrected contract defines an atomic
-pre-entry cancellation linearization point, a truthful owner-level canceled
-outcome, and the non-interruptible active-attempt boundary. The next phase is
-the crate-private owner implementation exactly within this plan. This plan
-does not itself implement runtime behavior. See the
+Status: implemented within the accepted crate-private boundary after
+documentation-only blocker correction and focused maintainer/security
+re-review. The implementation adds the atomic pre-entry cancellation
+linearization point, truthful owner-level canceled outcome, and explicit
+non-interruptible active-attempt boundary defined here. It does not add an
+application adoption site or automatic runtime behavior. See the
 [focused review](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_REVIEW.md)
 the [blocker-fix report](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_BLOCKER_FIX_REPORT.md),
-and the [blocker-fix re-review](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_BLOCKER_FIX_REVIEW.md).
+the [blocker-fix re-review](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_PLAN_BLOCKER_FIX_REVIEW.md),
+and the [implementation report](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_PROCESS_OWNER_REPORT.md).
 
 ## 1. Executive Summary
 
@@ -340,20 +341,27 @@ or automatic continuation.
 None of these questions may be answered implicitly by the first private owner
 implementation.
 
-## 16. Validation For This Planning Phase
+## 16. Implementation Validation
 
-Planning validation is limited to:
+The implementation phase validated the private boundary with:
 
+- focused owner and cancellation-linearization tests;
+- `cargo fmt --all --check`;
+- `cargo clippy --workspace --all-targets -- -D warnings`;
+- `cargo test --workspace`;
 - `npm run check:docs`; and
 - `git diff --check`.
 
-No Rust behavior changes in this phase.
+The full Rust validation used a clean non-incremental target directory after
+the existing default incremental cache stopped making observable progress.
+The clean target completed successfully; no product behavior was changed to
+work around the local cache condition.
 
 ## 17. Final Recommendation
 
-Proceed next to the crate-private process-owner implementation exactly within
-this corrected plan.
+Proceed next to focused maintainer/security review of the crate-private
+process-owner implementation.
 
-Do not combine owner implementation with an application adoption site,
-discovery, signal orchestration, background execution, public surfaces, or
-automatic continuation.
+Do not combine that review with an application adoption site, discovery,
+signal orchestration, background execution, public surfaces, or automatic
+continuation.
