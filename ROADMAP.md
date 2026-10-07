@@ -652,7 +652,13 @@ current queue when they contain historical `next phase` language.
    successful outcomes must be terminal and account for exactly one aggregate
    entry, while the loser may be a bounded fail-closed error or a terminal
    zero-entry observation. Scheduling models and behavior remain deferred
-   until focused review accepts the fix.
+   until focused review accepts the fix. That focused
+   [review](docs/concepts/TRUSTED_HOST_EXPLICIT_REINVOCATION_PREREQUISITE_PROOFS_BLOCKER_FIX_REVIEW.md)
+   now accepts the corrected proof with no remaining blocker. The next phase
+   is the first private scheduling implementation slice: coherent Core-owned
+   scheduling observation, inert absolute-UTC ticket, and non-mutating
+   source-specific readiness assessment only. The injected deadline waiter and
+   schedule-once host helper remain deferred until that slice is reviewed.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.
