@@ -565,6 +565,12 @@ pub use side_effect_discovery::{
 pub use sqlite_state::{
     FilesystemToSqliteMigrationInput, SqliteStateBackend, StateMigrationVerificationReceipt,
 };
+#[cfg(feature = "trusted-host-application-spi")]
+pub use sqlite_state::{
+    TrustedHostLocalApplicationCancellationHandle,
+    TrustedHostLocalApplicationContinuationStopReason, TrustedHostLocalApplicationEntryStopReason,
+    TrustedHostLocalApplicationOutcome, TrustedHostLocalApplicationSession,
+};
 pub use state::{
     AdapterTelemetryStore, ApprovalPresentationRecordStore, ApprovalStore, BackendHealthCheck,
     EventLogStore, IdempotencyResult, IdempotencyStore, IdempotencyWrite, LocalStateBackend,

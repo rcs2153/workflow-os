@@ -645,6 +645,11 @@ mod tests {
     use crate::sqlite_state::trusted_host_explicit_local_process_owner::{
         TrustedHostExplicitLocalProcessOwner, TrustedHostExplicitLocalProcessOwnerOutcome,
     };
+    #[cfg(feature = "trusted-host-application-spi")]
+    use crate::sqlite_state::trusted_host_local_application_spi::{
+        TrustedHostLocalApplicationCancellationHandle, TrustedHostLocalApplicationOutcome,
+        TrustedHostLocalApplicationSession,
+    };
     use crate::sqlite_state::trusted_host_local_production_caller::{
         run_trusted_host_local_production_caller, TrustedHostLocalProductionCallerInput,
     };
@@ -3688,6 +3693,55 @@ mod tests {
                 .len(),
             events_before
         );
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn application_spi_wraps_owner_and_preserves_pre_entry_cancellation() {
+        let fixture = Fixture::new();
+        let locator = register_resumable_operational_entry(&fixture, "application-spi-cancel", 3);
+        let before = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot before session");
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let (owner, timer_handle) =
+            TrustedHostExplicitLocalProcessOwner::new(TrustedHostOperationalEntryInput {
+                backend: &fixture.backend,
+                locator,
+                opening: None,
+                executor: &executor,
+                skill_input: skill_input(&fixture),
+                opening_persistence: TrustedHostSupervisorPersistenceInput {
+                    operation: ContinuityOperationId::new("operation/unused-application-spi")
+                        .expect("operation"),
+                    receipt: ContinuityReceiptId::new("receipt/unused-application-spi")
+                        .expect("receipt"),
+                    yield_generation: None,
+                },
+                identity_provider: &mut identity_provider,
+            });
+        let session = TrustedHostLocalApplicationSession::from_process_owner(owner);
+        let handle = TrustedHostLocalApplicationCancellationHandle::from_timer_handle(timer_handle);
+
+        handle
+            .request_cancellation()
+            .expect("cancel before application entry");
+        let outcome = session.run().expect("bounded application outcome");
+
+        assert_eq!(
+            outcome,
+            TrustedHostLocalApplicationOutcome::CanceledBeforeEntry
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(identity_provider.calls, 0);
+        let after = crate::sqlite_state::continuity_codec::load_snapshot(
+            &fixture.backend.connection().expect("connection"),
+        )
+        .expect("snapshot after session");
+        assert!(before == after);
     }
 
     #[test]

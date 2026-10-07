@@ -11,6 +11,10 @@ rust-version.workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = []
+trusted-host-application-spi = []
+
 [dependencies]
 base64 = "0.22"
 fs2 = "0.4"

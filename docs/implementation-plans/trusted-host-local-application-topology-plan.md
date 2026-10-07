@@ -1,6 +1,7 @@
 # Trusted-Host Local Application Topology Plan
 
-Status: planned, not implemented.
+Status: Core SPI model and visibility slice implemented; session preparation,
+application composition, and operational adoption remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -17,10 +18,13 @@ current validated SQLite state and exact invocation authority. The local host
 may own foreground lifecycle and cooperative cancellation, but it must not
 construct locators, capabilities, immutable bindings, or workflow status.
 
-The first implementation should establish the topology and visibility
-contracts only. It must not add an executable command, automatic discovery,
-or operational adoption until a separately reviewed in-process source can
-produce the exact Core-issued session.
+The first implementation establishes the topology and visibility contracts
+only behind the non-default `trusted-host-application-spi` feature. It adds an
+opaque one-shot session, cooperative cancellation-handle vocabulary, bounded
+outcomes, redacted Debug, and direct privacy/construction tests. Production
+code has no session or handle constructor yet. No executable command,
+automatic discovery, preparation helper, application package, or operational
+adoption exists.
 
 ## 2. Goals
 

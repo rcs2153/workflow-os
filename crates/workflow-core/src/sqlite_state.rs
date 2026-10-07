@@ -178,6 +178,8 @@ mod operational_opening_store;
 mod trusted_host_explicit_local_operation;
 #[allow(dead_code)]
 mod trusted_host_explicit_local_process_owner;
+#[cfg(feature = "trusted-host-application-spi")]
+mod trusted_host_local_application_spi;
 #[allow(dead_code)]
 mod trusted_host_local_production_caller;
 #[allow(dead_code)]
@@ -194,6 +196,13 @@ mod trusted_host_time_window_reinvocation;
 mod trusted_host_time_window_scheduling;
 #[allow(dead_code)]
 mod trusted_host_wait_handoff;
+
+#[cfg(feature = "trusted-host-application-spi")]
+pub use trusted_host_local_application_spi::{
+    TrustedHostLocalApplicationCancellationHandle,
+    TrustedHostLocalApplicationContinuationStopReason, TrustedHostLocalApplicationEntryStopReason,
+    TrustedHostLocalApplicationOutcome, TrustedHostLocalApplicationSession,
+};
 
 /// Opt-in embedded `SQLite` durable-state backend.
 ///
