@@ -1,10 +1,12 @@
 # Trusted-Host Explicit Local Caller Adoption Plan
 
-Status: implementation complete, pending focused implementation/security
-review. The accepted plan is implemented as one additive crate-private
-operational-entry composition. It does not create automatic scheduling, a
-public owner surface, or a new authority path. See the
-[implementation report](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_CALLER_ADOPTION_REPORT.md).
+Status: implementation and focused implementation/security review complete.
+The accepted plan is implemented as one additive crate-private
+operational-entry composition and accepted with non-blocking follow-ups. It
+does not create automatic scheduling, a public owner surface, or a new
+authority path. See the
+[implementation report](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_CALLER_ADOPTION_REPORT.md)
+and [focused review](../concepts/TRUSTED_HOST_EXPLICIT_LOCAL_CALLER_ADOPTION_REVIEW.md).
 
 ## 1. Executive Summary
 
