@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-08-15.
+Status date: 2026-10-06.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -633,8 +633,15 @@ current queue when they contain historical `next phase` language.
    accepts the corrections with no remaining planning blocker. The next P0
    implementation is limited to the two prerequisite explicit-reinvocation
    proofs: full-composition concurrent callers and transition-to-entry crash
-   recovery. Scheduling models and behavior remain deferred until those proofs
-   are implemented and reviewed.
+   recovery. Those proofs are now implemented in the [prerequisite proofs
+   report](docs/concepts/TRUSTED_HOST_EXPLICIT_REINVOCATION_PREREQUISITE_PROOFS_REPORT.md).
+   The concurrent composition admits one executor entry, leaves the losing
+   caller with one of the bounded fail-closed race rejections and terminal
+   durable posture, and the injected post-transition crash recovers after
+   SQLite reopen through exact replay without reconstructing authority or
+   duplicating entry. The next
+   phase is focused maintainer/security review of these proofs. Scheduling
+   models and behavior remain deferred until that review accepts them.
    Repeated scheduling, provider mutation, OpenShell, nested harnesses,
    automatic approval, public runtime configuration, CLI, SDK, and schema
    exposure remain blocked.

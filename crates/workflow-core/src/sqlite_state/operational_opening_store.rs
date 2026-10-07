@@ -625,7 +625,8 @@ mod tests {
     use super::*;
     use crate::authorized_execution_continuity_state::internal::{
         expected_consume_directive_commitment, trusted_time_observation, window_binding_commitment,
-        AuthorityUseCapability, AuthorizedExecutionContinuityProjectionStore,
+        AuthoritativeContinuationDisposition, AuthorityUseCapability,
+        AuthorizedExecutionContinuityProjectionStore, AuthorizedExecutionContinuityStore,
         ConsumeDirectiveRequest, ConsumeDirectiveResult, ContinuityCursor, ContinuityDirectiveId,
         ContinuityOperationId, ContinuityReceiptId, ContinuityTrustedTimeEpochId,
         ContinuityYieldGenerationId, TrustedTimeSourceKind,
@@ -647,7 +648,8 @@ mod tests {
         TrustedHostRedispatchStopReason,
     };
     use crate::sqlite_state::trusted_host_time_window_reinvocation::{
-        reinvoke_after_time_window_wait, TrustedHostTimeWindowReinvocationInput,
+        reinvoke_after_time_window_wait, reinvoke_after_time_window_wait_with_test_transition_hook,
+        TrustedHostTimeWindowReinvocationInput,
     };
     use crate::sqlite_state::trusted_host_wait_handoff::observe_trusted_host_wait_with_time;
     use crate::trusted_host_supervisor::{
@@ -2734,6 +2736,307 @@ mod tests {
             replay.execution.stop_reason,
             TrustedHostRedispatchStopReason::Terminal
         );
+        assert_eq!(replay.execution.executor_entries, 0);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(replay_identity_provider.calls, 0);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn concurrent_explicit_time_window_reinvocations_enter_executor_at_most_once() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/concurrent-reinvocation", 2);
+        let window_id = capability.window_id.clone();
+        let locator = TrustedHostOperationalEntryLocator {
+            workflow_id: fixture.workflow_id.clone(),
+            run_id: fixture.run_id.clone(),
+            step_id: fixture.step_id.clone(),
+            window_id: window_id.clone(),
+            subject_actor_id: capability.subject_actor_id.clone(),
+            immutable_run_bundle: fixture.bundle.clone(),
+        };
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::seconds(2),
+        );
+        supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &TimeWindowYieldExecutor {
+                condition_version: 1,
+                deadline,
+            },
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/concurrent-reinvocation-yield")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/concurrent-reinvocation-yield")
+                    .expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new("yield/concurrent-reinvocation")
+                        .expect("generation"),
+                ),
+            },
+        })
+        .expect("initial attempt yields");
+        let handoff = observe_trusted_host_wait_with_time(
+            &fixture.backend,
+            &locator,
+            trusted_time_observation(
+                Timestamp::now_utc(),
+                TrustedTimeSourceKind::CoreInjectedClockV1,
+                SpecContentHash::new(super::super::CONTINUITY_CLOCK_PROVENANCE)
+                    .expect("provenance"),
+                ContinuityTrustedTimeEpochId::new(super::super::CONTINUITY_CLOCK_EPOCH)
+                    .expect("epoch"),
+            ),
+        )
+        .expect("handoff observation")
+        .handoff
+        .expect("handoff");
+        std::thread::sleep(std::time::Duration::from_millis(2_100));
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let barrier = Arc::new(Barrier::new(2));
+        let mut workers = Vec::new();
+        for _ in 0..2 {
+            let backend = fixture.backend.clone();
+            let handoff = handoff.clone();
+            let workflow_id = fixture.workflow_id.clone();
+            let run_id = fixture.run_id.clone();
+            let step_id = fixture.step_id.clone();
+            let bundle = fixture.bundle.clone();
+            let window_id = window_id.clone();
+            let input = skill_input(&fixture);
+            let calls = Arc::clone(&calls);
+            let barrier = Arc::clone(&barrier);
+            workers.push(std::thread::spawn(move || {
+                let executor = CountingExecutor { calls: &calls };
+                let mut identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+                barrier.wait();
+                reinvoke_after_time_window_wait(TrustedHostTimeWindowReinvocationInput {
+                    backend: &backend,
+                    handoff,
+                    locator: TrustedHostOperationalEntryLocator {
+                        workflow_id,
+                        run_id,
+                        step_id,
+                        window_id,
+                        subject_actor_id: ActorId::new("agent/opening-test").expect("actor"),
+                        immutable_run_bundle: bundle,
+                    },
+                    condition_id: crate::AuthorizedExecutionWaitConditionId::new(
+                        "wait/supervisor-time-window",
+                    )
+                    .expect("condition"),
+                    condition_version: 1,
+                    operation_id: ContinuityOperationId::new(
+                        "operation/concurrent-explicit-reinvocation-wake",
+                    )
+                    .expect("operation"),
+                    receipt_id: ContinuityReceiptId::new(
+                        "receipt/concurrent-explicit-reinvocation-wake",
+                    )
+                    .expect("receipt"),
+                    executor: &executor,
+                    skill_input: input,
+                    identity_provider: &mut identity_provider,
+                })
+            }));
+        }
+        let outcomes = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("worker"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        let loser = outcomes
+            .iter()
+            .find_map(|outcome| outcome.as_ref().err())
+            .expect("one losing caller");
+        assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+        assert!(matches!(
+            loser.code(),
+            "trusted_host_redispatch.directive_replayed"
+                | "trusted_host_redispatch.attempt_limit_inconsistent"
+        ));
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter_map(|outcome| outcome.as_ref().ok())
+                .map(|outcome| outcome.execution.executor_entries)
+                .sum::<u32>(),
+            1
+        );
+        assert!(outcomes.iter().filter_map(|outcome| outcome.as_ref().ok()).all(
+            |outcome| {
+                matches!(
+                    outcome.wake_status,
+                    crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::Transitioned
+                        | crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::ExactReplay
+                ) && outcome.execution.stop_reason == TrustedHostRedispatchStopReason::Terminal
+            }
+        ));
+        assert_eq!(
+            fixture
+                .backend
+                .continuation_disposition(&window_id)
+                .expect("durable continuation disposition"),
+            AuthoritativeContinuationDisposition::Terminal
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn explicit_time_window_reinvocation_recovers_after_transition_before_entry() {
+        let fixture = Fixture::new();
+        let capability = open_supervisor_attempt(&fixture, "opening/reinvocation-crash", 2);
+        let window_id = capability.window_id.clone();
+        let locator = TrustedHostOperationalEntryLocator {
+            workflow_id: fixture.workflow_id.clone(),
+            run_id: fixture.run_id.clone(),
+            step_id: fixture.step_id.clone(),
+            window_id: window_id.clone(),
+            subject_actor_id: capability.subject_actor_id.clone(),
+            immutable_run_bundle: fixture.bundle.clone(),
+        };
+        let deadline = Timestamp::from_offset_date_time(
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::seconds(2),
+        );
+        supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
+            backend: &fixture.backend,
+            capability: TrustedHostSupervisorAttemptCapability::Opened(capability),
+            executor: &TimeWindowYieldExecutor {
+                condition_version: 1,
+                deadline,
+            },
+            skill_input: skill_input(&fixture),
+            persistence: TrustedHostSupervisorPersistenceInput {
+                operation: ContinuityOperationId::new("operation/reinvocation-crash-yield")
+                    .expect("operation"),
+                receipt: ContinuityReceiptId::new("receipt/reinvocation-crash-yield")
+                    .expect("receipt"),
+                yield_generation: Some(
+                    ContinuityYieldGenerationId::new("yield/reinvocation-crash")
+                        .expect("generation"),
+                ),
+            },
+        })
+        .expect("initial attempt yields");
+        let handoff = observe_trusted_host_wait_with_time(
+            &fixture.backend,
+            &locator,
+            trusted_time_observation(
+                Timestamp::now_utc(),
+                TrustedTimeSourceKind::CoreInjectedClockV1,
+                SpecContentHash::new(super::super::CONTINUITY_CLOCK_PROVENANCE)
+                    .expect("provenance"),
+                ContinuityTrustedTimeEpochId::new(super::super::CONTINUITY_CLOCK_EPOCH)
+                    .expect("epoch"),
+            ),
+        )
+        .expect("handoff observation")
+        .handoff
+        .expect("handoff");
+        std::thread::sleep(std::time::Duration::from_millis(2_100));
+        let calls = AtomicUsize::new(0);
+        let executor = CountingExecutor { calls: &calls };
+        let mut failed_identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+
+        let error = reinvoke_after_time_window_wait_with_test_transition_hook(
+            TrustedHostTimeWindowReinvocationInput {
+                backend: &fixture.backend,
+                handoff: handoff.clone(),
+                locator,
+                condition_id: crate::AuthorizedExecutionWaitConditionId::new(
+                    "wait/supervisor-time-window",
+                )
+                .expect("condition"),
+                condition_version: 1,
+                operation_id: ContinuityOperationId::new("operation/reinvocation-crash-wake")
+                    .expect("operation"),
+                receipt_id: ContinuityReceiptId::new("receipt/reinvocation-crash-wake")
+                    .expect("receipt"),
+                executor: &executor,
+                skill_input: skill_input(&fixture),
+                identity_provider: &mut failed_identity_provider,
+            },
+            || {
+                Err(WorkflowOsError::new(
+                    WorkflowOsErrorKind::Internal,
+                    "trusted_host_time_window_reinvocation.test_transition_to_entry_crash",
+                    "injected transition-to-entry crash",
+                ))
+            },
+        )
+        .expect_err("injected crash must interrupt before entry");
+        assert_eq!(
+            error.code(),
+            "trusted_host_time_window_reinvocation.test_transition_to_entry_crash"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(failed_identity_provider.calls, 0);
+
+        let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen backend");
+        let mut recovery_identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let recovered = reinvoke_after_time_window_wait(TrustedHostTimeWindowReinvocationInput {
+            backend: &reopened,
+            handoff: handoff.clone(),
+            locator: TrustedHostOperationalEntryLocator {
+                workflow_id: fixture.workflow_id.clone(),
+                run_id: fixture.run_id.clone(),
+                step_id: fixture.step_id.clone(),
+                window_id: window_id.clone(),
+                subject_actor_id: ActorId::new("agent/opening-test").expect("actor"),
+                immutable_run_bundle: fixture.bundle.clone(),
+            },
+            condition_id: crate::AuthorizedExecutionWaitConditionId::new(
+                "wait/supervisor-time-window",
+            )
+            .expect("condition"),
+            condition_version: 1,
+            operation_id: ContinuityOperationId::new("operation/reinvocation-crash-wake")
+                .expect("operation"),
+            receipt_id: ContinuityReceiptId::new("receipt/reinvocation-crash-wake")
+                .expect("receipt"),
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            identity_provider: &mut recovery_identity_provider,
+        })
+        .expect("reopened exact replay recovers");
+        assert_eq!(
+            recovered.wake_status,
+            crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::ExactReplay
+        );
+        assert_eq!(recovered.execution.executor_entries, 1);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(recovery_identity_provider.calls, 1);
+
+        let mut replay_identity_provider = DeterministicRedispatchIdentityProvider { calls: 0 };
+        let replay = reinvoke_after_time_window_wait(TrustedHostTimeWindowReinvocationInput {
+            backend: &reopened,
+            handoff,
+            locator: TrustedHostOperationalEntryLocator {
+                workflow_id: fixture.workflow_id.clone(),
+                run_id: fixture.run_id.clone(),
+                step_id: fixture.step_id.clone(),
+                window_id,
+                subject_actor_id: ActorId::new("agent/opening-test").expect("actor"),
+                immutable_run_bundle: fixture.bundle.clone(),
+            },
+            condition_id: crate::AuthorizedExecutionWaitConditionId::new(
+                "wait/supervisor-time-window",
+            )
+            .expect("condition"),
+            condition_version: 1,
+            operation_id: ContinuityOperationId::new("operation/reinvocation-crash-wake")
+                .expect("operation"),
+            receipt_id: ContinuityReceiptId::new("receipt/reinvocation-crash-wake")
+                .expect("receipt"),
+            executor: &executor,
+            skill_input: skill_input(&fixture),
+            identity_provider: &mut replay_identity_provider,
+        })
+        .expect("post-recovery replay");
         assert_eq!(replay.execution.executor_entries, 0);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
         assert_eq!(replay_identity_provider.calls, 0);
