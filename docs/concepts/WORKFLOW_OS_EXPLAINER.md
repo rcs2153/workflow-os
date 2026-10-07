@@ -1,287 +1,351 @@
 # Workflow OS Explainer
 
-Workflow OS starts from a simple idea:
+Workflow OS is a governance kernel for work performed by agents, humans,
+deterministic programs, and external tools.
+
+Its job is not to be the intelligence doing the work. Its job is to make the
+work governable.
 
 ```text
 Agent executes. Workflow OS governs.
 ```
 
-That sentence is the shortest version of the project. It says that the model, coding assistant, human operator, script, or tool may do the work, but Workflow OS should define the governing boundary around that work: what is allowed, what must be checked, what needs approval, what evidence was considered, what happened, what remains incomplete, and what should be handed off next.
+That means an executor can still explore, reason, write code, call a reviewed
+tool, or operate inside a sandbox. Workflow OS establishes the durable contract
+around material actions: identity, immutable inputs, policy, authority,
+required context, checks, approvals, side effects, evidence, event history,
+reporting, and lawful continuation.
 
-Workflow OS is not trying to be another chat interface. It is not trying to be a generic agent swarm. It is not trying to make every model call autonomous. It is a local-first governed workflow kernel for AI-assisted work.
+The project exists because autonomous execution without this contract is hard
+to inspect and harder to improve. A prompt transcript may explain what a model
+said. It does not reliably prove which workflow version ran, what authority was
+current, whether required evidence existed, what side effect occurred, or why
+the next action was allowed.
 
-The bet is that as AI work becomes more common inside companies, the hard part will not be getting a model to take action. The hard part will be knowing which action was authorized, which context was used, which policy gate passed, which approval was required, which evidence supports the output, which side effects were proposed or skipped, and what the next person or workflow can trust.
+## The Engineering Thesis
 
-That is the space Workflow OS is building toward.
+Workflow OS separates three things that agent systems often collapse:
 
-## The Problem It Is Solving
+1. **Execution**: code edits, tool calls, provider requests, analysis, or human
+   work.
+2. **Governance**: validation, policy, authority, approvals, evidence and check
+   obligations, side-effect boundaries, and reporting requirements.
+3. **Orchestration**: deciding when and where an executor gets another turn.
 
-Most AI workflows begin as prompts. Then they become prompt templates. Then they become scripts. Then they become a pile of scripts, tool calls, agent instructions, Slack messages, review notes, CI logs, ticket comments, and half-remembered operating norms.
+Workflow OS is primarily the second layer. It implements some local execution
+and hosted dispatch machinery because governance must be proven against real
+state transitions, but it is not trying to replace the executor or become a
+universal scheduler.
 
-That can work for a demo. It does not scale into governed work.
+This boundary matters. If Workflow OS claimed to govern every internal model
+decision, it would create brittle orchestration and false confidence. Instead,
+it governs the transitions that change durable state, consume authority, expose
+data, invoke tools, create side effects, satisfy gates, or close work.
 
-Once AI work touches real systems, the questions change:
+## The Core Objects
 
-- What was the workflow supposed to do?
-- Which version of the workflow ran?
-- Which step failed?
-- Which approval was required?
-- Who approved it?
-- What evidence did the agent use?
-- Did it copy a secret into a report?
-- Did it write to a provider?
-- Was that write allowed?
-- What did it skip?
-- What should the next operator know?
+### Project
 
-Those questions are not solved by making the model more persuasive. They are solved by turning the work into a governed system.
+A Workflow OS project contains a manifest and versioned definitions for
+workflows, skills, policies, and tests. Rust is the canonical parser and
+validator. The TypeScript package helps author compatible specs; it is not a
+second runtime model.
 
-Workflow OS is the kernel for that governed system.
+### Workflow
 
-## The Core Mental Model
+A workflow is an authored contract for governed work. It identifies ordered
+steps and their skill, policy, approval, retry, escalation, check, and reporting
+requirements.
 
-Workflow OS separates execution from governance.
+A workflow is not the agent's full reasoning graph. The executor can make many
+local decisions inside a step. The workflow captures the boundaries that must
+remain stable and inspectable.
 
-Execution is the messy part. A person edits a file. Codex writes code. Claude drafts a plan. A deterministic local skill validates a project. A read-only adapter pulls repository context. A future write-capable adapter may propose or perform a side effect.
+### Run
 
-Governance is the boundary around that execution. It says:
+A run is one durable execution of one exact workflow definition. It has stable
+identity, state, event history, correlation metadata, and immutable input
+commitments.
 
-- this workflow has an identity;
-- this run has an identity;
-- these steps are allowed;
-- this policy gate must pass;
-- this approval is mandatory;
-- this event happened;
-- this evidence can be cited;
-- this report must disclose what happened and what did not happen.
+The run is not allowed to drift to the newest files on disk. Immutable run
+bundles preserve the workflow and referenced declarations needed to prove what
+was authorized. Approval resume and retry paths reject changed referenced
+definitions rather than silently executing new work under old approval.
 
-The current preview implements the local kernel foundations for that boundary. It can load and validate Workflow OS projects, execute sequential local workflows, persist event-sourced run state, pause and resume approval-gated runs, emit audit and observability records, model evidence references, model work reports, and expose narrow local report APIs.
+### Event log and projection
 
-It also includes read-only adapter contracts and fixture-first GitHub, Jira, and CI/GitHub Actions preview paths. Those adapters are deliberately read-only in the public preview. Write-capable adapters remain future work.
+Meaningful transitions append events. A current snapshot is a projection for
+efficient reads, not an independent source of truth. Backends must reconcile
+snapshot and event history and must reject ambiguous concurrent transitions.
 
-## What A Workflow Is
+Events answer questions such as:
 
-A Workflow OS workflow is an authored unit of governed work.
+- when the run was created and validated;
+- which step was scheduled;
+- which policy decision was recorded;
+- whether approval was requested, granted, or denied;
+- whether a handler was invoked;
+- which side effect was proposed, attempted, completed, failed, denied, or
+  skipped;
+- why the run completed, failed, escalated, canceled, yielded, or waited.
 
-It is not just a prompt. It is not just a script. It is a declared process with steps, policies, capabilities, approval requirements, retry and escalation behavior, validation rules, and run identity.
+### Evidence and report
 
-In the local kernel today, a workflow can run as a sequential multi-step process. Each meaningful transition is recorded as an event. If the workflow reaches an approval gate, execution pauses. A human can approve or deny. The run can be inspected later.
+`EvidenceReference` is a bounded citation, not a payload warehouse. It records
+stable identity, kind, scope, sensitivity, redaction posture, and a safe target.
 
-This matters because the workflow is no longer a vague instruction to an agent. It becomes something with shape.
+`WorkReport` is the governed handoff. It can cite evidence, checks, audit events,
+approvals, policy decisions, side effects, and provider outcomes while
+disclosing incomplete work, limitations, risks, and operator notes. Reports are
+not audit logs and do not replace the event stream; they are a terminal summary
+whose claims point back to durable references.
 
-The kernel can say:
+### Side effect
 
-- this step was scheduled;
-- this policy decision was recorded;
-- this approval was requested;
-- this approval was granted or denied;
-- this skill invocation was requested;
-- this step completed or failed;
-- this run reached a terminal state.
+A `SideEffect` records a material effect boundary independently from the skill
+or provider that caused it. Proposal, authorization linkage, attempt, outcome,
+and report citation are separate facts. This prevents “the tool returned OK”
+from becoming the entire governance model for an external mutation.
 
-That gives AI-assisted work a durable spine.
+## A Governed Run, Step By Step
 
-## Why Local-First Matters
+The following is the conceptual local path. Specific APIs may expose only a
+subset or add stronger gates.
 
-Workflow OS is local-first on purpose.
+### 1. Load
 
-The current preview is not a hosted orchestration platform. It is not a production distributed runtime. It does not require a remote service to understand the kernel. It gives developers and maintainers a way to run governed workflows on a laptop, inspect the state, and build confidence in the model before introducing distributed workers, production databases, or hosted control planes.
+The project loader reads the manifest and declared spec directories. It avoids
+network access and code execution. Source locations are retained for bounded
+diagnostics.
 
-Local-first also makes dogfooding possible. Workflow OS can be used to govern work on Workflow OS itself. The agent or human still edits the repository, but the kernel can validate the dogfood project, run the governed workflow, pause at approval checkpoints, preserve events, and produce report posture.
+### 2. Validate
 
-That is the loop:
+Validation checks schema versions, identifiers, references, policy effects,
+approval requirements, retry bounds, state transitions, local-check
+declarations, and unsupported features. Unknown semantics fail closed.
 
-```text
-Workflow OS governs the build of Workflow OS.
-```
+This is important: a policy file is not decoration. Declared policy effects
+must be understood by validation and the runtime path that claims to enforce
+them. Unsupported effects are rejected rather than treated as meaningful prose.
 
-The project is not claiming full self-hosting. It is proving, phase by phase, that the governance model can be applied to its own development.
+### 3. Freeze authoritative inputs
 
-## What The Kernel Does Today
+Before sensitive execution paths, Workflow OS constructs an immutable run
+bundle from referenced definitions and canonical declaration records. Content
+addressing binds the run to the exact material it was created from.
 
-The public preview includes several important capabilities.
+This closes a classic approval time-of-check/time-of-use gap: editing a
+workflow or skill after approval cannot transparently change what resumes.
 
-It validates projects before execution. Workflow specs, skill specs, policy specs, and project manifests are checked deterministically. Validation diagnostics preserve source locations. Selected validation diagnostics can attach safe `EvidenceReference` values without copying raw spec contents.
+### 4. Create or rehydrate durable state
 
-It runs local workflows. The local executor supports sequential multi-step runs with deterministic state transitions. It can pause for approvals, resume after approval, fail closed on policy denial, retry bounded failures, and escalate when configured.
+The kernel creates a run or loads the existing run by ID. Idempotency records
+prevent duplicate invocation from creating duplicate runs or repeating
+completed effects. Rehydration verifies that stored state remains consistent
+with event history and immutable identity.
 
-It persists local state. Runs are event-sourced. Events are append-only. Snapshots are projections. The event log remains the source of truth. Local state can be inspected and rehydrated.
+### 5. Derive current governance posture
 
-It records governance signals. Audit records and observability records are emitted for meaningful runtime behavior. The goal is not to bury governance in prose, but to preserve structured facts.
+Before a material action, Core can evaluate:
 
-It models evidence. `EvidenceReference` provides a citation substrate: a safe pointer to evidence, not a payload dump. Evidence can point to a spec file, adapter record, validation result, workflow event, audit event, or future evidence types. The design is intentionally conservative about sensitivity and redaction.
+- declared policy and action capability;
+- current authority facts and scoped grants;
+- required context availability;
+- independent check results and assurance;
+- approval requirements and presentation proof;
+- sensitivity and side-effect posture;
+- previous stricter governance decisions.
 
-It models work reports. `WorkReportContract` and `WorkReport` define the future handoff artifact: what work was performed, what evidence was considered, what decisions were made, what approvals and policy gates mattered, what validation ran, what side effects were none/skipped/unsupported, what risks remain, and what the operator should know next. In-memory report helpers exist, and local report artifacts can be explicitly stored, but automatic report generation for every run is not implemented.
+The proportional-governance model derives one of four postures:
 
-It models side effects before enabling writes. The SideEffect core model exists, WorkReport can cite SideEffect IDs, SideEffect workflow event vocabulary exists, proposed/denied/skipped events can be explicitly appended in a local executor path, and explicit SideEffect records can be stored locally. Runtime side-effect execution, provider mutation, write-capable adapters, and automatic discovery remain unimplemented.
+- **quiet capture**: proceed and record evidence without interruption;
+- **visible disclosure**: proceed, but surface a bounded disclosure;
+- **blocking approval**: do not proceed until a valid approval is recorded;
+- **denial**: prohibit the action.
 
-That boundary is the point. The project is building the vocabulary and safety rails before opening mutation.
+The decision is monotonic: a weaker later assessment cannot silently relax a
+stricter prior requirement.
 
-## What It Does Not Do Yet
+Visible disclosure is represented separately from quiet capture because it is
+an auditable delivery obligation, not merely a UI preference. A future UI may
+render both in one stream, but the kernel must still know whether disclosure was
+required and whether the target surface accepted it.
 
-Workflow OS is intentionally honest about what it does not do.
+### 6. Present and decide approval
 
-It does not provide production distributed execution. It does not provide a hosted service. It does not provide a UI. It does not provide write-capable GitHub, Jira, CI, or provider adapters. It does not automatically execute arbitrary local commands. It does not silently register local check handlers. It does not run recursive agents or agent swarms. It does not enable Level 3 or Level 4 autonomy by default.
+An approval request can be bound to a durable presentation record containing
+the concrete scope, non-goals, touched surfaces, expected validation, and next
+action. The decision path can require proof that the exact presentation was
+delivered recently enough and matches the approval being decided.
 
-It also does not replace deterministic governance with model self-review.
+Approval is not authority by itself. It is one input into an authorized path.
+Current policy, capability, context, checks, immutable run identity, and
+side-effect constraints may still block execution.
 
-That last point matters. A model saying "this looks good" is not a policy gate. A model saying "I reviewed my own work" is not an approval. A natural-language summary is not an audit record. A copied log is not a safe evidence reference.
+### 7. Invoke one explicit execution boundary
 
-Workflow OS is built around the opposite posture: typed state, deterministic validation, explicit approval, bounded evidence, and reportable handoffs.
+The local executor resolves an explicitly registered handler. No handler means
+no execution. Fixed local-check profiles bind a reviewed command contract and
+side-effect allowance; they do not open a generic shell escape hatch.
 
-## The Governed Work Pattern
+External integrations go through adapters or provider interfaces. The kernel
+evaluates the preconditions, the provider performs the external operation, and
+Core reconciles the provider outcome into durable state. Uncertainty after a
+provider call is represented as uncertainty, not blindly retried.
 
-The larger architecture is called the Governed Work Pattern.
+### 8. Record outcome and report
 
-It describes a disciplined loop for serious AI-assisted work:
+Core appends the resulting events, stores bounded references, reconciles the
+run state, and, on explicit report paths, produces a WorkReport. Artifact gates
+can require that cited SideEffects, approval proof markers, and authority
+receipts exist and match before a report artifact is written.
 
-1. Read required context.
-2. Respect explicit product and policy boundaries.
-3. Make scoped changes or recommendations.
-4. Run validation and quality gates.
-5. Preserve evidence.
-6. Require approval for sensitive or irreversible actions.
-7. Produce a structured work report.
-8. Disclose incomplete, deferred, skipped, or uncertain work.
+Report failure does not rewrite historical workflow success or failure. It is a
+separate outcome that must be disclosed.
 
-This pattern applies to software engineering, but it is not limited to software engineering.
+## Authority Is Not A Boolean
 
-A product marketing workflow might read roadmap facts, launch constraints, customer evidence, and product decisions, then produce narrative drafts without constantly asking engineering for status.
+Workflow OS deliberately avoids a single `approved = true` concept.
 
-A security workflow might triage alerts, cite evidence, classify risk, escalate ambiguous findings, and preserve what was not remediated.
+Authority is composed from exact facts:
 
-A legal workflow might review contract language against policy, cite source clauses, flag ambiguous obligations, and require approval before anything leaves the company.
+- actor and system-actor identity;
+- project, workflow, run, step, and harness scope;
+- capability and resource scope;
+- issuance, expiration, and revocation posture;
+- immutable bundle and current event cursor;
+- policy and approval commitments;
+- sensitivity limits;
+- required context and check evidence.
 
-A finance workflow might reconcile exception evidence, apply approval thresholds, preserve audit context, and produce a decision packet.
+The capability model can resolve whether one requested action has an exact
+active grant. The current-authority source model can bind a fresh external or
+durable authority snapshot. Step-scoped projections expose only capabilities
+that remain authorized for that exact step.
 
-In each case, the value is not that an AI can write words. The value is that the work is governed.
+These models do not create credentials or magically constrain an unrelated
+agent process. Enforcement exists only where an execution path consumes them
+before the protected action.
 
-## Harnesses, Agents, And Tools
+## Continuation: The Kernel, Not The Conversation, Chooses Next
 
-Workflow OS uses the word "harness" carefully.
+Long-running agent work exposed a second control-plane problem: a model can end
+a turn, lose context, or resume from a stale summary even while lawful work
+remains.
 
-A harness is a bounded execution envelope. It is not synonymous with an agent.
+Workflow OS therefore distinguishes:
 
-A harness may contain:
+- workflow lifecycle state;
+- authority state;
+- execution-window state;
+- executor yield;
+- genuine wait conditions;
+- resume directives and attempt outcomes.
 
-- a model or coding agent;
-- deterministic code;
-- a local skill;
-- read-only tools;
-- future write-capable tools;
-- policy checks;
-- validation;
-- human approval;
-- typed handoff requirements.
+An executor turn ending is not workflow completion. If work can continue, the
+kernel may project a resume disposition. If work genuinely cannot continue, it
+must persist an exact typed wait or blocked condition.
 
-This distinction matters because the future is not simply "agents managing agents." The more useful direction is governed execution envelopes that can be composed safely.
+The local CLI exposes a read-only `next-action` preview. Deeper continuity work
+uses atomic SQLite operations for opening execution windows, registering yields
+and waits, satisfying typed wake conditions, consuming one-winner directives,
+starting attempts, and reconciling outcomes. The trusted-host caller and
+supervisor work remains private and narrowly reviewed while the boundary
+hardens. Workflow OS does not yet claim to be a production scheduler that can
+create model turns by itself.
 
-That future direction is captured as Composable Harness Contracts. A composable harness contract should eventually define the harness name, purpose, allowed inputs, required context, allowed tools, allowed side effects, output schema, evidence requirements, approval policy, timeout and retry policy, failure semantics, and handoff requirements.
+## State Backends
 
-The core model exists as vocabulary and validation. Runtime nested harness execution does not exist yet.
+The repository contains several state postures with different claims:
 
-That is deliberate. Nested harnesses are powerful, but they are dangerous if introduced before identity, durable state, evidence, policy gates, approval, typed handoffs, scoped authority, validation, and final work reports are stable.
+- **Local filesystem** supports the ordinary local preview and inspectable
+  event history. It does not claim every atomic continuity capability.
+- **SQLite** is used for explicit migration/activation and the atomic local
+  continuity implementation.
+- **PostgreSQL** implements the shared-state milestone and supports the hosted
+  alpha's fenced work claims, receipts, terminal projections, and recovery.
 
-## The Role Of Hooks
+Backend capability is explicit. A backend cannot advertise an atomic operation
+merely because it can store the same fields.
 
-The current agent scaffold is useful for orientation. It tells Codex, Claude Code, or another coding agent how to behave in a Workflow OS repository. It makes the operating model easy to adopt:
+## Hosted And Sandbox Execution
 
-```text
-Agent executes. Workflow OS governs.
-```
+The hosted crate is a single-tenant alpha, not Workflow OS Cloud. It provides an
+authenticated API and stateless worker around PostgreSQL, one project trust
+domain, Core-owned dispatch, provider outcome reconciliation, and terminal
+report persistence.
 
-But instructions are not enforcement.
+The optional OpenShell integration follows the same separation of concerns:
 
-The next maturity layer is hook infrastructure: deterministic, named checkpoints that the harness invokes before or after important phases of work. Hooks should make governance less dependent on an agent remembering prose instructions.
+- Workflow OS decides the governed request and required evidence;
+- OpenShell supplies a sandbox and enforces runtime filesystem, process, and
+  network policy;
+- Workflow OS records bounded sandbox identity, policy, outcome, log, denied
+  action, telemetry, and artifact references.
 
-Workflow OS has already implemented hook contract vocabulary, in-memory hook invocation helper models, hook disclosure models, and selected executor hook checkpoint behavior. Runtime hook execution is still carefully bounded and explicit. Hooks do not silently enable command execution, workflow runs, approvals, local checks, writes, hosted behavior, recursive agents, agent swarms, or higher autonomy.
+The current OpenShell provider is no-write and injected. The pinned CLI
+compatibility layer can inspect lifecycle and effective policy but does not yet
+provide all observations required by the full provider contract.
 
-Hooks are part of the move from "please remember the rules" to "the harness invokes the checkpoint."
+## Why YAML Exists, And Why YAML Is Not The Product
 
-## The Work Report
+YAML is the portable authoring format for project and workflow contracts. It is
+useful because definitions can be versioned, reviewed, validated, and hashed.
 
-The work report is one of the most important ideas in Workflow OS.
+But users should not have to design every workflow manually. The current
+onboarding path can inspect safe repository metadata, disclose governance gaps,
+recommend workflow candidates, and author inactive drafts. Promotion remains
+explicit: recommendation, draft, preflight, steward review, and catalog
+promotion are distinct steps.
 
-It is not a marketing summary. It is not an audit log. It is not a transcript. It is a governed handoff artifact.
+The long-term direction is governed workflow discovery and evolution from
+observed work records, not uncontrolled workflow synthesis. Suggested changes
+must not become active authority merely because an agent generated them.
 
-A good work report should answer:
+## What The Current Product Proves
 
-- what work was performed;
-- what evidence was considered;
-- what decisions were made;
-- which policy gates were evaluated;
-- which approvals were requested, granted, or denied;
-- which validation and quality checks ran;
-- which side effects were none, skipped, unsupported, denied, proposed, or eventually completed;
-- what remains incomplete or deferred;
-- what limitations and risks remain;
-- what the next operator should know.
+The repository proves that these concepts can be composed in a real kernel:
 
-The report should cite stable references rather than copying raw payloads. It should be bounded and redacted. It should be useful to a person, but grounded in structured state.
+- a run can be tied to immutable definitions;
+- approval can be paused, persisted, proven as presented, and resumed safely;
+- policy and independent checks can fail closed before execution;
+- local and hosted work can leave ordered durable history;
+- external write attempts can be modeled and reconciled without granting broad
+  provider authority;
+- evidence and reports can cite bounded references instead of copying secrets;
+- the lawful next action can be derived from durable state rather than model
+  memory.
 
-This is how Workflow OS starts to turn AI work into something that can be handed from one person, harness, team, or workflow to another without losing the plot.
+That is more than a schema library, but less than a turnkey enterprise agent
+platform.
 
-## Why This Is Different From A Task Runner
+## What Remains
 
-A normal task runner can run commands.
+The largest unfinished product work is not another vocabulary layer. It is
+broadening runtime composition without weakening the invariants:
 
-Workflow OS is trying to answer a different question: under what governance boundary should work proceed?
+- complete trusted-host continuation and redispatch;
+- independent execution evidence and attestations;
+- production-quality handler and sandbox integration;
+- broader provider mutations only after authority and outcome reconciliation
+  are proven;
+- nested harness execution through scoped contracts and typed handoffs;
+- enterprise identity, stewardship, policy administration, and multi-tenancy;
+- an operator experience for quiet evidence, visible disclosures, approvals,
+  workflow evolution, and reports;
+- Reasoning Lineage after evidence, report, and harness boundaries are stable.
 
-That means the important pieces are not only execution steps. They are identity, policy, approval, audit, evidence, reportability, and side-effect boundaries.
+## The Practical Test
 
-The kernel cares about questions like:
+For any claimed Workflow OS capability, ask four questions:
 
-- Is this workflow version the same one that started the run?
-- Did this run mutate after reaching a terminal state?
-- Was this approval requested before the gated step?
-- Did a duplicate run ID cause duplicated side effects?
-- Did report generation failure change the workflow result?
-- Did a citation fabricate evidence?
-- Did debug output leak a token-like value?
-- Did a future write path get modeled before authority was explicit?
+1. Which exact path enforces it?
+2. Which durable record proves it happened?
+3. What fails closed when the proof is missing, stale, or ambiguous?
+4. Is this available through a real handler/provider path, or only represented
+   as a model or helper?
 
-These are governance questions. They are why Workflow OS is a kernel, not just a wrapper around commands.
+If those questions do not have concrete answers, the capability is roadmap
+language, not runtime truth.
 
-## A Concrete Example
-
-Imagine a team using Workflow OS to govern an AI-assisted software change.
-
-The workflow starts by validating the project and reading the relevant engineering standard. It runs a planning step. The plan requires approval before implementation. After approval, an agent edits the repository. The workflow records that the implementation step happened. Local checks run through explicit handlers where they exist. A review step captures findings. A final work report cites validation, local check results, relevant evidence references, hook disclosures, typed handoffs, and any side-effect records.
-
-The agent still writes the code. The human still approves sensitive checkpoints. The local machine still runs the tools.
-
-Workflow OS governs the shape of the work.
-
-Now imagine the same pattern in a product narrative workflow. A PMM wants launch messaging based on product, engineering, and design facts. The workflow declares required context, reads allowed sources, cites evidence, flags missing roadmap facts, separates claims from assumptions, requires approval before external-facing language, and produces a report that explains what was used and what remains uncertain.
-
-That is the broader point. Workflow OS is not only for code. It is for governed work.
-
-## Roadmap Direction
-
-The roadmap is intentionally phased.
-
-The project first builds the local deterministic kernel: specs, validation, local execution, durable state, policy, approvals, audit, and inspection.
-
-Then it adds governed workflow depth: multi-step execution, evidence references, work reports, hook checkpoints, typed handoffs, side-effect modeling, and local check handlers.
-
-Then it can move toward more serious capabilities: side-effect discovery, write-capable adapters, stronger approval models, composable harness contracts, nested harness execution patterns, and eventually reasoning lineage or claim graph concepts.
-
-The ordering matters. If writes come before side-effect authority, the system becomes unsafe. If nested harnesses come before typed handoffs, context drifts. If model review replaces deterministic gates, governance becomes theater. If reports copy raw payloads, privacy and security degrade.
-
-Workflow OS is trying to build the boring substrate first so the powerful things can be added without pretending.
-
-## The Short Version
-
-Workflow OS is a local-first governed workflow kernel for AI-assisted work.
-
-It helps define the work, validate the work, run bounded local workflows, pause for approvals, preserve event history, cite evidence, model reports, and prepare for safe side-effect handling.
-
-It is not an agent swarm, not a hosted automation platform, not a production distributed runtime, and not a write-capable adapter framework yet.
-
-Its opinion is simple:
-
-AI execution is becoming easy.
-
-Governed execution is the hard part.
-
-Workflow OS is building the governed substrate.
+That standard is the point of Workflow OS.
