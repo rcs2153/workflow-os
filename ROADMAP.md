@@ -1062,14 +1062,17 @@ current queue when they contain historical `next phase` language.
    now proves approval wait, unsupported-topology rejection, actor and
    correlation replay rejection, resolved-executable substitution rejection,
    incompatible SQLite rejection, bounded non-leaking failures, and unchanged
-   exact replay. The hardening also closes a discovered executor-binding gap by
-   committing the exact resolved process boundary privately in addition to the
-   logical command contract. Policy-denial and pre-entry cancellation remain
+   exact replay. The focused security review found that the first resolved
+   process commitment used lossy path text and did not bind same-path
+   executable replacement. The governed blocker fix now commits exact encoded
+   path bytes plus a streaming executable content identity and revalidates that
+   identity before request construction. Policy-denial and pre-entry cancellation remain
    lower-level proofs because the foreground binary exposes no injection seam
    for either posture. See the [hardening
    report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_REPORT.md).
    Broader profiles and runtime surfaces remain blocked pending focused
-   review.
+   blocker-fix review. See the [review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_REVIEW.md)
+   and [blocker-fix report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_BLOCKER_FIX_REPORT.md).
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

@@ -19,7 +19,6 @@ struct Fixture {
     root: PathBuf,
     database: PathBuf,
     npm: PathBuf,
-    alternate_npm: PathBuf,
 }
 
 impl Fixture {
@@ -35,19 +34,10 @@ impl Fixture {
         let mut permissions = fs::metadata(&npm).expect("fake npm metadata").permissions();
         permissions.set_mode(0o700);
         fs::set_permissions(&npm, permissions).expect("fake npm executable");
-        let alternate_npm = root.join("alternate-npm");
-        fs::write(&alternate_npm, "#!/bin/sh\nexit 0\n").expect("alternate fake npm");
-        let mut alternate_permissions = fs::metadata(&alternate_npm)
-            .expect("alternate fake npm metadata")
-            .permissions();
-        alternate_permissions.set_mode(0o700);
-        fs::set_permissions(&alternate_npm, alternate_permissions)
-            .expect("alternate fake npm executable");
         Self {
             id,
             database: root.join("state.sqlite3"),
             npm,
-            alternate_npm,
             root,
         }
     }
@@ -286,7 +276,7 @@ fn foreground_binary_rejects_replay_identity_substitution_without_leakage() {
 }
 
 #[test]
-fn foreground_binary_rejects_command_contract_substitution() {
+fn foreground_binary_rejects_same_path_executable_replacement() {
     let fixture = Fixture::new();
     let repository_root = repository_root();
     let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
@@ -309,6 +299,9 @@ fn foreground_binary_rejects_command_contract_substitution() {
     });
     assert!(initial.status.success());
 
+    fs::write(&fixture.npm, "#!/bin/sh\n# changed executable\nexit 0\n")
+        .expect("replace fake npm contents");
+
     let substituted = invoke_foreground_with(ForegroundInvocation {
         fixture: &fixture,
         repository_root: &repository_root,
@@ -321,10 +314,10 @@ fn foreground_binary_rejects_command_contract_substitution() {
         expires_at: &expires_at,
         actor: "system/local-host-command-test",
         correlation_id: "correlation-local-host-command-test",
-        npm_executable: &fixture.alternate_npm,
+        npm_executable: &fixture.npm,
     });
     assert!(!substituted.status.success());
-    assert_bounded_failure(&substituted, "alternate-npm");
+    assert_bounded_failure(&substituted, "changed executable");
 }
 
 #[test]

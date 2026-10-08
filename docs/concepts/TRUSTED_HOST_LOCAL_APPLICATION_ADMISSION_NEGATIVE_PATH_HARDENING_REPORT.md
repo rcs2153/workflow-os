@@ -52,16 +52,19 @@ paths with the same logical contract produced the same executor commitment.
 `ResolvedExplicitLocalCheckProfile::resolved_execution_fingerprint` now builds
 a domain-separated private commitment over:
 
-- the exact executable path;
+- the exact executable path bytes;
+- a streaming SHA-256 identity of the resolved executable contents;
 - the fixed argument vector;
 - the exact working directory;
 - the sanitized environment names and values; and
 - the timeout.
 
-The trusted-host executor commitment combines this digest with the existing
-logical command-contract fingerprint and skill identity. Raw paths and
-environment values are not serialized, displayed, included in errors, or
-placed in reports.
+Each resolved handler retains the executable content identity established at
+construction and revalidates it immediately before building a process request.
+The trusted-host executor commitment combines the complete resolved digest
+with the existing logical command-contract fingerprint and skill identity.
+Raw paths, executable bytes, content digests, and environment values are not
+serialized, displayed, included in errors, or placed in reports.
 
 ## 5. Application Proofs
 
@@ -73,8 +76,8 @@ The focused binary suite now proves:
   failure category and no run events;
 - changed actor and correlation values fail closed, do not append events, and
   are absent from output;
-- a changed resolved executable fails closed even when the logical docs-check
-  contract is unchanged;
+- same-path executable replacement fails closed even when the logical
+  docs-check contract is unchanged;
 - invalid SQLite bytes yield only `state.unavailable`, without the database
   path; and
 - the established success case still executes once and replays idempotently.

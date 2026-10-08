@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
@@ -8,6 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Deserializer, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{
     EventId, HarnessContractId, HarnessContractVersion, RedactionMetadata,
@@ -1157,6 +1160,7 @@ impl SkillHandler for TestOnlyWorkflowOsValidateDogfoodHandler {
 pub struct DocsCheckLocalHandler {
     contract: LocalCheckCommandContract,
     npm_executable: PathBuf,
+    executable_content_hash: crate::SpecContentHash,
     repository_root: PathBuf,
     npm_cache_directory: Option<PathBuf>,
     process_runner: Arc<dyn LocalCheckProcessRunner>,
@@ -1256,9 +1260,12 @@ impl DocsCheckLocalHandler {
 
         let _ = docs_check_environment(&npm_executable, npm_cache_directory.as_deref())?;
 
+        let executable_content_hash = executable_content_hash(&npm_executable)?;
+
         Ok(Self {
             contract,
             npm_executable,
+            executable_content_hash,
             repository_root,
             npm_cache_directory,
             process_runner,
@@ -1273,6 +1280,7 @@ impl DocsCheckLocalHandler {
         &self,
     ) -> Result<LocalCheckProcessRequest, WorkflowOsError> {
         self.contract.validate()?;
+        validate_executable_content_hash(&self.npm_executable, &self.executable_content_hash)?;
         LocalCheckProcessRequest::new(
             self.npm_executable.clone(),
             self.contract.arguments().to_vec(),
@@ -1296,6 +1304,7 @@ impl fmt::Debug for DocsCheckLocalHandler {
             .debug_struct("DocsCheckLocalHandler")
             .field("command_kind", &self.contract.command_kind())
             .field("npm_executable", &"[REDACTED]")
+            .field("executable_content_hash", &"[REDACTED]")
             .field("repository_root", &"[REDACTED]")
             .field("npm_cache_directory", &"[REDACTED]")
             .field("process_runner", &"[REDACTED]")
@@ -1317,6 +1326,8 @@ pub(crate) trait AuthoritativeLocalCheckHandler: fmt::Debug {
     fn contract(&self) -> &LocalCheckCommandContract;
     fn skill_id(&self) -> &'static str;
     fn skill_version(&self) -> &'static str;
+    #[cfg(feature = "trusted-host-application-spi")]
+    fn executable_content_hash(&self) -> &crate::SpecContentHash;
     fn build_process_request(&self) -> Result<LocalCheckProcessRequest, WorkflowOsError>;
     fn run_process(
         &self,
@@ -1335,6 +1346,11 @@ impl AuthoritativeLocalCheckHandler for DocsCheckLocalHandler {
 
     fn skill_version(&self) -> &'static str {
         "v0"
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    fn executable_content_hash(&self) -> &crate::SpecContentHash {
+        &self.executable_content_hash
     }
 
     fn build_process_request(&self) -> Result<LocalCheckProcessRequest, WorkflowOsError> {
@@ -1504,6 +1520,7 @@ impl ExplicitLocalCheckProfileSelection {
 pub struct WorkflowOsProjectValidationLocalHandler {
     contract: LocalCheckCommandContract,
     workflow_os_binary: PathBuf,
+    executable_content_hash: crate::SpecContentHash,
     project_root: PathBuf,
     process_runner: Arc<dyn LocalCheckProcessRunner>,
 }
@@ -1563,9 +1580,12 @@ impl WorkflowOsProjectValidationLocalHandler {
             ));
         }
 
+        let executable_content_hash = executable_content_hash(&workflow_os_binary)?;
+
         Ok(Self {
             contract,
             workflow_os_binary,
+            executable_content_hash,
             project_root,
             process_runner,
         })
@@ -1579,6 +1599,7 @@ impl WorkflowOsProjectValidationLocalHandler {
         &self,
     ) -> Result<LocalCheckProcessRequest, WorkflowOsError> {
         self.contract.validate()?;
+        validate_executable_content_hash(&self.workflow_os_binary, &self.executable_content_hash)?;
         LocalCheckProcessRequest::new(
             self.workflow_os_binary.clone(),
             self.contract.arguments().to_vec(),
@@ -1602,6 +1623,7 @@ impl fmt::Debug for WorkflowOsProjectValidationLocalHandler {
             .debug_struct("WorkflowOsProjectValidationLocalHandler")
             .field("command_kind", &self.contract.command_kind())
             .field("workflow_os_binary", &"[REDACTED]")
+            .field("executable_content_hash", &"[REDACTED]")
             .field("project_root", &"[REDACTED]")
             .field("process_runner", &"[REDACTED]")
             .finish()
@@ -1628,6 +1650,11 @@ impl AuthoritativeLocalCheckHandler for WorkflowOsProjectValidationLocalHandler 
 
     fn skill_version(&self) -> &'static str {
         "v0"
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    fn executable_content_hash(&self) -> &crate::SpecContentHash {
+        &self.executable_content_hash
     }
 
     fn build_process_request(&self) -> Result<LocalCheckProcessRequest, WorkflowOsError> {
@@ -1761,34 +1788,46 @@ impl ResolvedExplicitLocalCheckProfile {
     /// arguments, and timeout. Only the digest crosses the trusted-host
     /// admission boundary; raw local paths and environment values remain
     /// private.
+    #[cfg(feature = "trusted-host-application-spi")]
     pub(crate) fn resolved_execution_fingerprint(
         &self,
     ) -> Result<crate::SpecContentHash, WorkflowOsError> {
-        let request = self.handler.authoritative().build_process_request()?;
-        let mut material = String::from("workflow-os/resolved-local-check-execution/v1\n");
-        append_private_commitment_field(
-            &mut material,
-            "executable",
-            request.executable().to_string_lossy().as_ref(),
+        let handler = self.handler.authoritative();
+        let request = handler.build_process_request()?;
+        let mut hasher = Sha256::new();
+        hash_private_commitment_field(
+            &mut hasher,
+            b"domain",
+            b"workflow-os/resolved-local-check-execution/v2",
+        );
+        hash_private_commitment_field(
+            &mut hasher,
+            b"executable",
+            request.executable().as_os_str().as_encoded_bytes(),
         );
         for argument in request.arguments() {
-            append_private_commitment_field(&mut material, "argument", argument);
+            hash_private_commitment_field(&mut hasher, b"argument", argument.as_bytes());
         }
-        append_private_commitment_field(
-            &mut material,
-            "working_directory",
-            request.working_directory().to_string_lossy().as_ref(),
+        hash_private_commitment_field(
+            &mut hasher,
+            b"working_directory",
+            request.working_directory().as_os_str().as_encoded_bytes(),
         );
         for (name, value) in request.environment() {
-            append_private_commitment_field(&mut material, "environment_name", name);
-            append_private_commitment_field(&mut material, "environment_value", value);
+            hash_private_commitment_field(&mut hasher, b"environment_name", name.as_bytes());
+            hash_private_commitment_field(&mut hasher, b"environment_value", value.as_bytes());
         }
-        append_private_commitment_field(
-            &mut material,
-            "timeout_millis",
-            &request.timeout().as_millis().to_string(),
+        hash_private_commitment_field(
+            &mut hasher,
+            b"timeout_millis",
+            &request.timeout().as_millis().to_be_bytes(),
         );
-        Ok(crate::SpecContentHash::from_text(&material))
+        hash_private_commitment_field(
+            &mut hasher,
+            b"executable_content_hash",
+            handler.executable_content_hash().as_str().as_bytes(),
+        );
+        Ok(crate::SpecContentHash::from_bytes(hasher.finalize()))
     }
 
     /// Executes the resolved closed-profile check exactly once.
@@ -1823,12 +1862,52 @@ impl ResolvedExplicitLocalCheckProfile {
     }
 }
 
-fn append_private_commitment_field(material: &mut String, name: &str, value: &str) {
-    use std::fmt::Write as _;
+#[cfg(any(feature = "trusted-host-application-spi", test))]
+fn hash_private_commitment_field(hasher: &mut Sha256, name: &[u8], value: &[u8]) {
+    hasher.update((name.len() as u64).to_be_bytes());
+    hasher.update(name);
+    hasher.update((value.len() as u64).to_be_bytes());
+    hasher.update(value);
+}
 
-    let _ = writeln!(material, "{}:{}:{}", name.len(), name, value.len());
-    material.push_str(value);
-    material.push('\n');
+fn executable_content_hash(path: &Path) -> Result<crate::SpecContentHash, WorkflowOsError> {
+    let mut file = File::open(path).map_err(|_| {
+        local_check_error(
+            WorkflowOsErrorKind::Security,
+            "local_check.profile.handler.executable_identity_unavailable",
+            "local check executable identity is unavailable",
+        )
+    })?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let count = file.read(&mut buffer).map_err(|_| {
+            local_check_error(
+                WorkflowOsErrorKind::Security,
+                "local_check.profile.handler.executable_identity_unavailable",
+                "local check executable identity is unavailable",
+            )
+        })?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(crate::SpecContentHash::from_bytes(hasher.finalize()))
+}
+
+fn validate_executable_content_hash(
+    path: &Path,
+    expected: &crate::SpecContentHash,
+) -> Result<(), WorkflowOsError> {
+    if &executable_content_hash(path)? != expected {
+        return Err(local_check_error(
+            WorkflowOsErrorKind::Security,
+            "local_check.profile.handler.executable_identity_changed",
+            "local check executable identity changed after resolution",
+        ));
+    }
+    Ok(())
 }
 
 impl fmt::Debug for ResolvedExplicitLocalCheckProfile {
@@ -3206,5 +3285,32 @@ mod explicit_zero_required_context_tests {
 
         assert!(contract.is_explicit_none());
         assert!(contract.requirements().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_commitment_preserves_non_utf8_path_bytes() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let left = PathBuf::from(OsString::from_vec(vec![b'/', b't', b'm', b'p', b'/', 0x80]));
+        let right = PathBuf::from(OsString::from_vec(vec![b'/', b't', b'm', b'p', b'/', 0x81]));
+        let mut left_hasher = Sha256::new();
+        let mut right_hasher = Sha256::new();
+        hash_private_commitment_field(
+            &mut left_hasher,
+            b"path",
+            left.as_os_str().as_encoded_bytes(),
+        );
+        hash_private_commitment_field(
+            &mut right_hasher,
+            b"path",
+            right.as_os_str().as_encoded_bytes(),
+        );
+
+        assert_ne!(
+            crate::SpecContentHash::from_bytes(left_hasher.finalize()),
+            crate::SpecContentHash::from_bytes(right_hasher.finalize())
+        );
     }
 }
