@@ -1754,6 +1754,43 @@ impl ResolvedExplicitLocalCheckProfile {
             .clone()])
     }
 
+    /// Computes a private commitment to the exact resolved process boundary.
+    ///
+    /// Unlike the public command-contract fingerprint, this commitment binds
+    /// the selected executable, working directory, sanitized environment,
+    /// arguments, and timeout. Only the digest crosses the trusted-host
+    /// admission boundary; raw local paths and environment values remain
+    /// private.
+    pub(crate) fn resolved_execution_fingerprint(
+        &self,
+    ) -> Result<crate::SpecContentHash, WorkflowOsError> {
+        let request = self.handler.authoritative().build_process_request()?;
+        let mut material = String::from("workflow-os/resolved-local-check-execution/v1\n");
+        append_private_commitment_field(
+            &mut material,
+            "executable",
+            request.executable().to_string_lossy().as_ref(),
+        );
+        for argument in request.arguments() {
+            append_private_commitment_field(&mut material, "argument", argument);
+        }
+        append_private_commitment_field(
+            &mut material,
+            "working_directory",
+            request.working_directory().to_string_lossy().as_ref(),
+        );
+        for (name, value) in request.environment() {
+            append_private_commitment_field(&mut material, "environment_name", name);
+            append_private_commitment_field(&mut material, "environment_value", value);
+        }
+        append_private_commitment_field(
+            &mut material,
+            "timeout_millis",
+            &request.timeout().as_millis().to_string(),
+        );
+        Ok(crate::SpecContentHash::from_text(&material))
+    }
+
     /// Executes the resolved closed-profile check exactly once.
     ///
     /// This method does not discover commands, accept caller-supplied
@@ -1784,6 +1821,14 @@ impl ResolvedExplicitLocalCheckProfile {
     pub(crate) fn into_handler(self) -> Box<dyn SkillHandler> {
         self.handler.into_skill_handler()
     }
+}
+
+fn append_private_commitment_field(material: &mut String, name: &str, value: &str) {
+    use std::fmt::Write as _;
+
+    let _ = writeln!(material, "{}:{}:{}", name.len(), name, value.len());
+    material.push_str(value);
+    material.push('\n');
 }
 
 impl fmt::Debug for ResolvedExplicitLocalCheckProfile {

@@ -1056,10 +1056,20 @@ current queue when they contain historical `next phase` language.
    report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_IMPLEMENTATION_REPORT.md).
    The focused [implementation/security
    review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_IMPLEMENTATION_REVIEW.md)
-   accepts the unpublished docs-check slice with non-blocking follow-ups. The
-   next phase is bounded application-boundary negative-path proof hardening
-   for the existing slice. Broader profiles and runtime surfaces remain
-   blocked.
+   accepts the unpublished docs-check slice with non-blocking follow-ups.
+   Bounded application-boundary negative-path proof hardening is now
+   implemented for the existing slice. The real unpublished foreground binary
+   now proves approval wait, unsupported-topology rejection, actor and
+   correlation replay rejection, resolved-executable substitution rejection,
+   incompatible SQLite rejection, bounded non-leaking failures, and unchanged
+   exact replay. The hardening also closes a discovered executor-binding gap by
+   committing the exact resolved process boundary privately in addition to the
+   logical command contract. Policy-denial and pre-entry cancellation remain
+   lower-level proofs because the foreground binary exposes no injection seam
+   for either posture. See the [hardening
+   report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_REPORT.md).
+   Broader profiles and runtime surfaces remain blocked pending focused
+   review.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.
