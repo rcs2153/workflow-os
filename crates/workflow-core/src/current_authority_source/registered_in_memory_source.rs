@@ -29,8 +29,9 @@ use crate::{
     RequiredContextConsumptionContext, RequiredContextConsumptionInput,
     RequiredContextConsumptionPosture, RequiredContextContractBinding,
     RequiredContextExecutionBinding, RequiredContextObligation, RequiredContextRequirementId,
-    SpecContentHash, StepId, Timestamp, WorkReportArtifactStore, WorkReportId,
-    WorkReportSensitivity, WorkReportStatus, WorkflowId, WorkflowOsError, WorkflowRunId,
+    ResolvedExplicitLocalCheckProfile, SpecContentHash, StepId, Timestamp, WorkReportArtifactStore,
+    WorkReportId, WorkReportSensitivity, WorkReportStatus, WorkflowId, WorkflowOsError,
+    WorkflowRunId,
 };
 
 const REGISTERED_FACT_FAMILIES: [CurrentAuthorityFactFamily; 3] = [
@@ -51,6 +52,19 @@ pub(super) struct RegisteredInMemoryCurrentAuthoritySourceInput {
     pub(super) complete_grant_inventory: Vec<CapabilityGrant>,
     pub(super) complete_availability_inventory: Vec<CapabilityAvailabilityRecord>,
     pub(super) complete_context_reference_inventory: Vec<GovernedContextReference>,
+}
+
+pub(crate) struct RegisteredExplicitZeroDocsCheckSourceInput<'a> {
+    pub(crate) source_id: CurrentAuthoritySourceId,
+    pub(crate) contract_version: CurrentAuthoritySourceContractVersion,
+    pub(crate) profile: &'a ResolvedExplicitLocalCheckProfile,
+    pub(crate) execution_binding: &'a RequiredContextExecutionBinding,
+    pub(crate) contract: &'a RequiredContextContractBinding,
+    pub(crate) core_maximum_observation_age_seconds: u32,
+    pub(crate) sensitivity: WorkReportSensitivity,
+    pub(crate) observed_at: Timestamp,
+    pub(crate) source_valid_through: Option<Timestamp>,
+    pub(crate) generation: Option<CurrentAuthoritySourceGeneration>,
 }
 
 pub(super) struct RegisteredCurrentAuthoritySourceReadInput<'a> {
@@ -547,6 +561,50 @@ impl fmt::Debug for RegisteredCurrentAuthorityResolutionAssessment {
 }
 
 impl RegisteredInMemoryCurrentAuthoritySource {
+    pub(crate) fn register_explicit_zero_docs_check(
+        input: RegisteredExplicitZeroDocsCheckSourceInput<'_>,
+    ) -> Result<Self, WorkflowOsError> {
+        input
+            .profile
+            .explicit_zero_required_context_authorization()?;
+        if !input.contract.is_explicit_none()
+            || input.execution_binding.contract_content_hash() != input.contract.content_hash()
+        {
+            return Err(registered_source_error(
+                "registration.explicit_zero_binding_mismatch",
+                "explicit zero current authority registration binding is invalid",
+            ));
+        }
+        let configuration_commitment = hash_serializable(
+            "registered-in-memory-explicit-zero-docs-check-v1",
+            &(
+                input.execution_binding.binding_hash(),
+                input.contract.contract_id(),
+                input.contract.contract_version(),
+                input.contract.content_hash(),
+                crate::compute_local_check_command_contract_fingerprint(
+                    input.profile.command_contract(),
+                ),
+                "capability_grants:explicit_none",
+                "capability_availability:explicit_none",
+                "governed_context_references:explicit_none",
+            ),
+        )?;
+        Self::register(RegisteredInMemoryCurrentAuthoritySourceInput {
+            source_id: input.source_id,
+            contract_version: input.contract_version,
+            configuration_commitment,
+            core_maximum_observation_age_seconds: input.core_maximum_observation_age_seconds,
+            sensitivity: input.sensitivity,
+            observed_at: input.observed_at,
+            source_valid_through: input.source_valid_through,
+            generation: input.generation,
+            complete_grant_inventory: Vec::new(),
+            complete_availability_inventory: Vec::new(),
+            complete_context_reference_inventory: Vec::new(),
+        })
+    }
+
     pub(super) fn register(
         input: RegisteredInMemoryCurrentAuthoritySourceInput,
     ) -> Result<Self, WorkflowOsError> {
@@ -1610,7 +1668,7 @@ fn ensure_no_receipt_proof(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    #![allow(clippy::expect_used)]
+    #![allow(clippy::assert_is_empty, clippy::expect_used, clippy::panic)]
 
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1626,12 +1684,14 @@ pub(crate) mod tests {
         ApprovalDecisionKind, ApprovalReferenceId, CapabilityAvailability,
         CapabilityDelegationPosture, CapabilityGrantDefinition, CapabilityGrantId,
         CapabilityGrantLifecycle, CapabilityGrantRequirements, CapabilityGrantScope, CorrelationId,
-        EventLogStore, EvidenceReferenceId, GovernedContextAccessLevel,
-        GovernedContextAvailability, GovernedContextReferenceTarget, HarnessContractId,
-        HarnessContractVersion, ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
-        ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
+        EventLogStore, EvidenceReferenceId, ExplicitLocalCheckProfileSelection,
+        GovernedContextAccessLevel, GovernedContextAvailability, GovernedContextReferenceTarget,
+        HarnessContractId, HarnessContractVersion, ImmutableRunBundleBuildRequest,
+        ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
+        ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
         ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity,
-        ImmutableRunBundleVersion, LocalApprovalDecisionRequest, LocalCheckResultId,
+        ImmutableRunBundleVersion, LocalApprovalDecisionRequest, LocalCheckProcessOutput,
+        LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckResultId,
         LocalExecutionBeforeSkillInvocationCheckpointInputs,
         LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
         LocalExecutionWithImmutableRunBundleRequest, LocalExecutor, LocalImmutableRunBundleStore,
@@ -1648,6 +1708,18 @@ pub(crate) mod tests {
     };
 
     static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
+
+    #[derive(Debug)]
+    struct NeverRunDocsCheck;
+
+    impl LocalCheckProcessRunner for NeverRunDocsCheck {
+        fn run(
+            &self,
+            _request: &LocalCheckProcessRequest,
+        ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+            panic!("authority registration must not execute docs check")
+        }
+    }
 
     struct TestRoot(PathBuf);
 
@@ -1972,6 +2044,78 @@ pub(crate) mod tests {
             },
         )
         .expect("source")
+    }
+
+    #[test]
+    fn canonical_docs_check_registers_complete_explicit_zero_authority() {
+        use crate::required_context_execution_binding::RequiredContextExecutionBindingTestSubstitution;
+
+        let (_, original_binding) = fixture();
+        let contract = RequiredContextContractBinding::explicit_none_for_test(
+            original_binding.harness_contract_id().clone(),
+            original_binding.harness_contract_version().clone(),
+        )
+        .expect("explicit zero contract");
+        let binding = original_binding.with_test_substitution(
+            RequiredContextExecutionBindingTestSubstitution::ContractContentHash(
+                contract.content_hash().clone(),
+            ),
+        );
+        binding.validate().expect("binding");
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("repository root");
+        let profile = ExplicitLocalCheckProfileSelection::docs_check()
+            .resolve_docs_check_with_process_runner(
+                std::env::current_exe().expect("test binary"),
+                repository_root.to_path_buf(),
+                None,
+                Arc::new(NeverRunDocsCheck),
+            )
+            .expect("docs profile");
+        let source = RegisteredInMemoryCurrentAuthoritySource::register_explicit_zero_docs_check(
+            RegisteredExplicitZeroDocsCheckSourceInput {
+                source_id: CurrentAuthoritySourceId::new("authority/docs-check").expect("source"),
+                contract_version: CurrentAuthoritySourceContractVersion::new("v1")
+                    .expect("version"),
+                profile: &profile,
+                execution_binding: &binding,
+                contract: &contract,
+                core_maximum_observation_age_seconds: 600,
+                sensitivity: WorkReportSensitivity::Internal,
+                observed_at: timestamp("2026-07-26T10:15:00Z"),
+                source_valid_through: None,
+                generation: Some(CurrentAuthoritySourceGeneration::new(1).expect("generation")),
+            },
+        )
+        .expect("source");
+
+        let outcome = source
+            .resolve_current_authority(&RegisteredCurrentAuthorityResolutionInput {
+                execution_binding: &binding,
+                contract: &contract,
+                evaluated_at: timestamp("2026-07-26T10:20:00Z"),
+                redaction: &RedactionMetadata::empty(),
+            })
+            .expect("resolution");
+        let RegisteredCurrentAuthorityResolutionOutcome::Assessment(assessment) = outcome else {
+            panic!("explicit zero authority should resolve")
+        };
+        assert_eq!(
+            assessment.posture,
+            RegisteredCurrentAuthorityResolutionPosture::Ready
+        );
+        assert_eq!(
+            assessment.reasons,
+            vec![RegisteredCurrentAuthorityResolutionReason::Ready]
+        );
+        assert_eq!(
+            assessment.consumption.posture(),
+            RequiredContextConsumptionPosture::Satisfied
+        );
+        assert!(assessment.consumption.satisfactions().is_empty());
+        assert!(assessment.consumption.gaps().is_empty());
     }
 
     struct InstrumentedWorkReportArtifactStore {

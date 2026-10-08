@@ -22,22 +22,27 @@ use crate::{
     validate_work_report_artifact_side_effect_integrity, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, AdapterTelemetryStore, ApprovalPresentationId,
     ApprovalPresentationRecord, ApprovalPresentationRecordStore, ApprovalRequest, ApprovalStore,
-    BackendHealthCheck, DurableLeaseSemantics, DurableStateBackendKind, DurableStateCapability,
-    DurableStateContractProvider, DurableStateContractVersion, DurableStateSchemaMetadata,
-    DurableStateSchemaPosture, DurableStateSemanticContract, DurableStateSupport,
-    DurableStateTransactionKind, DurableStateTransactionSupport, EventLogStore, IdempotencyKey,
-    IdempotencyResult, IdempotencyStore, IdempotencyWrite, LockLease, LockStore, PolicyAuditRecord,
-    PolicyAuditStore, ProjectId, ProjectStateRecord, ProjectStateStore, RunSnapshotStore,
-    SideEffectId, SideEffectRecord, SideEffectRecordStore, SpecContentHash, StateBackend,
-    StateMigrationAttempt, StateMigrationDigest, StateMigrationImporterTransactionVersion,
-    StateMigrationPlan, StateMigrationRecordCount, StateMigrationWriterCompatibility,
-    StateMigrationWriterProtocolVersion, Timestamp, WorkReportArtifactRecord,
+    BackendHealthCheck, CanonicalLocalCheckDeclarationSetRecord, DurableLeaseSemantics,
+    DurableStateBackendKind, DurableStateCapability, DurableStateContractProvider,
+    DurableStateContractVersion, DurableStateSchemaMetadata, DurableStateSchemaPosture,
+    DurableStateSemanticContract, DurableStateSupport, DurableStateTransactionKind,
+    DurableStateTransactionSupport, EventLogStore, IdempotencyKey, IdempotencyResult,
+    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildResult,
+    ImmutableRunBundleDefinitionRecord, ImmutableRunBundleId, ImmutableRunBundleManifest,
+    ImmutableRunBundlePublishOutcome, ImmutableRunBundleStore, LockLease, LockStore,
+    PolicyAuditRecord, PolicyAuditStore, ProjectId, ProjectStateRecord, ProjectStateStore,
+    RunSnapshotStore, SideEffectId, SideEffectRecord, SideEffectRecordStore, SpecContentHash,
+    StateBackend, StateMigrationAttempt, StateMigrationDigest,
+    StateMigrationImporterTransactionVersion, StateMigrationPlan, StateMigrationRecordCount,
+    StateMigrationWriterCompatibility, StateMigrationWriterProtocolVersion,
+    StoredImmutableRunBundle, Timestamp, WorkReportArtifactRecord,
     WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactStore, WorkReportId, WorkflowId,
     WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId,
     WorkflowRunSnapshot,
 };
 
-const ADAPTER_SCHEMA_VERSION: u32 = 6;
+const ADAPTER_SCHEMA_VERSION: u32 = 7;
+const TIME_WINDOW_WAIT_ADAPTER_SCHEMA_VERSION: u32 = 6;
 const DISPATCH_RESERVATION_ADAPTER_SCHEMA_VERSION: u32 = 5;
 const OPERATIONAL_OPENING_ADAPTER_SCHEMA_VERSION: u32 = 4;
 const PREVIOUS_ADAPTER_SCHEMA_VERSION: u32 = 3;
@@ -62,10 +67,14 @@ const DISPATCH_RESERVATION_SCHEMA_CHECKSUM: &str =
     "sha256:17534b84a0ee25e73b4415842c5127eee8d5190fe28280aa7e5915a2f7bdcd6f";
 const DISPATCH_RESERVATION_SCHEMA_MANIFEST_DIGEST: &str =
     "17534b84a0ee25e73b4415842c5127eee8d5190fe28280aa7e5915a2f7bdcd6f";
-const SCHEMA_CHECKSUM: &str =
+const TIME_WINDOW_WAIT_SCHEMA_CHECKSUM: &str =
     "sha256:722932d52cc757312bc8c592eb1c3009e4eff2c4c6104b92655dfd0dbe5709e7";
-const SCHEMA_MANIFEST_DIGEST: &str =
+const TIME_WINDOW_WAIT_SCHEMA_MANIFEST_DIGEST: &str =
     "722932d52cc757312bc8c592eb1c3009e4eff2c4c6104b92655dfd0dbe5709e7";
+const SCHEMA_CHECKSUM: &str =
+    "sha256:146d96a0485b5bda065b4a6e33b48faeb4a3998b48d67e6bbd6d1b0c6a795ed5";
+const SCHEMA_MANIFEST_DIGEST: &str =
+    "146d96a0485b5bda065b4a6e33b48faeb4a3998b48d67e6bbd6d1b0c6a795ed5";
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(2);
 
 const BASE_SCHEMA: &str = r"
@@ -166,9 +175,11 @@ const OPERATIONAL_OPENING_SCHEMA_V4: &str =
 const DISPATCH_RESERVATION_SCHEMA_V5: &str =
     include_str!("sqlite_dispatch_reservation_schema_v5.sql");
 const TIME_WINDOW_WAIT_SCHEMA_V6: &str = include_str!("sqlite_time_window_wait_schema_v6.sql");
-const CONTINUITY_CLOCK_PROVENANCE: &str =
+const IMMUTABLE_RUN_BUNDLE_SCHEMA_V7: &str =
+    include_str!("sqlite_immutable_run_bundle_schema_v7.sql");
+pub(crate) const CONTINUITY_CLOCK_PROVENANCE: &str =
     "77efdb5ae4c8696d8573d816a52dce594793b1749471a98cc58a85fc8129e50f";
-const CONTINUITY_CLOCK_EPOCH: &str = "epoch/sqlite-local-live-state/1";
+pub(crate) const CONTINUITY_CLOCK_EPOCH: &str = "epoch/sqlite-local-live-state/1";
 
 mod continuity_codec;
 mod continuity_store;
@@ -199,12 +210,21 @@ mod trusted_host_time_window_scheduling;
 mod trusted_host_wait_handoff;
 
 #[cfg(feature = "trusted-host-application-spi")]
+pub(crate) use trusted_host_local_application_spi::{
+    prepare_owned_trusted_host_local_application_session,
+    TrustedHostLocalApplicationOwnedFreshPreparation,
+    TrustedHostLocalApplicationOwnedPreparationInput,
+    TrustedHostLocalApplicationOwnedPreparationPosture,
+};
+#[cfg(feature = "trusted-host-application-spi")]
 pub use trusted_host_local_application_spi::{
     TrustedHostLocalApplicationCancellationHandle,
     TrustedHostLocalApplicationContinuationStopReason, TrustedHostLocalApplicationEntryStopReason,
     TrustedHostLocalApplicationFailure, TrustedHostLocalApplicationOutcome,
     TrustedHostLocalApplicationPreparedSession, TrustedHostLocalApplicationSession,
 };
+#[cfg(feature = "trusted-host-application-spi")]
+pub(crate) use trusted_host_operational_entry::TrustedHostOperationalEntryLocator;
 
 /// Opt-in embedded `SQLite` durable-state backend.
 ///
@@ -705,8 +725,8 @@ impl SqliteStateBackend {
         let version: u32 = transaction
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(|_| schema_recovery_required())?;
-        if version == ADAPTER_SCHEMA_VERSION {
-            validate_schema_metadata(&transaction)?;
+        if version == TIME_WINDOW_WAIT_ADAPTER_SCHEMA_VERSION {
+            validate_v6_upgrade_eligibility(&transaction)?;
             transaction
                 .commit()
                 .map_err(|_| schema_recovery_required())?;
@@ -721,6 +741,67 @@ impl SqliteStateBackend {
         validate_v5_upgrade_eligibility(&transaction)?;
         transaction
             .execute_batch(TIME_WINDOW_WAIT_SCHEMA_V6)
+            .and_then(|()| {
+                transaction.execute(
+                    "UPDATE schema_metadata SET schema_version=?1, checksum=?2 WHERE singleton=1",
+                    params![
+                        TIME_WINDOW_WAIT_ADAPTER_SCHEMA_VERSION,
+                        TIME_WINDOW_WAIT_SCHEMA_CHECKSUM
+                    ],
+                )?;
+                transaction.pragma_update(
+                    None,
+                    "user_version",
+                    TIME_WINDOW_WAIT_ADAPTER_SCHEMA_VERSION,
+                )
+            })
+            .map_err(|_| schema_recovery_required())?;
+        validate_v6_upgrade_eligibility(&transaction)?;
+        transaction
+            .commit()
+            .map_err(|_| schema_recovery_required())?;
+        Ok(backend)
+    }
+
+    /// Explicitly upgrades one exact ready V6 database to the additive V7
+    /// immutable run-bundle schema.
+    ///
+    /// Ordinary [`Self::open`] never performs this upgrade. The operation is
+    /// atomic and idempotent for an already-valid V7 database.
+    ///
+    /// # Errors
+    ///
+    /// Returns a bounded error for incompatible or unverifiable state.
+    pub fn upgrade_immutable_run_bundle_v6_to_v7(
+        database_path: impl Into<PathBuf>,
+    ) -> Result<Self, WorkflowOsError> {
+        let backend = Self {
+            database_path: database_path.into(),
+            busy_timeout: DEFAULT_BUSY_TIMEOUT,
+        };
+        let mut connection = backend.existing_connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| schema_recovery_required())?;
+        let version: u32 = transaction
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|_| schema_recovery_required())?;
+        if version == ADAPTER_SCHEMA_VERSION {
+            validate_schema_metadata(&transaction)?;
+            transaction
+                .commit()
+                .map_err(|_| schema_recovery_required())?;
+            return Ok(backend);
+        }
+        if version != TIME_WINDOW_WAIT_ADAPTER_SCHEMA_VERSION {
+            return Err(sqlite_state_error(
+                "schema.incompatible",
+                "SQLite state schema version is not supported",
+            ));
+        }
+        validate_v6_upgrade_eligibility(&transaction)?;
+        transaction
+            .execute_batch(IMMUTABLE_RUN_BUNDLE_SCHEMA_V7)
             .and_then(|()| {
                 transaction.execute(
                     "UPDATE schema_metadata SET schema_version=?1, checksum=?2 WHERE singleton=1",
@@ -1055,6 +1136,14 @@ impl SqliteStateBackend {
                 })?;
             transaction
                 .execute_batch(TIME_WINDOW_WAIT_SCHEMA_V6)
+                .map_err(|_| {
+                    migration_runtime_error(
+                        "destination.initialize_failed",
+                        "state migration destination could not be initialized",
+                    )
+                })?;
+            transaction
+                .execute_batch(IMMUTABLE_RUN_BUNDLE_SCHEMA_V7)
                 .map_err(|_| {
                     migration_runtime_error(
                         "destination.initialize_failed",
@@ -1825,6 +1914,15 @@ impl SqliteStateBackend {
                             "SQLite state schema could not be initialized",
                         )
                     })?;
+                transaction
+                    .execute_batch(IMMUTABLE_RUN_BUNDLE_SCHEMA_V7)
+                    .map_err(|error| {
+                        map_sqlite_error(
+                            error,
+                            "schema.initialize_failed",
+                            "SQLite state schema could not be initialized",
+                        )
+                    })?;
                 migrate_v3_snapshots(&transaction)?;
                 initialize_continuity_trusted_time(&transaction).map_err(|error| {
                     map_sqlite_error(
@@ -1899,6 +1997,13 @@ impl SqliteStateBackend {
                 Err(sqlite_state_error(
                     "schema.upgrade_required",
                     "SQLite state schema requires an explicit TimeWindow wait-binding upgrade",
+                ))
+            }
+            TIME_WINDOW_WAIT_ADAPTER_SCHEMA_VERSION => {
+                validate_v6_upgrade_eligibility(connection)?;
+                Err(sqlite_state_error(
+                    "schema.upgrade_required",
+                    "SQLite state schema requires an explicit immutable run-bundle upgrade",
                 ))
             }
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(connection),
@@ -3032,6 +3137,152 @@ impl SideEffectRecordStore for SqliteStateBackend {
     }
 }
 
+impl ImmutableRunBundleStore for SqliteStateBackend {
+    fn publish_bundle_create_only(
+        &self,
+        bundle: &ImmutableRunBundleBuildResult,
+    ) -> Result<ImmutableRunBundlePublishOutcome, WorkflowOsError> {
+        StoredImmutableRunBundle::from_validated_parts(
+            bundle.manifest().clone(),
+            bundle.definition_records().to_vec(),
+            bundle.local_check_declaration_set_records().to_vec(),
+        )?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "bundle.write_failed",
+                    "immutable run bundle could not be written",
+                )
+            })?;
+        let exists = transaction
+            .query_row(
+                "SELECT 1 FROM immutable_run_bundles WHERE run_id = ?1",
+                params![bundle.manifest().run_id().as_str()],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "bundle.read_failed",
+                    "immutable run bundle could not be read",
+                )
+            })?
+            .is_some();
+        if exists {
+            return Ok(ImmutableRunBundlePublishOutcome::AlreadyExists);
+        }
+        transaction
+            .execute(
+                "INSERT INTO immutable_run_bundles
+                 (run_id, bundle_id, root_hash, manifest_payload,
+                  definition_records_payload, local_check_records_payload)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    bundle.manifest().run_id().as_str(),
+                    bundle.manifest().bundle_id().as_str(),
+                    bundle.manifest().root_hash().as_str(),
+                    encode_json(bundle.manifest(), "immutable run bundle manifest")?,
+                    encode_json(
+                        &bundle.definition_records(),
+                        "immutable run bundle definitions"
+                    )?,
+                    encode_json(
+                        &bundle.local_check_declaration_set_records(),
+                        "immutable run bundle local checks"
+                    )?,
+                ],
+            )
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "bundle.write_failed",
+                    "immutable run bundle could not be written",
+                )
+            })?;
+        transaction.commit().map_err(|error| {
+            map_sqlite_error(
+                error,
+                "bundle.write_failed",
+                "immutable run bundle could not be written",
+            )
+        })?;
+        Ok(ImmutableRunBundlePublishOutcome::Published)
+    }
+
+    fn read_exact_bundle(
+        &self,
+        run_id: &WorkflowRunId,
+        bundle_id: &ImmutableRunBundleId,
+    ) -> Result<StoredImmutableRunBundle, WorkflowOsError> {
+        let connection = self.connection()?;
+        let row = connection
+            .query_row(
+                "SELECT bundle_id, root_hash, manifest_payload,
+                        definition_records_payload, local_check_records_payload
+                 FROM immutable_run_bundles WHERE run_id = ?1",
+                params![run_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "bundle.read_failed",
+                    "immutable run bundle could not be read",
+                )
+            })?
+            .ok_or_else(|| {
+                sqlite_state_error(
+                    "bundle.not_found",
+                    "immutable run bundle could not be found",
+                )
+            })?;
+        let (
+            stored_bundle_id,
+            stored_root_hash,
+            manifest_payload,
+            definitions_payload,
+            checks_payload,
+        ) = row;
+        let manifest: ImmutableRunBundleManifest =
+            decode_json(&manifest_payload, "immutable run bundle manifest")?;
+        if manifest.run_id() != run_id
+            || manifest.bundle_id() != bundle_id
+            || stored_bundle_id != bundle_id.as_str()
+            || stored_root_hash != manifest.root_hash().as_str()
+        {
+            return Err(sqlite_state_error(
+                "bundle.identity_mismatch",
+                "immutable run bundle storage identity does not match payload",
+            ));
+        }
+        let definitions: Vec<ImmutableRunBundleDefinitionRecord> =
+            decode_json(&definitions_payload, "immutable run bundle definitions")?;
+        let local_checks: Vec<CanonicalLocalCheckDeclarationSetRecord> =
+            decode_json(&checks_payload, "immutable run bundle local checks")?;
+        StoredImmutableRunBundle::from_validated_parts(manifest, definitions, local_checks).map_err(
+            |_| {
+                sqlite_state_error(
+                    "bundle.validation_failed",
+                    "immutable run bundle storage failed validation",
+                )
+            },
+        )
+    }
+}
+
 impl StateBackend for SqliteStateBackend {
     fn health_check(&self) -> Result<BackendHealthCheck, WorkflowOsError> {
         let connection = self.connection()?;
@@ -3247,6 +3498,29 @@ fn validate_v5_upgrade_eligibility(connection: &Connection) -> Result<(), Workfl
     }
     validate_schema_manifest(connection, DISPATCH_RESERVATION_SCHEMA_MANIFEST_DIGEST)?;
     validate_continuity_security_state(connection)
+}
+
+fn validate_v6_upgrade_eligibility(connection: &Connection) -> Result<(), WorkflowOsError> {
+    let metadata = connection
+        .query_row(
+            "SELECT schema_version, migration_state, checksum FROM schema_metadata WHERE singleton=1",
+            [],
+            |row| Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
+        )
+        .optional()
+        .map_err(|_| schema_recovery_required())?;
+    if metadata
+        != Some((
+            TIME_WINDOW_WAIT_ADAPTER_SCHEMA_VERSION,
+            "ready".to_owned(),
+            TIME_WINDOW_WAIT_SCHEMA_CHECKSUM.to_owned(),
+        ))
+    {
+        return Err(schema_recovery_required());
+    }
+    validate_schema_manifest(connection, TIME_WINDOW_WAIT_SCHEMA_MANIFEST_DIGEST)?;
+    validate_continuity_security_state(connection)?;
+    validate_time_window_wait_binding_columns(connection)
 }
 
 fn validate_schema_metadata(connection: &Connection) -> Result<(), WorkflowOsError> {

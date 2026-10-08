@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
     ActorId, CapabilityResolutionPosture, CapabilityResolutionReason, GovernedContextAccessLevel,
@@ -198,13 +199,21 @@ impl<'de> Deserialize<'de> for RequiredContextRequirement {
     }
 }
 
+/// Closed posture for the canonical requirement set.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RequiredContextRequirementPosture {
+    DeclaredRequirements,
+    ExplicitNone,
+}
+
 /// Immutable, content-addressed required-context contract binding.
-#[derive(Clone, Eq, PartialEq, Serialize)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct RequiredContextContractBinding {
     contract_id: HarnessContractId,
     contract_version: HarnessContractVersion,
     content_hash: SpecContentHash,
     requirements: Vec<RequiredContextRequirement>,
+    requirement_posture: RequiredContextRequirementPosture,
 }
 
 impl RequiredContextContractBinding {
@@ -226,22 +235,54 @@ impl RequiredContextContractBinding {
             contract_version,
             content_hash,
             requirements,
+            requirement_posture: RequiredContextRequirementPosture::DeclaredRequirements,
         })
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn explicit_none(
+        contract_id: HarnessContractId,
+        contract_version: HarnessContractVersion,
+        _authorization: crate::local_check::ExplicitZeroRequiredContextProfileAuthorization,
+    ) -> Result<Self, WorkflowOsError> {
+        let content_hash = compute_explicit_none_contract_hash(&contract_id, &contract_version);
+        let binding = Self {
+            contract_id,
+            contract_version,
+            content_hash,
+            requirements: Vec::new(),
+            requirement_posture: RequiredContextRequirementPosture::ExplicitNone,
+        };
+        binding.validate()?;
+        Ok(binding)
+    }
+
     fn validate(&self) -> Result<(), WorkflowOsError> {
-        validate_requirements(&self.requirements)?;
-        if !is_canonically_ordered(&self.requirements) {
-            return Err(validation_error(
-                "required_context.contract.requirements_unordered",
-                "required context requirements must use canonical order",
-            ));
-        }
-        let expected = compute_contract_hash(
-            &self.contract_id,
-            &self.contract_version,
-            &self.requirements,
-        );
+        let expected = match self.requirement_posture {
+            RequiredContextRequirementPosture::DeclaredRequirements => {
+                validate_requirements(&self.requirements)?;
+                if !is_canonically_ordered(&self.requirements) {
+                    return Err(validation_error(
+                        "required_context.contract.requirements_unordered",
+                        "required context requirements must use canonical order",
+                    ));
+                }
+                compute_contract_hash(
+                    &self.contract_id,
+                    &self.contract_version,
+                    &self.requirements,
+                )
+            }
+            RequiredContextRequirementPosture::ExplicitNone => {
+                if !self.requirements.is_empty() {
+                    return Err(validation_error(
+                        "required_context.contract.explicit_none_nonempty",
+                        "explicit zero required context cannot include requirements",
+                    ));
+                }
+                compute_explicit_none_contract_hash(&self.contract_id, &self.contract_version)
+            }
+        };
         if self.content_hash != expected {
             return Err(validation_error(
                 "required_context.contract.content_hash_mismatch",
@@ -274,6 +315,30 @@ impl RequiredContextContractBinding {
     pub fn requirements(&self) -> &[RequiredContextRequirement] {
         &self.requirements
     }
+
+    pub(crate) const fn is_explicit_none(&self) -> bool {
+        matches!(
+            self.requirement_posture,
+            RequiredContextRequirementPosture::ExplicitNone
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn explicit_none_for_test(
+        contract_id: HarnessContractId,
+        contract_version: HarnessContractVersion,
+    ) -> Result<Self, WorkflowOsError> {
+        let content_hash = compute_explicit_none_contract_hash(&contract_id, &contract_version);
+        let binding = Self {
+            contract_id,
+            contract_version,
+            content_hash,
+            requirements: Vec::new(),
+            requirement_posture: RequiredContextRequirementPosture::ExplicitNone,
+        };
+        binding.validate()?;
+        Ok(binding)
+    }
 }
 
 impl fmt::Debug for RequiredContextContractBinding {
@@ -283,8 +348,28 @@ impl fmt::Debug for RequiredContextContractBinding {
             .field("contract_id", &"[REDACTED]")
             .field("contract_version", &"[REDACTED]")
             .field("content_hash", &"[REDACTED]")
+            .field("requirement_posture", &self.requirement_posture)
             .field("requirement_count", &self.requirements.len())
             .finish()
+    }
+}
+
+impl Serialize for RequiredContextContractBinding {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let field_count = if self.is_explicit_none() { 5 } else { 4 };
+        let mut state =
+            serializer.serialize_struct("RequiredContextContractBinding", field_count)?;
+        state.serialize_field("contract_id", &self.contract_id)?;
+        state.serialize_field("contract_version", &self.contract_version)?;
+        state.serialize_field("content_hash", &self.content_hash)?;
+        if self.is_explicit_none() {
+            state.serialize_field("requirement_posture", "explicit_none")?;
+        }
+        state.serialize_field("requirements", &self.requirements)?;
+        state.end()
     }
 }
 
@@ -298,15 +383,33 @@ impl<'de> Deserialize<'de> for RequiredContextContractBinding {
             contract_id: HarnessContractId,
             contract_version: HarnessContractVersion,
             content_hash: SpecContentHash,
+            requirement_posture: Option<String>,
             requirements: Vec<RequiredContextRequirement>,
         }
 
         let wire = Wire::deserialize(deserializer)?;
+        let requirement_posture = match wire.requirement_posture.as_deref() {
+            None if wire.requirements.is_empty() => {
+                return Err(serde::de::Error::custom(validation_error(
+                    "required_context.contract.explicit_none_marker_missing",
+                    "empty required context needs an explicit zero marker",
+                )));
+            }
+            None => RequiredContextRequirementPosture::DeclaredRequirements,
+            Some("explicit_none") => RequiredContextRequirementPosture::ExplicitNone,
+            Some(_) => {
+                return Err(serde::de::Error::custom(validation_error(
+                    "required_context.contract.requirement_posture_invalid",
+                    "required context requirement posture is invalid",
+                )));
+            }
+        };
         let binding = Self {
             contract_id: wire.contract_id,
             contract_version: wire.contract_version,
             content_hash: wire.content_hash,
             requirements: wire.requirements,
+            requirement_posture,
         };
         binding.validate().map_err(serde::de::Error::custom)?;
         Ok(binding)
@@ -767,6 +870,15 @@ fn validate_projection_set(
             "required context contract does not match the expected execution context",
         ));
     }
+    if contract.is_explicit_none() {
+        if projections.is_empty() {
+            return Ok(());
+        }
+        return Err(validation_error(
+            "required_context.consumption.explicit_none_projection_supplied",
+            "explicit zero required context cannot consume projections",
+        ));
+    }
     if projections.is_empty() {
         return Err(validation_error(
             "required_context.consumption.projections_empty",
@@ -1061,6 +1173,17 @@ fn compute_contract_hash(
     SpecContentHash::from_bytes(bytes)
 }
 
+fn compute_explicit_none_contract_hash(
+    contract_id: &HarnessContractId,
+    contract_version: &HarnessContractVersion,
+) -> SpecContentHash {
+    let mut bytes = Vec::new();
+    append_framed(&mut bytes, b"required-context-contract-explicit-none-v1");
+    append_framed(&mut bytes, contract_id.as_str().as_bytes());
+    append_framed(&mut bytes, contract_version.as_str().as_bytes());
+    SpecContentHash::from_bytes(bytes)
+}
+
 fn append_framed(buffer: &mut Vec<u8>, value: &[u8]) {
     buffer.extend_from_slice(&(value.len() as u64).to_be_bytes());
     buffer.extend_from_slice(value);
@@ -1119,4 +1242,133 @@ fn validate_not_secret_like(value: &str) -> Result<(), WorkflowOsError> {
 
 fn validation_error(code: &'static str, message: &'static str) -> WorkflowOsError {
     WorkflowOsError::validation(code, message)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::assert_is_empty, clippy::expect_used)]
+
+    use super::*;
+
+    fn explicit_none_contract() -> RequiredContextContractBinding {
+        RequiredContextContractBinding::explicit_none_for_test(
+            HarnessContractId::new("harness/docs-check").expect("contract"),
+            HarnessContractVersion::new("v1").expect("version"),
+        )
+        .expect("explicit zero contract")
+    }
+
+    fn context() -> RequiredContextConsumptionContext {
+        RequiredContextConsumptionContext::new(
+            ActorId::new("system/kernel").expect("actor"),
+            WorkflowId::new("dg/docs-check").expect("workflow"),
+            WorkflowRunId::new("run-docs-check").expect("run"),
+            StepId::new("docs-check").expect("step"),
+            HarnessContractId::new("harness/docs-check").expect("contract"),
+            Timestamp::parse_rfc3339("2026-10-07T10:00:00Z").expect("timestamp"),
+        )
+    }
+
+    #[test]
+    fn explicit_zero_contract_round_trips_and_consumes_no_projections() {
+        let contract = explicit_none_contract();
+        let value = serde_json::to_value(&contract).expect("serialize");
+        assert_eq!(value["requirement_posture"], "explicit_none");
+        assert_eq!(value["requirements"], serde_json::json!([]));
+
+        let round_trip: RequiredContextContractBinding =
+            serde_json::from_value(value).expect("deserialize");
+        assert_eq!(round_trip, contract);
+
+        let result = consume_required_context(&RequiredContextConsumptionInput {
+            contract: &contract,
+            context: &context(),
+            projections: &[],
+        })
+        .expect("explicit zero consumption");
+        assert_eq!(
+            result.posture(),
+            RequiredContextConsumptionPosture::Satisfied
+        );
+        assert!(result.satisfactions().is_empty());
+        assert!(result.gaps().is_empty());
+    }
+
+    #[test]
+    fn empty_contract_without_marker_fails_closed_without_payload_leakage() {
+        let mut value = serde_json::to_value(explicit_none_contract()).expect("serialize");
+        value
+            .as_object_mut()
+            .expect("object")
+            .remove("requirement_posture");
+        let error = serde_json::from_value::<RequiredContextContractBinding>(value)
+            .expect_err("marker is required");
+        let message = error.to_string();
+        assert!(message.contains("explicit_none_marker_missing"));
+        assert!(!message.contains("harness/docs-check"));
+    }
+
+    #[test]
+    fn unknown_or_nonempty_explicit_zero_posture_fails_closed() {
+        let mut unknown = serde_json::to_value(explicit_none_contract()).expect("serialize");
+        unknown["requirement_posture"] = serde_json::json!("unknown-private-posture");
+        let unknown_error = serde_json::from_value::<RequiredContextContractBinding>(unknown)
+            .expect_err("unknown posture must fail");
+        assert!(unknown_error
+            .to_string()
+            .contains("requirement_posture_invalid"));
+        assert!(!unknown_error
+            .to_string()
+            .contains("unknown-private-posture"));
+
+        let legacy = RequiredContextContractBinding::new(
+            HarnessContractId::new("harness/docs-check").expect("contract"),
+            HarnessContractVersion::new("v1").expect("version"),
+            vec![RequiredContextRequirement::new(
+                RequiredContextRequirementId::new("required/evidence").expect("requirement"),
+                GovernedContextReferenceTarget::EvidenceReference(
+                    crate::EvidenceReferenceId::new("evidence/required").expect("evidence"),
+                ),
+                GovernedContextAccessLevel::ReferenceOnly,
+                RequiredContextObligation::Required,
+                WorkReportSensitivity::Internal,
+            )
+            .expect("requirement")],
+        )
+        .expect("legacy contract");
+        let mut nonempty = serde_json::to_value(legacy).expect("serialize");
+        nonempty["requirement_posture"] = serde_json::json!("explicit_none");
+        let nonempty_error = serde_json::from_value::<RequiredContextContractBinding>(nonempty)
+            .expect_err("explicit zero with requirement must fail");
+        assert!(nonempty_error
+            .to_string()
+            .contains("explicit_none_nonempty"));
+        assert!(!nonempty_error.to_string().contains("evidence/required"));
+    }
+
+    #[test]
+    fn explicit_zero_contract_rejects_supplied_projection() {
+        let contract = explicit_none_contract();
+        let context = context();
+        let projection =
+            crate::project_step_scoped_context(&crate::GovernedContextProjectionInput {
+                actor: context.actor(),
+                workflow_id: context.workflow_id(),
+                run_id: context.run_id(),
+                step_id: context.step_id(),
+                harness_contract_id: Some(context.harness_contract_id()),
+                projected_at: context.evaluated_at(),
+                maximum_allowed_sensitivity: WorkReportSensitivity::Internal,
+                requested_access_level: GovernedContextAccessLevel::ReferenceOnly,
+                candidates: &[],
+                redaction: &crate::RedactionMetadata::empty(),
+            })
+            .expect("projection");
+        let error = validate_projection_set(&contract, &context, &[projection])
+            .expect_err("projection conflicts with explicit zero");
+        assert_eq!(
+            error.code(),
+            "required_context.consumption.explicit_none_projection_supplied"
+        );
+    }
 }

@@ -362,6 +362,10 @@ impl OperationalExecutionWindowOpeningProjectionSnapshot {
             committed_result_cursor: event.committed_result_cursor.clone(),
         }
     }
+
+    pub(crate) const fn window_id(&self) -> &AuthorizedExecutionWindowId {
+        &self.window_id
+    }
 }
 
 impl fmt::Debug for OperationalExecutionWindowOpeningProjectionSnapshot {

@@ -1,6 +1,7 @@
 use std::fmt;
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use time::Duration;
 
@@ -12,6 +13,8 @@ use crate::{
 #[allow(dead_code)]
 mod registered_in_memory_source;
 
+#[cfg(feature = "trusted-host-application-spi")]
+pub(crate) use registered_in_memory_source::RegisteredExplicitZeroDocsCheckSourceInput;
 pub(crate) use registered_in_memory_source::{
     RegisteredCurrentAuthorityConsumerResult, RegisteredCurrentAuthorityUseInput,
     RegisteredCurrentAuthorityUsePosture, RegisteredInMemoryCurrentAuthoritySource,
@@ -630,7 +633,7 @@ pub struct CurrentAuthoritySourceRequestInput<'a> {
 }
 
 /// Exact payload-free source request commitment.
-#[derive(Clone, Eq, PartialEq, Serialize)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct CurrentAuthoritySourceRequest {
     model_version: CurrentAuthoritySourceModelVersion,
     registration_commitment: SpecContentHash,
@@ -643,6 +646,7 @@ pub struct CurrentAuthoritySourceRequest {
     registered_sensitivity: WorkReportSensitivity,
     evaluated_at: Timestamp,
     request_commitment: SpecContentHash,
+    explicit_zero: bool,
 }
 
 impl CurrentAuthoritySourceRequest {
@@ -691,6 +695,7 @@ impl CurrentAuthoritySourceRequest {
             ));
         }
         let query_set = CurrentAuthorityQuerySet::from_contract(input.contract)?;
+        let explicit_zero = input.contract.is_explicit_none();
         let mut value = Self {
             model_version: CurrentAuthoritySourceModelVersion::V1,
             registration_commitment: input.registration.registration_commitment.clone(),
@@ -703,6 +708,7 @@ impl CurrentAuthoritySourceRequest {
             registered_sensitivity: input.registration.sensitivity,
             evaluated_at: input.evaluated_at,
             request_commitment: pending_hash(),
+            explicit_zero,
         };
         value.request_commitment = value.compute_commitment()?;
         value.validate()?;
@@ -716,7 +722,9 @@ impl CurrentAuthoritySourceRequest {
     /// Returns a stable non-leaking validation error for inconsistent state.
     pub fn validate(&self) -> Result<(), WorkflowOsError> {
         validate_canonical_families(&self.requested_fact_families)?;
-        if self.query_count == 0 || self.maximum_sensitivity == WorkReportSensitivity::Unknown {
+        if (self.query_count == 0) != self.explicit_zero
+            || self.maximum_sensitivity == WorkReportSensitivity::Unknown
+        {
             return Err(source_error(
                 "request.posture_invalid",
                 "current authority source request posture is invalid",
@@ -740,21 +748,23 @@ impl CurrentAuthoritySourceRequest {
     }
 
     fn compute_commitment(&self) -> Result<SpecContentHash, WorkflowOsError> {
-        hash_serializable(
-            "request",
-            &(
-                self.model_version,
-                &self.registration_commitment,
-                &self.execution_binding_hash,
-                &self.contract_content_hash,
-                &self.query_set_hash,
-                self.query_count,
-                &self.requested_fact_families,
-                self.maximum_sensitivity,
-                self.registered_sensitivity,
-                self.evaluated_at,
-            ),
-        )
+        let value = (
+            self.model_version,
+            &self.registration_commitment,
+            &self.execution_binding_hash,
+            &self.contract_content_hash,
+            &self.query_set_hash,
+            self.query_count,
+            &self.requested_fact_families,
+            self.maximum_sensitivity,
+            self.registered_sensitivity,
+            self.evaluated_at,
+        );
+        if self.explicit_zero {
+            hash_serializable("request-explicit-zero-v1", &value)
+        } else {
+            hash_serializable("request", &value)
+        }
     }
 
     /// Returns the registration commitment.
@@ -782,6 +792,32 @@ impl CurrentAuthoritySourceRequest {
     }
 }
 
+impl Serialize for CurrentAuthoritySourceRequest {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let field_count = if self.explicit_zero { 12 } else { 11 };
+        let mut state =
+            serializer.serialize_struct("CurrentAuthoritySourceRequest", field_count)?;
+        state.serialize_field("model_version", &self.model_version)?;
+        state.serialize_field("registration_commitment", &self.registration_commitment)?;
+        state.serialize_field("execution_binding_hash", &self.execution_binding_hash)?;
+        state.serialize_field("contract_content_hash", &self.contract_content_hash)?;
+        state.serialize_field("query_set_hash", &self.query_set_hash)?;
+        state.serialize_field("query_count", &self.query_count)?;
+        state.serialize_field("requested_fact_families", &self.requested_fact_families)?;
+        state.serialize_field("maximum_sensitivity", &self.maximum_sensitivity)?;
+        state.serialize_field("registered_sensitivity", &self.registered_sensitivity)?;
+        state.serialize_field("evaluated_at", &self.evaluated_at)?;
+        state.serialize_field("request_commitment", &self.request_commitment)?;
+        if self.explicit_zero {
+            state.serialize_field("requirement_posture", "explicit_none")?;
+        }
+        state.end()
+    }
+}
+
 impl fmt::Debug for CurrentAuthoritySourceRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -797,6 +833,7 @@ impl fmt::Debug for CurrentAuthoritySourceRequest {
             .field("registered_sensitivity", &self.registered_sensitivity)
             .field("evaluated_at", &"[REDACTED]")
             .field("request_commitment", &"[REDACTED]")
+            .field("explicit_zero", &self.explicit_zero)
             .finish()
     }
 }
@@ -819,8 +856,23 @@ impl<'de> Deserialize<'de> for CurrentAuthoritySourceRequest {
             registered_sensitivity: WorkReportSensitivity,
             evaluated_at: Timestamp,
             request_commitment: SpecContentHash,
+            requirement_posture: Option<String>,
         }
         let wire = Wire::deserialize(deserializer)?;
+        let explicit_zero = match wire.requirement_posture.as_deref() {
+            None if wire.query_count == 0 => {
+                return Err(serde::de::Error::custom(
+                    "invalid current authority source request",
+                ));
+            }
+            None => false,
+            Some("explicit_none") => true,
+            Some(_) => {
+                return Err(serde::de::Error::custom(
+                    "invalid current authority source request",
+                ));
+            }
+        };
         let value = Self {
             model_version: wire.model_version,
             registration_commitment: wire.registration_commitment,
@@ -833,6 +885,7 @@ impl<'de> Deserialize<'de> for CurrentAuthoritySourceRequest {
             registered_sensitivity: wire.registered_sensitivity,
             evaluated_at: wire.evaluated_at,
             request_commitment: wire.request_commitment,
+            explicit_zero,
         };
         value
             .validate()

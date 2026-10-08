@@ -109,7 +109,7 @@ fn sqlite_backend_passes_common_conformance_without_overclaiming() {
     );
     assert_eq!(
         contract.schema().adapter_schema_version(),
-        Some(6),
+        Some(7),
         "SQLite schema version is explicit"
     );
     assert_eq!(
@@ -265,7 +265,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
     let secret = "secret-schema-token-marker";
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 7)
+        .pragma_update(None, "user_version", 8)
         .expect("set newer schema");
     drop(connection);
 
@@ -278,7 +278,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 6)
+        .pragma_update(None, "user_version", 7)
         .expect("restore schema version");
     connection
         .execute(
@@ -298,7 +298,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 }
 
 #[test]
-fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v6() {
+fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v7() {
     let fixture = Fixture::new();
     fixture
         .backend
@@ -326,8 +326,12 @@ fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v6() {
         .expect("upgrade exact V4 database");
     let v6_required = SqliteStateBackend::open(&fixture.path).expect_err("V6 upgrade is explicit");
     assert_eq!(v6_required.code(), "state.sqlite.schema.upgrade_required");
-    let upgraded = SqliteStateBackend::upgrade_time_window_wait_binding_v5_to_v6(&fixture.path)
+    let v6 = SqliteStateBackend::upgrade_time_window_wait_binding_v5_to_v6(&fixture.path)
         .expect("upgrade exact V5 database");
+    let v7_required = SqliteStateBackend::open(&fixture.path).expect_err("V7 upgrade is explicit");
+    assert_eq!(v7_required.code(), "state.sqlite.schema.upgrade_required");
+    let upgraded = SqliteStateBackend::upgrade_immutable_run_bundle_v6_to_v7(&fixture.path)
+        .expect("upgrade exact V6 database");
     let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
     assert_eq!(
         reopened
@@ -348,11 +352,11 @@ fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v6() {
             |row| row.get(0),
         )
         .expect("trusted time singleton");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     assert_eq!(trusted_time_rows, 1);
 
-    SqliteStateBackend::upgrade_time_window_wait_binding_v5_to_v6(&fixture.path)
-        .expect("upgrade is idempotent for exact V6");
+    SqliteStateBackend::upgrade_immutable_run_bundle_v6_to_v7(&fixture.path)
+        .expect("upgrade is idempotent for exact V7");
     assert_eq!(
         v3.read_events(&fixture.created.run_id)
             .expect("V3 handle remains readable"),
@@ -361,6 +365,11 @@ fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v6() {
     assert_eq!(
         v4.read_events(&fixture.created.run_id)
             .expect("V4 handle remains readable"),
+        vec![fixture.created.clone()]
+    );
+    assert_eq!(
+        v6.read_events(&fixture.created.run_id)
+            .expect("V6 handle remains readable after upgrade"),
         vec![fixture.created.clone()]
     );
     assert_eq!(
@@ -413,6 +422,8 @@ fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
         .expect("finish explicit V5 upgrade");
     SqliteStateBackend::upgrade_time_window_wait_binding_v5_to_v6(&fixture.path)
         .expect("finish explicit V6 upgrade");
+    SqliteStateBackend::upgrade_immutable_run_bundle_v6_to_v7(&fixture.path)
+        .expect("finish explicit V7 upgrade");
     let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
     assert_eq!(
         reopened
@@ -431,7 +442,7 @@ fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
             |row| row.get(0),
         )
         .expect("trusted time singleton");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     assert_eq!(trusted_time_rows, 1);
 }
 
@@ -740,6 +751,7 @@ fn downgrade_fixture_to_v1(path: &Path) {
     connection
         .execute_batch(
             "PRAGMA foreign_keys = OFF;
+             DROP TABLE immutable_run_bundles;
              DROP TABLE dispatch_reservation_projection_bindings;
              DROP TABLE dispatch_reservations;
              DROP TABLE operational_opening_projection_bindings;

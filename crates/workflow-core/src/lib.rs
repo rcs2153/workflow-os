@@ -190,6 +190,13 @@ pub use evidence::{
     EvidenceReferenceTarget, EvidenceRetentionHint, EvidenceScope, EvidenceSensitivity,
     EvidenceSourceComponent, ValidationReferenceId,
 };
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+pub use executor::{
+    admit_trusted_host_local_application_operation, TrustedHostLocalApplicationAdmissionOutcome,
+    TrustedHostLocalApplicationAdmissionRequest, TrustedHostLocalApplicationBlockReason,
+    TrustedHostLocalApplicationWaitReason,
+};
 pub use executor::{
     compose_github_pr_comment_live_sandbox_event_proof,
     compose_github_pr_comment_live_sandbox_runtime,
