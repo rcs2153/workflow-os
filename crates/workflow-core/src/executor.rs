@@ -365,6 +365,93 @@ pub struct LocalExecutionWithImmutableRunBundleResult {
     bundle_binding: crate::ImmutableRunBundleBinding,
 }
 
+/// Explicit unstable input for one trusted-host local application admission.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+#[derive(Clone, Eq, PartialEq)]
+pub struct TrustedHostLocalApplicationAdmissionRequest {
+    /// Existing immutable-bundle execution request.
+    pub execution: LocalExecutionWithImmutableRunBundleRequest,
+    /// Exact sole workflow step selected for the canonical docs-check profile.
+    pub selected_step_id: StepId,
+    /// Core-injected trusted observation time supplied by the foreground owner.
+    pub observed_at: Timestamp,
+    /// Bounded execution-window expiry.
+    pub expires_at: Timestamp,
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+impl fmt::Debug for TrustedHostLocalApplicationAdmissionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedHostLocalApplicationAdmissionRequest")
+            .field("binding", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Fixed lawful wait posture returned before any trusted-host preparation.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrustedHostLocalApplicationWaitReason {
+    /// Existing policy requires an approval decision.
+    Approval,
+    /// A supported external wait remains unsatisfied.
+    ExternalCondition,
+}
+
+/// Fixed blocked posture returned before any trusted-host preparation.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrustedHostLocalApplicationBlockReason {
+    /// The selected workflow shape is outside the closed first slice.
+    UnsupportedWorkflow,
+    /// Current durable state is not eligible for exactly one operation.
+    CurrentState,
+}
+
+/// Bounded admission result for the unpublished trusted-host local application.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+pub enum TrustedHostLocalApplicationAdmissionOutcome<'a> {
+    /// Core prepared one opaque one-shot operation.
+    Prepared(crate::TrustedHostLocalApplicationPreparedSession<'a>),
+    /// The run lawfully waits and no handler was admitted.
+    Waiting(TrustedHostLocalApplicationWaitReason),
+    /// The explicit run is already terminal and was not replayed.
+    TerminalReplay,
+    /// Current input or durable state blocks operation preparation.
+    Blocked(TrustedHostLocalApplicationBlockReason),
+    /// Policy denied admission before handler preparation.
+    Denied,
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+impl fmt::Debug for TrustedHostLocalApplicationAdmissionOutcome<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Prepared(_) => formatter
+                .write_str("TrustedHostLocalApplicationAdmissionOutcome::Prepared([REDACTED])"),
+            Self::Waiting(reason) => formatter
+                .debug_tuple("TrustedHostLocalApplicationAdmissionOutcome::Waiting")
+                .field(reason)
+                .finish(),
+            Self::TerminalReplay => {
+                formatter.write_str("TrustedHostLocalApplicationAdmissionOutcome::TerminalReplay")
+            }
+            Self::Blocked(reason) => formatter
+                .debug_tuple("TrustedHostLocalApplicationAdmissionOutcome::Blocked")
+                .field(reason)
+                .finish(),
+            Self::Denied => {
+                formatter.write_str("TrustedHostLocalApplicationAdmissionOutcome::Denied")
+            }
+        }
+    }
+}
+
 /// Server-owned inputs for the deterministic no-write hosted dispatch proof.
 #[derive(Clone, Eq, PartialEq)]
 pub struct HostedNoWriteDispatchInputs {
@@ -10245,6 +10332,429 @@ fn report_artifact_provider_integration(
         },
         None => ReportArtifactWriteProviderIntegration::None,
     }
+}
+
+/// Admits one explicit canonical docs-check run into the unpublished local
+/// trusted-host application boundary.
+///
+/// This function owns workflow validation, immutable bundle publication,
+/// policy and approval posture, current-authority registration, exact step
+/// selection, and opaque operation preparation. It does not execute the
+/// returned operation, discover work, grant approval, or expose authority
+/// inputs.
+///
+/// # Errors
+///
+/// Returns only the fixed payload-free local-application failure vocabulary.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+pub fn admit_trusted_host_local_application_operation<'a>(
+    backend: &'a crate::SqliteStateBackend,
+    profile: &'a ResolvedExplicitLocalCheckProfile,
+    request: &TrustedHostLocalApplicationAdmissionRequest,
+) -> Result<
+    TrustedHostLocalApplicationAdmissionOutcome<'a>,
+    crate::TrustedHostLocalApplicationFailure,
+> {
+    match admit_trusted_host_local_application_operation_internal(backend, profile, request) {
+        Ok(outcome) => Ok(outcome),
+        Err(error) if error.kind() == WorkflowOsErrorKind::PolicyDenied => {
+            Ok(TrustedHostLocalApplicationAdmissionOutcome::Denied)
+        }
+        Err(error) => Err(crate::TrustedHostLocalApplicationFailure::from_core_error(
+            &error,
+        )),
+    }
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn admit_trusted_host_local_application_operation_internal<'a>(
+    backend: &'a crate::SqliteStateBackend,
+    profile: &'a ResolvedExplicitLocalCheckProfile,
+    request: &TrustedHostLocalApplicationAdmissionRequest,
+) -> Result<TrustedHostLocalApplicationAdmissionOutcome<'a>, WorkflowOsError> {
+    let execution = &request.execution.execution;
+    let run_id = execution
+        .run_id
+        .clone()
+        .unwrap_or_else(WorkflowRunId::generate);
+    if !backend.read_events(&run_id)?.is_empty() {
+        return admit_existing_trusted_host_local_application_operation(
+            backend, profile, request, &run_id,
+        );
+    }
+
+    let registry = LocalSkillRegistry::new();
+    let executor = LocalExecutor::new(backend, &registry);
+    let mut plan =
+        LocalExecutor::<crate::SqliteStateBackend>::prepare_execution(execution, run_id.clone())?;
+    validate_trusted_host_admission_plan(&plan, profile, &request.selected_step_id)?;
+    executor.evaluate_pre_run_policy(&plan, &execution.actor, &execution.correlation_id)?;
+
+    let project = load_validated_project_bundle(
+        &execution.project_root,
+        ProjectValidationCapability::Default,
+    )?;
+    let inventory = profile.command_contract_inventory()?;
+    let execution_posture = immutable_run_bundle_execution_posture(execution, None)?;
+    let handlers = vec![crate::ImmutableRunBundleHandlerReference {
+        skill_id: plan.skill_id.clone(),
+        skill_version: plan.skill_version.clone(),
+        posture: crate::ImmutableRunBundleHandlerPosture::RegisteredUnattested,
+    }];
+    let bundle = crate::immutable_run_bundle_builder::build_immutable_run_bundle_with_local_check_declarations_and_capability(
+        crate::ImmutableRunBundleBuildRequest {
+            project: &project,
+            workflow_id: &execution.workflow_id,
+            bundle_id: request.execution.bundle.bundle_id.clone(),
+            bundle_version: request.execution.bundle.bundle_version.clone(),
+            run_id: run_id.clone(),
+            resolved_execution_context_hash: plan.resolved_execution_context_hash.clone(),
+            execution_posture,
+            handlers,
+            created_at: request.execution.bundle.created_at,
+            created_by: execution.actor.clone(),
+            sensitivity: request.execution.bundle.sensitivity,
+            redaction_required: request.execution.bundle.redaction_required,
+        },
+        &inventory,
+        ProjectValidationCapability::Default,
+    )?;
+    validate_immutable_run_bundle_matches_plan(bundle.manifest(), &plan)?;
+    persist_or_validate_immutable_run_bundle(backend, &bundle)?;
+    let stored = crate::ImmutableRunBundleStore::read_exact_bundle(
+        backend,
+        &run_id,
+        bundle.manifest().bundle_id(),
+    )?;
+
+    plan.immutable_run_bundle = Some(stored.manifest().run_binding());
+    executor.append_run_start(&mut plan)?;
+    executor.append_step_scheduled(&mut plan)?;
+    plan.step_scheduled = true;
+    if plan.policy_effects.requires_approval() {
+        executor.pause_for_approval(plan)?;
+        return Ok(TrustedHostLocalApplicationAdmissionOutcome::Waiting(
+            TrustedHostLocalApplicationWaitReason::Approval,
+        ));
+    }
+
+    prepare_fresh_trusted_host_local_application_operation(backend, profile, request, &stored, plan)
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn validate_trusted_host_admission_plan(
+    plan: &ExecutionPlan,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    selected_step_id: &StepId,
+) -> Result<(), WorkflowOsError> {
+    if plan.steps.len() != 1
+        || &plan.step.id != selected_step_id
+        || plan.skill_id.as_str() != profile.skill_id()
+        || plan.skill_version.as_str() != profile.skill_version()
+        || plan.adapter_id.is_some()
+        || !plan.side_effect_events.is_empty()
+        || !plan.side_effect_lifecycle_events.is_empty()
+        || plan.before_skill_invocation_hook.is_some()
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Unsupported,
+            "trusted_host_local_application.admission.workflow_unsupported",
+            "trusted-host local application supports one canonical no-write docs-check step",
+        ));
+    }
+    profile.explicit_zero_required_context_authorization()?;
+    Ok(())
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn prepare_fresh_trusted_host_local_application_operation<'a>(
+    backend: &'a crate::SqliteStateBackend,
+    profile: &'a ResolvedExplicitLocalCheckProfile,
+    request: &TrustedHostLocalApplicationAdmissionRequest,
+    stored: &crate::StoredImmutableRunBundle,
+    plan: ExecutionPlan,
+) -> Result<TrustedHostLocalApplicationAdmissionOutcome<'a>, WorkflowOsError> {
+    use crate::authorized_execution_continuity_state::internal::{
+        trusted_time_observation, ContinuityOperationId, ContinuityReceiptId,
+        ContinuityTrustedTimeEpochId, TrustedTimeSourceKind,
+    };
+    use crate::current_authority_source::RegisteredExplicitZeroDocsCheckSourceInput;
+    use crate::trusted_host_supervisor::{
+        LocalSkillAttemptExecutor, TrustedHostSupervisorPersistenceInput,
+    };
+
+    let contract = profile.explicit_zero_required_context_contract(
+        crate::HarnessContractId::new("harness/docs-check")?,
+        crate::HarnessContractVersion::new("v1")?,
+    )?;
+    let execution_binding =
+        crate::RequiredContextExecutionBinding::new(crate::RequiredContextExecutionBindingInput {
+            bundle: stored,
+            contract: &contract,
+            actor: plan.execution_actor.clone(),
+            step_id: plan.step.id.clone(),
+            maximum_sensitivity: WorkReportSensitivity::Internal,
+            bound_at: request.observed_at,
+        })?;
+    let source = crate::current_authority_source::RegisteredInMemoryCurrentAuthoritySource::register_explicit_zero_docs_check(
+        RegisteredExplicitZeroDocsCheckSourceInput {
+            source_id: crate::CurrentAuthoritySourceId::new("source/trusted-host-docs-check")?,
+            contract_version: crate::CurrentAuthoritySourceContractVersion::new("v1")?,
+            profile,
+            execution_binding: &execution_binding,
+            contract: &contract,
+            core_maximum_observation_age_seconds: 300,
+            sensitivity: WorkReportSensitivity::Internal,
+            observed_at: request.observed_at,
+            source_valid_through: Some(request.expires_at),
+            generation: Some(crate::CurrentAuthoritySourceGeneration::new(1)?),
+        },
+    )?;
+    let suffix = trusted_host_admission_suffix(&plan.event_builder.run_id, &plan.step.id);
+    let window_id = crate::AuthorizedExecutionWindowId::new(format!("window/{suffix}"))?;
+    let skill_input = trusted_host_skill_input(&plan, &request.execution.execution.correlation_id)?;
+    let executor_commitment = trusted_host_executor_commitment(profile, &plan);
+    let executor = Box::new(LocalSkillAttemptExecutor::new(
+        profile.skill_handler(),
+        executor_commitment,
+    ));
+    let fresh = crate::sqlite_state::TrustedHostLocalApplicationOwnedFreshPreparation {
+        source,
+        execution_binding,
+        contract,
+        operation_id: crate::OperationalExecutionWindowOpeningOperationId::new(format!(
+            "opening/{suffix}"
+        ))?,
+        receipt_id: crate::OperationalExecutionWindowOpeningReceiptId::new(format!(
+            "receipt/{suffix}"
+        ))?,
+        attempt_id: crate::AuthorizedExecutionAttemptId::new(format!("attempt/{suffix}"))?,
+        expires_at: request.expires_at,
+        maximum_attempts: plan.retry_max_attempts,
+        trusted_time: trusted_time_observation(
+            request.observed_at,
+            TrustedTimeSourceKind::CoreInjectedClockV1,
+            SpecContentHash::new(crate::sqlite_state::CONTINUITY_CLOCK_PROVENANCE)?,
+            ContinuityTrustedTimeEpochId::new(crate::sqlite_state::CONTINUITY_CLOCK_EPOCH)?,
+        ),
+        evaluated_at: request.observed_at,
+        redaction: RedactionMetadata::empty(),
+        persistence: TrustedHostSupervisorPersistenceInput {
+            operation: ContinuityOperationId::new(format!("supervisor/{suffix}"))?,
+            receipt: ContinuityReceiptId::new(format!("supervisor-receipt/{suffix}"))?,
+            yield_generation: None,
+        },
+    };
+    let prepared = crate::sqlite_state::prepare_owned_trusted_host_local_application_session(
+        crate::sqlite_state::TrustedHostLocalApplicationOwnedPreparationInput {
+            backend,
+            locator: crate::sqlite_state::TrustedHostOperationalEntryLocator {
+                workflow_id: plan.event_builder.workflow_id,
+                run_id: plan.event_builder.run_id,
+                step_id: plan.step.id,
+                window_id,
+                subject_actor_id: plan.execution_actor,
+                immutable_run_bundle: stored.manifest().run_binding(),
+            },
+            posture: crate::sqlite_state::TrustedHostLocalApplicationOwnedPreparationPosture::Fresh(
+                Box::new(fresh),
+            ),
+            executor,
+            skill_input,
+        },
+    )?;
+    Ok(TrustedHostLocalApplicationAdmissionOutcome::Prepared(
+        prepared,
+    ))
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+#[allow(clippy::too_many_lines)]
+fn admit_existing_trusted_host_local_application_operation<'a>(
+    backend: &'a crate::SqliteStateBackend,
+    profile: &'a ResolvedExplicitLocalCheckProfile,
+    request: &TrustedHostLocalApplicationAdmissionRequest,
+    run_id: &WorkflowRunId,
+) -> Result<TrustedHostLocalApplicationAdmissionOutcome<'a>, WorkflowOsError> {
+    use crate::trusted_host_supervisor::LocalSkillAttemptExecutor;
+
+    let run = backend.rehydrate_run(run_id)?;
+    if run.snapshot.status.is_terminal() {
+        return Ok(TrustedHostLocalApplicationAdmissionOutcome::TerminalReplay);
+    }
+    match run.snapshot.status {
+        WorkflowRunStatus::WaitingForApproval => {
+            return Ok(TrustedHostLocalApplicationAdmissionOutcome::Waiting(
+                TrustedHostLocalApplicationWaitReason::Approval,
+            ));
+        }
+        WorkflowRunStatus::WaitingForExternalEvent => {
+            return Ok(TrustedHostLocalApplicationAdmissionOutcome::Waiting(
+                TrustedHostLocalApplicationWaitReason::ExternalCondition,
+            ));
+        }
+        WorkflowRunStatus::Running | WorkflowRunStatus::Retrying => {}
+        _ => {
+            return Ok(TrustedHostLocalApplicationAdmissionOutcome::Blocked(
+                TrustedHostLocalApplicationBlockReason::CurrentState,
+            ));
+        }
+    }
+    let binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(immutable_run_bundle_binding_error)?;
+    let stored =
+        crate::ImmutableRunBundleStore::read_exact_bundle(backend, run_id, binding.bundle_id())?;
+    if stored.manifest().run_binding() != *binding
+        || !existing_immutable_run_bundle_request_matches(
+            stored.manifest(),
+            &request.execution.execution,
+            &request.execution.bundle,
+            None,
+        )?
+    {
+        return Err(immutable_run_bundle_binding_error());
+    }
+    let workflow = immutable_continuation_workflow(&stored)?;
+    if workflow.steps.len() != 1 {
+        return Ok(TrustedHostLocalApplicationAdmissionOutcome::Blocked(
+            TrustedHostLocalApplicationBlockReason::UnsupportedWorkflow,
+        ));
+    }
+    let step = &workflow.steps[0];
+    let skill = immutable_continuation_skill(&stored, step)?;
+    if step.id != request.selected_step_id
+        || skill.id.as_str() != profile.skill_id()
+        || skill.version.as_str() != profile.skill_version()
+    {
+        return Ok(TrustedHostLocalApplicationAdmissionOutcome::Blocked(
+            TrustedHostLocalApplicationBlockReason::UnsupportedWorkflow,
+        ));
+    }
+    let opening = run
+        .snapshot
+        .last_operational_opening_projection
+        .as_ref()
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "trusted_host_local_application.admission.existing_window_missing",
+                "trusted-host existing operational window is unavailable",
+            )
+        })?;
+    let actor = run
+        .events
+        .first()
+        .and_then(|event| event.actor.clone())
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "trusted_host_local_application.admission.actor_missing",
+                "trusted-host durable actor binding is unavailable",
+            )
+        })?;
+    if actor != request.execution.execution.actor {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Security,
+            "trusted_host_local_application.admission.actor_mismatch",
+            "trusted-host durable actor binding does not match",
+        ));
+    }
+    let skill_input = SkillInput {
+        run_id: run_id.clone(),
+        workflow_id: workflow.id.clone(),
+        workflow_version: workflow.version.clone(),
+        schema_version: workflow.schema_version.clone(),
+        spec_hash: stored.manifest().workflow_content_hash().clone(),
+        step_id: step.id.clone(),
+        skill_id: skill.id.clone(),
+        skill_version: skill.version.clone(),
+        correlation_id: request.execution.execution.correlation_id.clone(),
+        values: build_input_values(&step.input_mapping)?,
+    };
+    let executor = Box::new(LocalSkillAttemptExecutor::new(
+        profile.skill_handler(),
+        trusted_host_executor_commitment_from_identity(profile, &skill.id, &skill.version),
+    ));
+    let prepared = crate::sqlite_state::prepare_owned_trusted_host_local_application_session(
+        crate::sqlite_state::TrustedHostLocalApplicationOwnedPreparationInput {
+            backend,
+            locator: crate::sqlite_state::TrustedHostOperationalEntryLocator {
+                workflow_id: workflow.id.clone(),
+                run_id: run_id.clone(),
+                step_id: step.id.clone(),
+                window_id: opening.window_id().clone(),
+                subject_actor_id: actor,
+                immutable_run_bundle: binding.clone(),
+            },
+            posture:
+                crate::sqlite_state::TrustedHostLocalApplicationOwnedPreparationPosture::Existing,
+            executor,
+            skill_input,
+        },
+    )?;
+    Ok(TrustedHostLocalApplicationAdmissionOutcome::Prepared(
+        prepared,
+    ))
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_skill_input(
+    plan: &ExecutionPlan,
+    correlation_id: &CorrelationId,
+) -> Result<SkillInput, WorkflowOsError> {
+    Ok(SkillInput {
+        run_id: plan.event_builder.run_id.clone(),
+        workflow_id: plan.event_builder.workflow_id.clone(),
+        workflow_version: plan.event_builder.workflow_version.clone(),
+        schema_version: plan.event_builder.schema_version.clone(),
+        spec_hash: plan.event_builder.spec_hash.clone(),
+        step_id: plan.step.id.clone(),
+        skill_id: plan.skill_id.clone(),
+        skill_version: plan.skill_version.clone(),
+        correlation_id: correlation_id.clone(),
+        values: build_input_values(&plan.step.input_mapping)?,
+    })
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_executor_commitment(
+    profile: &ResolvedExplicitLocalCheckProfile,
+    plan: &ExecutionPlan,
+) -> SpecContentHash {
+    trusted_host_executor_commitment_from_identity(profile, &plan.skill_id, &plan.skill_version)
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_executor_commitment_from_identity(
+    profile: &ResolvedExplicitLocalCheckProfile,
+    skill_id: &SkillId,
+    skill_version: &SkillVersion,
+) -> SpecContentHash {
+    let fingerprint =
+        crate::compute_local_check_command_contract_fingerprint(profile.command_contract());
+    let material = format!(
+        "workflow-os/trusted-host-local-executor/v1\n{}\n{}\n{}",
+        skill_id.as_str(),
+        skill_version.as_str(),
+        fingerprint.as_str()
+    );
+    SpecContentHash::from_text(&material)
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_admission_suffix(run_id: &WorkflowRunId, step_id: &StepId) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"workflow-os/trusted-host-local-admission/v1\0");
+    hasher.update(run_id.as_str().as_bytes());
+    hasher.update(b"\0");
+    hasher.update(step_id.as_str().as_bytes());
+    let digest = SpecContentHash::from_bytes(hasher.finalize());
+    digest.as_str()[..24].to_owned()
 }
 
 /// Executes one explicit local run only after publishing and binding its immutable bundle.

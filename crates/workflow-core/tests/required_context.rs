@@ -45,6 +45,41 @@ fn harness_version() -> HarnessContractVersion {
     HarnessContractVersion::new("v1").expect("version")
 }
 
+#[test]
+fn legacy_nonempty_contract_hash_and_wire_shape_remain_unchanged() {
+    let contract = RequiredContextContractBinding::new(
+        harness_id(),
+        harness_version(),
+        vec![RequiredContextRequirement::new(
+            RequiredContextRequirementId::new("required/evidence").expect("requirement"),
+            evidence_target("evidence/required"),
+            GovernedContextAccessLevel::ReferenceOnly,
+            RequiredContextObligation::Required,
+            WorkReportSensitivity::Confidential,
+        )
+        .expect("requirement")],
+    )
+    .expect("contract");
+
+    assert_eq!(
+        contract.content_hash().as_str(),
+        "f7f7aedb81d2f26171bcd352dd1523cff4ad56a5c06f61703b8263cc9e33cfdf"
+    );
+    let value = serde_json::to_value(&contract).expect("serialize");
+    assert!(value.get("requirement_posture").is_none());
+    assert_eq!(value.as_object().expect("object").len(), 4);
+    let round_trip: RequiredContextContractBinding =
+        serde_json::from_value(value).expect("deserialize");
+    assert_eq!(round_trip, contract);
+}
+
+#[test]
+fn public_contract_constructor_still_rejects_empty_requirements() {
+    let error = RequiredContextContractBinding::new(harness_id(), harness_version(), Vec::new())
+        .expect_err("public empty contract must fail closed");
+    assert_eq!(error.code(), "required_context.contract.requirements_empty");
+}
+
 fn evidence_target(value: &str) -> GovernedContextReferenceTarget {
     GovernedContextReferenceTarget::EvidenceReference(
         EvidenceReferenceId::new(value).expect("evidence id"),

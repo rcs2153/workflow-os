@@ -15,5 +15,8 @@ path = "src/lib.rs"
 [dependencies]
 workflow-core = { path = "../workflow-core", features = ["trusted-host-application-spi"] }
 
+[dev-dependencies]
+time = "0.3"
+
 [lints]
 workspace = true

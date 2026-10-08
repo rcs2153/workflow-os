@@ -1,0 +1,58 @@
+schema_version: workflowos.dev/v0
+id: dg/trusted-host-docs-check
+version: v0
+display_name: Trusted-Host Docs Check
+description: Closed one-step dogfood workflow for the unpublished trusted-host local admission proof.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - requested
+    - checked
+steps:
+  - id: docs-check
+    skill_ref:
+      id: local/check-docs
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: trusted-host-docs-check
+        to: request
+    policy_requirements:
+      - id: local/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+    - RunCompleted
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - dogfood
+  - self-governance
+  - trusted-host
+  - local-check

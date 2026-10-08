@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    EventId, RedactionMetadata, SkillHandler, SkillInput, SkillOutput, WorkReportCitationKind,
+    EventId, HarnessContractId, HarnessContractVersion, RedactionMetadata,
+    RequiredContextContractBinding, SkillHandler, SkillInput, SkillOutput, WorkReportCitationKind,
     WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId,
 };
 
@@ -1648,6 +1649,11 @@ pub struct ResolvedExplicitLocalCheckProfile {
     handler: ResolvedExplicitLocalCheckHandler,
 }
 
+#[allow(dead_code)]
+pub(crate) struct ExplicitZeroRequiredContextProfileAuthorization {
+    _private: (),
+}
+
 #[derive(Clone)]
 enum ResolvedExplicitLocalCheckHandler {
     WorkflowOsProjectValidation(WorkflowOsProjectValidationLocalHandler),
@@ -1668,6 +1674,14 @@ impl ResolvedExplicitLocalCheckHandler {
             Self::DocsCheck(handler) => Box::new(handler),
         }
     }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    fn skill_handler(&self) -> &dyn SkillHandler {
+        match self {
+            Self::WorkflowOsProjectValidation(handler) => handler,
+            Self::DocsCheck(handler) => handler,
+        }
+    }
 }
 
 impl ResolvedExplicitLocalCheckProfile {
@@ -1675,6 +1689,35 @@ impl ResolvedExplicitLocalCheckProfile {
     #[must_use]
     pub const fn profile_id(&self) -> ExplicitLocalCheckProfileId {
         self.profile_id
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn explicit_zero_required_context_authorization(
+        &self,
+    ) -> Result<ExplicitZeroRequiredContextProfileAuthorization, WorkflowOsError> {
+        if self.profile_id != ExplicitLocalCheckProfileId::DocsCheck
+            || self.command_contract() != &LocalCheckCommandContract::docs_check_model_only()?
+        {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Security,
+                "local_check.profile.required_context_not_explicit_zero",
+                "selected local-check profile does not declare explicit zero required context",
+            ));
+        }
+        Ok(ExplicitZeroRequiredContextProfileAuthorization { _private: () })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn explicit_zero_required_context_contract(
+        &self,
+        contract_id: HarnessContractId,
+        contract_version: HarnessContractVersion,
+    ) -> Result<RequiredContextContractBinding, WorkflowOsError> {
+        RequiredContextContractBinding::explicit_none(
+            contract_id,
+            contract_version,
+            self.explicit_zero_required_context_authorization()?,
+        )
     }
 
     /// Returns the canonical fixed command contract.
@@ -1731,6 +1774,11 @@ impl ResolvedExplicitLocalCheckProfile {
 
     pub(crate) fn handler(&self) -> &dyn AuthoritativeLocalCheckHandler {
         self.handler.authoritative()
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    pub(crate) fn skill_handler(&self) -> &dyn SkillHandler {
+        self.handler.skill_handler()
     }
 
     pub(crate) fn into_handler(self) -> Box<dyn SkillHandler> {
@@ -3069,4 +3117,49 @@ fn local_check_error(
 
 fn validation_error(code: &'static str, message: impl Into<String>) -> WorkflowOsError {
     WorkflowOsError::validation(code, message)
+}
+
+#[cfg(test)]
+mod explicit_zero_required_context_tests {
+    #![allow(clippy::assert_is_empty, clippy::expect_used, clippy::panic)]
+
+    use super::*;
+
+    #[derive(Debug)]
+    struct NeverRun;
+
+    impl LocalCheckProcessRunner for NeverRun {
+        fn run(
+            &self,
+            _request: &LocalCheckProcessRequest,
+        ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+            panic!("profile resolution must not execute the check")
+        }
+    }
+
+    #[test]
+    fn canonical_docs_check_profile_is_the_only_explicit_zero_issuer() {
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("repository root")
+            .to_path_buf();
+        let profile = ExplicitLocalCheckProfileSelection::docs_check()
+            .resolve_docs_check_with_process_runner(
+                std::env::current_exe().expect("test binary"),
+                repository_root,
+                None,
+                Arc::new(NeverRun),
+            )
+            .expect("docs profile");
+        let contract = profile
+            .explicit_zero_required_context_contract(
+                HarnessContractId::new("harness/docs-check").expect("contract"),
+                HarnessContractVersion::new("v1").expect("version"),
+            )
+            .expect("explicit zero contract");
+
+        assert!(contract.is_explicit_none());
+        assert!(contract.requirements().is_empty());
+    }
 }

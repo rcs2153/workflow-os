@@ -22,7 +22,10 @@ use crate::operational_execution_window_opening::OperationalExecutionWindowOpeni
 use crate::trusted_host_supervisor::{
     TrustedHostAttemptExecutor, TrustedHostSupervisorPersistenceInput,
 };
-use crate::SkillInput;
+use crate::{
+    RedactionMetadata, RequiredContextContractBinding, RequiredContextExecutionBinding, SkillInput,
+    Timestamp,
+};
 
 type SessionRunner<'a> =
     Box<dyn FnOnce() -> Result<TrustedHostLocalApplicationOutcome, WorkflowOsError> + 'a>;
@@ -155,7 +158,7 @@ pub enum TrustedHostLocalApplicationFailure {
 }
 
 impl TrustedHostLocalApplicationFailure {
-    fn from_core_error(error: &WorkflowOsError) -> Self {
+    pub(crate) fn from_core_error(error: &WorkflowOsError) -> Self {
         match error.kind() {
             WorkflowOsErrorKind::Parse => Self::Parse,
             WorkflowOsErrorKind::Validation => Self::Validation,
@@ -213,6 +216,156 @@ pub(crate) struct TrustedHostLocalApplicationPreparationInput<'a> {
     pub(crate) posture: TrustedHostLocalApplicationPreparationPosture<'a>,
     pub(crate) executor: &'a dyn TrustedHostAttemptExecutor,
     pub(crate) skill_input: SkillInput,
+}
+
+pub(crate) struct TrustedHostLocalApplicationOwnedFreshPreparation {
+    pub(crate) source: crate::current_authority_source::RegisteredInMemoryCurrentAuthoritySource,
+    pub(crate) execution_binding: RequiredContextExecutionBinding,
+    pub(crate) contract: RequiredContextContractBinding,
+    pub(crate) operation_id: crate::OperationalExecutionWindowOpeningOperationId,
+    pub(crate) receipt_id: crate::OperationalExecutionWindowOpeningReceiptId,
+    pub(crate) attempt_id: crate::AuthorizedExecutionAttemptId,
+    pub(crate) expires_at: Timestamp,
+    pub(crate) maximum_attempts: u32,
+    pub(crate) trusted_time:
+        crate::authorized_execution_continuity_state::internal::TrustedTimeObservation,
+    pub(crate) evaluated_at: Timestamp,
+    pub(crate) redaction: RedactionMetadata,
+    pub(crate) persistence: TrustedHostSupervisorPersistenceInput,
+}
+
+pub(crate) enum TrustedHostLocalApplicationOwnedPreparationPosture {
+    Fresh(Box<TrustedHostLocalApplicationOwnedFreshPreparation>),
+    Existing,
+}
+
+pub(crate) struct TrustedHostLocalApplicationOwnedPreparationInput<'a> {
+    pub(crate) backend: &'a SqliteStateBackend,
+    pub(crate) locator: TrustedHostOperationalEntryLocator,
+    pub(crate) posture: TrustedHostLocalApplicationOwnedPreparationPosture,
+    pub(crate) executor: Box<dyn TrustedHostAttemptExecutor + 'a>,
+    pub(crate) skill_input: SkillInput,
+}
+
+fn fresh_opening<'a>(
+    backend: &'a SqliteStateBackend,
+    locator: &TrustedHostOperationalEntryLocator,
+    fresh: &'a TrustedHostLocalApplicationOwnedFreshPreparation,
+    invocation_binding_commitment: &'a crate::SpecContentHash,
+) -> OperationalExecutionWindowOpeningUseInput<'a> {
+    OperationalExecutionWindowOpeningUseInput {
+        source: &fresh.source,
+        backend,
+        execution_binding: &fresh.execution_binding,
+        contract: &fresh.contract,
+        invocation_binding_commitment,
+        operation_id: fresh.operation_id.clone(),
+        receipt_id: fresh.receipt_id.clone(),
+        window_id: locator.window_id.clone(),
+        attempt_id: fresh.attempt_id.clone(),
+        expires_at: fresh.expires_at,
+        maximum_attempts: fresh.maximum_attempts,
+        trusted_time: fresh.trusted_time.clone(),
+        evaluated_at: fresh.evaluated_at,
+        redaction: &fresh.redaction,
+    }
+}
+
+pub(crate) fn prepare_owned_trusted_host_local_application_session(
+    input: TrustedHostLocalApplicationOwnedPreparationInput<'_>,
+) -> Result<TrustedHostLocalApplicationPreparedSession<'_>, WorkflowOsError> {
+    let TrustedHostLocalApplicationOwnedPreparationInput {
+        backend,
+        locator,
+        posture,
+        executor,
+        skill_input,
+    } = input;
+    let invocation_commitment =
+        super::super::operational_execution_window_opening::trusted_host_invocation_commitment(
+            &skill_input,
+            &executor.binding_commitment(),
+        );
+    let borrowed_posture = match &posture {
+        TrustedHostLocalApplicationOwnedPreparationPosture::Fresh(fresh) => {
+            TrustedHostOperationalEntryPosture::Fresh {
+                opening: Box::new(fresh_opening(
+                    backend,
+                    &locator,
+                    fresh,
+                    &invocation_commitment,
+                )),
+                persistence: TrustedHostSupervisorPersistenceInput {
+                    operation: fresh.persistence.operation.clone(),
+                    receipt: fresh.persistence.receipt.clone(),
+                    yield_generation: fresh.persistence.yield_generation.clone(),
+                },
+            }
+        }
+        TrustedHostLocalApplicationOwnedPreparationPosture::Existing => {
+            TrustedHostOperationalEntryPosture::Existing
+        }
+    };
+    let preparation_binding = validate_trusted_host_operational_entry_preparation(
+        backend,
+        &locator,
+        &borrowed_posture,
+        executor.as_ref(),
+        &skill_input,
+    )?;
+    drop(borrowed_posture);
+
+    let (cancellation, timer_handle) = TrustedHostLocalTimerCancellation::new();
+    let session = TrustedHostLocalApplicationSession {
+        runner: Box::new(move || {
+            let invocation_commitment = super::super::operational_execution_window_opening::trusted_host_invocation_commitment(
+                &skill_input,
+                &executor.binding_commitment(),
+            );
+            let posture = match &posture {
+                TrustedHostLocalApplicationOwnedPreparationPosture::Fresh(fresh) => {
+                    TrustedHostOperationalEntryPosture::Fresh {
+                        opening: Box::new(fresh_opening(
+                            backend,
+                            &locator,
+                            fresh,
+                            &invocation_commitment,
+                        )),
+                        persistence: TrustedHostSupervisorPersistenceInput {
+                            operation: fresh.persistence.operation.clone(),
+                            receipt: fresh.persistence.receipt.clone(),
+                            yield_generation: fresh.persistence.yield_generation.clone(),
+                        },
+                    }
+                }
+                TrustedHostLocalApplicationOwnedPreparationPosture::Existing => {
+                    TrustedHostOperationalEntryPosture::Existing
+                }
+            };
+            let source = TrustedHostLocalProductionIdentitySource::new();
+            let mut identity_provider = source.redispatch_provider();
+            TrustedHostExplicitLocalProcessOwner::with_cancellation(
+                TrustedHostOperationalEntryInput {
+                    backend,
+                    locator,
+                    posture,
+                    executor: executor.as_ref(),
+                    skill_input,
+                    identity_provider: &mut identity_provider,
+                    expected_preparation_commitment: Some(preparation_binding.commitment),
+                },
+                cancellation,
+            )
+            .run()
+            .map(map_owner_outcome)
+        }),
+    };
+    Ok(TrustedHostLocalApplicationPreparedSession {
+        session,
+        cancellation_handle: TrustedHostLocalApplicationCancellationHandle::from_timer_handle(
+            timer_handle,
+        ),
+    })
 }
 
 /// Opaque Core-issued session and cancellation pair for the unstable local-host SPI.

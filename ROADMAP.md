@@ -1009,7 +1009,57 @@ current queue when they contain historical `next phase` language.
    the closed docs-check profile must explicitly declare zero current-authority
    facts rather than relying on absent fields. The next phase is the complete
    unpublished binary-to-Core-admission-to-local-host-operation Rust vertical
-   slice. Broader profiles and runtime surfaces remain blocked.
+   slice. Implementation inspection found a canonical-model blocker before any
+   runtime wiring: `RequiredContextContractBinding` rejects an empty requirement
+   set, and required-context consumption rejects an empty projection set. Core
+   therefore cannot currently represent or consume the exact explicit
+   zero-obligation contract required by the accepted admission review. The
+   [implementation blocker report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_IMPLEMENTATION_BLOCKER_REPORT.md)
+   records why fabricating an optional requirement, treating absence as proof,
+   or bypassing registered current authority would violate the accepted
+   boundary. The next phase is a narrowly scoped explicit zero-required-context
+   contract model and consumption-semantics plan. That [plan](docs/implementation-plans/explicit-zero-required-context-contract-plan.md)
+   and its [planning report](docs/concepts/EXPLICIT_ZERO_REQUIRED_CONTEXT_CONTRACT_PLAN_REPORT.md)
+   now define an explicit hash-bound posture, compatibility-conscious serde,
+   zero-projection consumption, private closed docs-check issuance, and exact
+   empty-inventory resolution. The focused [maintainer/security
+   review](docs/concepts/EXPLICIT_ZERO_REQUIRED_CONTEXT_CONTRACT_PLAN_REVIEW.md)
+   accepts the plan with one mandatory compatibility condition: existing
+   non-empty contract hashes and serialized output must remain byte-for-byte
+   unchanged, while explicit zero uses a separate marker and hash domain. The
+   prerequisite-only implementation is now complete. It preserves the legacy
+   non-empty hash and wire shape, adds a private canonical docs-check issuer,
+   accepts exactly zero projections only for explicit-zero contracts, and lets
+   the private registered authority source commit and resolve complete empty
+   grant, availability, and context-reference inventories for the exact
+   execution binding. The [implementation
+   report](docs/concepts/EXPLICIT_ZERO_REQUIRED_CONTEXT_CONTRACT_IMPLEMENTATION_REPORT.md)
+   records the boundary and focused tests. The focused [implementation
+   review](docs/concepts/EXPLICIT_ZERO_REQUIRED_CONTEXT_CONTRACT_IMPLEMENTATION_REVIEW.md)
+   accepts the prerequisite with non-blocking follow-ups. The trusted-host
+   local application admission vertical slice is now implemented. One
+   unpublished `workflow-local-host` foreground binary opens a single SQLite
+   backend, supplies explicit selection and lifecycle input, and asks Core to
+   admit the exact one-step `dg/trusted-host-docs-check` operation. Core owns
+   project validation, immutable run-bundle creation or exact rehydration,
+   policy and approval posture, exact step/profile/actor binding, explicit-zero
+   current-authority proof, executor commitment, and opaque one-shot session
+   preparation. The local-host package consumes the pair synchronously and
+   emits only bounded posture strings. SQLite schema v7 adds atomic create-only
+   immutable-run-bundle storage so the admitted run does not split truth across
+   backends. Production-shaped tests invoke the actual unpublished binary,
+   prove durable bundle/event state and idempotent replay, and use no provider,
+   network, mock handler, released CLI, or filesystem state bridge. An
+   operational terminal outcome deliberately leaves the workflow run
+   `Running`; application return does not fabricate workflow completion. See
+   the [implementation
+   report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_IMPLEMENTATION_REPORT.md).
+   The focused [implementation/security
+   review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_IMPLEMENTATION_REVIEW.md)
+   accepts the unpublished docs-check slice with non-blocking follow-ups. The
+   next phase is bounded application-boundary negative-path proof hardening
+   for the existing slice. Broader profiles and runtime surfaces remain
+   blocked.
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

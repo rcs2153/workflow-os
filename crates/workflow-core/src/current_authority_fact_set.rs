@@ -1,6 +1,7 @@
 use std::fmt;
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -196,11 +197,12 @@ impl<'de> Deserialize<'de> for CurrentAuthorityQuery {
 }
 
 /// Canonical complete query set derived from one exact contract.
-#[derive(Clone, Eq, PartialEq, Serialize)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct CurrentAuthorityQuerySet {
     contract_content_hash: SpecContentHash,
     queries: Vec<CurrentAuthorityQuery>,
     query_set_hash: SpecContentHash,
+    explicit_zero: bool,
 }
 
 impl CurrentAuthorityQuerySet {
@@ -222,18 +224,29 @@ impl CurrentAuthorityQuerySet {
                 .as_str()
                 .cmp(right.requirement_id.as_str())
         });
-        validate_queries(&queries)?;
-        let query_set_hash = hash_serializable("query-set", &queries)?;
+        let explicit_zero = contract.is_explicit_none();
+        validate_queries(&queries, explicit_zero)?;
+        let query_set_hash = if explicit_zero {
+            hash_serializable("query-set-explicit-zero-v1", &queries)?
+        } else {
+            hash_serializable("query-set", &queries)?
+        };
         Ok(Self {
             contract_content_hash: contract.content_hash().clone(),
             queries,
             query_set_hash,
+            explicit_zero,
         })
     }
 
     fn validate(&self) -> Result<(), WorkflowOsError> {
-        validate_queries(&self.queries)?;
-        if self.query_set_hash != hash_serializable("query-set", &self.queries)? {
+        validate_queries(&self.queries, self.explicit_zero)?;
+        let expected = if self.explicit_zero {
+            hash_serializable("query-set-explicit-zero-v1", &self.queries)?
+        } else {
+            hash_serializable("query-set", &self.queries)?
+        };
+        if self.query_set_hash != expected {
             return Err(fact_error(
                 "query_set.hash_mismatch",
                 "authority query-set hash is invalid",
@@ -255,6 +268,23 @@ impl CurrentAuthorityQuerySet {
     }
 }
 
+impl Serialize for CurrentAuthorityQuerySet {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let field_count = if self.explicit_zero { 4 } else { 3 };
+        let mut state = serializer.serialize_struct("CurrentAuthorityQuerySet", field_count)?;
+        state.serialize_field("contract_content_hash", &self.contract_content_hash)?;
+        state.serialize_field("queries", &self.queries)?;
+        state.serialize_field("query_set_hash", &self.query_set_hash)?;
+        if self.explicit_zero {
+            state.serialize_field("requirement_posture", "explicit_none")?;
+        }
+        state.end()
+    }
+}
+
 impl fmt::Debug for CurrentAuthorityQuerySet {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -262,6 +292,7 @@ impl fmt::Debug for CurrentAuthorityQuerySet {
             .field("contract_content_hash", &"[REDACTED]")
             .field("query_count", &self.queries.len())
             .field("query_set_hash", &"[REDACTED]")
+            .field("explicit_zero", &self.explicit_zero)
             .finish()
     }
 }
@@ -276,12 +307,28 @@ impl<'de> Deserialize<'de> for CurrentAuthorityQuerySet {
             contract_content_hash: SpecContentHash,
             queries: Vec<CurrentAuthorityQuery>,
             query_set_hash: SpecContentHash,
+            requirement_posture: Option<String>,
         }
         let wire = Wire::deserialize(deserializer)?;
+        let explicit_zero = match wire.requirement_posture.as_deref() {
+            None if wire.queries.is_empty() => {
+                return Err(serde::de::Error::custom(
+                    "invalid current authority query set",
+                ));
+            }
+            None => false,
+            Some("explicit_none") => true,
+            Some(_) => {
+                return Err(serde::de::Error::custom(
+                    "invalid current authority query set",
+                ));
+            }
+        };
         let value = Self {
             contract_content_hash: wire.contract_content_hash,
             queries: wire.queries,
             query_set_hash: wire.query_set_hash,
+            explicit_zero,
         };
         value
             .validate()
@@ -590,11 +637,20 @@ impl<'de> Deserialize<'de> for CurrentAuthorityFactSet {
     }
 }
 
-fn validate_queries(queries: &[CurrentAuthorityQuery]) -> Result<(), WorkflowOsError> {
-    if queries.is_empty() {
+fn validate_queries(
+    queries: &[CurrentAuthorityQuery],
+    explicit_zero: bool,
+) -> Result<(), WorkflowOsError> {
+    if queries.is_empty() && !explicit_zero {
         return Err(fact_error(
             "query_set.empty",
             "authority query set cannot be empty",
+        ));
+    }
+    if !queries.is_empty() && explicit_zero {
+        return Err(fact_error(
+            "query_set.explicit_zero_nonempty",
+            "explicit zero authority query set cannot contain queries",
         ));
     }
     for query in queries {
@@ -706,8 +762,12 @@ mod same_call_resolver;
 
 #[cfg(test)]
 mod tests {
-    use super::hash_serializable;
-    use crate::WorkflowOsError;
+    #![allow(clippy::assert_is_empty, clippy::expect_used)]
+
+    use super::{hash_serializable, CurrentAuthorityQuerySet};
+    use crate::{
+        HarnessContractId, HarnessContractVersion, RequiredContextContractBinding, WorkflowOsError,
+    };
 
     #[test]
     fn hash_framing_separates_ambiguous_domain_and_value_pairs() -> Result<(), WorkflowOsError> {
@@ -716,5 +776,38 @@ mod tests {
 
         assert_ne!(left, right);
         Ok(())
+    }
+
+    #[test]
+    fn explicit_zero_query_set_round_trips_with_distinct_marker() {
+        let contract = RequiredContextContractBinding::explicit_none_for_test(
+            HarnessContractId::new("harness/docs-check").expect("contract"),
+            HarnessContractVersion::new("v1").expect("version"),
+        )
+        .expect("explicit zero contract");
+        let query_set = CurrentAuthorityQuerySet::from_contract(&contract).expect("query set");
+        assert!(query_set.queries().is_empty());
+        let value = serde_json::to_value(&query_set).expect("serialize");
+        assert_eq!(value["requirement_posture"], "explicit_none");
+        let decoded: CurrentAuthorityQuerySet = serde_json::from_value(value).expect("deserialize");
+        assert_eq!(decoded, query_set);
+    }
+
+    #[test]
+    fn empty_query_set_without_explicit_marker_fails_closed() {
+        let contract = RequiredContextContractBinding::explicit_none_for_test(
+            HarnessContractId::new("harness/docs-check").expect("contract"),
+            HarnessContractVersion::new("v1").expect("version"),
+        )
+        .expect("explicit zero contract");
+        let query_set = CurrentAuthorityQuerySet::from_contract(&contract).expect("query set");
+        let mut value = serde_json::to_value(query_set).expect("serialize");
+        value
+            .as_object_mut()
+            .expect("object")
+            .remove("requirement_posture");
+        let error = serde_json::from_value::<CurrentAuthorityQuerySet>(value)
+            .expect_err("marker is required");
+        assert_eq!(error.to_string(), "invalid current authority query set");
     }
 }

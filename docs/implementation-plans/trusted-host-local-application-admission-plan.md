@@ -1,9 +1,11 @@
 # Trusted-Host Local Application Admission Plan
 
-Status: planning blocker fix complete; focused blocker-fix review required
-before implementation. The original focused review found that the process
-entry, current-authority inventory provenance, and admission result shape were
-not sufficiently specified.
+Status: implemented; focused implementation/security review required. The
+planning blockers were resolved before implementation by selecting the
+unpublished foreground process, requiring an explicit-zero current-authority
+contract for the closed docs-check profile, and defining bounded admission and
+operation outcomes. The implementation remains unpublished, local, opt-in,
+and limited to the exact no-write docs-check vertical slice.
 
 ## 1. Executive Summary
 
@@ -423,19 +425,23 @@ function without its foreground caller or a caller with only a test issuer.
 - What minimal operational metric can be emitted without exposing bound
   identities or creating a second audit truth?
 
-## 16. Validation For This Planning Phase
+## 16. Validation
 
+- `cargo fmt --all --check`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
 - `npm run check:docs`
+- `npm run check:integrations`
 - `git diff --check`
-
-No Rust implementation or Rust validation is authorized in this phase.
 
 ## 17. Final Recommendation
 
-Proceed to a focused maintainer/security review. If accepted, implement one
-unpublished SQLite-backed foreground admission path for the explicit docs-
-check profile. Keep Core as the sole authority for admission and return only
-the existing opaque prepared pair to local host.
+Proceed to a focused implementation/security review of the one unpublished
+SQLite-backed foreground admission path for the explicit docs-check profile.
+Review the Core-owned provenance boundary, SQLite v7 immutable-bundle
+semantics, explicit-zero current-authority proof, one-shot opaque handoff,
+bounded output, replay behavior, and the deliberate separation between an
+operational terminal outcome and workflow completion.
 
 Do not add the path to the released CLI, broaden handler families, add
 discovery or scheduling, expose authority-bearing inputs, mutate providers,
