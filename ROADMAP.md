@@ -1067,14 +1067,15 @@ current queue when they contain historical `next phase` language.
    executable replacement. The governed blocker fix now commits exact encoded
    path bytes plus a streaming executable content identity and revalidates that
    identity before request construction. The focused blocker-fix review accepts
-   the substantive identity binding but requires one final regression proving
-   that executable identity becoming unavailable after resolution fails before
-   runner invocation and without leakage. Policy-denial and pre-entry cancellation remain
+   the substantive identity binding and identified one missing regression. The
+   governed follow-up now proves that executable identity becoming unavailable
+   after resolution fails before runner invocation and without leakage. The
+   blocker is closed. Policy-denial and pre-entry cancellation remain
    lower-level proofs because the foreground binary exposes no injection seam
    for either posture. See the [hardening
    report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_REPORT.md).
-   Broader profiles and runtime surfaces remain blocked pending that one-test
-   fix and verification. See the [review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_REVIEW.md),
+   Broader profiles and runtime surfaces remain separately scoped rather than
+   authorized by this acceptance. See the [review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_REVIEW.md),
    [blocker-fix report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_BLOCKER_FIX_REPORT.md),
    and [blocker-fix review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_BLOCKER_FIX_REVIEW.md).
    General scheduling, public configuration, provider

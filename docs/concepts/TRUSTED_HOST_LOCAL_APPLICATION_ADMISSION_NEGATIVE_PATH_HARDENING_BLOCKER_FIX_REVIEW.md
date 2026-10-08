@@ -2,14 +2,15 @@
 
 ## 1. Executive Verdict
 
-**Needs one additional blocker fix.**
+**Blocker fixed; trusted-host roadmap work may proceed.**
 
 The executable-identity implementation fixes the substantive security defect.
 The private commitment now preserves exact encoded path bytes, binds a
 streaming executable content identity, and rejects same-path replacement before
 the process runner is invoked. One regression required by the original review
-is still absent: executable identity becoming unavailable after resolution is
-implemented but not tested.
+was initially absent: executable identity becoming unavailable after
+resolution was implemented but not tested. The governed fix adds that direct
+pre-runner regression without changing production behavior.
 
 ## 2. Scope Verification
 
@@ -67,34 +68,30 @@ The following required proofs are present:
 - application errors do not expose executable contents or local paths; and
 - the original six application-boundary postures remain covered.
 
-The following required proof is missing:
+The final required proof is now present:
 
-- after a valid handler resolves an executable, make that executable identity
+- after a valid handler resolves an executable, making that executable identity
   unavailable and prove invocation fails with
   `local_check.profile.handler.executable_identity_unavailable`, before runner
   invocation and without path or content leakage.
 
-The code path exists and is bounded, but the prior security review explicitly
-required this regression. Broader adoption should not rely on an untested
-fail-closed branch at this boundary.
+The regression removes the executable after successful handler construction,
+then proves the stable code, zero runner invocation, and bounded error text.
 
 ## 7. Validation Assessment
 
 The implementation passed format, clippy, focused tests, documentation checks,
-integration checks, and a serialized full workspace test run. Two unrelated
-timing-sensitive scheduler tests failed in separate ordinary parallel runs and
-each passed immediately in isolation. The serialized workspace run passed in
-full. A deliberately concurrent integration build changed the executable
+integration checks, and a serialized full workspace test run. Unrelated
+timing-sensitive scheduler tests failed in ordinary parallel runs and each
+passed immediately in isolation. The serialized workspace run passed in full;
+the final test-only follow-up also passed its focused test, format, clippy,
+documentation, and integration gates. A deliberately concurrent integration build changed the executable
 under test and correctly triggered the new identity guard; independent runs of
 both gates passed.
 
-## 8. Blocker
+## 8. Blockers
 
-Add the missing post-resolution executable-unavailability regression. It must
-prove the stable unavailable-identity code, zero runner invocation, and no
-path, executable bytes, or digest leakage.
-
-No implementation redesign is requested.
+None.
 
 ## 9. Non-Blocking Follow-Ups
 
@@ -106,11 +103,28 @@ No implementation redesign is requested.
 
 ## 10. Recommended Next Phase
 
-Implement the one-test executable-unavailability blocker fix, run the focused
-and full validation gates, and perform a concise fix verification. Do not
-broaden trusted-host adoption or public runtime surfaces.
+Proceed to the next trusted-host roadmap phase identified after PR integration.
+Do not treat this acceptance as authorization for public runtime surfaces or
+for removing the disclosed final validation-to-process-entry race.
 
-## 11. Governed Review Record
+## 11. Fix Verification
+
+The one-test governed blocker phase added no production behavior. Focused and
+repository validation passed, and the new regression proves post-resolution
+unavailability fails before runner invocation without leaking the path or
+fixture contents.
+
+- Workflow: `dg/blocker`
+- Run: `run-1791501089129242000-2`
+- Approval: `approval/run-1791501089129242000-2/fix-approved`
+- Presentation proof: `presentation/4013c801a6dad79f`
+- Approval outcome: granted under delegated maintainer authority
+- Phase status: completed
+- Event summary: 39 events, including one approval request, one approval
+  grant, eight policy decisions, six scheduled steps, six successful skill
+  invocations, and one run completion; zero retries and zero escalations
+
+## 12. Governed Review Record
 
 - Workflow: `dg/review`
 - Run: `run-1791500256676192000-2`

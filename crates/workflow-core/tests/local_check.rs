@@ -1571,6 +1571,45 @@ fn docs_check_handler_rejects_same_path_executable_replacement_before_runner() {
 }
 
 #[test]
+fn docs_check_handler_rejects_unavailable_executable_identity_before_runner() {
+    let executable = std::env::temp_dir().join(format!(
+        "workflow-os-local-check-unavailable-executable-{}",
+        std::process::id()
+    ));
+    fs::write(&executable, b"resolved executable bytes").expect("write executable fixture");
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        12,
+        Vec::new(),
+        Vec::new(),
+    )));
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("valid docs contract"),
+        executable.clone(),
+        repository_root(),
+        None,
+        runner.clone(),
+    )
+    .expect("valid docs handler");
+    fs::remove_file(&executable).expect("remove resolved executable fixture");
+
+    let error = handler
+        .invoke(skill_input())
+        .expect_err("unavailable executable identity must fail before runner");
+
+    assert_eq!(
+        error.code(),
+        "local_check.profile.handler.executable_identity_unavailable"
+    );
+    assert!(!error.to_string().contains("resolved executable bytes"));
+    assert!(!error
+        .to_string()
+        .contains(executable.to_str().expect("fixture path")));
+    assert!(runner.last_request.lock().expect("request lock").is_none());
+}
+
+#[test]
 fn local_check_registration_none_profile_registers_no_handlers() {
     let profile = LocalCheckRegistrationProfile::none();
 

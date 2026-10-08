@@ -54,6 +54,8 @@ No new serialized field or public model surface is introduced.
   contents at the same path, and proves replay fails closed.
 - A direct handler test replaces executable contents after resolution and
   proves failure occurs before the injected process runner is called.
+- A direct handler test removes the executable after resolution and proves
+  unavailable identity fails before the injected process runner is called.
 - A Unix-only unit proof shows distinct non-UTF-8 path byte sequences produce
   distinct commitment digests.
 - Existing actor, correlation, approval-wait, topology, SQLite, exact replay,
