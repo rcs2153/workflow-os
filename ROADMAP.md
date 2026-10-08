@@ -1056,10 +1056,28 @@ current queue when they contain historical `next phase` language.
    report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_IMPLEMENTATION_REPORT.md).
    The focused [implementation/security
    review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_IMPLEMENTATION_REVIEW.md)
-   accepts the unpublished docs-check slice with non-blocking follow-ups. The
-   next phase is bounded application-boundary negative-path proof hardening
-   for the existing slice. Broader profiles and runtime surfaces remain
-   blocked.
+   accepts the unpublished docs-check slice with non-blocking follow-ups.
+   Bounded application-boundary negative-path proof hardening is now
+   implemented for the existing slice. The real unpublished foreground binary
+   now proves approval wait, unsupported-topology rejection, actor and
+   correlation replay rejection, resolved-executable substitution rejection,
+   incompatible SQLite rejection, bounded non-leaking failures, and unchanged
+   exact replay. The focused security review found that the first resolved
+   process commitment used lossy path text and did not bind same-path
+   executable replacement. The governed blocker fix now commits exact encoded
+   path bytes plus a streaming executable content identity and revalidates that
+   identity before request construction. The focused blocker-fix review accepts
+   the substantive identity binding and identified one missing regression. The
+   governed follow-up now proves that executable identity becoming unavailable
+   after resolution fails before runner invocation and without leakage. The
+   blocker is closed. Policy-denial and pre-entry cancellation remain
+   lower-level proofs because the foreground binary exposes no injection seam
+   for either posture. See the [hardening
+   report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_REPORT.md).
+   Broader profiles and runtime surfaces remain separately scoped rather than
+   authorized by this acceptance. See the [review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_REVIEW.md),
+   [blocker-fix report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_BLOCKER_FIX_REPORT.md),
+   and [blocker-fix review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_BLOCKER_FIX_REVIEW.md).
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

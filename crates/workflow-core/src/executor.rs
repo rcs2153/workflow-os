@@ -10514,7 +10514,7 @@ fn prepare_fresh_trusted_host_local_application_operation<'a>(
     let suffix = trusted_host_admission_suffix(&plan.event_builder.run_id, &plan.step.id);
     let window_id = crate::AuthorizedExecutionWindowId::new(format!("window/{suffix}"))?;
     let skill_input = trusted_host_skill_input(&plan, &request.execution.execution.correlation_id)?;
-    let executor_commitment = trusted_host_executor_commitment(profile, &plan);
+    let executor_commitment = trusted_host_executor_commitment(profile, &plan)?;
     let executor = Box::new(LocalSkillAttemptExecutor::new(
         profile.skill_handler(),
         executor_commitment,
@@ -10678,7 +10678,7 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
     };
     let executor = Box::new(LocalSkillAttemptExecutor::new(
         profile.skill_handler(),
-        trusted_host_executor_commitment_from_identity(profile, &skill.id, &skill.version),
+        trusted_host_executor_commitment_from_identity(profile, &skill.id, &skill.version)?,
     ));
     let prepared = crate::sqlite_state::prepare_owned_trusted_host_local_application_session(
         crate::sqlite_state::TrustedHostLocalApplicationOwnedPreparationInput {
@@ -10725,7 +10725,7 @@ fn trusted_host_skill_input(
 fn trusted_host_executor_commitment(
     profile: &ResolvedExplicitLocalCheckProfile,
     plan: &ExecutionPlan,
-) -> SpecContentHash {
+) -> Result<SpecContentHash, WorkflowOsError> {
     trusted_host_executor_commitment_from_identity(profile, &plan.skill_id, &plan.skill_version)
 }
 
@@ -10734,16 +10734,18 @@ fn trusted_host_executor_commitment_from_identity(
     profile: &ResolvedExplicitLocalCheckProfile,
     skill_id: &SkillId,
     skill_version: &SkillVersion,
-) -> SpecContentHash {
+) -> Result<SpecContentHash, WorkflowOsError> {
     let fingerprint =
         crate::compute_local_check_command_contract_fingerprint(profile.command_contract());
+    let resolved_execution_fingerprint = profile.resolved_execution_fingerprint()?;
     let material = format!(
-        "workflow-os/trusted-host-local-executor/v1\n{}\n{}\n{}",
+        "workflow-os/trusted-host-local-executor/v2\n{}\n{}\n{}\n{}",
         skill_id.as_str(),
         skill_version.as_str(),
-        fingerprint.as_str()
+        fingerprint.as_str(),
+        resolved_execution_fingerprint.as_str()
     );
-    SpecContentHash::from_text(&material)
+    Ok(SpecContentHash::from_text(&material))
 }
 
 #[cfg(feature = "trusted-host-application-spi")]
