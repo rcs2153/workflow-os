@@ -1153,7 +1153,27 @@ current queue when they contain historical `next phase` language.
    with non-blocking follow-ups in [GitHub Draft Pull Request HTTP Sandbox
    Transport Review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_HTTP_SANDBOX_TRANSPORT_REVIEW.md).
    The next proof is dedicated provisioning and execution of the ignored live
-   sandbox smoke; it must not broaden targets or mutation families.
+   sandbox smoke; it must not broaden targets or mutation families. The first
+   governed execution attempt failed closed before any provider call with
+   `github_draft_pull_request.approval.proof_marker_mismatch`. The ignored
+   smoke built its durable approval proof from the ordinary content fixture
+   while presenting distinct live-sandbox content. GitHub retained no open
+   pull request. The focused test-fixture blocker fix now derives the approval
+   decision proof from the exact live content, preserves all production
+   behavior, and adds a direct substitution regression; all 11 focused
+   ordinary tests pass. The rerun reached the real pre-observation boundary
+   and failed closed because the installed repository-scoped credential can
+   access `rcs2153/workflow-os` but not the dedicated
+   `rcs2153/workflow-os-sandbox` repository. No provider write was attempted
+   and the sandbox still has zero open pull requests. The remaining proof
+   prerequisite is a separate least-privilege sandbox credential with contents
+   read and pull requests write; the live smoke must then be rerun unchanged.
+   The fixture failure, correction, and remaining operational prerequisite are
+   recorded in the [blocker
+   report](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_LIVE_SANDBOX_SMOKE_BLOCKER_REPORT.md),
+   [fix report](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_LIVE_SANDBOX_SMOKE_FIX_REPORT.md),
+   and focused [fix
+   review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_LIVE_SANDBOX_SMOKE_FIX_REVIEW.md).
    See also
    [GitHub Draft Pull Request Provider
    Mutation Plan](docs/implementation-plans/github-draft-pull-request-provider-mutation-plan.md),

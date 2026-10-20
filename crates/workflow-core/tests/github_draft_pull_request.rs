@@ -229,7 +229,11 @@ fn approval_request() -> ApprovalRequest {
 }
 
 fn approval_decision() -> ApprovalDecision {
-    let presentation = presentation(&content());
+    approval_decision_for(&content())
+}
+
+fn approval_decision_for(content: &GitHubDraftPullRequestContent) -> ApprovalDecision {
+    let presentation = presentation(content);
     ApprovalDecision {
         approval_id: APPROVAL_ID.to_owned(),
         actor: actor(),
@@ -349,6 +353,10 @@ fn terminal_run_with(
 
 fn terminal_run() -> WorkflowRun {
     terminal_run_with(policy_decision(), approval_decision())
+}
+
+fn terminal_run_for(content: &GitHubDraftPullRequestContent) -> WorkflowRun {
+    terminal_run_with(policy_decision(), approval_decision_for(content))
 }
 
 fn presentation(content: &GitHubDraftPullRequestContent) -> ApprovalPresentationRecord {
@@ -759,7 +767,7 @@ fn live_github_com_transport_creates_or_reconciles_one_exact_managed_draft() {
         "workflow-os-github-draft-pr-sandbox-v1",
     )
     .expect("bounded smoke content");
-    let run = terminal_run();
+    let run = terminal_run_for(&live_content);
     let presentation = presentation(&live_content);
     let artifact = report_artifact(&run);
     let current_assessment = current_governance_assessment();
@@ -1108,6 +1116,38 @@ fn granted_approval_requires_the_exact_presentation_proof_marker() {
     assert_eq!(
         error.code(),
         "github_draft_pull_request.approval.proof_marker_missing"
+    );
+    assert_eq!(provider.transport_calls.get(), 0);
+}
+
+#[test]
+fn granted_approval_rejects_substituted_presented_content_before_provider_use() {
+    let state = state();
+    let provider = Provider::created();
+    let run = terminal_run();
+    let resolution = capability_resolution();
+    let substituted_content = GitHubDraftPullRequestContent::new(
+        "substituted-v1",
+        "Substituted governed draft pull request",
+        "This content was not included in the durable approval proof.",
+        "workflow-os-substituted-draft-pr",
+    )
+    .expect("substituted content");
+    let substituted_presentation = presentation(&substituted_content);
+
+    let error = execute(
+        &state.backend,
+        &provider,
+        &run,
+        &resolution,
+        substituted_content,
+        &substituted_presentation,
+    )
+    .expect_err("substituted presentation content must fail closed");
+
+    assert_eq!(
+        error.code(),
+        "github_draft_pull_request.approval.proof_marker_mismatch"
     );
     assert_eq!(provider.transport_calls.get(), 0);
 }
