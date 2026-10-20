@@ -51,13 +51,36 @@ pub(super) fn inject_dispatch_commit_fault(fault: InjectedDispatchCommitFault) {
 }
 
 impl DispatchReservationStore for SqliteStateBackend {
-    #[allow(clippy::too_many_lines)]
     fn reserve_attempt_dispatch(
         &self,
+        request: DispatchReservationRequest,
+    ) -> Result<DispatchReservationOutcome, WorkflowOsError> {
+        self.reserve_attempt_dispatch_inner(request, None)
+    }
+}
+
+impl SqliteStateBackend {
+    pub(crate) fn reserve_attempt_dispatch_with_lifecycle(
+        &self,
+        request: DispatchReservationRequest,
+        lifecycle: &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+    ) -> Result<DispatchReservationOutcome, WorkflowOsError> {
+        self.reserve_attempt_dispatch_inner(request, Some(lifecycle))
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn reserve_attempt_dispatch_inner(
+        &self,
         mut request: DispatchReservationRequest,
+        lifecycle: Option<
+            &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+        >,
     ) -> Result<DispatchReservationOutcome, WorkflowOsError> {
         let expected_request = request_commitment(&request);
-        if request.request_commitment != expected_request {
+        if request.request_commitment != expected_request
+            || request.workflow_lifecycle_commitment
+                != lifecycle.map(crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext::commitment)
+        {
             return Err(reservation_error(
                 WorkflowOsErrorKind::Validation,
                 "request.invalid",
@@ -161,6 +184,18 @@ impl DispatchReservationStore for SqliteStateBackend {
                 .ok_or_else(corrupt)?,
         )?;
         let event_id = dispatch_admission_event_id(&request.operation_id)?;
+        let terminal_sequence = if lifecycle.is_some() {
+            crate::EventSequenceNumber::new(
+                next_sequence.get().checked_add(1).ok_or_else(corrupt)?,
+            )?
+        } else {
+            next_sequence
+        };
+        let terminal_event_id = if let Some(lifecycle) = lifecycle {
+            lifecycle.event_id("invocation-started", request.operation_id.as_str())?
+        } else {
+            event_id.clone()
+        };
         let admission_cursor =
             DispatchAdmissionProjectionCursor::new(next_sequence, event_id.clone());
         let trusted_commitment = trusted_time_commitment(&observation);
@@ -191,8 +226,8 @@ impl DispatchReservationStore for SqliteStateBackend {
 
         let continuity_cursor =
             crate::authorized_execution_continuity_state::internal::ContinuityCursor {
-                sequence_number: next_sequence,
-                event_id: event_id.clone(),
+                sequence_number: terminal_sequence,
+                event_id: terminal_event_id.clone(),
             };
         window.cursor = continuity_cursor.clone();
         window.revision = next_revision;
@@ -227,7 +262,26 @@ impl DispatchReservationStore for SqliteStateBackend {
         };
         let snapshot = append_event_and_project_snapshot(&transaction, &workflow_event)?;
         let snapshot_payload = encode_json(&snapshot, "snapshot")?;
-        let snapshot_binding = snapshot_commitment(&snapshot_payload);
+        let projection_snapshot_binding = snapshot_commitment(&snapshot_payload);
+        if let Some(lifecycle) = lifecycle {
+            append_event_and_project_snapshot(
+                &transaction,
+                &WorkflowRunEvent {
+                    sequence_number: terminal_sequence,
+                    event_id: terminal_event_id,
+                    timestamp: observation.observed_at(),
+                    run_id: request.expected_window_binding.run_id.clone(),
+                    workflow_id: request.expected_window_binding.workflow_id.clone(),
+                    schema_version: last.schema_version.clone(),
+                    workflow_version: last.workflow_version.clone(),
+                    spec_content_hash: last.spec_content_hash.clone(),
+                    correlation_id: None,
+                    actor: None,
+                    idempotency_key: Some(lifecycle.idempotency_key("invocation-started")?),
+                    kind: lifecycle.started_event(&request.capability.attempt_id)?,
+                },
+            )?;
+        }
         let record = DispatchReservationRecord {
             operation_id: request.operation_id.clone(),
             receipt_id: request.receipt_id.clone(),
@@ -245,7 +299,7 @@ impl DispatchReservationStore for SqliteStateBackend {
             &record,
             &ProjectionBinding {
                 event: event.clone(),
-                snapshot_commitment: snapshot_binding.clone(),
+                snapshot_commitment: projection_snapshot_binding,
             },
         )?;
         #[cfg(test)]

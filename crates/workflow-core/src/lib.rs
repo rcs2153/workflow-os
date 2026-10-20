@@ -74,6 +74,7 @@ mod state_migration;
 mod timestamp;
 #[allow(dead_code)]
 mod trusted_host_supervisor;
+mod trusted_host_workflow_lifecycle;
 mod typed_handoff;
 mod validation;
 mod work_report;

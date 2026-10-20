@@ -141,6 +141,10 @@ impl SqliteContinuityStore {
             &crate::AuthorizedExecutionAttemptId,
             &crate::dispatch_reservation::DispatchReservationBinding,
         )>,
+        workflow_lifecycle: Option<(
+            &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+            &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
+        )>,
         mutation: F,
     ) -> Result<(CommittedOperationDisposition, bool), WorkflowOsError>
     where
@@ -210,17 +214,31 @@ impl SqliteContinuityStore {
         }
 
         let window = state.windows.get(window_id).ok_or_else(corrupt)?;
-        let committed_cursor = if self.project_runtime {
+        let projection_cursor = if self.project_runtime {
             allocate_projection_cursor(&transaction, window, expected_cursor, operation_id)?
         } else {
             expected_cursor.clone()
+        };
+        let lifecycle_terminal_cursor = if let Some((lifecycle, _)) = workflow_lifecycle {
+            ContinuityCursor {
+                sequence_number: crate::EventSequenceNumber::new(
+                    projection_cursor
+                        .sequence_number
+                        .get()
+                        .checked_add(2)
+                        .ok_or_else(corrupt)?,
+                )?,
+                event_id: lifecycle.event_id("run-terminal", operation_id.as_str())?,
+            }
+        } else {
+            projection_cursor.clone()
         };
         let window_expires_at = window.expires_at;
         let mut preflight = state.clone();
         mutation(
             &mut preflight,
             window.trusted_time_watermark,
-            &committed_cursor,
+            &lifecycle_terminal_cursor,
             MutationPhase::Preflight,
         )?;
 
@@ -292,9 +310,20 @@ impl SqliteContinuityStore {
             CommittedOperationDisposition::CommittedSuccess(mutation(
                 &mut state,
                 observed_at,
-                &committed_cursor,
+                &lifecycle_terminal_cursor,
                 MutationPhase::Commit,
             )?)
+        };
+        let projected_workflow_lifecycle = matches!(
+            disposition,
+            CommittedOperationDisposition::CommittedSuccess(_)
+        )
+        .then_some(workflow_lifecycle)
+        .flatten();
+        let committed_cursor = if projected_workflow_lifecycle.is_some() {
+            lifecycle_terminal_cursor
+        } else {
+            projection_cursor.clone()
         };
         let committed = operation_commitment(
             request_commitment,
@@ -345,9 +374,13 @@ impl SqliteContinuityStore {
                 &transaction,
                 &state,
                 &record,
-                expected_cursor,
-                &committed_cursor,
+                RuntimeProjectionCursors {
+                    expected: expected_cursor,
+                    projection: &projection_cursor,
+                    committed: &committed_cursor,
+                },
                 window_id,
+                projected_workflow_lifecycle,
             )?;
             *self.last_projection.lock().map_err(|_| corrupt())? = Some(binding);
         }
@@ -418,6 +451,7 @@ impl SqliteContinuityStore {
             &input.window_id,
             &input.cursor,
             &envelope,
+            None,
             None,
             |state, observed_at, _write_cursor, phase| {
                 let window = state.windows.get(&input.window_id).ok_or_else(corrupt)?;
@@ -568,6 +602,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
                 .dispatch_reservation
                 .as_ref()
                 .map(|binding| (&request.attempt_id, binding)),
+            None,
             |state, observed_at, write_cursor, _phase| {
                 let window = state.windows.get(&request.window_id).ok_or_else(corrupt)?;
                 validate_window(
@@ -779,6 +814,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
             &request.cursor,
             &envelope,
             None,
+            None,
             |state, observed_at, _write_cursor, _phase| {
                 let window = state.windows.get(&request.window_id).ok_or_else(corrupt)?;
                 validate_window(
@@ -928,6 +964,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
             &request.window_id,
             &request.cursor,
             &envelope,
+            None,
             None,
             |state, observed_at, write_cursor, _phase| {
                 let window = state.windows.get(&request.window_id).ok_or_else(corrupt)?;
@@ -1116,64 +1153,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
         &self,
         request: RecordAttemptOutcomeRequest<'_>,
     ) -> Result<MutationResult, WorkflowOsError> {
-        if expected_attempt_outcome_commitment(&request) != request.request_commitment
-            || request.outcome == AuthorizedExecutionAttemptOutcome::AmbiguousMayHaveStarted
-        {
-            return Err(input_invalid());
-        }
-        let envelope = envelope(
-            "record_attempt_outcome",
-            &request.operation_id,
-            &request.window_id,
-            None,
-            None,
-            None,
-            Some(request.attempt_id.as_str()),
-            vec![request.receipt_id.as_str(), request.attempt_id.as_str()],
-        );
-        let (result, replay) = self.transact(
-            AuthorizedExecutionContinuityOperationKind::RecordAttemptOutcome,
-            &request.operation_id,
-            &request.request_commitment,
-            &request.receipt_id,
-            &request.window_id,
-            &request.attempt_capability.cursor,
-            &envelope,
-            request
-                .attempt_capability
-                .dispatch_reservation
-                .as_ref()
-                .map(|binding| (&request.attempt_id, binding)),
-            |state, observed_at, _write_cursor, _phase| {
-                validate_attempt_request(
-                    state,
-                    &request.window_id,
-                    request.expected_window_revision,
-                    &request.expected_window_binding,
-                    &request.attempt_id,
-                    request.expected_attempt_revision,
-                    request.attempt_capability,
-                    observed_at,
-                )?;
-                let (attempts, windows) = (&mut state.attempts, &mut state.windows);
-                let attempt = attempts.get_mut(&request.attempt_id).ok_or_else(corrupt)?;
-                let window = windows.get_mut(&request.window_id).ok_or_else(corrupt)?;
-                let attempt_state = semantics::apply_attempt_outcome(
-                    attempt,
-                    window,
-                    request.outcome,
-                    observed_at,
-                )?;
-                Ok(RecordedOperationResult::AttemptOutcomeRecorded {
-                    window_id: request.window_id.clone(),
-                    attempt_id: request.attempt_id.clone(),
-                    attempt_state,
-                    window_state: window.state,
-                    window_revision: window.revision,
-                })
-            },
-        )?;
-        Ok(mutation_result(result, replay))
+        record_attempt_outcome_inner(self, &request, None)
     }
 
     fn recover_ambiguous_attempt(
@@ -1209,6 +1189,7 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
                 .dispatch_reservation
                 .as_ref()
                 .map(|binding| (&request.attempt_id, binding)),
+            None,
             |state, observed_at, _write_cursor, _phase| {
                 let window = state.windows.get(&request.window_id).ok_or_else(corrupt)?;
                 validate_window(
@@ -1283,6 +1264,78 @@ impl AuthorizedExecutionContinuityStore for SqliteContinuityStore {
             observed_at,
         )
     }
+}
+
+fn record_attempt_outcome_inner(
+    store: &SqliteContinuityStore,
+    request: &RecordAttemptOutcomeRequest<'_>,
+    workflow_lifecycle: Option<(
+        &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+        &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
+    )>,
+) -> Result<MutationResult, WorkflowOsError> {
+    let expected_commitment = workflow_lifecycle.map_or_else(
+        || expected_attempt_outcome_commitment(request),
+        |(lifecycle, outcome)| {
+            lifecycle
+                .outcome_request_commitment(&expected_attempt_outcome_commitment(request), outcome)
+        },
+    );
+    if expected_commitment != request.request_commitment
+        || request.outcome == AuthorizedExecutionAttemptOutcome::AmbiguousMayHaveStarted
+    {
+        return Err(input_invalid());
+    }
+    let envelope = envelope(
+        "record_attempt_outcome",
+        &request.operation_id,
+        &request.window_id,
+        None,
+        None,
+        None,
+        Some(request.attempt_id.as_str()),
+        vec![request.receipt_id.as_str(), request.attempt_id.as_str()],
+    );
+    let (result, replay) = store.transact(
+        AuthorizedExecutionContinuityOperationKind::RecordAttemptOutcome,
+        &request.operation_id,
+        &request.request_commitment,
+        &request.receipt_id,
+        &request.window_id,
+        &request.attempt_capability.cursor,
+        &envelope,
+        request
+            .attempt_capability
+            .dispatch_reservation
+            .as_ref()
+            .map(|binding| (&request.attempt_id, binding)),
+        workflow_lifecycle,
+        |state, observed_at, _write_cursor, _phase| {
+            validate_attempt_request(
+                state,
+                &request.window_id,
+                request.expected_window_revision,
+                &request.expected_window_binding,
+                &request.attempt_id,
+                request.expected_attempt_revision,
+                request.attempt_capability,
+                observed_at,
+            )?;
+            let (attempts, windows) = (&mut state.attempts, &mut state.windows);
+            let attempt = attempts.get_mut(&request.attempt_id).ok_or_else(corrupt)?;
+            let window = windows.get_mut(&request.window_id).ok_or_else(corrupt)?;
+            let attempt_state =
+                semantics::apply_attempt_outcome(attempt, window, request.outcome, observed_at)?;
+            Ok(RecordedOperationResult::AttemptOutcomeRecorded {
+                window_id: request.window_id.clone(),
+                attempt_id: request.attempt_id.clone(),
+                attempt_state,
+                window_state: window.state,
+                window_revision: window.revision,
+            })
+        },
+    )?;
+    Ok(mutation_result(result, replay))
 }
 
 impl AuthorizedExecutionContinuityReconciler for SqliteContinuityStore {
@@ -1436,6 +1489,25 @@ impl AuthorizedExecutionContinuityProjectionStore for SqliteStateBackend {
         request: &ReconcileOperationRequest,
     ) -> Result<ProjectedContinuityReconciliationResult, WorkflowOsError> {
         reconcile_projected_operation(self, request)
+    }
+}
+
+impl SqliteStateBackend {
+    pub(crate) fn record_trusted_host_attempt_outcome_projected(
+        &self,
+        request: &RecordAttemptOutcomeRequest<'_>,
+        lifecycle: &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+        outcome: &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
+    ) -> Result<ProjectedContinuityResult<MutationResult>, WorkflowOsError> {
+        if request.outcome != outcome.continuity_outcome() {
+            return Err(input_invalid());
+        }
+        let store = SqliteContinuityStore::projected(self);
+        let result = record_attempt_outcome_inner(&store, request, Some((lifecycle, outcome)))?;
+        Ok(ProjectedContinuityResult {
+            result,
+            binding: store.take_projection()?,
+        })
     }
 }
 
@@ -1627,15 +1699,30 @@ fn apply_committed_projection_cursors(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+struct RuntimeProjectionCursors<'a> {
+    expected: &'a ContinuityCursor,
+    projection: &'a ContinuityCursor,
+    committed: &'a ContinuityCursor,
+}
+
 #[allow(clippy::too_many_lines)]
 fn persist_runtime_projection(
     transaction: &Transaction<'_>,
     state: &ReferenceContinuityState,
     record: &AuthoritativeOperationRecord,
-    expected_cursor: &ContinuityCursor,
-    committed_cursor: &ContinuityCursor,
+    cursors: RuntimeProjectionCursors<'_>,
     window_id: &crate::AuthorizedExecutionWindowId,
+    workflow_lifecycle: Option<(
+        &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+        &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
+    )>,
 ) -> Result<ContinuityProjectionBinding, WorkflowOsError> {
+    let RuntimeProjectionCursors {
+        expected: expected_cursor,
+        projection: projection_cursor,
+        committed: committed_cursor,
+    } = cursors;
     let window = state.windows.get(window_id).ok_or_else(corrupt)?;
     let (disposition, result_kind, rejection_kind, target_kind, target_id, target_revision) =
         match &record.disposition {
@@ -1726,8 +1813,8 @@ fn persist_runtime_projection(
             },
         };
     let event_cursor = AuthorizedExecutionContinuityProjectionCursor::new(
-        committed_cursor.sequence_number,
-        committed_cursor.event_id.clone(),
+        projection_cursor.sequence_number,
+        projection_cursor.event_id.clone(),
     );
     let projection_commitment = projection_commitment(&ProjectionCommitmentInput {
         workflow_id: &window.workflow_id,
@@ -1772,8 +1859,8 @@ fn persist_runtime_projection(
         binding_id(&record.operation_id)
     ))?;
     let event = WorkflowRunEvent {
-        sequence_number: committed_cursor.sequence_number,
-        event_id: committed_cursor.event_id.clone(),
+        sequence_number: projection_cursor.sequence_number,
+        event_id: projection_cursor.event_id.clone(),
         timestamp: record.receipt.committed_at,
         run_id: window.run_id.clone(),
         workflow_id: window.workflow_id.clone(),
@@ -1787,7 +1874,51 @@ fn persist_runtime_projection(
             projection.clone(),
         )),
     };
-    let snapshot = append_event_and_project_snapshot(transaction, &event)?;
+    let mut snapshot = append_event_and_project_snapshot(transaction, &event)?;
+    if let Some((lifecycle, outcome)) = workflow_lifecycle {
+        let [invocation_terminal, run_terminal] = lifecycle.terminal_events(outcome);
+        append_event_and_project_snapshot(
+            transaction,
+            &WorkflowRunEvent {
+                sequence_number: crate::EventSequenceNumber::new(
+                    projection_cursor
+                        .sequence_number
+                        .get()
+                        .checked_add(1)
+                        .ok_or_else(corrupt)?,
+                )?,
+                event_id: lifecycle
+                    .event_id("invocation-terminal", record.operation_id.as_str())?,
+                timestamp: record.receipt.committed_at,
+                run_id: window.run_id.clone(),
+                workflow_id: window.workflow_id.clone(),
+                schema_version: first.schema_version.clone(),
+                workflow_version: first.workflow_version.clone(),
+                spec_content_hash: first.spec_content_hash.clone(),
+                correlation_id: None,
+                actor: None,
+                idempotency_key: Some(lifecycle.idempotency_key("invocation-terminal")?),
+                kind: invocation_terminal,
+            },
+        )?;
+        snapshot = append_event_and_project_snapshot(
+            transaction,
+            &WorkflowRunEvent {
+                sequence_number: committed_cursor.sequence_number,
+                event_id: committed_cursor.event_id.clone(),
+                timestamp: record.receipt.committed_at,
+                run_id: window.run_id.clone(),
+                workflow_id: window.workflow_id.clone(),
+                schema_version: first.schema_version.clone(),
+                workflow_version: first.workflow_version.clone(),
+                spec_content_hash: first.spec_content_hash.clone(),
+                correlation_id: None,
+                actor: None,
+                idempotency_key: Some(lifecycle.idempotency_key("run-terminal")?),
+                kind: run_terminal,
+            },
+        )?;
+    }
     let snapshot_payload = encode_json(&snapshot, "snapshot")?;
     let binding = ContinuityProjectionBinding {
         event: projection,
@@ -1819,8 +1950,8 @@ fn persist_runtime_projection(
                 binding.event.projection_commitment().as_str(),
                 expected_cursor.event_id.as_str(),
                 i64::try_from(expected_cursor.sequence_number.get()).map_err(|_| corrupt())?,
-                committed_cursor.event_id.as_str(),
-                i64::try_from(committed_cursor.sequence_number.get()).map_err(|_| corrupt())?,
+                projection_cursor.event_id.as_str(),
+                i64::try_from(projection_cursor.sequence_number.get()).map_err(|_| corrupt())?,
                 binding.snapshot_commitment.as_str(),
                 target_kind,
                 binding.event.target_id(),
@@ -5629,6 +5760,70 @@ mod conformance_backend {
             assert_single_projection(
                 &recovery_fixture,
                 AuthorizedExecutionContinuityOperationKind::RecoverAmbiguousAttempt,
+            );
+        }
+
+        #[test]
+        fn trusted_host_security_rejection_does_not_project_terminal_workflow_events() {
+            let fixture = projected_fixture(false, false);
+            fixture.backend.conformance_set_time(
+                Timestamp::parse_rfc3339("2026-08-15T13:01:00Z").expect("expired time"),
+            );
+            let capability = attempt_capability(&fixture);
+            let mut request = outcome_request(&fixture, &capability);
+            let lifecycle = crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext::test_context();
+            let outcome = crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome::Succeeded {
+                output_ref: Some("trusted-host/test-output".to_owned()),
+            };
+            request.request_commitment =
+                lifecycle.outcome_request_commitment(&request.request_commitment, &outcome);
+
+            assert!(matches!(
+                record_attempt_outcome_inner(
+                    &fixture.backend.store,
+                    &request,
+                    Some((&lifecycle, &outcome)),
+                ),
+                Ok(MutationResult::SecurityRejected(_))
+            ));
+            let events = fixture
+                .backend
+                .store
+                .backend
+                .read_events(&WorkflowRunId::new("run/sqlite-continuity").expect("run"))
+                .expect("events");
+            assert_eq!(events.len(), 4);
+            assert!(matches!(
+                events.last().map(|event| &event.kind),
+                Some(WorkflowRunEventKind::AuthorizedExecutionContinuityProjected(_))
+            ));
+            let snapshot = fixture
+                .backend
+                .store
+                .backend
+                .load_snapshot(&WorkflowRunId::new("run/sqlite-continuity").expect("run"))
+                .expect("snapshot read")
+                .expect("snapshot");
+            assert_eq!(snapshot.status, crate::WorkflowRunStatus::Running);
+            assert_eq!(snapshot.last_sequence_number.get(), 4);
+
+            let changed_outcome = crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome::Succeeded {
+                output_ref: Some("trusted-host/substituted-output".to_owned()),
+            };
+            request.request_commitment = lifecycle.outcome_request_commitment(
+                &expected_attempt_outcome_commitment(&request),
+                &changed_outcome,
+            );
+            let Err(replay_error) = record_attempt_outcome_inner(
+                &fixture.backend.store,
+                &request,
+                Some((&lifecycle, &changed_outcome)),
+            ) else {
+                panic!("terminal outcome substitution must fail closed");
+            };
+            assert_eq!(
+                replay_error.code(),
+                "authorized_execution_continuity_state.operation.replay_conflict"
             );
         }
 

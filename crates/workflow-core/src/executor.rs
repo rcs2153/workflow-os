@@ -10515,10 +10515,17 @@ fn prepare_fresh_trusted_host_local_application_operation<'a>(
     let window_id = crate::AuthorizedExecutionWindowId::new(format!("window/{suffix}"))?;
     let skill_input = trusted_host_skill_input(&plan, &request.execution.execution.correlation_id)?;
     let executor_commitment = trusted_host_executor_commitment(profile, &plan)?;
-    let executor = Box::new(LocalSkillAttemptExecutor::new(
-        profile.skill_handler(),
-        executor_commitment,
-    ));
+    let workflow_lifecycle =
+        crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext::from_skill(
+            plan.invocation_id.clone(),
+            plan.idempotency_key.clone(),
+            plan.step.id.clone(),
+            &plan.skill,
+        );
+    let executor = Box::new(
+        LocalSkillAttemptExecutor::new(profile.skill_handler(), executor_commitment)
+            .with_workflow_lifecycle(workflow_lifecycle),
+    );
     let fresh = crate::sqlite_state::TrustedHostLocalApplicationOwnedFreshPreparation {
         source,
         execution_binding,
@@ -10580,25 +10587,25 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
     use crate::trusted_host_supervisor::LocalSkillAttemptExecutor;
 
     let run = backend.rehydrate_run(run_id)?;
-    if run.snapshot.status.is_terminal() {
-        return Ok(TrustedHostLocalApplicationAdmissionOutcome::TerminalReplay);
-    }
-    match run.snapshot.status {
-        WorkflowRunStatus::WaitingForApproval => {
-            return Ok(TrustedHostLocalApplicationAdmissionOutcome::Waiting(
-                TrustedHostLocalApplicationWaitReason::Approval,
-            ));
-        }
-        WorkflowRunStatus::WaitingForExternalEvent => {
-            return Ok(TrustedHostLocalApplicationAdmissionOutcome::Waiting(
-                TrustedHostLocalApplicationWaitReason::ExternalCondition,
-            ));
-        }
-        WorkflowRunStatus::Running | WorkflowRunStatus::Retrying => {}
-        _ => {
-            return Ok(TrustedHostLocalApplicationAdmissionOutcome::Blocked(
-                TrustedHostLocalApplicationBlockReason::CurrentState,
-            ));
+    let terminal_replay = run.snapshot.status.is_terminal();
+    if !terminal_replay {
+        match run.snapshot.status {
+            WorkflowRunStatus::WaitingForApproval => {
+                return Ok(TrustedHostLocalApplicationAdmissionOutcome::Waiting(
+                    TrustedHostLocalApplicationWaitReason::Approval,
+                ));
+            }
+            WorkflowRunStatus::WaitingForExternalEvent => {
+                return Ok(TrustedHostLocalApplicationAdmissionOutcome::Waiting(
+                    TrustedHostLocalApplicationWaitReason::ExternalCondition,
+                ));
+            }
+            WorkflowRunStatus::Running | WorkflowRunStatus::Retrying => {}
+            _ => {
+                return Ok(TrustedHostLocalApplicationAdmissionOutcome::Blocked(
+                    TrustedHostLocalApplicationBlockReason::CurrentState,
+                ));
+            }
         }
     }
     let binding = run
@@ -10676,10 +10683,85 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
         correlation_id: request.execution.execution.correlation_id.clone(),
         values: build_input_values(&step.input_mapping)?,
     };
-    let executor = Box::new(LocalSkillAttemptExecutor::new(
-        profile.skill_handler(),
-        trusted_host_executor_commitment_from_identity(profile, &skill.id, &skill.version)?,
-    ));
+    let executor_commitment =
+        trusted_host_executor_commitment_from_identity(profile, &skill.id, &skill.version)?;
+    if terminal_replay {
+        let invocation_commitment =
+            crate::operational_execution_window_opening::trusted_host_invocation_commitment(
+                &skill_input,
+                &executor_commitment,
+            );
+        let mut dispatches = run.events.iter().filter_map(|event| {
+            let WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(dispatch) =
+                &event.kind
+            else {
+                return None;
+            };
+            Some(dispatch.as_ref())
+        });
+        let dispatch = dispatches.next().ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "trusted_host_local_application.admission.dispatch_missing",
+                "trusted-host durable dispatch binding is unavailable",
+            )
+        })?;
+        if dispatches.next().is_some()
+            || dispatch.executor_commitment() != &executor_commitment
+            || dispatch.invocation_commitment() != &invocation_commitment
+        {
+            return Err(executor_error(
+                WorkflowOsErrorKind::Security,
+                "trusted_host_local_application.admission.dispatch_mismatch",
+                "trusted-host durable dispatch binding does not match",
+            ));
+        }
+        return Ok(TrustedHostLocalApplicationAdmissionOutcome::TerminalReplay);
+    }
+    let expected_idempotency_key = invocation_idempotency_key(
+        run_id,
+        &workflow.id,
+        &workflow.version,
+        &step.id,
+        &skill.id,
+        &skill.version,
+    )?;
+    let mut matching_invocations = run.events.iter().filter_map(|event| {
+        let WorkflowRunEventKind::SkillInvocationRequested(invocation) = &event.kind else {
+            return None;
+        };
+        (invocation.step_id == step.id
+            && invocation.skill_id == skill.id
+            && invocation.skill_version == skill.version)
+            .then_some(invocation)
+    });
+    let invocation = matching_invocations.next().ok_or_else(|| {
+        executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "trusted_host_local_application.admission.invocation_missing",
+            "trusted-host durable invocation request is unavailable",
+        )
+    })?;
+    if matching_invocations.next().is_some()
+        || invocation.idempotency_key.as_ref() != Some(&expected_idempotency_key)
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "trusted_host_local_application.admission.invocation_mismatch",
+            "trusted-host durable invocation request does not match",
+        ));
+    }
+    let workflow_lifecycle =
+        crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext::from_skill(
+            invocation.invocation_id.clone(),
+            expected_idempotency_key,
+            step.id.clone(),
+            skill,
+        );
+    let executor = Box::new(
+        LocalSkillAttemptExecutor::new(profile.skill_handler(), executor_commitment)
+            .with_workflow_lifecycle(workflow_lifecycle),
+    );
     let prepared = crate::sqlite_state::prepare_owned_trusted_host_local_application_session(
         crate::sqlite_state::TrustedHostLocalApplicationOwnedPreparationInput {
             backend,
