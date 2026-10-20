@@ -1168,6 +1168,12 @@ current queue when they contain historical `next phase` language.
    and the sandbox still has zero open pull requests. The remaining proof
    prerequisite is a separate least-privilege sandbox credential with contents
    read and pull requests write; the live smoke must then be rerun unchanged.
+   The fixture failure, correction, and remaining operational prerequisite are
+   recorded in the [blocker
+   report](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_LIVE_SANDBOX_SMOKE_BLOCKER_REPORT.md),
+   [fix report](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_LIVE_SANDBOX_SMOKE_FIX_REPORT.md),
+   and focused [fix
+   review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_LIVE_SANDBOX_SMOKE_FIX_REVIEW.md).
    See also
    [GitHub Draft Pull Request Provider
    Mutation Plan](docs/implementation-plans/github-draft-pull-request-provider-mutation-plan.md),
