@@ -404,6 +404,8 @@ pub(crate) struct OperationalExecutionWindowOpeningUseInput<'a> {
     pub(crate) trusted_time: TrustedTimeObservation,
     pub(crate) evaluated_at: Timestamp,
     pub(crate) redaction: &'a RedactionMetadata,
+    pub(crate) workflow_lifecycle:
+        Option<&'a crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext>,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -481,6 +483,9 @@ pub(crate) fn open_with_registered_current_authority(
                 run_id: input.execution_binding.run_id().clone(),
                 step_id: input.execution_binding.step_id().clone(),
                 invocation_binding_commitment: input.invocation_binding_commitment.clone(),
+                workflow_lifecycle_commitment: input
+                    .workflow_lifecycle
+                    .map(crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext::commitment),
                 window_id: input.window_id.clone(),
                 attempt_id: input.attempt_id.clone(),
                 subject_actor_id: input.execution_binding.actor().clone(),
@@ -496,7 +501,14 @@ pub(crate) fn open_with_registered_current_authority(
                 authorization: &authorization,
             };
             request.request_commitment = opening_request_commitment(&request);
-            match input.backend.open_window_and_start_attempt_projected(request) {
+            let result = if let Some(lifecycle) = input.workflow_lifecycle {
+                input
+                    .backend
+                    .open_window_and_start_attempt_with_lifecycle(request, lifecycle)
+            } else {
+                input.backend.open_window_and_start_attempt_projected(request)
+            };
+            match result {
                 Ok(result) => {
                     store_result = Some(result);
                     crate::current_authority_source::RegisteredCurrentAuthorityConsumerResult::Succeeded
@@ -596,6 +608,7 @@ pub(crate) struct OperationalExecutionWindowOpeningRequest<'a> {
     pub(crate) run_id: WorkflowRunId,
     pub(crate) step_id: StepId,
     pub(crate) invocation_binding_commitment: SpecContentHash,
+    pub(crate) workflow_lifecycle_commitment: Option<SpecContentHash>,
     pub(crate) window_id: AuthorizedExecutionWindowId,
     pub(crate) attempt_id: AuthorizedExecutionAttemptId,
     pub(crate) subject_actor_id: ActorId,
@@ -736,6 +749,10 @@ pub(crate) fn opening_request_commitment(
             request.run_id.as_str(),
             request.step_id.as_str(),
             request.invocation_binding_commitment.as_str(),
+            request
+                .workflow_lifecycle_commitment
+                .as_ref()
+                .map_or("none", SpecContentHash::as_str),
             request.window_id.as_str(),
             request.attempt_id.as_str(),
             request.subject_actor_id.as_str(),

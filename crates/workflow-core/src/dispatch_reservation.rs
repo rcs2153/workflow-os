@@ -218,6 +218,16 @@ impl DispatchAdmissionProjectionEvent {
         &self.reservation_commitment
     }
 
+    #[cfg(feature = "trusted-host-application-spi")]
+    pub(crate) const fn invocation_commitment(&self) -> &SpecContentHash {
+        &self.invocation_commitment
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    pub(crate) const fn executor_commitment(&self) -> &SpecContentHash {
+        &self.executor_commitment
+    }
+
     pub(crate) const fn projection_commitment(&self) -> &SpecContentHash {
         &self.projection_commitment
     }
@@ -317,6 +327,7 @@ pub(crate) struct DispatchReservationRequest {
     pub(crate) operation_binding_commitment: SpecContentHash,
     pub(crate) invocation_commitment: SpecContentHash,
     pub(crate) executor_commitment: SpecContentHash,
+    pub(crate) workflow_lifecycle_commitment: Option<SpecContentHash>,
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -472,6 +483,10 @@ pub(crate) fn request_commitment(request: &DispatchReservationRequest) -> SpecCo
             request.operation_binding_commitment.as_str(),
             request.invocation_commitment.as_str(),
             request.executor_commitment.as_str(),
+            request
+                .workflow_lifecycle_commitment
+                .as_ref()
+                .map_or("none", SpecContentHash::as_str),
         ],
     )
 }

@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use workflow_core::{
     EventLogStore, ImmutableRunBundleId, ImmutableRunBundleStore, SqliteStateBackend, StateBackend,
-    Timestamp, WorkflowRunId, WorkflowRunStatus,
+    Timestamp, WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
 };
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
@@ -85,7 +85,11 @@ fn foreground_binary_admits_executes_and_persists_one_docs_check() {
         &expires_at_text,
     );
 
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "foreground stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(
         String::from_utf8(output.stdout).expect("bounded stdout"),
         "trusted_host_local_application: operation.terminal\n"
@@ -94,9 +98,22 @@ fn foreground_binary_admits_executes_and_persists_one_docs_check() {
 
     let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
     let run = backend.rehydrate_run(&run_id).expect("durable run");
-    assert_eq!(run.snapshot.status, WorkflowRunStatus::Running);
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
     assert!(run.snapshot.last_continuity_projection.is_some());
-    assert!(run.events.len() >= 7);
+    let event_kinds: Vec<_> = run
+        .events
+        .iter()
+        .map(workflow_core::WorkflowRunEvent::kind)
+        .collect();
+    assert!(event_kinds.ends_with(&[
+        WorkflowRunEventKindName::SkillInvocationRequested,
+        WorkflowRunEventKindName::OperationalExecutionWindowOpened,
+        WorkflowRunEventKindName::AuthorizedExecutionAttemptDispatchAdmitted,
+        WorkflowRunEventKindName::SkillInvocationStarted,
+        WorkflowRunEventKindName::AuthorizedExecutionContinuityProjected,
+        WorkflowRunEventKindName::SkillInvocationSucceeded,
+        WorkflowRunEventKindName::RunCompleted,
+    ]));
     let stored = backend
         .read_exact_bundle(&run_id, &bundle_id)
         .expect("durable immutable bundle");
@@ -116,7 +133,7 @@ fn foreground_binary_admits_executes_and_persists_one_docs_check() {
     assert!(replay.status.success());
     assert_eq!(
         String::from_utf8(replay.stdout).expect("bounded replay stdout"),
-        "trusted_host_local_application: operation.terminal\n"
+        "trusted_host_local_application: admission.terminal_replay\n"
     );
     assert_eq!(
         backend
@@ -127,6 +144,47 @@ fn foreground_binary_admits_executes_and_persists_one_docs_check() {
         event_count,
         "terminal operational replay must not duplicate events"
     );
+}
+
+#[test]
+fn foreground_binary_fails_closed_when_required_output_is_missing() {
+    let fixture = Fixture::new();
+    let repository_root = repository_root();
+    let governance_root = fixture.root.join("output-contract-project");
+    write_output_contract_project(&repository_root, &governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("missing-output");
+    let bundle_id = fixture.bundle_id("missing-output");
+
+    let output = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+
+    assert!(
+        output.status.success(),
+        "foreground stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let run = SqliteStateBackend::open(&fixture.database)
+        .expect("reopen SQLite")
+        .rehydrate_run(&run_id)
+        .expect("durable failed run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    let failure = run
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationFailed { failure, .. } => Some(failure),
+            _ => None,
+        })
+        .expect("durable invocation failure");
+    assert_eq!(failure.code, "executor.output.required_missing");
 }
 
 #[test]
@@ -223,7 +281,11 @@ fn foreground_binary_rejects_replay_identity_substitution_without_leakage() {
         correlation_id: "correlation-local-host-binding-test",
         npm_executable: &fixture.npm,
     });
-    assert!(initial.status.success());
+    assert!(
+        initial.status.success(),
+        "foreground stderr: {}",
+        String::from_utf8_lossy(&initial.stderr)
+    );
     let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
     let event_count = backend
         .rehydrate_run(&run_id)
@@ -297,7 +359,11 @@ fn foreground_binary_rejects_same_path_executable_replacement() {
         correlation_id: "correlation-local-host-command-test",
         npm_executable: &fixture.npm,
     });
-    assert!(initial.status.success());
+    assert!(
+        initial.status.success(),
+        "foreground stderr: {}",
+        String::from_utf8_lossy(&initial.stderr)
+    );
 
     fs::write(&fixture.npm, "#!/bin/sh\n# changed executable\nexit 0\n")
         .expect("replace fake npm contents");
@@ -411,6 +477,41 @@ fn write_approval_project(repository_root: &Path, project_root: &Path) {
         APPROVAL_WORKFLOW,
     )
     .expect("approval workflow fixture");
+}
+
+fn write_output_contract_project(repository_root: &Path, project_root: &Path) {
+    fs::create_dir_all(project_root.join("workflows")).expect("workflow directory");
+    fs::create_dir_all(project_root.join("skills")).expect("skill directory");
+    fs::create_dir_all(project_root.join("policies")).expect("policy directory");
+    fs::create_dir_all(project_root.join("tests")).expect("tests directory");
+    let source = repository_root.join("dogfood/workflow-os-self-governance");
+    fs::copy(
+        source.join("workflow-os.yml"),
+        project_root.join("workflow-os.yml"),
+    )
+    .expect("manifest fixture");
+    fs::copy(
+        source.join("workflows/trusted-host-docs-check.workflow.yml"),
+        project_root.join("workflows/trusted-host-docs-check.workflow.yml"),
+    )
+    .expect("workflow fixture");
+    fs::copy(
+        source.join("policies/self-governance-local.policy.yml"),
+        project_root.join("policies/self-governance-local.policy.yml"),
+    )
+    .expect("policy fixture");
+    let skill =
+        fs::read_to_string(source.join("skills/check-docs.skill.yml")).expect("skill fixture");
+    let skill = skill.replace(
+        "    - name: local_check_status\n      field_type: string\n      description: Bounded local check status.\n  required:",
+        "    - name: local_check_status\n      field_type: string\n      description: Bounded local check status.\n    - name: required_but_missing\n      field_type: string\n      description: Required output omitted by the fixture handler.\n  required:",
+    );
+    let skill = skill.replace(
+        "  required:\n    - summary\n    - local_check_status\nallowed_capabilities:",
+        "  required:\n    - summary\n    - local_check_status\n    - required_but_missing\nallowed_capabilities:",
+    );
+    fs::write(project_root.join("skills/check-docs.skill.yml"), skill)
+        .expect("write skill fixture");
 }
 
 const APPROVAL_WORKFLOW: &str = r"schema_version: workflowos.dev/v0

@@ -1078,6 +1078,50 @@ current queue when they contain historical `next phase` language.
    authorized by this acceptance. See the [review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_REVIEW.md),
    [blocker-fix report](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_BLOCKER_FIX_REPORT.md),
    and [blocker-fix review](docs/concepts/TRUSTED_HOST_LOCAL_APPLICATION_ADMISSION_NEGATIVE_PATH_HARDENING_BLOCKER_FIX_REVIEW.md).
+   The next bounded phase is now specified in the [Trusted-Host Workflow
+   Completion Reconciliation
+   Plan](docs/implementation-plans/trusted-host-workflow-completion-reconciliation-plan.md).
+   It keeps the foreground host non-authoritative and plans one private
+   Core-owned atomic reconciliation from the exact terminal continuity
+   attempt to the matching invocation-result and workflow-terminal events for
+   the existing one-step docs-check profile. The plan preserves the
+   uncollapsed in-memory `SkillOutput` until Core has freshly verified the
+   run, immutable bundle, cursor, window, attempt, invocation, and executor.
+   Retryable, yielded, ambiguous, stale, mismatched, or incomplete posture
+   remains non-terminal. Focused maintainer/security review found two planning
+   blockers: the proposed post-outcome transaction could not recover a
+   successful in-memory result after the continuity outcome committed, and the
+   exact invocation lifecycle identity and event ordering were unspecified.
+   The documentation-only blocker fix now assigns invocation request to the
+   opening transaction, invocation start to dispatch, and invocation plus run
+   terminal events to the attempt-outcome transaction. Core owns invocation
+   identity, derives attempt identity from the exact continuity attempt, and
+   requires complete-sequence replay. Focused re-review accepts the corrected
+   plan with one mandatory implementation condition: required-output
+   validation must select success or fixed terminal failure before any
+   terminal write set is applied. The bounded private Core and SQLite
+   implementation is now complete for the existing one-step docs-check
+   profile. Opening atomically appends the invocation request before the
+   operational opening event; dispatch atomically appends admission before
+   invocation start; and a terminal outcome atomically appends the continuity
+   projection, invocation terminal event, and matching run terminal event.
+   Required-output validation selects success or fixed terminal failure before
+   any terminal write set is applied. Exact terminal replay adds no events,
+   while changed actor, correlation, or resolved executable identity fails
+   closed before replay is accepted. The foreground host remains
+   non-authoritative and receives only bounded posture output. Focused
+   maintainer/security review found and fixed two terminal-transaction
+   blockers before accepting the slice. Current-authority security rejection
+   now projects no invocation or workflow terminal event, and terminal replay
+   commitment now binds the complete lifecycle context plus the exact bounded
+   terminal outcome. The accepted implementation remains limited to the
+   private one-step docs-check profile. See the [planning
+   report](docs/concepts/TRUSTED_HOST_WORKFLOW_COMPLETION_RECONCILIATION_PLAN_REPORT.md),
+   [plan review](docs/concepts/TRUSTED_HOST_WORKFLOW_COMPLETION_RECONCILIATION_PLAN_REVIEW.md),
+   [blocker-fix report](docs/concepts/TRUSTED_HOST_WORKFLOW_COMPLETION_RECONCILIATION_PLAN_BLOCKER_FIX_REPORT.md),
+   [blocker-fix review](docs/concepts/TRUSTED_HOST_WORKFLOW_COMPLETION_RECONCILIATION_PLAN_BLOCKER_FIX_REVIEW.md),
+   [implementation report](docs/concepts/TRUSTED_HOST_WORKFLOW_COMPLETION_RECONCILIATION_IMPLEMENTATION_REPORT.md),
+   and [implementation review](docs/concepts/TRUSTED_HOST_WORKFLOW_COMPLETION_RECONCILIATION_IMPLEMENTATION_REVIEW.md).
    General scheduling, public configuration, provider
    mutation, OpenShell, nested harnesses, automatic approval, CLI, SDK, and
    schema exposure remain blocked.

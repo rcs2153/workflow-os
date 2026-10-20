@@ -32,6 +32,12 @@ use crate::{
 pub(crate) trait TrustedHostAttemptExecutor {
     fn binding_commitment(&self) -> SpecContentHash;
 
+    fn workflow_lifecycle_context(
+        &self,
+    ) -> Option<&crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext> {
+        None
+    }
+
     fn execute(
         &self,
         context: &TrustedHostAttemptExecutionContext<'_>,
@@ -41,6 +47,8 @@ pub(crate) trait TrustedHostAttemptExecutor {
 pub(crate) struct LocalSkillAttemptExecutor<'a> {
     handler: &'a dyn SkillHandler,
     binding_commitment: SpecContentHash,
+    workflow_lifecycle:
+        Option<crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext>,
 }
 
 impl<'a> LocalSkillAttemptExecutor<'a> {
@@ -48,13 +56,28 @@ impl<'a> LocalSkillAttemptExecutor<'a> {
         Self {
             handler,
             binding_commitment,
+            workflow_lifecycle: None,
         }
+    }
+
+    pub(crate) fn with_workflow_lifecycle(
+        mut self,
+        workflow_lifecycle: crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+    ) -> Self {
+        self.workflow_lifecycle = Some(workflow_lifecycle);
+        self
     }
 }
 
 impl TrustedHostAttemptExecutor for LocalSkillAttemptExecutor<'_> {
     fn binding_commitment(&self) -> SpecContentHash {
         self.binding_commitment.clone()
+    }
+
+    fn workflow_lifecycle_context(
+        &self,
+    ) -> Option<&crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext> {
+        self.workflow_lifecycle.as_ref()
     }
 
     fn execute(
@@ -254,80 +277,23 @@ pub(crate) fn supervise_one_local_skill_attempt(
         &input.skill_input,
         &input.executor.binding_commitment(),
     );
-    let mut reservation_request = DispatchReservationRequest {
-        operation_id: DispatchReservationOperationId::new(input.persistence.operation.as_str())?,
-        receipt_id: DispatchReservationReceiptId::new(input.persistence.receipt.as_str())?,
-        request_commitment: SpecContentHash::from_text("pending dispatch reservation"),
-        capability: capability.capability,
-        expected_window_binding: capability.expected_window_binding,
-        operation_binding_commitment: capability.operation_binding_commitment,
+    let capability = reserve_dispatch(
+        input.backend,
+        &input.persistence,
+        input.executor,
+        capability,
         invocation_commitment,
-        executor_commitment: input.executor.binding_commitment(),
-    };
-    reservation_request.request_commitment = dispatch_request_commitment(&reservation_request);
-    let capability = match input
-        .backend
-        .reserve_attempt_dispatch(reservation_request)?
-    {
-        DispatchReservationOutcome::Admitted { capability, .. } => {
-            let parts = capability.into_parts();
-            SupervisorCapability {
-                capability: parts.attempt_capability,
-                expected_window_binding: parts.expected_window_binding,
-                operation_binding_commitment: parts.operation_binding_commitment,
-            }
-        }
-        DispatchReservationOutcome::AlreadyAdmitted { receipt } => {
-            let _binding = receipt.into_binding();
-            return Err(supervisor_error(
-                WorkflowOsErrorKind::InvalidState,
-                "attempt_already_admitted",
-                "trusted-host attempt was already admitted",
-            ));
-        }
-        DispatchReservationOutcome::CommittedButCapabilityUnavailable { receipt } => {
-            let _binding = receipt.into_binding();
-            return Err(supervisor_error(
-                WorkflowOsErrorKind::InvalidState,
-                "dispatch_capability_unavailable",
-                "trusted-host dispatch authority is unavailable",
-            ));
-        }
-    };
-
+    )?;
     let execution = input.executor.execute(&TrustedHostAttemptExecutionContext {
         skill_input: &input.skill_input,
     });
-    let mut skill_output = None;
-    match execution {
-        TrustedHostAttemptExecutionResult::Succeeded(output) => {
-            persist_outcome(
-                input.backend,
-                &input.persistence,
-                &capability,
-                AuthorizedExecutionAttemptOutcome::Succeeded,
-            )?;
-            skill_output = Some(output);
-        }
-        TrustedHostAttemptExecutionResult::RetryableFailure => persist_outcome(
-            input.backend,
-            &input.persistence,
-            &capability,
-            AuthorizedExecutionAttemptOutcome::RetryableFailure,
-        )?,
-        TrustedHostAttemptExecutionResult::TerminalFailure => persist_outcome(
-            input.backend,
-            &input.persistence,
-            &capability,
-            AuthorizedExecutionAttemptOutcome::TerminalFailure,
-        )?,
-        TrustedHostAttemptExecutionResult::Yielded(request) => {
-            persist_yield(input.backend, &input.persistence, &capability, request)?;
-        }
-        TrustedHostAttemptExecutionResult::AmbiguousMayHaveStarted => {
-            persist_ambiguous(input.backend, &input.persistence, &capability)?;
-        }
-    }
+    let skill_output = persist_execution_result(
+        input.backend,
+        &input.persistence,
+        &capability,
+        input.executor,
+        execution,
+    )?;
 
     Ok(TrustedHostSupervisorResult {
         disposition: input
@@ -335,6 +301,133 @@ pub(crate) fn supervise_one_local_skill_attempt(
             .continuation_disposition(&capability.capability.window_id)?,
         skill_output,
     })
+}
+
+fn reserve_dispatch(
+    backend: &SqliteStateBackend,
+    persistence: &TrustedHostSupervisorPersistenceInput,
+    executor: &dyn TrustedHostAttemptExecutor,
+    capability: UnreservedSupervisorCapability,
+    invocation_commitment: SpecContentHash,
+) -> Result<SupervisorCapability, WorkflowOsError> {
+    let mut reservation_request = DispatchReservationRequest {
+        operation_id: DispatchReservationOperationId::new(persistence.operation.as_str())?,
+        receipt_id: DispatchReservationReceiptId::new(persistence.receipt.as_str())?,
+        request_commitment: SpecContentHash::from_text("pending dispatch reservation"),
+        capability: capability.capability,
+        expected_window_binding: capability.expected_window_binding,
+        operation_binding_commitment: capability.operation_binding_commitment,
+        invocation_commitment,
+        executor_commitment: executor.binding_commitment(),
+        workflow_lifecycle_commitment: executor.workflow_lifecycle_context().map(
+            crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext::commitment,
+        ),
+    };
+    reservation_request.request_commitment = dispatch_request_commitment(&reservation_request);
+    let reservation = if let Some(lifecycle) = executor.workflow_lifecycle_context() {
+        backend.reserve_attempt_dispatch_with_lifecycle(reservation_request, lifecycle)?
+    } else {
+        backend.reserve_attempt_dispatch(reservation_request)?
+    };
+    match reservation {
+        DispatchReservationOutcome::Admitted { capability, .. } => {
+            let parts = capability.into_parts();
+            Ok(SupervisorCapability {
+                capability: parts.attempt_capability,
+                expected_window_binding: parts.expected_window_binding,
+                operation_binding_commitment: parts.operation_binding_commitment,
+            })
+        }
+        DispatchReservationOutcome::AlreadyAdmitted { receipt } => {
+            let _binding = receipt.into_binding();
+            Err(supervisor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "attempt_already_admitted",
+                "trusted-host attempt was already admitted",
+            ))
+        }
+        DispatchReservationOutcome::CommittedButCapabilityUnavailable { receipt } => {
+            let _binding = receipt.into_binding();
+            Err(supervisor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "dispatch_capability_unavailable",
+                "trusted-host dispatch authority is unavailable",
+            ))
+        }
+    }
+}
+
+fn persist_execution_result(
+    backend: &SqliteStateBackend,
+    persistence: &TrustedHostSupervisorPersistenceInput,
+    capability: &SupervisorCapability,
+    executor: &dyn TrustedHostAttemptExecutor,
+    execution: TrustedHostAttemptExecutionResult,
+) -> Result<Option<SkillOutput>, WorkflowOsError> {
+    let mut skill_output = None;
+    match execution {
+        TrustedHostAttemptExecutionResult::Succeeded(output) => {
+            if let Some(lifecycle) = executor.workflow_lifecycle_context() {
+                let workflow_outcome = lifecycle.normalize_success(&output);
+                persist_outcome(
+                    backend,
+                    persistence,
+                    capability,
+                    workflow_outcome.continuity_outcome(),
+                    Some((lifecycle, &workflow_outcome)),
+                )?;
+                if matches!(
+                    workflow_outcome,
+                    crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome::Succeeded { .. }
+                ) {
+                    skill_output = Some(output);
+                }
+            } else {
+                persist_outcome(
+                    backend,
+                    persistence,
+                    capability,
+                    AuthorizedExecutionAttemptOutcome::Succeeded,
+                    None,
+                )?;
+                skill_output = Some(output);
+            }
+        }
+        TrustedHostAttemptExecutionResult::RetryableFailure => persist_outcome(
+            backend,
+            persistence,
+            capability,
+            AuthorizedExecutionAttemptOutcome::RetryableFailure,
+            None,
+        )?,
+        TrustedHostAttemptExecutionResult::TerminalFailure => {
+            if let Some(lifecycle) = executor.workflow_lifecycle_context() {
+                let workflow_outcome = crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome::terminal_failure();
+                persist_outcome(
+                    backend,
+                    persistence,
+                    capability,
+                    workflow_outcome.continuity_outcome(),
+                    Some((lifecycle, &workflow_outcome)),
+                )?;
+            } else {
+                persist_outcome(
+                    backend,
+                    persistence,
+                    capability,
+                    AuthorizedExecutionAttemptOutcome::TerminalFailure,
+                    None,
+                )?;
+            }
+        }
+        TrustedHostAttemptExecutionResult::Yielded(request) => {
+            persist_yield(backend, persistence, capability, request)?;
+        }
+        TrustedHostAttemptExecutionResult::AmbiguousMayHaveStarted => {
+            persist_ambiguous(backend, persistence, capability)?;
+        }
+    }
+    Ok(skill_output)
 }
 
 fn normalize_capability(
@@ -476,6 +569,10 @@ fn persist_outcome(
     persistence: &TrustedHostSupervisorPersistenceInput,
     capability: &SupervisorCapability,
     outcome: AuthorizedExecutionAttemptOutcome,
+    workflow_lifecycle: Option<(
+        &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+        &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
+    )>,
 ) -> Result<(), WorkflowOsError> {
     let mut request = RecordAttemptOutcomeRequest {
         operation_id: persistence.operation.clone(),
@@ -490,6 +587,10 @@ fn persist_outcome(
         outcome,
     };
     request.request_commitment = expected_attempt_outcome_commitment(&request);
+    if let Some((lifecycle, workflow_outcome)) = workflow_lifecycle {
+        request.request_commitment =
+            lifecycle.outcome_request_commitment(&request.request_commitment, workflow_outcome);
+    }
     let reconciliation = ReconcileOperationRequest {
         operation_id: request.operation_id.clone(),
         expected_request_commitment: request.request_commitment.clone(),
@@ -504,7 +605,12 @@ fn persist_outcome(
     ) {
         return reconcile_persistence(backend, &reconciliation, "outcome");
     }
-    let result = match backend.record_attempt_outcome_projected(request) {
+    let persisted = if let Some((lifecycle, workflow_outcome)) = workflow_lifecycle {
+        backend.record_trusted_host_attempt_outcome_projected(&request, lifecycle, workflow_outcome)
+    } else {
+        backend.record_attempt_outcome_projected(request)
+    };
+    let result = match persisted {
         Ok(result) => result.result,
         Err(_) => return reconcile_persistence(backend, &reconciliation, "outcome"),
     };

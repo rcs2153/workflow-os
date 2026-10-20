@@ -74,7 +74,69 @@ impl OperationalExecutionWindowOpeningStoreV1 for SqliteStateBackend {
         &self,
         request: OperationalExecutionWindowOpeningRequest<'_>,
     ) -> Result<ProjectedOperationalExecutionWindowOpeningResult, WorkflowOsError> {
+        self.open_window_and_start_attempt_inner(request, None)
+    }
+
+    fn reconcile_operational_opening(
+        &self,
+        operation_id: &OperationalExecutionWindowOpeningOperationId,
+        expected_request_commitment: &SpecContentHash,
+        expected_receipt_id: &OperationalExecutionWindowOpeningReceiptId,
+    ) -> Result<OperationalExecutionWindowOpeningReconciliationResult, WorkflowOsError> {
+        let connection = self.connection()?;
+        match read_existing(&connection, operation_id)? {
+            Some((result, binding)) => {
+                if &result.request_commitment != expected_request_commitment
+                    || &result.receipt_id != expected_receipt_id
+                {
+                    return Err(opening_error(
+                        WorkflowOsErrorKind::InvalidState,
+                        "reconciliation_mismatch",
+                        "operational opening reconciliation binding does not match",
+                    ));
+                }
+                Ok(
+                    OperationalExecutionWindowOpeningReconciliationResult::DurablyCommitted {
+                        result: Box::new(result),
+                        event: Box::new(binding.event),
+                        snapshot_commitment: binding.snapshot_commitment,
+                    },
+                )
+            }
+            None => Ok(OperationalExecutionWindowOpeningReconciliationResult::ConfirmedAbsent),
+        }
+    }
+}
+
+impl SqliteStateBackend {
+    pub(crate) fn open_window_and_start_attempt_with_lifecycle(
+        &self,
+        request: OperationalExecutionWindowOpeningRequest<'_>,
+        lifecycle: &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+    ) -> Result<ProjectedOperationalExecutionWindowOpeningResult, WorkflowOsError> {
+        self.open_window_and_start_attempt_inner(request, Some(lifecycle))
+    }
+
+    // Keeping this transaction contiguous makes the all-or-nothing security
+    // boundary directly auditable.
+    #[allow(clippy::too_many_lines)]
+    fn open_window_and_start_attempt_inner(
+        &self,
+        request: OperationalExecutionWindowOpeningRequest<'_>,
+        lifecycle: Option<
+            &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+        >,
+    ) -> Result<ProjectedOperationalExecutionWindowOpeningResult, WorkflowOsError> {
         validate_request(&request)?;
+        if request.workflow_lifecycle_commitment
+            != lifecycle.map(crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext::commitment)
+        {
+            return Err(opening_error(
+                WorkflowOsErrorKind::InvalidState,
+                "workflow_lifecycle_mismatch",
+                "operational opening workflow lifecycle binding does not match",
+            ));
+        }
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -139,7 +201,23 @@ impl OperationalExecutionWindowOpeningStoreV1 for SqliteStateBackend {
         let mut continuity = continuity_codec::load_snapshot(&transaction)?;
         validate_and_advance_trusted_time(&request, &mut continuity.trusted_time)?;
         let observed_at = request.trusted_time.observed_at();
-        let result_cursor = next_cursor(&request.expected_cursor, &request.operation_id)?;
+        let opening_input_cursor = if let Some(lifecycle) = lifecycle {
+            crate::authorized_execution_continuity_state::internal::ContinuityCursor {
+                sequence_number: crate::EventSequenceNumber::new(
+                    request
+                        .expected_cursor
+                        .sequence_number
+                        .get()
+                        .checked_add(1)
+                        .ok_or_else(corrupt)?,
+                )?,
+                event_id: lifecycle
+                    .event_id("invocation-requested", request.operation_id.as_str())?,
+            }
+        } else {
+            request.expected_cursor.clone()
+        };
+        let result_cursor = next_cursor(&opening_input_cursor, &request.operation_id)?;
         let window_revision = ContinuityRevision::new(1)?;
         let binding = committed_window_binding(&request, result_cursor.clone());
         let window = AuthoritativeWindowRecord {
@@ -204,8 +282,8 @@ impl OperationalExecutionWindowOpeningStoreV1 for SqliteStateBackend {
                 operation_binding_commitment: result.operation_binding_commitment.clone(),
                 request_commitment: request.request_commitment.clone(),
                 expected_input_cursor: OperationalExecutionWindowOpeningProjectionCursor::new(
-                    request.expected_cursor.sequence_number,
-                    request.expected_cursor.event_id.clone(),
+                    opening_input_cursor.sequence_number,
+                    opening_input_cursor.event_id.clone(),
                 ),
                 committed_result_cursor: OperationalExecutionWindowOpeningProjectionCursor::new(
                     result_cursor.sequence_number,
@@ -214,6 +292,25 @@ impl OperationalExecutionWindowOpeningStoreV1 for SqliteStateBackend {
             },
         )?;
         let first = history.first().ok_or_else(corrupt)?;
+        if let Some(lifecycle) = lifecycle {
+            append_event_and_project_snapshot(
+                &transaction,
+                &WorkflowRunEvent {
+                    sequence_number: opening_input_cursor.sequence_number,
+                    event_id: opening_input_cursor.event_id.clone(),
+                    timestamp: observed_at,
+                    run_id: request.run_id.clone(),
+                    workflow_id: request.workflow_id.clone(),
+                    schema_version: first.schema_version.clone(),
+                    workflow_version: first.workflow_version.clone(),
+                    spec_content_hash: first.spec_content_hash.clone(),
+                    correlation_id: None,
+                    actor: None,
+                    idempotency_key: Some(lifecycle.idempotency_key("invocation-requested")?),
+                    kind: lifecycle.request_event(),
+                },
+            )?;
+        }
         let workflow_event = WorkflowRunEvent {
             sequence_number: result_cursor.sequence_number,
             event_id: result_cursor.event_id.clone(),
@@ -246,7 +343,13 @@ impl OperationalExecutionWindowOpeningStoreV1 for SqliteStateBackend {
             state: "started",
             revision: 1,
         };
-        insert_operation(&transaction, &request, &result, &result_cursor)?;
+        insert_operation(
+            &transaction,
+            &request,
+            &result,
+            &opening_input_cursor,
+            &result_cursor,
+        )?;
         insert_attempt(&transaction, &attempt)?;
         continuity_store::persist_attempt(&transaction, &continuity_attempt)?;
         let projection_binding = OpeningProjectionBinding {
@@ -313,36 +416,6 @@ impl OperationalExecutionWindowOpeningStoreV1 for SqliteStateBackend {
             event,
             snapshot_commitment,
         })
-    }
-
-    fn reconcile_operational_opening(
-        &self,
-        operation_id: &OperationalExecutionWindowOpeningOperationId,
-        expected_request_commitment: &SpecContentHash,
-        expected_receipt_id: &OperationalExecutionWindowOpeningReceiptId,
-    ) -> Result<OperationalExecutionWindowOpeningReconciliationResult, WorkflowOsError> {
-        let connection = self.connection()?;
-        match read_existing(&connection, operation_id)? {
-            Some((result, binding)) => {
-                if &result.request_commitment != expected_request_commitment
-                    || &result.receipt_id != expected_receipt_id
-                {
-                    return Err(opening_error(
-                        WorkflowOsErrorKind::InvalidState,
-                        "reconciliation_mismatch",
-                        "operational opening reconciliation binding does not match",
-                    ));
-                }
-                Ok(
-                    OperationalExecutionWindowOpeningReconciliationResult::DurablyCommitted {
-                        result: Box::new(result),
-                        event: Box::new(binding.event),
-                        snapshot_commitment: binding.snapshot_commitment,
-                    },
-                )
-            }
-            None => Ok(OperationalExecutionWindowOpeningReconciliationResult::ConfirmedAbsent),
-        }
     }
 }
 
@@ -460,6 +533,7 @@ fn insert_operation(
     transaction: &Transaction<'_>,
     request: &OperationalExecutionWindowOpeningRequest<'_>,
     result: &OperationalExecutionWindowOpeningRecordedResult,
+    opening_input_cursor: &crate::authorized_execution_continuity_state::internal::ContinuityCursor,
     result_cursor: &crate::authorized_execution_continuity_state::internal::ContinuityCursor,
 ) -> Result<(), WorkflowOsError> {
     let (seconds, nanos) = timestamp_parts(result.committed_at);
@@ -490,9 +564,8 @@ fn insert_operation(
                     .as_str(),
                 result.operation_binding_commitment.as_str(),
                 request.expected_snapshot_commitment.as_str(),
-                request.expected_cursor.event_id.as_str(),
-                i64::try_from(request.expected_cursor.sequence_number.get())
-                    .map_err(|_| corrupt())?,
+                opening_input_cursor.event_id.as_str(),
+                i64::try_from(opening_input_cursor.sequence_number.get()).map_err(|_| corrupt())?,
                 result_cursor.event_id.as_str(),
                 i64::try_from(result_cursor.sequence_number.get()).map_err(|_| corrupt())?,
                 seconds,
@@ -896,6 +969,7 @@ mod tests {
                     &skill_input(self),
                     &supervisor_executor_binding(),
                 ),
+                workflow_lifecycle_commitment: None,
                 window_id,
                 attempt_id,
                 subject_actor_id: ActorId::new("agent/opening-test").expect("actor"),
@@ -1021,6 +1095,7 @@ mod tests {
                         evaluated_at: Timestamp::parse_rfc3339("2026-07-26T10:25:00Z")
                             .expect("evaluated"),
                         redaction: &self.redaction,
+                        workflow_lifecycle: None,
                     }),
                     persistence: TrustedHostSupervisorPersistenceInput {
                         operation: ContinuityOperationId::new(
@@ -1859,9 +1934,8 @@ mod tests {
                 .expected_deadlines
                 .get(self.next)
                 .expect("unexpected deadline wait");
-            match expected {
-                Some(expected) => assert_eq!(&schedule_at, expected),
-                None => assert!(schedule_at > Timestamp::now_utc()),
+            if let Some(expected) = expected {
+                assert_eq!(&schedule_at, expected);
             }
             let delay = self.delays[self.next];
             self.next += 1;

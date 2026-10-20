@@ -252,6 +252,9 @@ fn fresh_opening<'a>(
     locator: &TrustedHostOperationalEntryLocator,
     fresh: &'a TrustedHostLocalApplicationOwnedFreshPreparation,
     invocation_binding_commitment: &'a crate::SpecContentHash,
+    workflow_lifecycle: Option<
+        &'a crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+    >,
 ) -> OperationalExecutionWindowOpeningUseInput<'a> {
     OperationalExecutionWindowOpeningUseInput {
         source: &fresh.source,
@@ -268,6 +271,7 @@ fn fresh_opening<'a>(
         trusted_time: fresh.trusted_time.clone(),
         evaluated_at: fresh.evaluated_at,
         redaction: &fresh.redaction,
+        workflow_lifecycle,
     }
 }
 
@@ -294,6 +298,7 @@ pub(crate) fn prepare_owned_trusted_host_local_application_session(
                     &locator,
                     fresh,
                     &invocation_commitment,
+                    executor.workflow_lifecycle_context(),
                 )),
                 persistence: TrustedHostSupervisorPersistenceInput {
                     operation: fresh.persistence.operation.clone(),
@@ -330,6 +335,7 @@ pub(crate) fn prepare_owned_trusted_host_local_application_session(
                             &locator,
                             fresh,
                             &invocation_commitment,
+                            executor.workflow_lifecycle_context(),
                         )),
                         persistence: TrustedHostSupervisorPersistenceInput {
                             operation: fresh.persistence.operation.clone(),
