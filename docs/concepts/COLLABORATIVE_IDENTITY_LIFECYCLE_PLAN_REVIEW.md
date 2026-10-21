@@ -1,5 +1,9 @@
 # Collaborative Identity Lifecycle Plan Review
 
+> Fix-forward status: the approved Core model phase is now implemented and is
+> awaiting focused maintainer/security review. See
+> [Collaborative Identity Core Model Report](COLLABORATIVE_IDENTITY_CORE_MODEL_REPORT.md).
+
 ## 1. Executive Verdict
 
 Plan accepted; proceed to the collaborative identity lifecycle Core model only.

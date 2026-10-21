@@ -1235,16 +1235,16 @@ current queue when they contain historical `next phase` language.
    transport, cross-repository pull requests, non-draft PRs, merges, automatic cleanup,
    Jira writes, default executor writes, hidden auth, and automatic broad write
    enablement remain unauthorized.
-3. **Collaborative identity lifecycle planning.** Project-scoped routing and
-   hosted authority integration are accepted, so the next identity boundary is
-   now defined in the [Collaborative Identity Lifecycle
+3. **Collaborative identity lifecycle Core model.** Project-scoped routing and
+   hosted authority integration are accepted, and the first identity boundary
+   is implemented as a model-only Core surface following the [Collaborative Identity Lifecycle
    Plan](docs/implementation-plans/collaborative-identity-lifecycle-plan.md)
-   and its [planning
-   report](docs/concepts/COLLABORATIVE_IDENTITY_LIFECYCLE_PLAN_REPORT.md).
-   The plan separates external authentication, opaque local principal binding,
+   and its [implementation
+   report](docs/concepts/COLLABORATIVE_IDENTITY_CORE_MODEL_REPORT.md).
+   Core now models provider registration, opaque local principal binding,
    principal lifecycle, immutable exact-project grants, additive revocation,
-   point-in-time current authority, hosted sessions, historical routes, and
-   evidence. The first recommended implementation is Core model only. OIDC
+   ambiguous-binding rejection, and constructor-only point-in-time current
+   authority. The next phase is focused maintainer/security review. OIDC
    protocol handling, PostgreSQL identity storage, hosted authentication
    cutover, principal inboxes, SCIM, groups, administration, hostile-tenant
    isolation, provider writes, and production identity claims remain deferred

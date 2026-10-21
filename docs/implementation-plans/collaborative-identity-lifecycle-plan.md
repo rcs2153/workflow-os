@@ -525,3 +525,17 @@ authority projection without protocol or persistence behavior.
 Do not build OIDC transport, PostgreSQL identity tables, hosted cutover,
 principal inboxes, administration, groups, provider writes, OpenShell, nested
 harnesses, or production identity claims in that first implementation.
+
+## 21. Implementation Status
+
+The collaborative identity lifecycle Core model is now implemented in
+`workflow-core`. It provides validated provider registrations, opaque external
+subject bindings, principal lifecycle records, immutable exact-project grants,
+create-only revocations, aggregate active-binding ambiguity checks, and a
+constructor-only point-in-time authority projection.
+
+The implementation remains model-only. It does not validate external identity
+protocols, persist identity or grant state, change hosted authentication,
+expose a principal inbox, add directory synchronization or groups, execute
+provider writes, change workflow schemas, add CLI behavior, or claim production
+identity readiness. Focused maintainer/security review is the next phase.

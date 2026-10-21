@@ -12,6 +12,7 @@ mod authorized_execution_continuity;
 mod authorized_execution_continuity_state;
 mod capability_authority;
 mod ci;
+mod collaborative_identity;
 mod current_authority_fact_set;
 mod current_authority_proportional_governance;
 mod current_authority_source;
@@ -143,6 +144,24 @@ pub use capability_authority::{
     CapabilityResolutionReason, CapabilityResourceKind, CapabilityResourceScope,
     StepScopedCapabilityProjection, StepScopedCapabilityProjectionEntry,
     StepScopedCapabilityProjectionInput,
+};
+pub use collaborative_identity::{
+    project_collaborative_current_authority, reconcile_collaborative_project_grant_revocation,
+    validate_collaborative_identity_binding_set, CollaborativeActiveGrantReference,
+    CollaborativeCurrentAuthorityProjection, CollaborativeCurrentAuthorityProjectionCommitment,
+    CollaborativeCurrentAuthorityProjectionInput, CollaborativeExternalSubjectCommitment,
+    CollaborativeIdentityAudienceCommitment, CollaborativeIdentityIssuerCommitment,
+    CollaborativeIdentityProviderId, CollaborativeIdentityProviderLifecycle,
+    CollaborativeIdentityProviderRegistration, CollaborativeIdentityProviderRegistrationVersion,
+    CollaborativePrincipalIdentityBinding, CollaborativePrincipalIdentityBindingId,
+    CollaborativePrincipalIdentityBindingLifecycle, CollaborativePrincipalLifecycle,
+    CollaborativePrincipalRecord, CollaborativePrincipalRevision, CollaborativeProjectGrant,
+    CollaborativeProjectGrantCommitment, CollaborativeProjectGrantDefinition,
+    CollaborativeProjectGrantId, CollaborativeProjectGrantRevision,
+    CollaborativeProjectGrantRevocation, CollaborativeProjectGrantRevocationCommitment,
+    CollaborativeProjectGrantRevocationDefinition, CollaborativeProjectGrantRevocationId,
+    CollaborativeProjectGrantRevocationReason, CollaborativeProjectGrantRevocationReconciliation,
+    UnverifiedCollaborativeCurrentAuthorityProjection,
 };
 pub use current_authority_fact_set::{
     AuthorityFactCompletenessPosture, AuthorityFactSourceBinding, AuthorityFactSourceKind,
