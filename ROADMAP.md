@@ -151,14 +151,20 @@ phase` language does not supersede the active queue.
    truth, binds pre-result failure to the deterministic invocation request,
    cites schedule events in v4 reports, and adds direct corruption,
    substitution, artifact-conflict, and privacy regressions. Focused
-   maintainer/security re-review is next. Clippy, tests, arbitrary commands, providers,
+   maintainer/security re-review found one remaining correctness blocker and
+   two proof gaps: pre-result failure is incorrectly limited to the final
+   workflow step rather than the last scheduled step, and direct duplicate-
+   dispatch and composed-timeout regressions are still missing. One additional
+   narrow blocker fix is next. Clippy, tests, arbitrary commands, providers,
    external writes, public surfaces, hosted expansion, and topology broadening
    remain out of scope. See
    [Trusted-Host Cargo Format Workflow Composition Implementation Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REPORT.md)
    and
    [Trusted-Host Cargo Format Workflow Composition Implementation Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REVIEW.md),
    plus the
-   [Trusted-Host Cargo Format Workflow Composition Blocker Fix Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_BLOCKER_FIX_REPORT.md).
+   [Trusted-Host Cargo Format Workflow Composition Blocker Fix Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_BLOCKER_FIX_REPORT.md)
+   and
+   [Trusted-Host Cargo Format Workflow Composition Blocker Fix Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_BLOCKER_FIX_REVIEW.md).
 
    Historical accepted evidence:
 
