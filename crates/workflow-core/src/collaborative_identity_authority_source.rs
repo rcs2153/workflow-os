@@ -348,9 +348,25 @@ impl CollaborativeIdentityAuthorityRevisionCandidate {
         query: &CollaborativeIdentityAuthorityQuery,
         evaluated_at: Timestamp,
     ) -> u64 {
-        if self.organization_id() != query.organization_id() {
-            return 0;
-        }
+        self.active_matching_grants(query, evaluated_at).count() as u64
+    }
+
+    pub(crate) fn single_active_matching_grant_commitment(
+        &self,
+        query: &CollaborativeIdentityAuthorityQuery,
+        evaluated_at: Timestamp,
+    ) -> Option<SpecContentHash> {
+        let mut matches = self.active_matching_grants(query, evaluated_at);
+        let commitment = SpecContentHash::new(matches.next()?.commitment().as_str()).ok()?;
+        matches.next().is_none().then_some(commitment)
+    }
+
+    fn active_matching_grants<'a>(
+        &'a self,
+        query: &'a CollaborativeIdentityAuthorityQuery,
+        evaluated_at: Timestamp,
+    ) -> impl Iterator<Item = &'a CollaborativeProjectGrant> + 'a {
+        let organization_matches = self.organization_id() == query.organization_id();
         let principal_active = self.principals.iter().any(|principal| {
             principal.principal_id() == query.principal_id()
                 && principal.effective_at() <= evaluated_at
@@ -368,26 +384,23 @@ impl CollaborativeIdentityAuthorityRevisionCandidate {
                             == crate::CollaborativeIdentityProviderLifecycle::Active
                 })
         });
-        if !principal_active || !binding_active {
-            return 0;
-        }
-        self.grants
-            .iter()
-            .filter(|grant| {
-                grant.project_id() == query.project_id()
-                    && grant.principal_id() == query.principal_id()
-                    && grant.capabilities().contains(&query.capability())
-                    && grant.effective_at() <= evaluated_at
-                    && grant
-                        .expires_at()
-                        .map_or(true, |expiry| expiry > evaluated_at)
-                    && !self.revocations.iter().any(|revocation| {
-                        revocation.grant_id() == grant.grant_id()
-                            && revocation.grant_commitment() == grant.commitment()
-                            && revocation.revoked_at() <= evaluated_at
-                    })
-            })
-            .count() as u64
+        self.grants.iter().filter(move |grant| {
+            organization_matches
+                && principal_active
+                && binding_active
+                && grant.project_id() == query.project_id()
+                && grant.principal_id() == query.principal_id()
+                && grant.capabilities().contains(&query.capability())
+                && grant.effective_at() <= evaluated_at
+                && grant
+                    .expires_at()
+                    .map_or(true, |expiry| expiry > evaluated_at)
+                && !self.revocations.iter().any(|revocation| {
+                    revocation.grant_id() == grant.grant_id()
+                        && revocation.grant_commitment() == grant.commitment()
+                        && revocation.revoked_at() <= evaluated_at
+                })
+        })
     }
 
     fn exact_query_fact_counts(&self, query: &CollaborativeIdentityAuthorityQuery) -> [u64; 5] {

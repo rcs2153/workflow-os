@@ -3,8 +3,10 @@
 Status: planning and focused maintainer/security review accepted; Phase 1
 transaction-scoped source-read refactor implemented and reviewed; Phase 2
 payload-free receipt model and dedicated create-only PostgreSQL persistence
-implemented; focused review found a live PostgreSQL conformance and recovery
-evidence blocker; the consequential consumer is not implemented
+implemented and its verification blocker fixed and accepted; Phase 3 same-call
+`ApprovalDecide` consumer implemented; focused review found a narrow executor-
+boundary verification blocker; the narrow locking and executor-path test fix
+is implemented and awaiting focused re-review with required live PostgreSQL CI
 
 Related foundations:
 
@@ -37,11 +39,13 @@ An approval decision may commit only in the same serializable transaction that
 proves current exact-project ApprovalDecide authority.
 ```
 
-Phase 1 now provides the private transaction-scoped source-read seam while
-preserving the existing public non-authorizing read. This plan does not yet
-implement the consumer. It does not change hosted
-authentication, create an identity administration surface, broaden approval
-APIs, or authorize any provider write.
+Phase 1 provides the private transaction-scoped source-read seam while
+preserving the existing public non-authorizing read. Phase 2 provides the
+payload-free receipt and verified PostgreSQL recovery boundary. Phase 3 now
+adds one explicit executor-facing consumer backed by one serializable
+decision transaction. It does not change hosted authentication, create an
+identity administration surface, broaden existing approval APIs, or authorize
+any provider write.
 
 ## 2. Why This Phase Is Next
 
@@ -388,20 +392,30 @@ Timing-only sleeps are not sufficient evidence.
 
 ### Phase 3: Same-Call ApprovalDecide Consumer
 
-- Add one explicit proof-enforced executor-facing collaborative decision
-  request/result boundary.
-- Derive the query from trusted scope and principal context.
-- Resolve and lock current authority in the approval transaction.
-- Preserve all existing gates.
-- Atomically persist event, projection, and receipt.
-- Rehydrate the committed event and continue without appending a duplicate
-  decision event.
-- Prove races cannot commit stale authority.
+- Implemented one explicit proof-enforced executor-facing collaborative
+  decision request/result boundary.
+- The query is fixed by Core from trusted scope and principal context.
+- Current authority is resolved under the shared organization advisory lock
+  and serializable decision transaction.
+- Existing approval-presentation and decision gates remain mandatory.
+- Decision event, approval projection, and payload-free receipt commit
+  atomically.
+- The executor rehydrates the committed decision and continues without
+  appending a duplicate event; exact restart replay recovers the receipt.
+- PostgreSQL conformance covers duplicate decisions, exact replay, revocation
+  serialization, revoked denial, and non-mutation on failed authority.
 
 ### Phase 4: Focused Maintainer/Security Review
 
-- Review transaction ordering, locking, retries, source completeness, receipt
-  privacy, non-bypass, recovery, and regression evidence.
+- Review completed. The backend transaction and payload-free receipt boundary
+  are structurally sound, but the public executor-facing consumer is not
+  invoked by focused tests. Restart continuation, post-commit recovery, and
+  failed-authority non-invocation therefore remain unproven at the claimed
+  runtime boundary.
+- The decision transaction also uses the non-locking exact run-binding helper
+  even though the accepted transaction design requires the binding read to be
+  locked.
+- Fix only those verification and locking gaps, then rerun focused review.
 - Do not add another identity consumer before acceptance.
 
 ## 18. Documentation Updates For Implementation
@@ -449,11 +463,12 @@ These resolutions do not authorize broader implementation.
 
 ## 20. Final Recommendation
 
-Proceed next to a focused maintainer/security review of this plan. If accepted,
-implement Phase 1 only: the private transaction-scoped source read with public
-read equivalence tests. Do not combine source refactoring, receipt persistence,
-and the consequential approval consumer into one unreviewed code phase.
+Proceed next to a **focused blocker-fix review** for the same-call consumer.
+The implementation now uses the locking exact run-binding read and adds live
+PostgreSQL tests that invoke the public executor-facing API for success, exact
+replay/restart continuation, post-commit recovery, and failed-authority
+non-invocation. Required Shared PostgreSQL State CI must execute that proof
+before acceptance.
 
-This is the right next runtime composition step because it turns the reviewed
-persistent source into enforceable governance at exactly one security-sensitive
-boundary while keeping the product surface narrow.
+Do not broaden into hosted authentication, identity administration, another
+capability, or provider mutation from this implementation phase.

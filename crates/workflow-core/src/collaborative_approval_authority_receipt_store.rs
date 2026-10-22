@@ -52,6 +52,13 @@ impl PersistedCollaborativeApprovalAuthorityReceiptRecord {
         self.claim.approval_decision_event_id()
     }
 
+    /// Returns the exact authority query commitment for trusted in-process
+    /// replay binding checks.
+    #[must_use]
+    pub(crate) const fn query_commitment(&self) -> &crate::SpecContentHash {
+        self.claim.query_commitment()
+    }
+
     /// Returns the complete deterministic receipt commitment.
     #[must_use]
     pub const fn receipt_commitment(&self) -> &crate::SpecContentHash {

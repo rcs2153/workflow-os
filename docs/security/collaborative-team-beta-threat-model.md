@@ -36,6 +36,8 @@ certification.
 | Rolled-back or conflicting deployment authority serves traffic | Explicit pre-serve PostgreSQL high-watermark activation rejects rollback and same-revision content conflict |
 | Stale approval, project binding, or authority creates a route | One serializable route-create transaction rechecks pending approval history, active exact-project run binding, and exact current authority |
 | Database columns drift from canonical route content | Every read recomputes the canonical payload hash and cross-checks all duplicated index columns |
+| Collaborative approval commits under stale or revoked identity authority | The opt-in consumer shares the organization advisory lock with authority activation, locks and rechecks the current watermark, uses database time, and commits the decision event, projection, and receipt in one serializable transaction |
+| Approval retry duplicates a decision event or treats a receipt as reusable authority | Exact replay requires the same durable approval and event, recovers the payload-free receipt by decision binding, and rehydrates before continuation; the receipt never authorizes another action |
 
 Authenticated authorization decisions are stored as payload-free records with
 actor, principal kind, scope, capability, allowed/denied posture, stable reason,
@@ -59,3 +61,7 @@ project roots, provider payloads, source contents, or command output.
 - Approval route records are historical evidence, not current authority. No
   inbox, decision endpoint, notification delivery, or automatic route creation
   consumes them yet.
+- The executor-facing collaborative `ApprovalDecide` consumer is explicit and
+  opt-in. It is not exposed through a hosted decision endpoint and does not
+  establish enterprise identity, session authentication, identity
+  administration, or another capability consumer.

@@ -26,12 +26,13 @@ use crate::{
     CollaborativeIdentityAuthorityRevisionCandidate, CollaborativeIdentityAuthoritySourceRead,
     CollaborativeIdentityProviderRegistration, CollaborativePrincipalIdentityBinding,
     CollaborativePrincipalRecord, CollaborativeProjectGrant, CollaborativeProjectGrantRevocation,
-    CurrentAuthorityFactFamily, DurableLeaseSemantics, DurableRevision, DurableStateBackendKind,
-    DurableStateCapability, DurableStateContractProvider, DurableStateContractVersion,
-    DurableStateSchemaMetadata, DurableStateSchemaPosture, DurableStateSemanticContract,
-    DurableStateSupport, DurableStateTransactionKind, DurableStateTransactionSupport,
-    EventLogStore, HostedExecutionReceipt, HostedExecutionStatus, HostedProjectAccessDecision,
-    HostedProjectCatalogVersion, HostedProjectResourceBinding, HostedProjectResourceBindingReader,
+    CurrentAuthorityFactFamily, CurrentAuthoritySourceId, DurableLeaseSemantics, DurableRevision,
+    DurableStateBackendKind, DurableStateCapability, DurableStateContractProvider,
+    DurableStateContractVersion, DurableStateSchemaMetadata, DurableStateSchemaPosture,
+    DurableStateSemanticContract, DurableStateSupport, DurableStateTransactionKind,
+    DurableStateTransactionSupport, EventLogStore, HostedExecutionReceipt, HostedExecutionStatus,
+    HostedProjectAccessDecision, HostedProjectCapability, HostedProjectCatalogVersion,
+    HostedProjectResourceBinding, HostedProjectResourceBindingReader,
     HostedProjectResourceBindingStatus, HostedProjectResourceKind, HostedProjectScope,
     HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
     IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildResult,
@@ -504,6 +505,62 @@ pub struct PostgresRecordApprovalDecisionRequest<'a> {
     pub event: &'a WorkflowRunEvent,
 }
 
+/// Atomic collaborative `ApprovalDecide` recording input.
+#[derive(Clone, Copy)]
+pub struct PostgresRecordCollaborativeApprovalDecisionRequest<'a> {
+    /// Trusted exact project scope for the durable run.
+    pub project_scope: &'a HostedProjectScope,
+    /// Authenticated local principal making the decision.
+    pub authenticated_principal: &'a ActorId,
+    /// Updated approval projection containing the proof-marked decision.
+    pub approval: &'a ApprovalRequest,
+    /// Durable presentation proof shown before the decision.
+    pub presentation: &'a ApprovalPresentationRecord,
+    /// Authoritative approval-decision event.
+    pub event: &'a WorkflowRunEvent,
+}
+
+/// Result of one atomic collaborative approval decision commit.
+pub struct PostgresCollaborativeApprovalDecisionCommit {
+    receipt: CollaborativeApprovalAuthorityReceipt,
+    receipt_write: CollaborativeApprovalAuthorityReceiptWriteOutcome,
+}
+
+impl PostgresCollaborativeApprovalDecisionCommit {
+    /// Returns the trusted payload-free authority receipt.
+    #[must_use]
+    pub const fn receipt(&self) -> &CollaborativeApprovalAuthorityReceipt {
+        &self.receipt
+    }
+
+    /// Returns whether receipt persistence was new or an exact replay.
+    #[must_use]
+    pub const fn receipt_write(&self) -> CollaborativeApprovalAuthorityReceiptWriteOutcome {
+        self.receipt_write
+    }
+
+    /// Consumes the commit into its parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        CollaborativeApprovalAuthorityReceipt,
+        CollaborativeApprovalAuthorityReceiptWriteOutcome,
+    ) {
+        (self.receipt, self.receipt_write)
+    }
+}
+
+impl fmt::Debug for PostgresCollaborativeApprovalDecisionCommit {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PostgresCollaborativeApprovalDecisionCommit")
+            .field("receipt", &"[REDACTED]")
+            .field("receipt_write", &self.receipt_write)
+            .finish()
+    }
+}
+
 /// Atomic `SideEffect` transition input.
 #[derive(Clone, Copy)]
 pub struct PostgresTransitionSideEffectRequest<'a> {
@@ -879,58 +936,56 @@ impl PostgresStateBackend {
         candidate: &CollaborativeIdentityAuthorityRevisionCandidate,
     ) -> Result<CollaborativeIdentityAuthorityRevisionActivation, WorkflowOsError> {
         let revision = authority_revision_to_i64(candidate.authority_revision())?;
-        let organization_id = candidate.organization_id().as_str();
+        let organization_id = candidate.organization_id();
         let mut client = self.connections.connect()?;
-        let activation_lock = format!("workflow_os_collaborative_identity:{organization_id}");
-        client
-            .query_one("SELECT pg_advisory_lock(hashtext($1))", &[&activation_lock])
-            .map_err(|error| database_error("collaborative_authority_activation_lock", &error))?;
-        let activation = serializable(&mut client, |tx| {
-            let existing = tx
-                .query_opt(
-                    "SELECT authority_revision, revision_commitment, source_model_version
+        with_collaborative_authority_lock(&mut client, organization_id, |client| {
+            serializable(client, |tx| {
+                let existing = tx
+                    .query_opt(
+                        "SELECT authority_revision, revision_commitment, source_model_version
                        FROM workflow_os.collaborative_identity_authority_high_watermarks
                       WHERE organization_id = $1 FOR UPDATE",
-                    &[&organization_id],
-                )
-                .map_err(|error| {
-                    database_error("collaborative_authority_watermark_read", &error)
-                })?;
-            if let Some(row) = existing {
-                let stored_revision: i64 = row.get(0);
-                let stored_commitment: String = row.get(1);
-                let stored_source_model_version: String = row.get(2);
-                if stored_source_model_version != POSTGRES_SOURCE_VERSION {
-                    return Err(collaborative_authority_corruption_error());
-                }
-                if revision < stored_revision {
-                    return Err(state_error(
-                        "postgres_state.collaborative_authority.revision.rollback",
-                        "collaborative authority revision would roll back durable state",
-                    ));
-                }
-                if revision == stored_revision {
-                    let durable = read_collaborative_identity_candidate_tx(
-                        tx,
-                        organization_id,
-                        stored_revision,
-                    )?;
-                    if stored_commitment == candidate.commitment().as_str() && durable == *candidate
-                    {
-                        return Ok(
+                        &[&organization_id.as_str()],
+                    )
+                    .map_err(|error| {
+                        database_error("collaborative_authority_watermark_read", &error)
+                    })?;
+                if let Some(row) = existing {
+                    let stored_revision: i64 = row.get(0);
+                    let stored_commitment: String = row.get(1);
+                    let stored_source_model_version: String = row.get(2);
+                    if stored_source_model_version != POSTGRES_SOURCE_VERSION {
+                        return Err(collaborative_authority_corruption_error());
+                    }
+                    if revision < stored_revision {
+                        return Err(state_error(
+                            "postgres_state.collaborative_authority.revision.rollback",
+                            "collaborative authority revision would roll back durable state",
+                        ));
+                    }
+                    if revision == stored_revision {
+                        let durable = read_collaborative_identity_candidate_tx(
+                            tx,
+                            organization_id.as_str(),
+                            stored_revision,
+                        )?;
+                        if stored_commitment == candidate.commitment().as_str()
+                            && durable == *candidate
+                        {
+                            return Ok(
                             CollaborativeIdentityAuthorityRevisionActivation::ReconciledExisting,
                         );
+                        }
+                        return Err(state_error(
+                            "postgres_state.collaborative_authority.revision.conflict",
+                            "collaborative authority revision conflicts with durable state",
+                        ));
                     }
-                    return Err(state_error(
-                        "postgres_state.collaborative_authority.revision.conflict",
-                        "collaborative authority revision conflicts with durable state",
-                    ));
                 }
-            }
 
-            insert_collaborative_identity_candidate_tx(tx, candidate)?;
-            tx.execute(
-                "INSERT INTO workflow_os.collaborative_identity_authority_high_watermarks
+                insert_collaborative_identity_candidate_tx(tx, candidate)?;
+                tx.execute(
+                    "INSERT INTO workflow_os.collaborative_identity_authority_high_watermarks
                     (organization_id, authority_revision, revision_commitment,
                      source_model_version)
                  VALUES ($1, $2, $3, $4)
@@ -939,30 +994,19 @@ impl PostgresStateBackend {
                         revision_commitment = EXCLUDED.revision_commitment,
                         source_model_version = EXCLUDED.source_model_version,
                         accepted_at = clock_timestamp()",
-                &[
-                    &organization_id,
-                    &revision,
-                    &candidate.commitment().as_str(),
-                    &POSTGRES_SOURCE_VERSION,
-                ],
-            )
-            .map_err(|error| database_error("collaborative_authority_watermark_write", &error))?;
-            Ok(CollaborativeIdentityAuthorityRevisionActivation::Activated)
-        });
-        let unlock = client
-            .query_one(
-                "SELECT pg_advisory_unlock(hashtext($1))",
-                &[&activation_lock],
-            )
-            .map_err(|error| database_error("collaborative_authority_activation_unlock", &error))?;
-        let unlocked: bool = unlock.get(0);
-        if !unlocked {
-            return Err(state_error(
-                "postgres_state.collaborative_authority.activation_lock.invalid",
-                "collaborative authority activation lock state is invalid",
-            ));
-        }
-        activation
+                    &[
+                        &organization_id.as_str(),
+                        &revision,
+                        &candidate.commitment().as_str(),
+                        &POSTGRES_SOURCE_VERSION,
+                    ],
+                )
+                .map_err(|error| {
+                    database_error("collaborative_authority_watermark_write", &error)
+                })?;
+                Ok(CollaborativeIdentityAuthorityRevisionActivation::Activated)
+            })
+        })
     }
 
     /// Reads one exact collaborative authority query from the active complete revision.
@@ -1005,53 +1049,7 @@ impl PostgresStateBackend {
         let payload_hash = SpecContentHash::from_text(&payload);
         let mut client = self.connections.connect()?;
         serializable(&mut client, |tx| {
-            let inserted = tx
-                .execute(
-                    "INSERT INTO workflow_os.collaborative_approval_authority_receipts
-                        (receipt_id, approval_reference_id, approval_decision_event_id,
-                         canonical_payload, canonical_payload_hash)
-                     VALUES ($1, $2, $3, $4, $5)
-                     ON CONFLICT DO NOTHING",
-                    &[
-                        &receipt.receipt_id().as_str(),
-                        &receipt.approval_reference_id().as_str(),
-                        &receipt.approval_decision_event_id().as_str(),
-                        &payload,
-                        &payload_hash.as_str(),
-                    ],
-                )
-                .map_err(|error| database_error("collaborative_approval_receipt_write", &error))?;
-            if inserted == 1 {
-                return Ok(CollaborativeApprovalAuthorityReceiptWriteOutcome::Written);
-            }
-            let existing = read_collaborative_approval_authority_receipt_tx(
-                tx,
-                receipt.receipt_id().as_str(),
-            )?
-            .ok_or_else(collaborative_approval_receipt_conflict_error)?;
-            let existing_payload = tx
-                .query_opt(
-                    "SELECT canonical_payload
-                       FROM workflow_os.collaborative_approval_authority_receipts
-                      WHERE receipt_id = $1",
-                    &[&receipt.receipt_id().as_str()],
-                )
-                .map_err(|error| {
-                    database_error("collaborative_approval_receipt_replay_read", &error)
-                })?
-                .map(|row| row.get::<_, String>(0))
-                .ok_or_else(collaborative_approval_receipt_conflict_error)?;
-            if existing_payload != payload {
-                return Err(collaborative_approval_receipt_conflict_error());
-            }
-            if existing.approval_reference_id() != receipt.approval_reference_id()
-                || existing.approval_decision_event_id() != receipt.approval_decision_event_id()
-                || existing.receipt_id() != receipt.receipt_id()
-                || existing.receipt_commitment() != receipt.receipt_commitment()
-            {
-                return Err(collaborative_approval_receipt_conflict_error());
-            }
-            Ok(CollaborativeApprovalAuthorityReceiptWriteOutcome::AlreadyExists)
+            write_collaborative_approval_authority_receipt_tx(tx, receipt, &payload, &payload_hash)
         })
     }
 
@@ -1197,7 +1195,7 @@ impl PostgresStateBackend {
                     ));
                 }
                 if let Some(scope) = request.project_scope {
-                    require_project_resource_binding_tx(
+                    require_locked_project_resource_binding_tx(
                         tx,
                         scope,
                         HostedProjectResourceKind::WorkItem,
@@ -2256,103 +2254,118 @@ impl PostgresStateBackend {
         request: PostgresRecordApprovalDecisionRequest<'_>,
     ) -> Result<(), WorkflowOsError> {
         request.approval.validate_subject()?;
-        let Some(decision) = request.approval.decision.as_ref() else {
+        if request.approval.decision.is_none() {
             return Err(state_error(
                 "postgres_state.approval.decision_missing",
                 "PostgreSQL approval transaction requires a decision",
             ));
-        };
+        }
         validate_approval_event_binding(request.approval, request.event)?;
         let mut client = self.connections.connect()?;
         serializable(&mut client, |tx| {
-            let row = tx
-                .query_opt(
-                    "SELECT payload, revision FROM workflow_os.records
-                      WHERE family = 'approval' AND key1 = $1 AND key2 = ''
-                      FOR UPDATE",
-                    &[&request.approval.approval_id],
-                )
-                .map_err(|error| database_error("approval_read", &error))?
-                .ok_or_else(|| {
-                    state_error(
-                        "postgres_state.approval.missing",
-                        "PostgreSQL approval request is missing",
-                    )
-                })?;
-            let prior: ApprovalRequest = decode(row.get::<_, String>(0).as_str())?;
-            if prior.decision.is_some() {
-                return Err(state_error(
-                    "postgres_state.approval.already_decided",
-                    "PostgreSQL approval request already has a decision",
-                ));
-            }
-            let mut expected = prior.clone();
-            expected.decision = Some(decision.clone());
-            if expected != *request.approval {
-                return Err(state_error(
-                    "postgres_state.approval.identity_mismatch",
-                    "PostgreSQL approval decision does not match the pending request",
-                ));
-            }
-            validate_approval_presentation_for_request(ApprovalPresentationValidationInput {
-                presentation: request.presentation,
-                approval_request: &prior,
-            })
-            .map_err(|_| {
-                state_error(
-                    "postgres_state.approval.presentation_mismatch",
-                    "PostgreSQL approval presentation does not match the pending request",
-                )
-            })?;
-            let stored_presentation = tx
-                .query_opt(
-                    "SELECT payload FROM workflow_os.records
-                      WHERE family = 'approval_presentation' AND key1 = $1
-                      FOR UPDATE",
-                    &[&request.presentation.presentation_id().as_str()],
-                )
-                .map_err(|error| database_error("approval_presentation_read", &error))?
-                .ok_or_else(|| {
-                    state_error(
-                        "postgres_state.approval.presentation_missing",
-                        "PostgreSQL approval presentation proof is missing",
-                    )
-                })?;
-            let stored_presentation: ApprovalPresentationRecord =
-                decode(stored_presentation.get::<_, String>(0).as_str())?;
-            if stored_presentation != *request.presentation {
-                return Err(state_error(
-                    "postgres_state.approval.presentation_mismatch",
-                    "PostgreSQL approval presentation does not match durable proof",
-                ));
-            }
-            let proof_marker = decision.proof_marker.as_ref().ok_or_else(|| {
-                state_error(
-                    "postgres_state.approval.proof_marker_missing",
-                    "PostgreSQL approval decision proof marker is missing",
-                )
-            })?;
-            if proof_marker.presentation_id() != request.presentation.presentation_id()
-                || proof_marker.presentation_content_hash() != request.presentation.content_hash()
-            {
-                return Err(state_error(
-                    "postgres_state.approval.proof_marker_mismatch",
-                    "PostgreSQL approval decision proof marker does not match presentation proof",
-                ));
-            }
-            append_event_tx(tx, request.event)?;
-            let revision = revision_from_i64(row.get(1))?;
-            put_record(
-                tx,
-                "approval",
-                &request.approval.approval_id,
-                "",
-                request.approval,
-                Some(revision),
-                false,
-            )?;
-            Ok(())
+            record_approval_decision_tx(tx, request, false).map(|_| ())
         })
+    }
+
+    /// Atomically proves current exact-project `ApprovalDecide` authority,
+    /// records one proof-marked decision, and creates its payload-free receipt.
+    ///
+    /// The capability and authority query are fixed by Core. The same
+    /// organization-scoped lock used by authority activation prevents a newer
+    /// revision from crossing the authorization-to-commit interval.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed before commit when project binding, actor identity,
+    /// presentation proof, current authority, decision event, or receipt
+    /// persistence cannot be proven exactly.
+    pub fn record_collaborative_approval_decision(
+        &self,
+        request: PostgresRecordCollaborativeApprovalDecisionRequest<'_>,
+    ) -> Result<PostgresCollaborativeApprovalDecisionCommit, WorkflowOsError> {
+        request.project_scope.validate()?;
+        request.approval.validate_subject()?;
+        let decision = request.approval.decision.as_ref().ok_or_else(|| {
+            state_error(
+                "postgres_state.approval.decision_missing",
+                "PostgreSQL approval transaction requires a decision",
+            )
+        })?;
+        if &decision.actor != request.authenticated_principal {
+            return Err(state_error(
+                "postgres_state.collaborative_approval.actor_mismatch",
+                "authenticated principal does not match the approval decision actor",
+            ));
+        }
+        validate_approval_event_binding(request.approval, request.event)?;
+        let query = CollaborativeIdentityAuthorityQuery::new(
+            request.project_scope.organization_id().clone(),
+            request.project_scope.project_id().clone(),
+            request.authenticated_principal.clone(),
+            HostedProjectCapability::ApprovalDecide,
+        )?;
+        let mut client = self.connections.connect()?;
+        with_collaborative_authority_lock(
+            &mut client,
+            request.project_scope.organization_id(),
+            |client| {
+                serializable(client, |tx| {
+                    let authority = read_collaborative_approval_authorizing_view_tx(tx, &query)?;
+                    require_locked_project_resource_binding_tx(
+                        tx,
+                        request.project_scope,
+                        HostedProjectResourceKind::Run,
+                        request.approval.run_id.as_str(),
+                    )?;
+                    record_approval_decision_tx(
+                        tx,
+                        PostgresRecordApprovalDecisionRequest {
+                            approval: request.approval,
+                            presentation: request.presentation,
+                            event: request.event,
+                        },
+                        true,
+                    )?;
+                    require_collaborative_authority_watermark_unchanged_tx(tx, &query, &authority)?;
+                    let receipt = CollaborativeApprovalAuthorityReceipt::from_decision_proof(
+                        crate::collaborative_approval_authority_receipt::CollaborativeApprovalAuthorityReceiptProof {
+                            approval_reference_id: ApprovalReferenceId::new(
+                                request.approval.approval_id.clone(),
+                            )?,
+                            approval_decision_event_id: request.event.event_id.clone(),
+                            source_id: CurrentAuthoritySourceId::new(
+                                "core/postgres/collaborative-identity",
+                            )?,
+                            query_commitment: query.query_commitment().clone(),
+                            authority_revision: authority.source_read.authority_revision(),
+                            authority_revision_commitment: authority
+                                .authority_revision_commitment,
+                            source_snapshot_commitment: authority
+                                .source_read
+                                .source_snapshot()
+                                .snapshot_commitment()
+                                .clone(),
+                            active_grant_commitment: authority.active_grant_commitment,
+                            observed_at: authority.observed_at,
+                            decision_kind: decision.decision,
+                        },
+                    )?;
+                    let payload = encode(&receipt)
+                        .map_err(|_| collaborative_approval_receipt_invalid_error())?;
+                    let payload_hash = SpecContentHash::from_text(&payload);
+                    let receipt_write = write_collaborative_approval_authority_receipt_tx(
+                        tx,
+                        &receipt,
+                        &payload,
+                        &payload_hash,
+                    )?;
+                    Ok(PostgresCollaborativeApprovalDecisionCommit {
+                        receipt,
+                        receipt_write,
+                    })
+                })
+            },
+        )
     }
 
     /// Atomically compare-and-transitions a `SideEffect` plus its event.
@@ -3846,6 +3859,245 @@ fn serializable<T>(
     }))
 }
 
+fn with_collaborative_authority_lock<T>(
+    client: &mut Client,
+    organization_id: &OrganizationId,
+    operation: impl FnOnce(&mut Client) -> Result<T, WorkflowOsError>,
+) -> Result<T, WorkflowOsError> {
+    let lock_key = format!(
+        "workflow_os_collaborative_identity:{}",
+        organization_id.as_str()
+    );
+    client
+        .query_one("SELECT pg_advisory_lock(hashtext($1))", &[&lock_key])
+        .map_err(|error| database_error("collaborative_authority_activation_lock", &error))?;
+    let result = operation(client);
+    let unlock = client
+        .query_one("SELECT pg_advisory_unlock(hashtext($1))", &[&lock_key])
+        .map_err(|error| database_error("collaborative_authority_activation_unlock", &error))?;
+    let unlocked: bool = unlock.get(0);
+    if !unlocked {
+        return Err(state_error(
+            "postgres_state.collaborative_authority.activation_lock.invalid",
+            "collaborative authority activation lock state is invalid",
+        ));
+    }
+    result
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ApprovalDecisionPersistencePosture {
+    Committed,
+    ReconciledExisting,
+}
+
+fn record_approval_decision_tx(
+    tx: &mut Transaction<'_>,
+    request: PostgresRecordApprovalDecisionRequest<'_>,
+    allow_exact_replay: bool,
+) -> Result<ApprovalDecisionPersistencePosture, WorkflowOsError> {
+    let decision = request.approval.decision.as_ref().ok_or_else(|| {
+        state_error(
+            "postgres_state.approval.decision_missing",
+            "PostgreSQL approval transaction requires a decision",
+        )
+    })?;
+    let row = tx
+        .query_opt(
+            "SELECT payload, revision FROM workflow_os.records
+              WHERE family = 'approval' AND key1 = $1 AND key2 = ''
+              FOR UPDATE",
+            &[&request.approval.approval_id],
+        )
+        .map_err(|error| database_error("approval_read", &error))?
+        .ok_or_else(|| {
+            state_error(
+                "postgres_state.approval.missing",
+                "PostgreSQL approval request is missing",
+            )
+        })?;
+    let prior: ApprovalRequest = decode(row.get::<_, String>(0).as_str())?;
+    if prior.decision.is_some() && (!allow_exact_replay || prior != *request.approval) {
+        return Err(state_error(
+            "postgres_state.approval.already_decided",
+            "PostgreSQL approval request already has a decision",
+        ));
+    }
+    let mut pending = prior.clone();
+    pending.decision = None;
+    let mut expected = pending.clone();
+    expected.decision = Some(decision.clone());
+    if expected != *request.approval {
+        return Err(state_error(
+            "postgres_state.approval.identity_mismatch",
+            "PostgreSQL approval decision does not match the pending request",
+        ));
+    }
+    validate_approval_presentation_for_request(ApprovalPresentationValidationInput {
+        presentation: request.presentation,
+        approval_request: &pending,
+    })
+    .map_err(|_| {
+        state_error(
+            "postgres_state.approval.presentation_mismatch",
+            "PostgreSQL approval presentation does not match the pending request",
+        )
+    })?;
+    let stored_presentation = tx
+        .query_opt(
+            "SELECT payload FROM workflow_os.records
+              WHERE family = 'approval_presentation' AND key1 = $1
+              FOR UPDATE",
+            &[&request.presentation.presentation_id().as_str()],
+        )
+        .map_err(|error| database_error("approval_presentation_read", &error))?
+        .ok_or_else(|| {
+            state_error(
+                "postgres_state.approval.presentation_missing",
+                "PostgreSQL approval presentation proof is missing",
+            )
+        })?;
+    let stored_presentation: ApprovalPresentationRecord =
+        decode(stored_presentation.get::<_, String>(0).as_str())?;
+    if stored_presentation != *request.presentation {
+        return Err(state_error(
+            "postgres_state.approval.presentation_mismatch",
+            "PostgreSQL approval presentation does not match durable proof",
+        ));
+    }
+    let proof_marker = decision.proof_marker.as_ref().ok_or_else(|| {
+        state_error(
+            "postgres_state.approval.proof_marker_missing",
+            "PostgreSQL approval decision proof marker is missing",
+        )
+    })?;
+    if proof_marker.presentation_id() != request.presentation.presentation_id()
+        || proof_marker.presentation_content_hash() != request.presentation.content_hash()
+    {
+        return Err(state_error(
+            "postgres_state.approval.proof_marker_mismatch",
+            "PostgreSQL approval decision proof marker does not match presentation proof",
+        ));
+    }
+    if prior.decision.is_some() {
+        return reconcile_approval_decision_replay_tx(tx, request.event);
+    }
+    append_event_tx(tx, request.event)?;
+    let revision = revision_from_i64(row.get(1))?;
+    put_record(
+        tx,
+        "approval",
+        &request.approval.approval_id,
+        "",
+        request.approval,
+        Some(revision),
+        false,
+    )?;
+    Ok(ApprovalDecisionPersistencePosture::Committed)
+}
+
+fn reconcile_approval_decision_replay_tx(
+    tx: &mut Transaction<'_>,
+    event: &WorkflowRunEvent,
+) -> Result<ApprovalDecisionPersistencePosture, WorkflowOsError> {
+    if !event_exists_exact_tx(tx, event)? {
+        return Err(state_error(
+            "postgres_state.approval.replay_conflict",
+            "PostgreSQL approval decision replay conflicts with durable state",
+        ));
+    }
+    Ok(ApprovalDecisionPersistencePosture::ReconciledExisting)
+}
+
+struct CollaborativeApprovalAuthorizingView {
+    source_read: CollaborativeIdentityAuthoritySourceRead,
+    authority_revision_commitment: SpecContentHash,
+    active_grant_commitment: SpecContentHash,
+    observed_at: crate::Timestamp,
+}
+
+fn read_collaborative_approval_authorizing_view_tx(
+    tx: &mut Transaction<'_>,
+    query: &CollaborativeIdentityAuthorityQuery,
+) -> Result<CollaborativeApprovalAuthorizingView, WorkflowOsError> {
+    let observed_at = database_timestamp_tx(tx)?;
+    let row = tx
+        .query_opt(
+            "SELECT authority_revision, revision_commitment, source_model_version
+               FROM workflow_os.collaborative_identity_authority_high_watermarks
+              WHERE organization_id = $1 FOR UPDATE",
+            &[&query.organization_id().as_str()],
+        )
+        .map_err(|error| database_error("collaborative_authority_watermark_read", &error))?
+        .ok_or_else(|| {
+            state_error(
+                "postgres_state.collaborative_authority.missing",
+                "collaborative authority source is not initialized",
+            )
+        })?;
+    let revision: i64 = row.get(0);
+    let commitment: String = row.get(1);
+    let source_model_version: String = row.get(2);
+    if source_model_version != POSTGRES_SOURCE_VERSION {
+        return Err(collaborative_authority_corruption_error());
+    }
+    let candidate =
+        read_collaborative_identity_candidate_tx(tx, query.organization_id().as_str(), revision)?;
+    if candidate.commitment().as_str() != commitment {
+        return Err(collaborative_authority_corruption_error());
+    }
+    let active_grant_commitment = candidate
+        .single_active_matching_grant_commitment(query, observed_at)
+        .ok_or_else(|| {
+            state_error(
+                "postgres_state.collaborative_approval.authority_denied",
+                "current collaborative ApprovalDecide authority was not proven",
+            )
+        })?;
+    let source_read =
+        build_postgres_collaborative_identity_source_read(query, &candidate, observed_at)?;
+    if source_read.matching_active_grant_count() != 1 {
+        return Err(state_error(
+            "postgres_state.collaborative_approval.authority_denied",
+            "current collaborative ApprovalDecide authority was not proven",
+        ));
+    }
+    Ok(CollaborativeApprovalAuthorizingView {
+        source_read,
+        authority_revision_commitment: candidate.commitment().clone(),
+        active_grant_commitment,
+        observed_at,
+    })
+}
+
+fn require_collaborative_authority_watermark_unchanged_tx(
+    tx: &mut Transaction<'_>,
+    query: &CollaborativeIdentityAuthorityQuery,
+    view: &CollaborativeApprovalAuthorizingView,
+) -> Result<(), WorkflowOsError> {
+    let row = tx
+        .query_one(
+            "SELECT authority_revision, revision_commitment, source_model_version
+               FROM workflow_os.collaborative_identity_authority_high_watermarks
+              WHERE organization_id = $1 FOR UPDATE",
+            &[&query.organization_id().as_str()],
+        )
+        .map_err(|error| database_error("collaborative_authority_watermark_recheck", &error))?;
+    let revision: i64 = row.get(0);
+    let commitment: String = row.get(1);
+    let source_model_version: String = row.get(2);
+    if revision != authority_revision_to_i64(view.source_read.authority_revision())?
+        || commitment != view.authority_revision_commitment.as_str()
+        || source_model_version != POSTGRES_SOURCE_VERSION
+    {
+        return Err(state_error(
+            "postgres_state.collaborative_approval.authority_changed",
+            "collaborative authority changed before the approval decision committed",
+        ));
+    }
+    Ok(())
+}
+
 /// Reads collaborative authority inside a transaction owned by the caller.
 ///
 /// This helper returns payload-free source evidence only. It does not lock the
@@ -3901,6 +4153,55 @@ fn read_collaborative_approval_authority_receipt_tx(
     .as_ref()
     .map(decode_collaborative_approval_receipt_row)
     .transpose()
+}
+
+fn write_collaborative_approval_authority_receipt_tx(
+    tx: &mut Transaction<'_>,
+    receipt: &CollaborativeApprovalAuthorityReceipt,
+    payload: &str,
+    payload_hash: &SpecContentHash,
+) -> Result<CollaborativeApprovalAuthorityReceiptWriteOutcome, WorkflowOsError> {
+    let inserted = tx
+        .execute(
+            "INSERT INTO workflow_os.collaborative_approval_authority_receipts
+                (receipt_id, approval_reference_id, approval_decision_event_id,
+                 canonical_payload, canonical_payload_hash)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT DO NOTHING",
+            &[
+                &receipt.receipt_id().as_str(),
+                &receipt.approval_reference_id().as_str(),
+                &receipt.approval_decision_event_id().as_str(),
+                &payload,
+                &payload_hash.as_str(),
+            ],
+        )
+        .map_err(|error| database_error("collaborative_approval_receipt_write", &error))?;
+    if inserted == 1 {
+        return Ok(CollaborativeApprovalAuthorityReceiptWriteOutcome::Written);
+    }
+    let existing =
+        read_collaborative_approval_authority_receipt_tx(tx, receipt.receipt_id().as_str())?
+            .ok_or_else(collaborative_approval_receipt_conflict_error)?;
+    let existing_payload = tx
+        .query_opt(
+            "SELECT canonical_payload
+               FROM workflow_os.collaborative_approval_authority_receipts
+              WHERE receipt_id = $1",
+            &[&receipt.receipt_id().as_str()],
+        )
+        .map_err(|error| database_error("collaborative_approval_receipt_replay_read", &error))?
+        .map(|row| row.get::<_, String>(0))
+        .ok_or_else(collaborative_approval_receipt_conflict_error)?;
+    if existing_payload != payload
+        || existing.approval_reference_id() != receipt.approval_reference_id()
+        || existing.approval_decision_event_id() != receipt.approval_decision_event_id()
+        || existing.receipt_id() != receipt.receipt_id()
+        || existing.receipt_commitment() != receipt.receipt_commitment()
+    {
+        return Err(collaborative_approval_receipt_conflict_error());
+    }
+    Ok(CollaborativeApprovalAuthorityReceiptWriteOutcome::AlreadyExists)
 }
 
 fn decode_collaborative_approval_receipt_row(
@@ -4502,6 +4803,30 @@ fn require_project_resource_binding_tx(
 ) -> Result<(), WorkflowOsError> {
     let binding =
         read_project_resource_binding_tx(tx, kind, resource_id, false)?.ok_or_else(|| {
+            state_error(
+                "postgres_state.hosted_project_binding.missing",
+                "hosted project resource binding is missing",
+            )
+        })?;
+    if binding.value().scope() != scope
+        || binding.value().status() != HostedProjectResourceBindingStatus::Active
+    {
+        return Err(state_error(
+            "postgres_state.hosted_project_binding.scope_mismatch",
+            "hosted project resource binding does not authorize access",
+        ));
+    }
+    Ok(())
+}
+
+fn require_locked_project_resource_binding_tx(
+    tx: &mut Transaction<'_>,
+    scope: &HostedProjectScope,
+    kind: HostedProjectResourceKind,
+    resource_id: &str,
+) -> Result<(), WorkflowOsError> {
+    let binding =
+        read_project_resource_binding_tx(tx, kind, resource_id, true)?.ok_or_else(|| {
             state_error(
                 "postgres_state.hosted_project_binding.missing",
                 "hosted project resource binding is missing",

@@ -35,15 +35,20 @@ database time, and emits payload-free complete exact-query source evidence.
 Its focused maintainer/security review is accepted after first-activation
 serialization, durable source-version verification, ambiguous-grant failure,
 query-minimized count disclosure, and recovery-rehearsal fixes. The source
-remains non-consuming: no approval decision accepts this evidence yet, and no
-hosted authentication cutover is implemented. A dedicated payload-free
+now has one explicit opt-in consumer: an executor-facing collaborative project
+approval decision proves current exact-project `ApprovalDecide` authority in
+the same PostgreSQL transaction that records the decision event, approval
+projection, and payload-free receipt. It rehydrates committed state before
+continuation and reconciles exact restart replay without duplicating the
+decision event. No hosted authentication cutover is implemented. A dedicated payload-free
 collaborative approval-authority receipt and PostgreSQL v4 create-only store
-are implemented. Focused review accepted the model boundary but found a
-blocking verification gap: required CI proves v4 migration/table creation but
-does not execute receipt store behavior or preserve a receipt through the
-backup/restore rehearsal. The receipt remains point-in-time, serialize-only
-trusted evidence; persisted claims remain unverified and cannot authorize
-another action.
+are implemented and their required-CI and recovery verification blocker is
+fixed and accepted. The receipt remains point-in-time trusted evidence and
+cannot authorize another action. Focused maintainer/security review found a
+narrow runtime-boundary evidence blocker: backend conformance is present, but
+the public executor-facing consumer is not invoked by tests, and the exact
+run-binding read does not use the accepted locking helper. A focused blocker
+fix is required before another identity consumer is selected.
 
 The first provider-write sandbox is implemented and accepted for GitHub pull
 request comments only. The second bounded Core slice now implements an
@@ -79,7 +84,8 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Implement the same-call collaborative `ApprovalDecide` consumer.** The
+2. **Re-review the fixed same-call collaborative `ApprovalDecide`
+   consumer runtime boundary.** The
    source planning, implementation, and review are accepted in the
    [Authoritative Collaborative Identity Source Boundary
    Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
@@ -102,11 +108,21 @@ phase` language does not supersede the active queue.
    configuration fails closed, restart recovery uses a reopened backend,
    corrupted replay retains the corruption error, and the established logical
    backup/restore rehearsal recovers the receipt by its decision bindings.
-   Phase 3 is now unblocked. Move
-   database-time observation to the outer decision transaction and implement
-   the reviewed advisory-lock and watermark-lock order. Do not add the decision
-   consumer during review, substitute another
-   caller-assembled projection, or begin OIDC, SCIM,
+   Phase 3 is implemented. The explicit executor-facing path derives a fixed
+   exact-project query, resolves database-time authority under the shared
+   advisory-lock and watermark-lock order, atomically records the decision and
+   receipt, then rehydrates before continuation. Focused review found that
+   backend tests do not invoke this public executor path, leaving restart
+   continuation, post-commit recovery, and failed-authority non-invocation
+   unproven at the claimed consumer boundary. The transaction also uses a
+   non-locking exact run-binding read despite the accepted locking requirement.
+   The narrow blocker fix now uses the locking exact run-binding read and adds
+   direct public executor-consumer tests for success, exact replay/restart,
+   post-commit recovery, and revoked-authority non-invocation. Run the proof in
+   required Shared PostgreSQL State CI and repeat focused review. Do
+   not add another
+   identity consumer during review, substitute another caller-assembled
+   projection, or begin OIDC, SCIM,
    dynamic groups, enterprise administration, hosted authentication cutover,
    or provider writes.
 3. **Select the next runnable no-write trusted-host profile.** Generalize the

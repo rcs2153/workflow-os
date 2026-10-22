@@ -45,9 +45,10 @@ use crate::{
     ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationValidationInput,
     ApprovalProofMarkerProjectionPersistenceInput, ApprovalProofMarkerProjectionPersistencePolicy,
     ApprovalProofMarkerProjectionPersistenceResult, ApprovalReferenceId, ApprovalRequest,
-    AuditEvent, AuditSink, AutonomyLevel, CancellationRecord, Capability, ConservativePolicyEngine,
-    CorrelationId, EscalationRecord, EventId, EventLogStore, EventSequenceNumber,
-    EvidenceReferenceId, FailureClass, FailureRecord,
+    AuditEvent, AuditSink, AutonomyLevel, CancellationRecord, Capability,
+    CollaborativeApprovalAuthorityReceiptId, CollaborativeApprovalAuthorityReceiptWriteOutcome,
+    CollaborativeIdentityAuthorityQuery, ConservativePolicyEngine, CorrelationId, EscalationRecord,
+    EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
     GitHubPullRequestCommentLiveSandboxValidationInput,
     GitHubPullRequestCommentLiveSandboxValidationResult, GitHubPullRequestCommentProvider,
     GitHubPullRequestCommentProviderCallOrchestrationError,
@@ -62,12 +63,13 @@ use crate::{
     GovernanceDecisionAuthorityReceiptWriteOutcome, HighAssuranceApprovalControl,
     HighAssuranceApprovalDecisionValidationInput, HighAssuranceApprovalDisclosureDiscoveryInput,
     HighAssuranceApprovalSuppliedReference, HostedCatalogEntryId, HostedExecutionBudget,
-    HostedExecutionPolicyBinding, HostedExecutionRequest, HostedSkillDispatch, HostedWorkItem,
-    HostedWorkItemId, IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec,
-    LocalApprovalProofMarkerAuditProjectionStore, LocalAuditSink, LocalObservabilitySink,
-    LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
-    PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect, PolicyEffectSet,
-    PolicyEvaluationContext, PolicySpecDocument, PostgresDispatchHostedSkillRequest,
+    HostedExecutionPolicyBinding, HostedExecutionRequest, HostedProjectCapability,
+    HostedProjectScope, HostedSkillDispatch, HostedWorkItem, HostedWorkItemId, IdempotencyKey,
+    IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalApprovalProofMarkerAuditProjectionStore,
+    LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger, MappingExpression,
+    ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
+    PolicyEffect, PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument,
+    PostgresDispatchHostedSkillRequest, PostgresRecordCollaborativeApprovalDecisionRequest,
     PostgresStateBackend, ProjectBundle, ProjectValidationCapability, RedactionDisposition,
     RedactionFieldState, RedactionMetadata, ReportArtifactWriteIntegrationInput,
     ReportArtifactWriteIntegrationResult, ReportArtifactWriteProviderIntegration, RetryRecord,
@@ -5808,6 +5810,79 @@ pub struct LocalApprovalPresentationDecisionRequest {
     pub max_presentation_age: Option<Duration>,
 }
 
+/// Explicit trusted input for one collaborative exact-project approval decision.
+#[derive(Clone, Eq, PartialEq)]
+pub struct CollaborativeProjectApprovalDecisionRequest {
+    /// Exact project scope supplied by the trusted hosted composition root.
+    pub project_scope: HostedProjectScope,
+    /// Authenticated principal supplied by the trusted hosted composition root.
+    pub authenticated_principal: ActorId,
+    /// Existing proof-enforced local approval decision request.
+    pub approval: LocalApprovalPresentationDecisionRequest,
+}
+
+impl fmt::Debug for CollaborativeProjectApprovalDecisionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CollaborativeProjectApprovalDecisionRequest")
+            .field("project_scope", &"[REDACTED]")
+            .field("authenticated_principal", &"[REDACTED]")
+            .field("approval", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// In-memory result of one collaborative approval decision and continuation.
+pub struct CollaborativeProjectApprovalDecisionResult {
+    run: WorkflowRun,
+    authority_receipt_id: CollaborativeApprovalAuthorityReceiptId,
+    receipt_write: CollaborativeApprovalAuthorityReceiptWriteOutcome,
+}
+
+impl CollaborativeProjectApprovalDecisionResult {
+    /// Returns the rehydrated run after the committed decision continuation.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the durable payload-free authority receipt identity.
+    #[must_use]
+    pub const fn authority_receipt_id(&self) -> &CollaborativeApprovalAuthorityReceiptId {
+        &self.authority_receipt_id
+    }
+
+    /// Returns whether the receipt was newly written or reconciled exactly.
+    #[must_use]
+    pub const fn receipt_write(&self) -> CollaborativeApprovalAuthorityReceiptWriteOutcome {
+        self.receipt_write
+    }
+
+    /// Consumes the result into its parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        WorkflowRun,
+        CollaborativeApprovalAuthorityReceiptId,
+        CollaborativeApprovalAuthorityReceiptWriteOutcome,
+    ) {
+        (self.run, self.authority_receipt_id, self.receipt_write)
+    }
+}
+
+impl fmt::Debug for CollaborativeProjectApprovalDecisionResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CollaborativeProjectApprovalDecisionResult")
+            .field("run_status", &self.run.snapshot.status)
+            .field("run_event_count", &self.run.events.len())
+            .field("authority_receipt_id", &"[REDACTED]")
+            .field("receipt_write", &self.receipt_write)
+            .finish()
+    }
+}
+
 impl fmt::Debug for LocalApprovalPresentationDecisionRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -11331,6 +11406,315 @@ pub fn decide_hosted_dispatch_approval_with_presentation(
             )
         }
     }
+}
+
+/// Applies one proof-enforced collaborative project approval decision only
+/// when current exact-project `ApprovalDecide` authority commits atomically
+/// with the decision and its payload-free receipt.
+///
+/// This explicit opt-in boundary preserves existing approval APIs. It neither
+/// accepts a caller-selected capability nor treats the returned receipt as
+/// reusable authority.
+///
+/// # Errors
+///
+/// Returns existing approval and resume validation errors or stable
+/// non-leaking collaborative authority, project binding, transaction, and
+/// receipt errors before unauthorized continuation.
+pub fn decide_collaborative_project_approval_with_presentation<A, O, L>(
+    executor: &LocalExecutor<'_, PostgresStateBackend, A, O, L>,
+    request: CollaborativeProjectApprovalDecisionRequest,
+) -> Result<CollaborativeProjectApprovalDecisionResult, WorkflowOsError>
+where
+    A: AuditSink,
+    O: ObservabilitySink,
+    L: StructuredLogger,
+{
+    let CollaborativeProjectApprovalDecisionRequest {
+        project_scope,
+        authenticated_principal,
+        approval:
+            LocalApprovalPresentationDecisionRequest {
+                approval: approval_request,
+                proof,
+                max_presentation_age,
+            },
+    } = request;
+    if let Some(recovered) = recover_collaborative_approval_decision_replay(
+        executor,
+        &project_scope,
+        &approval_request,
+        &authenticated_principal,
+        &proof,
+        max_presentation_age,
+    )? {
+        return Ok(recovered);
+    }
+    let (run, approval, decision) = executor.prepare_approval_decision(&approval_request)?;
+    if decision.actor != authenticated_principal {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor.collaborative_approval.actor_mismatch",
+            "authenticated principal does not match the approval decision actor",
+        ));
+    }
+    let presentation = executor.resolve_approval_presentation_proof(&approval, &proof)?;
+    validate_approval_presentation_enforcement(
+        &presentation,
+        &approval,
+        &decision,
+        max_presentation_age,
+    )?;
+    let proof_marker =
+        approval_decision_proof_marker(&presentation, &decision, max_presentation_age)?;
+    let decision = ApprovalDecision {
+        proof_marker: Some(proof_marker),
+        ..decision
+    };
+    let mut builder = EventBuilder::from_snapshot(
+        &run.snapshot,
+        decision.correlation_id.clone(),
+        decision.actor.clone(),
+    );
+    let resume_plan = match decision.decision {
+        ApprovalDecisionKind::Granted => {
+            let mut plan = LocalExecutor::<PostgresStateBackend>::prepare_resume_execution(
+                &approval_request.project_root,
+                &builder,
+                &approval,
+                &ProjectValidationCapability::Default,
+            )?;
+            plan.immutable_run_bundle
+                .clone_from(&run.snapshot.identity.immutable_run_bundle);
+            Some(plan)
+        }
+        ApprovalDecisionKind::Denied => None,
+    };
+    let event_kind = match decision.decision {
+        ApprovalDecisionKind::Granted => WorkflowRunEventKind::ApprovalGranted(decision.clone()),
+        ApprovalDecisionKind::Denied => WorkflowRunEventKind::ApprovalDenied(decision.clone()),
+    };
+    let decision_event = builder.event(event_kind, None);
+    let mut decided_approval = approval.clone();
+    decided_approval.decision = Some(decision.clone());
+    let commit = executor.backend.record_collaborative_approval_decision(
+        PostgresRecordCollaborativeApprovalDecisionRequest {
+            project_scope: &project_scope,
+            authenticated_principal: &authenticated_principal,
+            approval: &decided_approval,
+            presentation: &presentation,
+            event: &decision_event,
+        },
+    )?;
+    executor.emit_runtime_signals(&decision_event)?;
+    let committed_run = executor.rehydrate_and_project(&run.snapshot.identity.run_id)?;
+    let (receipt, receipt_write) = commit.into_parts();
+    continue_collaborative_approval_from_committed_decision(
+        executor,
+        &approval_request,
+        committed_run,
+        &approval,
+        &decision,
+        receipt.receipt_id().clone(),
+        receipt_write,
+        resume_plan,
+    )
+}
+
+fn recover_collaborative_approval_decision_replay<A, O, L>(
+    executor: &LocalExecutor<'_, PostgresStateBackend, A, O, L>,
+    project_scope: &HostedProjectScope,
+    approval_request: &LocalApprovalDecisionRequest,
+    authenticated_principal: &ActorId,
+    proof: &LocalApprovalPresentationProof,
+    max_presentation_age: Option<Duration>,
+) -> Result<Option<CollaborativeProjectApprovalDecisionResult>, WorkflowOsError>
+where
+    A: AuditSink,
+    O: ObservabilitySink,
+    L: StructuredLogger,
+{
+    let durable_run = executor.backend.rehydrate_run(&approval_request.run_id)?;
+    let Some(durable_approval) = durable_run
+        .snapshot
+        .approval_requests
+        .iter()
+        .find(|candidate| candidate.approval_id == approval_request.approval_id)
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    let Some(durable_decision) = durable_approval.decision.clone() else {
+        return Ok(None);
+    };
+    if &durable_decision.actor != authenticated_principal
+        || durable_decision.actor != approval_request.actor
+        || durable_decision.decision != approval_request.decision
+        || durable_decision.reason != approval_request.reason
+        || durable_decision.correlation_id != approval_request.correlation_id
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.collaborative_approval.replay_conflict",
+            "collaborative approval decision replay conflicts with durable state",
+        ));
+    }
+    let presentation = executor.resolve_approval_presentation_proof(&durable_approval, proof)?;
+    let mut pending_approval = durable_approval.clone();
+    pending_approval.decision = None;
+    validate_approval_presentation_enforcement(
+        &presentation,
+        &pending_approval,
+        &durable_decision,
+        max_presentation_age,
+    )?;
+    let mut decision_events = durable_run.events.iter().filter(|event| {
+        matches!(
+            &event.kind,
+            WorkflowRunEventKind::ApprovalGranted(candidate)
+                | WorkflowRunEventKind::ApprovalDenied(candidate)
+                if candidate == &durable_decision
+        )
+    });
+    let decision_event = decision_events.next().ok_or_else(|| {
+        executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.collaborative_approval.decision_event_missing",
+            "collaborative approval decision event is unavailable",
+        )
+    })?;
+    if decision_events.next().is_some() {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.collaborative_approval.decision_event_ambiguous",
+            "collaborative approval decision event is ambiguous",
+        ));
+    }
+    let receipt = executor
+        .backend
+        .read_collaborative_approval_authority_receipt_for_decision(
+            &ApprovalReferenceId::new(durable_approval.approval_id.clone())?,
+            &decision_event.event_id,
+        )?
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.collaborative_approval.receipt_missing",
+                "collaborative approval authority receipt is unavailable",
+            )
+        })?;
+    let replay_query = CollaborativeIdentityAuthorityQuery::new(
+        project_scope.organization_id().clone(),
+        project_scope.project_id().clone(),
+        authenticated_principal.clone(),
+        HostedProjectCapability::ApprovalDecide,
+    )?;
+    if receipt.query_commitment() != replay_query.query_commitment() {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.collaborative_approval.replay_scope_mismatch",
+            "collaborative approval decision replay scope does not match durable authority",
+        ));
+    }
+    continue_collaborative_approval_from_committed_decision(
+        executor,
+        approval_request,
+        durable_run,
+        &pending_approval,
+        &durable_decision,
+        receipt.receipt_id().clone(),
+        CollaborativeApprovalAuthorityReceiptWriteOutcome::AlreadyExists,
+        None,
+    )
+    .map(Some)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn continue_collaborative_approval_from_committed_decision<A, O, L>(
+    executor: &LocalExecutor<'_, PostgresStateBackend, A, O, L>,
+    approval_request: &LocalApprovalDecisionRequest,
+    run: WorkflowRun,
+    approval: &ApprovalRequest,
+    decision: &ApprovalDecision,
+    authority_receipt_id: CollaborativeApprovalAuthorityReceiptId,
+    receipt_write: CollaborativeApprovalAuthorityReceiptWriteOutcome,
+    mut resume_plan: Option<ExecutionPlan>,
+) -> Result<CollaborativeProjectApprovalDecisionResult, WorkflowOsError>
+where
+    A: AuditSink,
+    O: ObservabilitySink,
+    L: StructuredLogger,
+{
+    if run.snapshot.status.is_terminal() || run.snapshot.status == WorkflowRunStatus::Running {
+        return Ok(CollaborativeProjectApprovalDecisionResult {
+            run,
+            authority_receipt_id,
+            receipt_write,
+        });
+    }
+    if run.snapshot.status != WorkflowRunStatus::WaitingForApproval {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.collaborative_approval.continuation_invalid",
+            "collaborative approval continuation state is invalid",
+        ));
+    }
+    let mut builder = EventBuilder::from_snapshot(
+        &run.snapshot,
+        decision.correlation_id.clone(),
+        decision.actor.clone(),
+    );
+    let completed = match decision.decision {
+        ApprovalDecisionKind::Granted => {
+            if resume_plan.is_none() {
+                let mut plan = LocalExecutor::<PostgresStateBackend>::prepare_resume_execution(
+                    &approval_request.project_root,
+                    &builder,
+                    approval,
+                    &ProjectValidationCapability::Default,
+                )?;
+                plan.immutable_run_bundle
+                    .clone_from(&run.snapshot.identity.immutable_run_bundle);
+                resume_plan = Some(plan);
+            }
+            let resume_context = PolicyEvaluationContext {
+                action: Action::ResumeWorkflow,
+                capabilities: vec![Capability::WorkflowResume, Capability::AuditWrite],
+                actor: Some(builder.actor.clone()),
+                workflow_id: Some(builder.workflow_id.clone()),
+                run_id: Some(builder.run_id.clone()),
+                step_id: approval.step_id.clone(),
+                skill_id: approval.skill_id.clone(),
+                autonomy_level: None,
+                approval_sensitivity: None,
+                has_approval_policy: false,
+                policy_effects: PolicyEffectSet::default(),
+                adapter_id: None,
+                correlation_id: Some(builder.correlation_id.clone()),
+            };
+            executor.evaluate_and_record_policy(&mut builder, &resume_context)?;
+            executor.append(&mut builder, WorkflowRunEventKind::RunResumed, None)?;
+            let mut plan = resume_plan.take().ok_or_else(|| {
+                executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "executor.collaborative_approval.resume_plan_missing",
+                    "collaborative approval resume plan is unavailable",
+                )
+            })?;
+            plan.event_builder = builder;
+            executor.execute_steps(plan, &approval_request.correlation_id)?
+        }
+        ApprovalDecisionKind::Denied => executor.fail_run(
+            builder,
+            "executor.approval.denied",
+            "approval was denied; run failed closed",
+        )?,
+    };
+    Ok(CollaborativeProjectApprovalDecisionResult {
+        run: completed,
+        authority_receipt_id,
+        receipt_write,
+    })
 }
 
 fn validate_hosted_no_write_plan(plan: &ExecutionPlan) -> Result<(), WorkflowOsError> {

@@ -5,8 +5,10 @@
 //! Local runs skip when `WORKFLOW_OS_TEST_POSTGRES_URL` is absent. CI sets
 //! `WORKFLOW_OS_REQUIRE_POSTGRES_TESTS=1`, making absence a hard failure.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
@@ -14,28 +16,29 @@ use std::time::Duration;
 use postgres::{Client, Config, NoTls};
 use workflow_core::{
     build_immutable_run_bundle, compute_approval_presentation_content_hash,
-    resolve_project_approval_route, transition_side_effect_to_attempted,
-    transition_side_effect_to_completed, ActorId, AdapterId, AdapterKind, ApprovalDecision,
-    ApprovalDecisionKind, ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
-    ApprovalDecisionProofMarkerDefinition, ApprovalDecisionProofValidationPolicy,
-    ApprovalPresentationChannel, ApprovalPresentationId, ApprovalPresentationRecord,
-    ApprovalPresentationRecordDefinition, ApprovalPresentationRecordStore,
-    ApprovalPresentationSensitivity, ApprovalRequest, ApprovalStore,
-    CollaborativeExternalSubjectCommitment, CollaborativeIdentityAudienceCommitment,
-    CollaborativeIdentityAuthorityMatchPosture, CollaborativeIdentityAuthorityQuery,
-    CollaborativeIdentityAuthorityRevisionActivation,
+    decide_collaborative_project_approval_with_presentation, resolve_project_approval_route,
+    transition_side_effect_to_attempted, transition_side_effect_to_completed, ActorId, AdapterId,
+    AdapterKind, ApprovalDecision, ApprovalDecisionKind, ApprovalDecisionProofEnforcementMode,
+    ApprovalDecisionProofMarker, ApprovalDecisionProofMarkerDefinition,
+    ApprovalDecisionProofValidationPolicy, ApprovalPresentationChannel, ApprovalPresentationId,
+    ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
+    ApprovalPresentationRecordStore, ApprovalPresentationSensitivity, ApprovalReferenceId,
+    ApprovalRequest, ApprovalStore, CollaborativeExternalSubjectCommitment,
+    CollaborativeIdentityAudienceCommitment, CollaborativeIdentityAuthorityMatchPosture,
+    CollaborativeIdentityAuthorityQuery, CollaborativeIdentityAuthorityRevisionActivation,
     CollaborativeIdentityAuthorityRevisionCandidate, CollaborativeIdentityIssuerCommitment,
     CollaborativeIdentityProviderId, CollaborativeIdentityProviderLifecycle,
     CollaborativeIdentityProviderRegistration, CollaborativeIdentityProviderRegistrationVersion,
     CollaborativePrincipalIdentityBinding, CollaborativePrincipalIdentityBindingId,
     CollaborativePrincipalIdentityBindingLifecycle, CollaborativePrincipalLifecycle,
-    CollaborativePrincipalRecord, CollaborativePrincipalRevision, CollaborativeProjectGrant,
+    CollaborativePrincipalRecord, CollaborativePrincipalRevision,
+    CollaborativeProjectApprovalDecisionRequest, CollaborativeProjectGrant,
     CollaborativeProjectGrantDefinition, CollaborativeProjectGrantId,
     CollaborativeProjectGrantRevision, CollaborativeProjectGrantRevocation,
     CollaborativeProjectGrantRevocationDefinition, CollaborativeProjectGrantRevocationId,
     CollaborativeProjectGrantRevocationReason, CorrelationId, DurableStateBackendKind,
     DurableStateCapability, DurableStateContractProvider, DurableStateSupport,
-    DurableStateTransactionKind, EventId, EventLogStore, EventSequenceNumber,
+    DurableStateTransactionKind, EventId, EventLogStore, EventSequenceNumber, FailingAuditSink,
     HostedAuthorityRegistryRevision, HostedCatalogEntryId, HostedExecutionBudget,
     HostedExecutionId, HostedExecutionPolicyBinding, HostedExecutionPolicyId,
     HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
@@ -51,39 +54,65 @@ use workflow_core::{
     ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
     ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundlePublishOutcome,
     ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleStore,
-    ImmutableRunBundleVersion, IntegrationId, LifecycleStatus, LockStore, OrganizationId,
+    ImmutableRunBundleVersion, IntegrationId, LifecycleStatus, LocalApprovalDecisionRequest,
+    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionRequest, LocalExecutor,
+    LocalObservabilitySink, LocalSkillRegistry, LocalStructuredLogger, LockStore, OrganizationId,
     OwnershipMetadata, PostgresAuthoritativeProjectionRequest, PostgresClaimHostedWorkItemRequest,
     PostgresCommitHostedReceiptProjectionRequest, PostgresCommitHostedReceiptRequest,
     PostgresCommitHostedUnreceiptedProjectionRequest, PostgresConnectionFactory,
     PostgresCreateHostedWorkItemRequest, PostgresDispatchHostedSkillRequest,
     PostgresHostedWorkItemCreateResult, PostgresLeaseAcquireRequest, PostgresLeaseKey,
     PostgresNoTlsConnectionFactory, PostgresRecordApprovalDecisionRequest,
-    PostgresRecordExternalOutcomeRequest, PostgresReserveIntentRequest,
-    PostgresSharedRunConsumerRequest, PostgresStateBackend, PostgresTransitionSideEffectRequest,
-    ProjectApprovalAuthoritySnapshotCommitment, ProjectApprovalAuthorityViewCommitment,
-    ProjectApprovalRouteCreateResult, ProjectApprovalRouteInput, ProjectApprovalRouteRecord,
-    ProjectApprovalRouteSourceCommitment, ProjectApprovalRouteSourceCommitmentInput,
-    ProjectApprovalRouteStore, ProjectApprovalRoutingReason, ProjectId, RedactionMetadata,
-    RunSnapshotStore, SchemaVersion, SideEffectAttemptTransitionInput, SideEffectAuthority,
-    SideEffectAuthorityDecision, SideEffectCapability, SideEffectCompleteTransitionInput,
-    SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
-    SideEffectLifecycleState, SideEffectOutcomeReference, SideEffectOutcomeReferenceKind,
-    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    PostgresRecordCollaborativeApprovalDecisionRequest, PostgresRecordExternalOutcomeRequest,
+    PostgresReserveIntentRequest, PostgresSharedRunConsumerRequest, PostgresStateBackend,
+    PostgresTransitionSideEffectRequest, ProjectApprovalAuthoritySnapshotCommitment,
+    ProjectApprovalAuthorityViewCommitment, ProjectApprovalRouteCreateResult,
+    ProjectApprovalRouteInput, ProjectApprovalRouteRecord, ProjectApprovalRouteSourceCommitment,
+    ProjectApprovalRouteSourceCommitmentInput, ProjectApprovalRouteStore,
+    ProjectApprovalRoutingReason, ProjectId, RedactionMetadata, RunSnapshotStore, SchemaVersion,
+    SideEffectAttemptTransitionInput, SideEffectAuthority, SideEffectAuthorityDecision,
+    SideEffectCapability, SideEffectCompleteTransitionInput, SideEffectId,
+    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
+    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
+    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
-    SkillAttemptId, SkillId, SkillInvocationId, SkillVersion, SpecContentHash, StateBackend,
-    StepId, Timestamp, WorkReportArtifactStore, WorkReportSensitivity, WorkflowCatalogRecord,
-    WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId, WorkflowId, WorkflowLifecycleStatus,
-    WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
+    SkillAttemptId, SkillHandler, SkillId, SkillInput, SkillInvocationId, SkillOutput,
+    SkillVersion, SpecContentHash, StateBackend, StepId, Timestamp, WorkReportArtifactStore,
+    WorkReportSensitivity, WorkflowCatalogRecord, WorkflowCatalogRecordDefinition,
+    WorkflowCatalogRecordId, WorkflowId, WorkflowLifecycleStatus, WorkflowOsError, WorkflowRun,
+    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
     WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
     WorkflowStewardshipRecordDefinition, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
+
+const COLLABORATIVE_DECISION_TEST_BARRIER_KEY: i64 = 7_814_229_041;
 
 struct UnexpectedConnectionFactory;
 
 impl PostgresConnectionFactory for UnexpectedConnectionFactory {
     fn connect(&self) -> Result<Client, WorkflowOsError> {
         panic!("invalid PostgreSQL request must fail before opening PostgreSQL");
+    }
+}
+
+struct CountingSkillHandler {
+    calls: Arc<AtomicU64>,
+}
+
+impl SkillHandler for CountingSkillHandler {
+    fn invoke(&self, _input: SkillInput) -> Result<SkillOutput, WorkflowOsError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let mut values = BTreeMap::new();
+        values.insert(
+            "summary".to_owned(),
+            "collaborative approval executed".to_owned(),
+        );
+        Ok(SkillOutput::new(
+            values,
+            Some("local-handler-output/collaborative-approval".to_owned()),
+        ))
     }
 }
 
@@ -131,6 +160,65 @@ fn postgresql_intent_rejects_mismatched_idempotency_before_connection() {
 }
 
 #[test]
+fn collaborative_approval_rejects_actor_mismatch_before_connection() {
+    let backend = PostgresStateBackend::new(Arc::new(UnexpectedConnectionFactory));
+    let events = event_sequence("collaborative-actor-mismatch");
+    let request = approval_request(&events[0], None);
+    let presentation = approval_presentation(&request);
+    let decision = ApprovalDecision {
+        approval_id: request.approval_id.clone(),
+        actor: ActorId::new("user/collaborative-source").expect("principal"),
+        decided_at: timestamp(),
+        decision: ApprovalDecisionKind::Granted,
+        reason: "bounded collaborative approval decision".to_owned(),
+        correlation_id: request.correlation_id.clone(),
+        proof_marker: Some(
+            ApprovalDecisionProofMarker::new(ApprovalDecisionProofMarkerDefinition {
+                enforcement_mode:
+                    ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired,
+                presentation_id: presentation.presentation_id().clone(),
+                presentation_content_hash: presentation.content_hash().clone(),
+                proof_validated_at: timestamp(),
+                proof_validation_policy:
+                    ApprovalDecisionProofValidationPolicy::ApprovalPresentationRequestMatch,
+                proof_age_ms: Some(0),
+                proof_freshness_limit_ms: Some(60_000),
+                proof_record_sensitivity: presentation.sensitivity(),
+                redaction: RedactionMetadata::empty(),
+            })
+            .expect("proof marker"),
+        ),
+    };
+    let decided = approval_request(&events[0], Some(decision.clone()));
+    let granted_event = event(
+        &events[0],
+        5,
+        "collaborative-approval-granted",
+        WorkflowRunEventKind::ApprovalGranted(decision),
+    );
+    let error = backend
+        .record_collaborative_approval_decision(
+            PostgresRecordCollaborativeApprovalDecisionRequest {
+                project_scope: &HostedProjectScope::new(
+                    OrganizationId::new("org/collaborative-source").expect("organization"),
+                    ProjectId::new("project/collaborative-source").expect("project"),
+                ),
+                authenticated_principal: &ActorId::new("user/not-authorized")
+                    .expect("other principal"),
+                approval: &decided,
+                presentation: &presentation,
+                event: &granted_event,
+            },
+        )
+        .expect_err("actor mismatch rejected");
+    assert_eq!(
+        error.code(),
+        "postgres_state.collaborative_approval.actor_mismatch"
+    );
+    assert!(!format!("{error:?}").contains("user/collaborative-source"));
+}
+
+#[test]
 fn postgresql_backend_proves_shared_state_milestone() {
     let Some(config) = test_config() else {
         return;
@@ -157,6 +245,7 @@ fn postgresql_backend_proves_shared_state_milestone() {
     prove_hosted_project_resource_binding(&backend, &config);
     prove_project_approval_route_persistence(&backend, &config);
     prove_collaborative_identity_authority_source(&backend, &config);
+    prove_collaborative_approval_decision_consumer(&backend, &config);
     prove_projection_rebuild(&backend);
     prove_corrupt_payload_nonleak(&config, &backend);
     prove_schema_fail_closed(&config, &backend);
@@ -1859,6 +1948,634 @@ fn prove_atomic_approval_family(backend: &PostgresStateBackend) {
         .is_some());
 }
 
+fn prove_collaborative_approval_decision_consumer(backend: &PostgresStateBackend, config: &Config) {
+    backend
+        .activate_collaborative_identity_authority_revision(&collaborative_authority_candidate(
+            9, false,
+        ))
+        .expect("activate collaborative approval authority");
+    let events = event_sequence("collaborative-approval-consumer");
+    for event in &events[..3] {
+        backend.append_event(event).expect("run setup");
+    }
+    let request = approval_request(&events[0], None);
+    let requested_event = event(
+        &events[0],
+        4,
+        "approval-requested",
+        WorkflowRunEventKind::ApprovalRequested(Box::new(request.clone())),
+    );
+    backend
+        .append_event(&requested_event)
+        .expect("approval requested");
+    backend
+        .save_approval_request(&request)
+        .expect("approval projection");
+    let presentation = approval_presentation(&request);
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("approval presentation proof");
+    let scope = HostedProjectScope::new(
+        OrganizationId::new("org/collaborative-source").expect("organization"),
+        ProjectId::new("project/collaborative-source").expect("project"),
+    );
+    let binding = HostedProjectResourceBinding::new(
+        scope.clone(),
+        HostedProjectResourceKind::Run,
+        request.run_id.as_str(),
+        HostedProjectResourceBindingStatus::Reserved,
+        timestamp(),
+    )
+    .expect("run binding");
+    backend
+        .reserve_hosted_project_resource(&binding)
+        .expect("reserve run binding");
+    backend
+        .activate_hosted_project_resource(
+            &scope,
+            HostedProjectResourceKind::Run,
+            request.run_id.as_str(),
+        )
+        .expect("activate run binding");
+    let principal = ActorId::new("user/collaborative-source").expect("principal");
+    let decision = ApprovalDecision {
+        approval_id: request.approval_id.clone(),
+        actor: principal.clone(),
+        decided_at: timestamp(),
+        decision: ApprovalDecisionKind::Granted,
+        reason: "bounded collaborative approval decision".to_owned(),
+        correlation_id: request.correlation_id.clone(),
+        proof_marker: Some(
+            ApprovalDecisionProofMarker::new(ApprovalDecisionProofMarkerDefinition {
+                enforcement_mode:
+                    ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired,
+                presentation_id: presentation.presentation_id().clone(),
+                presentation_content_hash: presentation.content_hash().clone(),
+                proof_validated_at: timestamp(),
+                proof_validation_policy:
+                    ApprovalDecisionProofValidationPolicy::ApprovalPresentationRequestMatch,
+                proof_age_ms: Some(0),
+                proof_freshness_limit_ms: Some(60_000),
+                proof_record_sensitivity: presentation.sensitivity(),
+                redaction: RedactionMetadata::empty(),
+            })
+            .expect("proof marker"),
+        ),
+    };
+    let decided = approval_request(&events[0], Some(decision.clone()));
+    let granted_event = event(
+        &events[0],
+        5,
+        "collaborative-approval-granted",
+        WorkflowRunEventKind::ApprovalGranted(decision),
+    );
+    let commit = backend
+        .record_collaborative_approval_decision(
+            PostgresRecordCollaborativeApprovalDecisionRequest {
+                project_scope: &scope,
+                authenticated_principal: &principal,
+                approval: &decided,
+                presentation: &presentation,
+                event: &granted_event,
+            },
+        )
+        .expect("same-call collaborative approval decision");
+    assert_eq!(
+        commit.receipt_write(),
+        workflow_core::CollaborativeApprovalAuthorityReceiptWriteOutcome::Written
+    );
+    let recovered = backend
+        .read_collaborative_approval_authority_receipt_for_decision(
+            commit.receipt().approval_reference_id(),
+            &granted_event.event_id,
+        )
+        .expect("read receipt")
+        .expect("receipt");
+    assert_eq!(recovered.receipt_id(), commit.receipt().receipt_id());
+    assert_eq!(
+        backend
+            .load_approval_request(&request.approval_id)
+            .expect("read approval")
+            .expect("approval")
+            .decision,
+        decided.decision
+    );
+
+    let replay = backend
+        .record_collaborative_approval_decision(
+            PostgresRecordCollaborativeApprovalDecisionRequest {
+                project_scope: &scope,
+                authenticated_principal: &principal,
+                approval: &decided,
+                presentation: &presentation,
+                event: &granted_event,
+            },
+        )
+        .expect("exact collaborative decision replay");
+    assert_eq!(
+        replay.receipt_write(),
+        workflow_core::CollaborativeApprovalAuthorityReceiptWriteOutcome::AlreadyExists
+    );
+    assert_eq!(
+        backend
+            .read_events(&request.run_id)
+            .expect("replayed run events")
+            .iter()
+            .filter(|event| event.event_id == granted_event.event_id)
+            .count(),
+        1
+    );
+
+    prove_competing_collaborative_approval_replay(backend);
+    prove_collaborative_approval_revocation_race(backend, config);
+    prove_collaborative_approval_executor_consumer(backend);
+}
+
+fn prove_collaborative_approval_executor_consumer(backend: &PostgresStateBackend) {
+    backend
+        .activate_collaborative_identity_authority_revision(&collaborative_authority_candidate(
+            11, false,
+        ))
+        .expect("activate executor collaborative authority");
+    let project = TestProject::new();
+    project.write_collaborative_approval_project();
+    let calls = Arc::new(AtomicU64::new(0));
+    let mut registry = LocalSkillRegistry::new();
+    registry.register(
+        SkillId::new("local/echo").expect("skill"),
+        SkillVersion::new("v0").expect("version"),
+        Box::new(CountingSkillHandler {
+            calls: Arc::clone(&calls),
+        }),
+    );
+    let executor = LocalExecutor::new(backend, &registry);
+    let paused = executor
+        .execute(&project.collaborative_request("collaborative-executor-success"))
+        .expect("executor pauses for collaborative approval");
+    assert_eq!(
+        paused.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let scope = collaborative_project_scope();
+    bind_collaborative_run(backend, &scope, &paused.snapshot.identity.run_id);
+    let presentation = approval_presentation_at(&approval, Timestamp::now_utc());
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("write executor approval presentation");
+    let principal = ActorId::new("user/collaborative-source").expect("principal");
+    let decision_request = CollaborativeProjectApprovalDecisionRequest {
+        project_scope: scope,
+        authenticated_principal: principal.clone(),
+        approval: LocalApprovalPresentationDecisionRequest {
+            approval: LocalApprovalDecisionRequest {
+                project_root: project.path().to_path_buf(),
+                run_id: paused.snapshot.identity.run_id.clone(),
+                approval_id: approval.approval_id.clone(),
+                decision: ApprovalDecisionKind::Granted,
+                actor: principal,
+                reason: "approve bounded collaborative executor proof".to_owned(),
+                correlation_id: approval.correlation_id.clone(),
+            },
+            proof: LocalApprovalPresentationProof::PresentationId(
+                presentation.presentation_id().clone(),
+            ),
+            max_presentation_age: None,
+        },
+    };
+    let failing_executor = LocalExecutor::new_with_sinks(
+        backend,
+        &registry,
+        workflow_core::ConservativePolicyEngine::new(),
+        FailingAuditSink,
+        LocalObservabilitySink::new(),
+        LocalStructuredLogger::new(),
+    );
+    let signal_error = decide_collaborative_project_approval_with_presentation(
+        &failing_executor,
+        decision_request.clone(),
+    )
+    .expect_err("post-commit signal failure is surfaced");
+    assert_eq!(signal_error.code(), "audit.sink.failed");
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    let mut substituted_scope_request = decision_request.clone();
+    substituted_scope_request.project_scope = HostedProjectScope::new(
+        OrganizationId::new("org/collaborative-source").expect("organization"),
+        ProjectId::new("project/collaborative-substituted").expect("project"),
+    );
+    let scope_error = decide_collaborative_project_approval_with_presentation(
+        &executor,
+        substituted_scope_request,
+    )
+    .expect_err("replay scope substitution fails before continuation");
+    assert_eq!(
+        scope_error.code(),
+        "executor.collaborative_approval.replay_scope_mismatch"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    let recovered = decide_collaborative_project_approval_with_presentation(
+        &executor,
+        decision_request.clone(),
+    )
+    .expect("restart recovers committed decision and continues");
+    assert_eq!(
+        recovered.run().snapshot.status,
+        WorkflowRunStatus::Completed
+    );
+    assert_eq!(
+        recovered.receipt_write(),
+        workflow_core::CollaborativeApprovalAuthorityReceiptWriteOutcome::AlreadyExists
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let replay =
+        decide_collaborative_project_approval_with_presentation(&executor, decision_request)
+            .expect("terminal exact replay reconciles");
+    assert_eq!(replay.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let events = backend
+        .read_events(&paused.snapshot.identity.run_id)
+        .expect("read executor collaborative events");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalGranted(_)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.kind, WorkflowRunEventKind::RunResumed))
+            .count(),
+        1
+    );
+
+    backend
+        .activate_collaborative_identity_authority_revision(&collaborative_authority_candidate(
+            12, true,
+        ))
+        .expect("revoke executor collaborative authority");
+    let denied = executor
+        .execute(&project.collaborative_request("collaborative-executor-denied"))
+        .expect("second executor run pauses for approval");
+    let denied_approval = denied.snapshot.approval_requests[0].clone();
+    let denied_scope = collaborative_project_scope();
+    bind_collaborative_run(backend, &denied_scope, &denied.snapshot.identity.run_id);
+    let denied_presentation = approval_presentation_at(&denied_approval, Timestamp::now_utc());
+    backend
+        .write_approval_presentation_record(&denied_presentation)
+        .expect("write denied executor presentation");
+    let denied_error = decide_collaborative_project_approval_with_presentation(
+        &executor,
+        CollaborativeProjectApprovalDecisionRequest {
+            project_scope: denied_scope,
+            authenticated_principal: ActorId::new("user/collaborative-source").expect("principal"),
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: LocalApprovalDecisionRequest {
+                    project_root: project.path().to_path_buf(),
+                    run_id: denied.snapshot.identity.run_id.clone(),
+                    approval_id: denied_approval.approval_id.clone(),
+                    decision: ApprovalDecisionKind::Granted,
+                    actor: ActorId::new("user/collaborative-source").expect("principal"),
+                    reason: "revoked authority must not continue".to_owned(),
+                    correlation_id: denied_approval.correlation_id.clone(),
+                },
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    denied_presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+        },
+    )
+    .expect_err("revoked authority fails before continuation");
+    assert_eq!(
+        denied_error.code(),
+        "postgres_state.collaborative_approval.authority_denied"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let denied_run = backend
+        .rehydrate_run(&denied.snapshot.identity.run_id)
+        .expect("rehydrate denied executor run");
+    assert_eq!(
+        denied_run.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert!(!denied_run.events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::ApprovalGranted(_)
+            | WorkflowRunEventKind::RunResumed
+            | WorkflowRunEventKind::SkillInvocationRequested { .. }
+    )));
+}
+
+fn collaborative_project_scope() -> HostedProjectScope {
+    HostedProjectScope::new(
+        OrganizationId::new("org/collaborative-source").expect("organization"),
+        ProjectId::new("project/collaborative-source").expect("project"),
+    )
+}
+
+fn bind_collaborative_run(
+    backend: &PostgresStateBackend,
+    scope: &HostedProjectScope,
+    run_id: &WorkflowRunId,
+) {
+    backend
+        .reserve_hosted_project_resource(
+            &HostedProjectResourceBinding::new(
+                scope.clone(),
+                HostedProjectResourceKind::Run,
+                run_id.as_str(),
+                HostedProjectResourceBindingStatus::Reserved,
+                Timestamp::now_utc(),
+            )
+            .expect("run binding"),
+        )
+        .expect("reserve run binding");
+    backend
+        .activate_hosted_project_resource(scope, HostedProjectResourceKind::Run, run_id.as_str())
+        .expect("activate run binding");
+}
+
+fn prove_competing_collaborative_approval_replay(backend: &PostgresStateBackend) {
+    let (scope, principal, decided, presentation, granted_event) =
+        prepare_collaborative_approval_fixture(backend, "collaborative-approval-race");
+    let barrier = Arc::new(Barrier::new(3));
+    let mut workers = Vec::new();
+    for _ in 0..2 {
+        let backend = backend.clone();
+        let barrier = Arc::clone(&barrier);
+        let scope = scope.clone();
+        let principal = principal.clone();
+        let decided = decided.clone();
+        let presentation = presentation.clone();
+        let granted_event = granted_event.clone();
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            backend.record_collaborative_approval_decision(
+                PostgresRecordCollaborativeApprovalDecisionRequest {
+                    project_scope: &scope,
+                    authenticated_principal: &principal,
+                    approval: &decided,
+                    presentation: &presentation,
+                    event: &granted_event,
+                },
+            )
+        }));
+    }
+    barrier.wait();
+    let commits = workers
+        .into_iter()
+        .map(|worker| worker.join().expect("collaborative approval worker"))
+        .collect::<Result<Vec<_>, _>>()
+        .expect("both exact calls reconcile");
+    assert_eq!(
+        commits
+            .iter()
+            .filter(|commit| {
+                commit.receipt_write()
+                    == workflow_core::CollaborativeApprovalAuthorityReceiptWriteOutcome::Written
+            })
+            .count(),
+        1
+    );
+    assert_eq!(
+        commits
+            .iter()
+            .filter(|commit| {
+                commit.receipt_write()
+                    == workflow_core::CollaborativeApprovalAuthorityReceiptWriteOutcome::AlreadyExists
+            })
+            .count(),
+        1
+    );
+    assert_eq!(
+        backend
+            .read_events(&decided.run_id)
+            .expect("concurrent approval events")
+            .iter()
+            .filter(|event| event.event_id == granted_event.event_id)
+            .count(),
+        1
+    );
+}
+
+fn prove_collaborative_approval_revocation_race(backend: &PostgresStateBackend, config: &Config) {
+    let (scope, principal, decided, presentation, granted_event) =
+        prepare_collaborative_approval_fixture(backend, "collaborative-revocation-race");
+    let mut holder = config.connect(NoTls).expect("connect barrier holder");
+    holder
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&COLLABORATIVE_DECISION_TEST_BARRIER_KEY],
+        )
+        .expect("hold transaction barrier");
+    holder
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION workflow_os.test_block_collaborative_decision()
+                 RETURNS trigger LANGUAGE plpgsql AS $$
+                 BEGIN
+                   IF NEW.event_id = 'event-postgres-collaborative-revocation-race-created-collaborative-approval-granted' THEN
+                     PERFORM pg_advisory_xact_lock(7814229041);
+                   END IF;
+                   RETURN NEW;
+                 END;
+                 $$;
+             CREATE TRIGGER test_block_collaborative_decision
+               BEFORE INSERT ON workflow_os.events
+               FOR EACH ROW EXECUTE FUNCTION workflow_os.test_block_collaborative_decision();",
+        )
+        .expect("install transaction barrier");
+    let decision_backend = backend.clone();
+    let decision_worker = thread::spawn(move || {
+        decision_backend.record_collaborative_approval_decision(
+            PostgresRecordCollaborativeApprovalDecisionRequest {
+                project_scope: &scope,
+                authenticated_principal: &principal,
+                approval: &decided,
+                presentation: &presentation,
+                event: &granted_event,
+            },
+        )
+    });
+    let mut observer = config.connect(NoTls).expect("connect barrier observer");
+    let mut decision_is_blocked = false;
+    for _ in 0..200 {
+        let blocked: i64 = observer
+            .query_one(
+                "SELECT count(*) FROM pg_stat_activity
+                  WHERE wait_event_type = 'Lock'
+                    AND query LIKE 'INSERT INTO workflow_os.events%'",
+                &[],
+            )
+            .expect("observe blocked decision")
+            .get(0);
+        if blocked > 0 {
+            decision_is_blocked = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(decision_is_blocked, "decision reached transaction barrier");
+    let revocation_backend = backend.clone();
+    let revocation_worker = thread::spawn(move || {
+        revocation_backend.activate_collaborative_identity_authority_revision(
+            &collaborative_authority_candidate(10, true),
+        )
+    });
+    holder
+        .query_one(
+            "SELECT pg_advisory_unlock($1)",
+            &[&COLLABORATIVE_DECISION_TEST_BARRIER_KEY],
+        )
+        .expect("release transaction barrier");
+    let decision = decision_worker.join().expect("decision worker");
+    revocation_worker
+        .join()
+        .expect("revocation worker")
+        .expect("revocation activation");
+    let commit = decision.expect("decision serialized before revocation");
+    assert_eq!(
+        commit.receipt_write(),
+        workflow_core::CollaborativeApprovalAuthorityReceiptWriteOutcome::Written
+    );
+    let source = backend
+        .read_collaborative_identity_authority(&collaborative_authority_query())
+        .expect("read revoked authority");
+    assert_eq!(source.matching_active_grant_count(), 0);
+    let (scope, principal, decided, presentation, denied_event) =
+        prepare_collaborative_approval_fixture(backend, "collaborative-revoked-denial");
+    let denied_error = backend
+        .record_collaborative_approval_decision(
+            PostgresRecordCollaborativeApprovalDecisionRequest {
+                project_scope: &scope,
+                authenticated_principal: &principal,
+                approval: &decided,
+                presentation: &presentation,
+                event: &denied_event,
+            },
+        )
+        .expect_err("revoked authority denies decision");
+    assert_eq!(
+        denied_error.code(),
+        "postgres_state.collaborative_approval.authority_denied"
+    );
+    assert!(backend
+        .load_approval_request(&decided.approval_id)
+        .expect("read denied approval")
+        .expect("pending approval")
+        .decision
+        .is_none());
+    assert!(!backend
+        .read_events(&decided.run_id)
+        .expect("read denied run events")
+        .iter()
+        .any(|event| event.event_id == denied_event.event_id));
+    assert!(backend
+        .read_collaborative_approval_authority_receipt_for_decision(
+            &ApprovalReferenceId::new(decided.approval_id.clone()).expect("approval reference"),
+            &denied_event.event_id,
+        )
+        .expect("read absent denied receipt")
+        .is_none());
+    holder
+        .batch_execute(
+            "DROP TRIGGER test_block_collaborative_decision ON workflow_os.events;
+             DROP FUNCTION workflow_os.test_block_collaborative_decision();",
+        )
+        .expect("remove transaction barrier");
+}
+
+fn prepare_collaborative_approval_fixture(
+    backend: &PostgresStateBackend,
+    name: &str,
+) -> (
+    HostedProjectScope,
+    ActorId,
+    ApprovalRequest,
+    ApprovalPresentationRecord,
+    WorkflowRunEvent,
+) {
+    let events = event_sequence(name);
+    for event in &events[..3] {
+        backend.append_event(event).expect("run setup");
+    }
+    let request = approval_request(&events[0], None);
+    backend
+        .append_event(&event(
+            &events[0],
+            4,
+            "approval-requested",
+            WorkflowRunEventKind::ApprovalRequested(Box::new(request.clone())),
+        ))
+        .expect("approval requested");
+    backend
+        .save_approval_request(&request)
+        .expect("approval projection");
+    let presentation = approval_presentation(&request);
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("approval presentation proof");
+    let scope = HostedProjectScope::new(
+        OrganizationId::new("org/collaborative-source").expect("organization"),
+        ProjectId::new("project/collaborative-source").expect("project"),
+    );
+    backend
+        .reserve_hosted_project_resource(
+            &HostedProjectResourceBinding::new(
+                scope.clone(),
+                HostedProjectResourceKind::Run,
+                request.run_id.as_str(),
+                HostedProjectResourceBindingStatus::Reserved,
+                timestamp(),
+            )
+            .expect("run binding"),
+        )
+        .expect("reserve run binding");
+    backend
+        .activate_hosted_project_resource(
+            &scope,
+            HostedProjectResourceKind::Run,
+            request.run_id.as_str(),
+        )
+        .expect("activate run binding");
+    let principal = ActorId::new("user/collaborative-source").expect("principal");
+    let decision = ApprovalDecision {
+        approval_id: request.approval_id.clone(),
+        actor: principal.clone(),
+        decided_at: timestamp(),
+        decision: ApprovalDecisionKind::Granted,
+        reason: "bounded collaborative approval decision".to_owned(),
+        correlation_id: request.correlation_id.clone(),
+        proof_marker: Some(
+            ApprovalDecisionProofMarker::new(ApprovalDecisionProofMarkerDefinition {
+                enforcement_mode:
+                    ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired,
+                presentation_id: presentation.presentation_id().clone(),
+                presentation_content_hash: presentation.content_hash().clone(),
+                proof_validated_at: timestamp(),
+                proof_validation_policy:
+                    ApprovalDecisionProofValidationPolicy::ApprovalPresentationRequestMatch,
+                proof_age_ms: Some(0),
+                proof_freshness_limit_ms: Some(60_000),
+                proof_record_sensitivity: presentation.sensitivity(),
+                redaction: RedactionMetadata::empty(),
+            })
+            .expect("proof marker"),
+        ),
+    };
+    let decided = approval_request(&events[0], Some(decision.clone()));
+    let granted_event = event(
+        &events[0],
+        5,
+        "collaborative-approval-granted",
+        WorkflowRunEventKind::ApprovalGranted(decision),
+    );
+    (scope, principal, decided, presentation, granted_event)
+}
+
 fn prove_immutable_bundle_family(backend: &PostgresStateBackend) {
     let project = TestProject::new();
     project.write_valid_project();
@@ -2777,6 +3494,13 @@ fn side_effect_payload(
 }
 
 fn approval_presentation(request: &ApprovalRequest) -> ApprovalPresentationRecord {
+    approval_presentation_at(request, timestamp())
+}
+
+fn approval_presentation_at(
+    request: &ApprovalRequest,
+    presented_at: Timestamp,
+) -> ApprovalPresentationRecord {
     let requested_action = "approve bounded PostgreSQL transaction";
     let work_summary = "record one approval decision under shared durable state";
     let approved_scope = "approval decision and authoritative event only";
@@ -2826,7 +3550,7 @@ fn approval_presentation(request: &ApprovalRequest) -> ApprovalPresentationRecor
         validation_expectations,
         why_now: why_now.to_owned(),
         next_action: next_action.to_owned(),
-        presented_at: timestamp(),
+        presented_at,
         presented_by: ActorId::new("system/postgres-test").expect("actor"),
         channel,
         content_hash,
@@ -3000,6 +3724,127 @@ impl TestProject {
             fs::create_dir_all(parent).expect("parent");
         }
         fs::write(path, content).expect("write fixture");
+    }
+
+    fn write_collaborative_approval_project(&self) {
+        self.write(
+            "workflow-os.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nproject:\n  id: collaborative/project\n  name: Collaborative Approval Project\n"
+            ),
+        );
+        self.write(
+            "workflows/main.workflow.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/main
+version: v0
+display_name: Collaborative Approval Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_2
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: echo
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello
+        to: request
+    policy_requirements:
+      - id: local/allow
+    approval_policy:
+      policy:
+        id: approval/required
+    timeout:
+      duration: 1m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: collaborative-approval
+    reason: Collaborative approval required before local execution.
+    expires_after:
+      duration: 30m
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+"
+            ),
+        );
+        self.write(
+            "skills/echo.skill.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/echo
+version: v0
+display_name: Collaborative Echo
+input_contract:
+  fields:
+    - name: request
+      field_type: string
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+failure_modes:
+  - code: failed
+    description: Echo failed.
+    retryable: false
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+observability_requirements:
+  metrics:
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+"
+            ),
+        );
+        self.write(
+            "policies/allow.policy.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: local/allow\nname: Allow Local\nrules:\n  - id: allow-local\n    effect: allow_local\n"
+            ),
+        );
+        self.write(
+            "policies/approval.policy.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: approval/required\nname: Approval Required\nrules:\n  - id: require-approval\n    effect: require_approval\n"
+            ),
+        );
+    }
+
+    fn collaborative_request(&self, suffix: &str) -> LocalExecutionRequest {
+        LocalExecutionRequest {
+            project_root: self.path().to_path_buf(),
+            workflow_id: WorkflowId::new("local/main").expect("workflow id"),
+            run_id: Some(WorkflowRunId::new(format!("run-postgres-{suffix}")).expect("run id")),
+            correlation_id: CorrelationId::new(format!("correlation/{suffix}"))
+                .expect("correlation"),
+            actor: ActorId::new("system/postgres-test").expect("actor"),
+            before_skill_invocation_checkpoints:
+                LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+            before_skill_invocation_hook: None,
+            side_effect_events: Vec::new(),
+            side_effect_lifecycle_events: Vec::new(),
+        }
     }
 
     fn write_valid_project(&self) {

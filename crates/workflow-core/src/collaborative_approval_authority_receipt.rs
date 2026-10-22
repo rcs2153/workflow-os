@@ -338,6 +338,13 @@ impl UnverifiedCollaborativeApprovalAuthorityReceipt {
         &self.record.approval_decision_event_id
     }
 
+    /// Returns the exact authority query commitment for trusted in-process
+    /// replay binding checks.
+    #[must_use]
+    pub(crate) const fn query_commitment(&self) -> &SpecContentHash {
+        &self.record.query_commitment
+    }
+
     /// Returns the complete receipt commitment.
     #[must_use]
     pub const fn receipt_commitment(&self) -> &SpecContentHash {
