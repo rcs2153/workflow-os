@@ -88,17 +88,22 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the trusted-host Cargo format-check profile plan.** The prior queue
+2. **Implement the trusted-host Cargo format-check profile.** The prior queue
    entry incorrectly pointed to a required-context review already accepted and
    merged in PR #374. The bounded two-step no-write trusted-host workflow is
    implemented and accepted after focused review fixed outcome-domain and
    causal-history validation blockers in
    [Trusted-Host Two-Step No-Write Workflow Review](docs/concepts/TRUSTED_HOST_TWO_STEP_NO_WRITE_WORKFLOW_REVIEW.md).
-   The next executable phase is the focused maintainer/security review of the
-   [Trusted-Host Cargo Format Check Profile Plan](docs/implementation-plans/trusted-host-cargo-fmt-profile-plan.md).
+   The focused maintainer/security review of the
+   [Trusted-Host Cargo Format Check Profile Plan](docs/implementation-plans/trusted-host-cargo-fmt-profile-plan.md)
+   is accepted after correcting toolchain-identity, ambient-configuration,
+   source-integrity, and toolchain-side-effect blockers in
+   [Trusted-Host Cargo Format Check Profile Plan Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_PROFILE_PLAN_REVIEW.md).
+   The next executable phase is its exact one-step implementation.
    The plan selects the already modeled `cargo fmt --all --check` command as a
-   third closed profile, requires explicit toolchain identity and source-tree
-   mutation detection, and keeps clippy, tests, arbitrary commands, providers,
+   third closed profile, requires complete formatter-chain identity and
+   persistent-mutation detection without claiming sandbox prevention, and
+   keeps clippy, tests, arbitrary commands, providers,
    external writes, public surfaces, hosted expansion, and topology broadening
    out of scope.
 

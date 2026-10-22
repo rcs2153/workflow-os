@@ -59,7 +59,9 @@ policy.
   repository root, fixed arguments, sanitized environment, timeout, and
   side-effect boundary before process entry.
 - Keep network disabled and reject ambient registry or provider authority.
-- Prove source-tree non-mutation across the check boundary.
+- Prove protected source-tree final-state equivalence across the check boundary
+  and disclose that this does not prevent or observe a transient write that is
+  restored before the post-execution commitment.
 - Record one bounded payload-free local-check result and normal invocation
   lifecycle.
 - Compose the existing terminal report and private artifact for the one-step
@@ -116,10 +118,11 @@ Extend the closed profile vocabulary with:
 
 The handler constructor should accept only:
 
-- an explicit Cargo executable path;
+- explicit Cargo, cargo-fmt, and rustfmt executable paths, or an equivalently
+  complete resolved formatter chain whose final backing executables are known;
 - the exact repository root;
-- an explicit toolchain-state root or other minimum Core-owned toolchain
-  context required to invoke the pinned rustfmt component;
+- an explicit read-only toolchain-state root and exact toolchain selector
+  required to invoke the pinned rustfmt component;
 - an injected process runner for deterministic tests; and
 - fixed Core-owned timeout and output bounds.
 
@@ -131,18 +134,26 @@ environment overrides, a network posture, or output paths.
 The trusted-host boundary must not search ambient `PATH` or install a missing
 component. Before process entry it should prove:
 
-- the supplied Cargo executable is a regular executable file;
-- its content hash is included in the resolved execution fingerprint;
-- the selected invocation can resolve the expected rustfmt component from the
-  explicitly supplied local toolchain context;
+- every executable in the resolved Cargo-to-rustfmt chain is a regular file
+  contained by the explicit toolchain root;
+- the content hash of Cargo, cargo-fmt, rustfmt, and any executable proxy or
+  backing binary actually used is included in the resolved execution
+  fingerprint;
+- the selected invocation resolves only the committed rustfmt component from
+  the explicitly supplied local toolchain context;
+- the toolchain selector and any repository `rust-toolchain.toml`,
+  `rust-toolchain`, `rustfmt.toml`, `.rustfmt.toml`, `.cargo/config.toml`, or
+  `.cargo/config` inputs that affect resolution or formatting are present in
+  the immutable run/source commitment;
 - no install or update action is attempted; and
 - replacement of the executable or bound toolchain material fails before
   execution.
 
-The implementation plan review should decide whether Cargo executable hashing
-alone is sufficient for the first proof or whether a separate rustfmt binary or
-toolchain-manifest commitment is required. It must not silently claim stronger
-toolchain provenance than it verifies.
+Cargo executable hashing alone is not sufficient. The implementation must bind
+the complete resolved formatter chain, including the final rustfmt executable.
+Rustup proxies are acceptable only when Core resolves and commits the exact
+backing toolchain material before process entry. If that cannot be done without
+ambient lookup or mutation, the implementation must stop before process entry.
 
 ## 8. Environment And Network Boundary
 
@@ -159,6 +170,12 @@ them. Do not inherit:
 - target-directory overrides; or
 - user Cargo configuration overrides.
 
+Any required `PATH` must be synthesized only from directories containing the
+already committed executable chain. The implementation must not consult user
+home Cargo/rustup configuration. Repository-local configuration that affects
+the invocation must be inside the protected inventory and immutable run
+commitment; unsupported configuration fails before process entry.
+
 Network posture remains disabled. A missing local toolchain or rustfmt
 component fails closed with a stable non-leaking error; the handler must not
 download it.
@@ -171,21 +188,36 @@ The profile derives a validated `LocalCheckSideEffectBoundary` with:
 - source writes forbidden;
 - network access forbidden;
 - no declared build-output write requirement; and
-- only the minimum explicit toolchain-state posture established by focused
-  tests.
+- one explicit read-only toolchain-state input outside the repository root.
+
+The existing model is sufficient only if the selected pre-provisioned
+toolchain can run without any declared cache, build, temp, or toolchain-state
+write. If a real invocation requires such a write, implementation must stop and
+return to a separately reviewed narrow side-effect-model extension. It must not
+reclassify the profile opportunistically.
 
 Because process isolation is not yet implemented, the first trusted-host proof
-must detect source-tree mutation rather than claim sandbox prevention. Capture
-a bounded metadata commitment over protected repository files immediately
-before and after execution. Any addition, removal, type change, or content
-change fails the operation and must not be reported as a successful format
-check.
+must compare protected final state rather than claim sandbox prevention.
+Capture a bounded metadata commitment over protected repository files and the
+explicit read-only toolchain inputs immediately before and after execution.
+Any observed addition, removal, type change, content change, or committed
+toolchain/config change fails the operation and must not be reported as a
+successful format check.
+
+This comparison detects persistent mutations only. It does not prove that the
+process never wrote and restored a file between commitments. Documentation,
+events, reports, and review must preserve that limitation until process-level
+filesystem isolation or equivalent write denial exists.
 
 The commitment must exclude accepted runtime state and explicitly bound local
 toolchain/cache roots outside the protected source inventory. It must not copy
 file contents into events, results, reports, or errors. The implementation
 review must reject a source-mutation check that is based only on git status,
 because ignored and untracked protected files are still part of the boundary.
+Inventory traversal must reject symlinks or other path resolution that escapes
+the canonical repository or toolchain root. Exclusions must be exact,
+Core-owned, and included in the resolved execution fingerprint; callers cannot
+add exclusions.
 
 ## 10. Workflow And Runtime Shape
 
@@ -212,8 +244,13 @@ Exact restart replay must not rerun Cargo or append duplicate events.
 ## 11. Result, Evidence, And Reporting
 
 The existing `LocalCheckResult` remains authoritative check truth. Only a
-passed result may produce skill success. Failed, timed-out, source-mutating, or
-internal handler outcomes fail the invocation with stable non-leaking codes.
+passed result may produce skill success. Failed, timed-out, persistently
+source-mutating, or internal handler outcomes fail the invocation with stable
+non-leaking codes.
+
+A final-state commitment mismatch is a distinct trusted-host integrity error,
+not a formatter result. A process exit of zero cannot become a successful
+`LocalCheckResult` or report when the integrity comparison fails.
 
 Do not persist stdout, stderr, command transcripts, source paths, Cargo config,
 or toolchain paths. The WorkReport should cite the stable local-check result
@@ -253,10 +290,13 @@ Focused tests should prove:
 - exact fixed command arguments;
 - deterministic injected-runner success, failure, and timeout;
 - explicit executable and repository-root binding;
+- complete Cargo/cargo-fmt/rustfmt chain and configuration-input binding;
 - missing component fails without installation or network use;
 - environment starts empty and rejects ambient or sensitive entries;
 - source-tree addition, deletion, content mutation, and type change fail closed;
 - ignored and untracked protected-file mutation is detected;
+- symlink escape and caller-selected exclusion attempts fail before execution;
+- persistent toolchain-state mutation fails closed;
 - runtime-state and explicit external toolchain roots are not misclassified as
   source mutation;
 - success records one result and one invocation lifecycle;
@@ -285,17 +325,24 @@ workspace validation required by the engineering standard.
 8. Only after acceptance, decide whether to add the profile to a larger
    sequential workflow.
 
-## 15. Open Questions For Plan Review
+## 15. Review Decisions
 
-- What exact local rustfmt identity must be committed in addition to Cargo?
-- Can the current local-check side-effect model express toolchain-state access
-  honestly, or is one narrow model extension required?
-- What protected-file inventory algorithm is small enough for this local proof
-  while still detecting ignored and untracked mutation?
-- Which runtime and toolchain directories must be excluded from the protected
-  source commitment, and how are those exclusions bound?
-- Should source mutation produce a failed local-check result or a distinct
-  trusted-host integrity error before result acceptance?
+- Bind the complete resolved Cargo/cargo-fmt/rustfmt executable chain and every
+  repository configuration input that can affect formatting. Cargo hashing
+  alone is insufficient.
+- Use the existing source-read-only side-effect model only when a
+  pre-provisioned toolchain needs no declared writes. Any required write is a
+  blocker requiring a separately reviewed model extension.
+- Inventory all repository entries, including ignored and untracked files,
+  with exact Core-owned exclusions for accepted runtime state. Reject symlink
+  escape and include the inventory/exclusion policy in the execution
+  fingerprint.
+- Commit the explicit read-only toolchain inputs before and after execution as
+  well as protected repository state.
+- Treat commitment mismatch as a distinct trusted-host integrity failure before
+  accepting a local-check result.
+- Describe this mechanism as persistent-mutation detection and final-state
+  equivalence, never process-level write prevention.
 
 ## 16. Final Recommendation
 
