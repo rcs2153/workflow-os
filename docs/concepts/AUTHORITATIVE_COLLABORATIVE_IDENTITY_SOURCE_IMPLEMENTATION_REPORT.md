@@ -62,12 +62,14 @@ PostgreSQL schema V3 stores immutable facts by organization, revision, family,
 and logical identity. Each row contains a canonical payload and payload hash;
 duplicated query columns are checked against the decoded value.
 
-The organization high watermark activates one complete revision. Activation is
-serializable and uses an organization-scoped transaction lock, including when
-no watermark row exists yet. Lower revisions fail, exact replay reconstructs
-and compares the durable inventory, same-revision content conflicts fail, and
-higher revisions insert the full inventory before the high watermark advances
-atomically. The high watermark binds the source model version.
+The organization high watermark activates one complete revision. Activation
+acquires an organization-scoped session advisory lock before opening its
+serializable transaction, including when no watermark row exists yet. This
+ensures a waiting first writer starts with a fresh snapshot. Lower revisions
+fail, exact replay reconstructs and compares the durable inventory,
+same-revision content conflicts fail, and higher revisions insert the full
+inventory before the high watermark advances atomically. The high watermark
+binds the source model version.
 
 ## 6. Exact Read Boundary
 

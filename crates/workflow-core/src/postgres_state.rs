@@ -860,13 +860,11 @@ impl PostgresStateBackend {
         let revision = authority_revision_to_i64(candidate.authority_revision())?;
         let organization_id = candidate.organization_id().as_str();
         let mut client = self.connections.connect()?;
-        serializable(&mut client, |tx| {
-            let activation_lock = format!("workflow_os_collaborative_identity:{organization_id}");
-            tx.query_one(
-                "SELECT pg_advisory_xact_lock(hashtext($1))",
-                &[&activation_lock],
-            )
+        let activation_lock = format!("workflow_os_collaborative_identity:{organization_id}");
+        client
+            .query_one("SELECT pg_advisory_lock(hashtext($1))", &[&activation_lock])
             .map_err(|error| database_error("collaborative_authority_activation_lock", &error))?;
+        let activation = serializable(&mut client, |tx| {
             let existing = tx
                 .query_opt(
                     "SELECT authority_revision, revision_commitment, source_model_version
@@ -929,7 +927,21 @@ impl PostgresStateBackend {
             )
             .map_err(|error| database_error("collaborative_authority_watermark_write", &error))?;
             Ok(CollaborativeIdentityAuthorityRevisionActivation::Activated)
-        })
+        });
+        let unlock = client
+            .query_one(
+                "SELECT pg_advisory_unlock(hashtext($1))",
+                &[&activation_lock],
+            )
+            .map_err(|error| database_error("collaborative_authority_activation_unlock", &error))?;
+        let unlocked: bool = unlock.get(0);
+        if !unlocked {
+            return Err(state_error(
+                "postgres_state.collaborative_authority.activation_lock.invalid",
+                "collaborative authority activation lock state is invalid",
+            ));
+        }
+        activation
     }
 
     /// Reads one exact collaborative authority query from the active complete revision.

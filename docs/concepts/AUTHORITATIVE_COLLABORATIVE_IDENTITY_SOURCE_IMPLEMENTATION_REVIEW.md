@@ -71,8 +71,11 @@ For an organization's first activation there was no row to lock, so concurrent
 identical writers could race and one could fail on immutable fact insertion
 instead of reconciling.
 
-The fix acquires an organization-scoped transaction advisory lock before
-reading the watermark. The PostgreSQL conformance scenario now launches two
+The first fix acquired a transaction advisory lock before reading the
+watermark, but CI proved that the serializable snapshot was already established
+while the second writer waited. The final fix acquires an organization-scoped
+session advisory lock before opening the serializable transaction and verifies
+that the lock is released. The PostgreSQL conformance scenario launches two
 concurrent first activations and requires exactly one `Activated` and one
 `ReconciledExisting` result.
 
