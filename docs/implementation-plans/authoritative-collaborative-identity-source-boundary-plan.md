@@ -1,6 +1,7 @@
 # Authoritative Collaborative Identity Source Boundary Plan
 
-Status: planning complete; implementation not started
+Status: planning and focused maintainer/security review accepted; implementation
+not started
 
 Related foundations:
 
@@ -111,7 +112,7 @@ The implementation should reuse, not duplicate:
 | Existing primitive | Collaborative use |
 | --- | --- |
 | `CurrentAuthoritySourceRegistration` | Core-owned registration for the PostgreSQL collaborative identity source |
-| `CurrentAuthoritySourceRequest` | Exact fact-family and scope request derived inside Core |
+| `CurrentAuthoritySourceRequest` | Existing commitment/freshness request pattern; it requires a minimal versioned query-binding extension before it can represent collaborative identity |
 | `CurrentAuthoritySourceSnapshot` | Provenance, watermark, observation window, completeness, freshness, and counts |
 | `CurrentAuthoritySourceWatermark` | Opaque commitment to organization revision and source snapshot |
 | `CurrentAuthoritySourceCompleteness::CompleteForExactQuery` | Required posture before authorization |
@@ -120,9 +121,42 @@ The implementation should reuse, not duplicate:
 | hosted authority high watermark | Pattern for rollback and same-revision conflict rejection |
 | project scope and capability vocabulary | Exact project and `ApprovalDecide` subject |
 
+The current source model is not used unchanged. Its V1 request is bound to a
+`RequiredContextExecutionBinding` and `RequiredContextContractBinding`, and its
+fact-family vocabulary has no identity lifecycle or revocation families. Those
+are meaningful type boundaries, not documentation details. The first
+implementation must add the smallest versioned, domain-neutral extension that
+can commit an exact Core-derived collaborative authority query and count all
+authority-bearing fact families. It must preserve the existing V1 required-
+context path unchanged.
+
 The non-authorizing collaborative claim remains useful for validation and
 canonicalization tests. It must not become the source response, a trusted
 snapshot, or an authorization token.
+
+### 5.1 Required Generic Source-Model Extension
+
+The persistent-source vertical slice should include a V2 query binding rather
+than forcing collaborative subjects into required-context hashes. The new
+model should distinguish at least:
+
+- the existing required-context execution query; and
+- an exact collaborative project-capability authority query committed from
+  organization, project, local principal, and capability.
+
+The collaborative query value must be constructed by Core from trusted route
+and authenticated-principal context. A serialized request is evidence of a
+request, not permission and not a reusable authorization token.
+
+The fact-family vocabulary should gain domain-neutral families sufficient to
+prove and count the complete read, such as identity-provider registration,
+principal identity binding, principal lifecycle, capability grants, and grant
+revocations. Exact names are an implementation-review decision, but collapsing
+all five into `CapabilityGrants` is not acceptable completeness evidence.
+
+This extension belongs in the same reviewed persistent-source implementation.
+It is not a separate caller-facing projection phase and does not authorize a
+generic user-defined source query language.
 
 ## 6. Authoritative Source Ownership
 
@@ -220,13 +254,16 @@ input or for non-authorizing display. They must not affect authorization.
 
 ## 10. Exact Query And Completeness
 
-The first query is intentionally narrow:
+The first query is intentionally narrow and requires the versioned query
+binding described in Section 5.1:
 
 ```text
 organization + project + local principal + capability ApprovalDecide
 ```
 
-Core derives the current-authority request. The source transaction must read:
+Core derives the collaborative query binding and the current-authority request.
+It must not repurpose a required-context contract hash as an identity query.
+The source transaction must read:
 
 - the one active provider registration referenced by the binding;
 - every current binding relevant to the local principal and provider subject
@@ -245,11 +282,12 @@ source failures, not negative authority.
 
 ## 11. Source Snapshot And Watermark
 
-The source should produce a normal `CurrentAuthoritySourceSnapshot` whose:
+The source should produce a versioned `CurrentAuthoritySourceSnapshot` using
+the accepted generic source model whose:
 
 - source registration identifies the Core-owned PostgreSQL source;
-- fact families name collaborative provider, binding, principal, grant, and
-  revocation authority;
+- fact families explicitly cover and count provider, binding, principal,
+  grant, and revocation authority through the minimal domain-neutral extension;
 - request commits the exact organization/project/principal/capability query;
 - watermark commits the accepted revision and canonical revision commitment;
 - read window uses database time;
@@ -369,6 +407,8 @@ posture remains fail-closed.
 
 ### Phase 1: Persistent Fact Store And Source Read
 
+- Add the minimal versioned source query-binding and fact-family extension
+  required by Section 5.1 while preserving existing V1 behavior.
 - Add the PostgreSQL identity fact and high-watermark schema.
 - Implement validated create/reconcile methods.
 - Implement revision activation and rollback protection.
@@ -424,6 +464,9 @@ Future implementation tests must cover:
 - one successful `ApprovalDecide` use;
 - no decision/event/run resumption on failed authority;
 - no acceptance of `CollaborativeAuthorityProjectionClaim` as authority;
+- no substitution of required-context hashes for collaborative identity query
+  subjects;
+- source-model V1 compatibility and V2 query-substitution rejection;
 - restart and restored-state equivalence;
 - payload-free audit commitment;
 - Debug, error, and serialization non-leakage;
@@ -440,6 +483,9 @@ Future implementation tests must cover:
   organization vector?
 - Which existing hosted approval-decision route is narrowest without coupling
   identity authority to the legacy bearer registry?
+- Should the generic source query extension be a closed enum in the existing
+  request model or a new versioned request type sharing registration and
+  snapshot commitments? It must remain closed and Core-constructed either way.
 - Should a complete negative result be represented only by fact counts and
   bounded reason, or also by a private empty authorizing view?
 - What conservative freshness duration is appropriate when the decision path
@@ -452,9 +498,9 @@ focused plan review. They do not justify broadening this plan.
 
 ## 20. Final Recommendation
 
-Proceed with a focused maintainer/security review of this plan. If accepted,
-implement **Phase 1: Persistent Fact Store And Source Read** as the next code
-phase.
+The focused maintainer/security review is accepted after clarifying the required
+versioned generic source query binding and fact-family extensions. Implement
+**Phase 1: Persistent Fact Store And Source Read** as the next code phase.
 
 The first implementation must be a bounded PostgreSQL vertical slice that
 persists collaborative identity facts and proves a complete Core-owned exact
@@ -462,3 +508,5 @@ query through the existing current-authority source boundary. It must not be
 another model-only projection, and it must not yet change hosted authentication
 or approval execution.
 
+See [Authoritative Collaborative Identity Source Boundary Plan
+Review](../concepts/AUTHORITATIVE_COLLABORATIVE_IDENTITY_SOURCE_BOUNDARY_PLAN_REVIEW.md).

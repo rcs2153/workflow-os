@@ -68,12 +68,13 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the authoritative collaborative identity source boundary, then
-   implement its persistent source slice.** Planning is complete in the
+2. **Implement the persistent collaborative identity source slice.** Planning
+   and focused maintainer/security review are accepted in the
    [Authoritative Collaborative Identity Source Boundary
-   Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md).
-   After focused maintainer/security review, implement the PostgreSQL fact
-   store and Core-owned complete exact-query source first. Same-call
+   Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
+   and [plan review](docs/concepts/AUTHORITATIVE_COLLABORATIVE_IDENTITY_SOURCE_BOUNDARY_PLAN_REVIEW.md).
+   Implement the minimal versioned query/fact-family extension, PostgreSQL fact
+   store, and Core-owned complete exact-query source first. Same-call
    `ApprovalDecide` consumption follows only after that source is reviewed.
    Do not substitute another caller-assembled projection or begin OIDC, SCIM,
    dynamic groups, enterprise administration, hosted authentication cutover,
@@ -1308,7 +1309,8 @@ being closed. Use **Active Delivery Queue** above for execution order.
    isolation, provider writes, and production identity claims remain deferred
    until separately reviewed phases. Authoritative source planning is complete
    in the [Authoritative Collaborative Identity Source Boundary
-   Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md).
+   Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
+   and its [accepted review](docs/concepts/AUTHORITATIVE_COLLABORATIVE_IDENTITY_SOURCE_BOUNDARY_PLAN_REVIEW.md).
    The first recommended code phase is a PostgreSQL persistent fact store and
    Core-owned exact-query source; the approval-decision consumer follows only
    after source review. See the [core model review](docs/concepts/COLLABORATIVE_IDENTITY_CORE_MODEL_REVIEW.md)

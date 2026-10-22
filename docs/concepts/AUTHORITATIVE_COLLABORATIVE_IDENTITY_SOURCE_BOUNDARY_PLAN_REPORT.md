@@ -42,6 +42,14 @@ specialize the accepted `CurrentAuthoritySource` contracts and source trust
 rules. The public non-authorizing collaborative claim remains descriptive and
 cannot be promoted into runtime authority.
 
+Review preparation found that the current V1 source request is specifically
+bound to required-context execution contracts and that its fact-family
+vocabulary cannot represent all collaborative identity prerequisites. The plan
+now requires a minimal versioned, closed, Core-constructed collaborative query
+binding and domain-neutral fact-family extension inside the persistent-source
+vertical slice. It explicitly forbids disguising identity subjects as required-
+context hashes or counting all identity facts as capability grants.
+
 ## 5. First Implementation Boundary
 
 The recommended first code phase is a PostgreSQL persistent fact store and
