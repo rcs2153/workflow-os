@@ -236,11 +236,14 @@ pub use evidence::{
 #[cfg(feature = "trusted-host-application-spi")]
 #[doc(hidden)]
 pub use executor::{
-    admit_trusted_host_local_application_operation, compose_trusted_host_terminal_work_report,
+    admit_trusted_host_local_application_operation, admit_trusted_host_two_step_no_write_operation,
+    compose_trusted_host_terminal_work_report, compose_trusted_host_two_step_terminal_work_report,
     persist_trusted_host_terminal_work_report_artifact,
+    persist_trusted_host_two_step_terminal_work_report_artifact,
     TrustedHostLocalApplicationAdmissionOutcome, TrustedHostLocalApplicationAdmissionRequest,
     TrustedHostLocalApplicationBlockReason, TrustedHostLocalApplicationWaitReason,
     TrustedHostTerminalWorkReportArtifactPosture, TrustedHostTerminalWorkReportArtifactResult,
+    TrustedHostTwoStepNoWriteAdmissionRequest, TrustedHostTwoStepNoWriteProfileRegistry,
 };
 pub use executor::{
     compose_github_pr_comment_live_sandbox_event_proof,

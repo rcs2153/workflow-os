@@ -1,7 +1,6 @@
 # Trusted-Host Two-Step No-Write Workflow Plan
 
-Status: planning complete; focused maintainer/security review required before
-implementation.
+Status: implemented; focused maintainer/security implementation review required.
 
 Related foundations:
 
@@ -402,7 +401,7 @@ None of these questions authorizes scope expansion.
 
 ## 20. Recommended Next Phase
 
-Perform focused maintainer/security review of this plan. If accepted, implement
-the two-step no-write trusted-host vertical slice exactly as reviewed, starting
-with Core-owned topology/current-step derivation and atomic intermediate-step
-progression before changing the host process loop or report composer.
+The plan review accepted this scope and the exact two-step no-write trusted-host
+vertical slice is now implemented. Perform focused maintainer/security review
+of the implementation before any additional profile, command, provider, write,
+public surface, or topology is considered.

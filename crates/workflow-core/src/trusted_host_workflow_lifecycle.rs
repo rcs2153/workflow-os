@@ -19,6 +19,14 @@ pub(crate) struct TrustedHostWorkflowLifecycleContext {
     skill_id: SkillId,
     skill_version: SkillVersion,
     required_outputs: Vec<String>,
+    success_progression: TrustedHostWorkflowSuccessProgression,
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+pub(crate) enum TrustedHostWorkflowSuccessProgression {
+    Terminal,
+    Continue { next_step_id: StepId },
 }
 
 impl TrustedHostWorkflowLifecycleContext {
@@ -36,7 +44,14 @@ impl TrustedHostWorkflowLifecycleContext {
             skill_id: skill.id.clone(),
             skill_version: skill.version.clone(),
             required_outputs: skill.output_contract.required.clone(),
+            success_progression: TrustedHostWorkflowSuccessProgression::Terminal,
         }
+    }
+
+    #[cfg(any(feature = "trusted-host-application-spi", test))]
+    pub(crate) fn with_next_step(mut self, next_step_id: StepId) -> Self {
+        self.success_progression = TrustedHostWorkflowSuccessProgression::Continue { next_step_id };
+        self
     }
 
     #[cfg(test)]
@@ -53,6 +68,7 @@ impl TrustedHostWorkflowLifecycleContext {
             skill_id: SkillId::new("local/trusted-host-test").expect("test skill ID"),
             skill_version: SkillVersion::new("v0").expect("test skill version"),
             required_outputs: Vec::new(),
+            success_progression: TrustedHostWorkflowSuccessProgression::Terminal,
         }
     }
 
@@ -71,6 +87,13 @@ impl TrustedHostWorkflowLifecycleContext {
         for required in &self.required_outputs {
             hasher.update(b"\0");
             hasher.update(required.as_bytes());
+        }
+        match &self.success_progression {
+            TrustedHostWorkflowSuccessProgression::Terminal => hasher.update(b"\0terminal"),
+            TrustedHostWorkflowSuccessProgression::Continue { next_step_id } => {
+                hasher.update(b"\0continue\0");
+                hasher.update(next_step_id.as_str().as_bytes());
+            }
         }
         SpecContentHash::from_bytes(hasher.finalize())
     }
@@ -151,21 +174,33 @@ impl TrustedHostWorkflowLifecycleContext {
         }
     }
 
-    pub(crate) fn terminal_events(
+    pub(crate) fn completion_events(
         &self,
         outcome: &TrustedHostWorkflowTerminalOutcome,
     ) -> [WorkflowRunEventKind; 2] {
         match outcome {
-            TrustedHostWorkflowTerminalOutcome::Succeeded { output_ref } => [
-                WorkflowRunEventKind::SkillInvocationSucceeded {
-                    invocation_id: self.invocation_id.clone(),
-                    step_id: self.step_id.clone(),
-                    skill_id: self.skill_id.clone(),
-                    skill_version: self.skill_version.clone(),
-                    output_ref: output_ref.clone(),
-                },
-                WorkflowRunEventKind::RunCompleted,
-            ],
+            TrustedHostWorkflowTerminalOutcome::Succeeded { output_ref } => {
+                let progression = match &self.success_progression {
+                    TrustedHostWorkflowSuccessProgression::Terminal => {
+                        WorkflowRunEventKind::RunCompleted
+                    }
+                    TrustedHostWorkflowSuccessProgression::Continue { next_step_id } => {
+                        WorkflowRunEventKind::StepScheduled {
+                            step_id: next_step_id.clone(),
+                        }
+                    }
+                };
+                [
+                    WorkflowRunEventKind::SkillInvocationSucceeded {
+                        invocation_id: self.invocation_id.clone(),
+                        step_id: self.step_id.clone(),
+                        skill_id: self.skill_id.clone(),
+                        skill_version: self.skill_version.clone(),
+                        output_ref: output_ref.clone(),
+                    },
+                    progression,
+                ]
+            }
             TrustedHostWorkflowTerminalOutcome::Failed(failure) => [
                 WorkflowRunEventKind::SkillInvocationFailed {
                     invocation_id: self.invocation_id.clone(),
@@ -176,6 +211,13 @@ impl TrustedHostWorkflowLifecycleContext {
                 },
                 WorkflowRunEventKind::RunFailed(failure.clone()),
             ],
+        }
+    }
+
+    pub(crate) fn completion_event_domain(&self) -> &'static str {
+        match self.success_progression {
+            TrustedHostWorkflowSuccessProgression::Terminal => "run-terminal",
+            TrustedHostWorkflowSuccessProgression::Continue { .. } => "step-scheduled",
         }
     }
 
@@ -328,6 +370,7 @@ mod tests {
             skill_id: SkillId::new("local/check-docs").expect("skill id"),
             skill_version: SkillVersion::new("v0").expect("skill version"),
             required_outputs: vec!["summary".to_owned(), "local_check_status".to_owned()],
+            success_progression: TrustedHostWorkflowSuccessProgression::Terminal,
         }
     }
 
@@ -369,7 +412,7 @@ mod tests {
         for rendered in [format!("{outcome:?}"), format!("{failure:?}")] {
             assert!(!rendered.contains(secret_marker));
         }
-        let [invocation_event, run_event] = context().terminal_events(&outcome);
+        let [invocation_event, run_event] = context().completion_events(&outcome);
         assert!(matches!(
             invocation_event,
             WorkflowRunEventKind::SkillInvocationFailed { .. }
@@ -381,7 +424,7 @@ mod tests {
     fn terminal_handler_failure_maps_to_bounded_workflow_failure_events() {
         let secret_marker = "authorization-private-key-marker";
         let outcome = TrustedHostWorkflowTerminalOutcome::terminal_failure();
-        let [invocation_event, run_event] = context().terminal_events(&outcome);
+        let [invocation_event, run_event] = context().completion_events(&outcome);
 
         assert!(matches!(
             invocation_event,
@@ -400,5 +443,30 @@ mod tests {
         ] {
             assert!(!rendered.contains(secret_marker));
         }
+    }
+
+    #[test]
+    fn intermediate_success_schedules_exact_next_step_without_completing_run() {
+        let output = SkillOutput::new(
+            BTreeMap::from([
+                ("summary".to_owned(), "completed".to_owned()),
+                ("local_check_status".to_owned(), "passed".to_owned()),
+            ]),
+            Some("local-check/result".to_owned()),
+        );
+        let lifecycle = context().with_next_step(StepId::new("docs-check-next").expect("step"));
+        let outcome = lifecycle.normalize_success(&output);
+        let [invocation_event, progression_event] = lifecycle.completion_events(&outcome);
+
+        assert!(matches!(
+            invocation_event,
+            WorkflowRunEventKind::SkillInvocationSucceeded { .. }
+        ));
+        assert!(matches!(
+            progression_event,
+            WorkflowRunEventKind::StepScheduled { step_id }
+                if step_id.as_str() == "docs-check-next"
+        ));
+        assert_eq!(lifecycle.completion_event_domain(), "step-scheduled");
     }
 }

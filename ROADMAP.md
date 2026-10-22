@@ -88,10 +88,10 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Implement one bounded two-step no-write trusted-host workflow after plan
-   review.** The private trusted-host terminal WorkReport artifact blocker fix
-   is accepted and merged. Planning now advances the same closed runtime from
-   independent one-step profiles to one exact sequential workflow:
+2. **Review the implemented bounded two-step no-write trusted-host workflow.**
+   The private trusted-host terminal WorkReport artifact blocker fix is
+   accepted and merged. The same closed runtime now advances from independent
+   one-step profiles to one exact sequential workflow:
    `workflow-os` project validation followed by docs check, then one terminal
    report and private artifact. The [Trusted-Host Two-Step No-Write Workflow
    Plan](docs/implementation-plans/trusted-host-two-step-no-write-workflow-plan.md)
@@ -101,9 +101,13 @@ phase` language does not supersede the active queue.
    maintainer/security review accepts the plan after a private v3 report-
    commitment correction in [Trusted-Host Two-Step No-Write Workflow Plan
    Review](docs/concepts/TRUSTED_HOST_TWO_STEP_NO_WRITE_WORKFLOW_PLAN_REVIEW.md).
-   Implementation is now the next executable no-write phase. Do not add a third
-   profile, arbitrary commands, providers, external writes, public CLI output,
-   schemas, examples, hosted expansion, parallelism, or nested harnesses.
+   The implementation adds Core-owned runnable-step/profile selection, atomic
+   first-step result/invocation/next-step progression, restart-safe exact
+   replay, and one private v3 terminal report/artifact over complete durable
+   history. The next phase is focused maintainer/security implementation
+   review. Do not add a third profile, arbitrary commands, providers, external
+   writes, public CLI output, schemas, examples, hosted expansion, parallelism,
+   or nested harnesses.
 
    The completed private artifact history is preserved below. The private
    artifact path composes the accepted v2 report, existing no-provider gates,
