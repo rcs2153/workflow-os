@@ -88,7 +88,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the trusted-host Cargo format workflow composition plan.** The prior queue
+2. **Implement the trusted-host Cargo format workflow composition plan.** The prior queue
    entry incorrectly pointed to a required-context review already accepted and
    merged in PR #374. The bounded two-step no-write trusted-host workflow is
    implemented and accepted after focused review fixed outcome-domain and
@@ -128,12 +128,15 @@ phase` language does not supersede the active queue.
    now defines one additive exact three-step workflow that preserves the
    accepted project-validation and docs-check prefix, appends Cargo format,
    retains the existing two-step v3 path unchanged, and uses a distinct v4
-   report/artifact commitment. Focused plan review is required before any
-   implementation. The plan preserves closed profiles, ordered result/report
-   truth, and exact replay. It keeps clippy, tests, arbitrary commands,
-   providers,
-   external writes, public surfaces, hosted expansion, and topology broadening
-   out of scope.
+   report/artifact commitment. Focused plan review accepts the plan after
+   correcting two blockers: every attempted step must bind and reproduce its
+   durable trusted-host dispatch executor commitment, and pre-result integrity
+   failure must be reported from the exact failed-invocation history without a
+   fabricated local-check result or unpersisted cause. Implementation is now
+   the next phase. The reviewed plan preserves closed profiles, ordered
+   result/report truth, and exact replay. It keeps clippy, tests, arbitrary
+   commands, providers, external writes, public surfaces, hosted expansion,
+   and topology broadening out of scope.
 
    Historical accepted evidence:
 
