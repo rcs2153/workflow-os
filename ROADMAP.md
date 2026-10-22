@@ -24,13 +24,15 @@ and database-interruption recovery. It is not a production-readiness,
 multi-tenancy, enterprise-identity, high-availability, or hosted-SaaS claim.
 
 Project-scoped approval routing and its PostgreSQL authority integration are
-implemented and reviewed. The collaborative identity lifecycle Core model is
-implemented on the active development branch. Its focused review found that a
-caller-assembled fact set was represented too strongly as trusted current
-authority; the in-progress blocker fix demotes that surface to an explicitly
-non-authorizing validated claim. A genuinely authorizing identity projection
-still requires a Core-owned authoritative source, complete current fact-set
-proof, trusted time, persistence, and separate review.
+implemented and reviewed. The collaborative identity lifecycle Core model and
+its blocker fix are implemented and reviewed. Caller-assembled identity facts
+now produce only an explicitly non-authorizing validated claim. Planning for a
+genuinely authorizing identity source is complete: the accepted direction is a
+Core-owned PostgreSQL source using the existing current-authority contracts,
+complete exact queries, database time, monotonic revisions, rollback
+protection, and one later same-call approval-decision consumer. No
+authoritative collaborative identity source or runtime consumer is implemented
+yet.
 
 The first provider-write sandbox is implemented and accepted for GitHub pull
 request comments only. The second bounded Core slice now implements an
@@ -66,14 +68,17 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Plan the authoritative collaborative identity source boundary.** The model
-   blocker fix is accepted. Define how Core obtains complete current
-   provider, binding, principal, grant, and revocation facts with trusted time
-   and rollback protection. The next implementation must be a bounded vertical
-   slice with persistence and current-authority consumption, not another
-   caller-assembled authority claim. OIDC protocol handling, SCIM, dynamic
-   groups, enterprise administration, and hosted authentication cutover remain
-   separately scoped.
+2. **Implement the persistent collaborative identity source slice.** Planning
+   and focused maintainer/security review are accepted in the
+   [Authoritative Collaborative Identity Source Boundary
+   Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
+   and [plan review](docs/concepts/AUTHORITATIVE_COLLABORATIVE_IDENTITY_SOURCE_BOUNDARY_PLAN_REVIEW.md).
+   Implement the minimal versioned query/fact-family extension, PostgreSQL fact
+   store, and Core-owned complete exact-query source first. Same-call
+   `ApprovalDecide` consumption follows only after that source is reviewed.
+   Do not substitute another caller-assembled projection or begin OIDC, SCIM,
+   dynamic groups, enterprise administration, hosted authentication cutover,
+   or provider writes.
 3. **Select the next runnable no-write trusted-host profile.** Generalize the
    accepted private docs-check proof through one additional closed profile only
    after its authority, required-context, check, evidence, and terminal-report
@@ -1302,7 +1307,13 @@ being closed. Use **Active Delivery Queue** above for execution order.
    protocol handling, PostgreSQL identity storage, hosted authentication
    cutover, principal inboxes, SCIM, groups, administration, hostile-tenant
    isolation, provider writes, and production identity claims remain deferred
-   until separately reviewed phases. See the [core model review](docs/concepts/COLLABORATIVE_IDENTITY_CORE_MODEL_REVIEW.md)
+   until separately reviewed phases. Authoritative source planning is complete
+   in the [Authoritative Collaborative Identity Source Boundary
+   Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
+   and its [accepted review](docs/concepts/AUTHORITATIVE_COLLABORATIVE_IDENTITY_SOURCE_BOUNDARY_PLAN_REVIEW.md).
+   The first recommended code phase is a PostgreSQL persistent fact store and
+   Core-owned exact-query source; the approval-decision consumer follows only
+   after source review. See the [core model review](docs/concepts/COLLABORATIVE_IDENTITY_CORE_MODEL_REVIEW.md)
    and [blocker fix report](docs/concepts/COLLABORATIVE_IDENTITY_CORE_MODEL_BLOCKER_FIX_REPORT.md).
 
 ### Blocked Or Dependency-Tracked
