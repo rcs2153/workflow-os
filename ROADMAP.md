@@ -127,9 +127,16 @@ phase` language does not supersede the active queue.
    It composes fresh source-backed authority, exact step projection, the
    existing injected adapter, explicit failure postures, and a separate
    payload-free capability-use receipt. Existing direct adapter APIs remain
-   unchanged and are not automatically capability-gated. Proceed next to the
-   focused implementation review before considering another operation or any
-   provider mutation.
+   unchanged and are not automatically capability-gated. The focused
+   implementation review is recorded in the [Scoped Capability GitHub
+   Read-Only Integration
+   Review](docs/concepts/SCOPED_CAPABILITY_GITHUB_READ_ONLY_INTEGRATION_REVIEW.md).
+   It accepted the call, policy, scope, failure, receipt, and privacy
+   boundaries but found that the operation builds an ad hoc selected-record
+   hash instead of a validated exact-query source snapshot and cannot detect
+   rollback without a prior trusted generation or watermark. Proceed next to
+   the bounded source-snapshot and rollback blocker fix. Do not add another
+   operation or provider mutation first.
 
 The first-use CLI and integration-check item added during the prior queue
 reconciliation was stale: both defects were already fixed and accepted in PR
