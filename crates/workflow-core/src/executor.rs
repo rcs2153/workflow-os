@@ -1224,7 +1224,13 @@ pub fn compose_trusted_host_three_step_terminal_work_report(
     {
         return Err(trusted_host_three_step_report_error("bundle_mismatch"));
     }
-    validate_trusted_host_three_step_history(&run)?;
+    validate_trusted_host_three_step_history(
+        &run,
+        &stored,
+        registry,
+        &request.execution.execution.correlation_id,
+        false,
+    )?;
 
     let terminal_event = run
         .events
@@ -1281,6 +1287,40 @@ pub fn compose_trusted_host_three_step_terminal_work_report(
             correlation_id: request.execution.execution.correlation_id.clone(),
             values: build_input_values(&step.input_mapping)?,
         };
+        let expected_idempotency_key = invocation_idempotency_key(
+            run_id,
+            &workflow.id,
+            &workflow.version,
+            &step.id,
+            &skill.id,
+            &skill.version,
+        )?;
+        let invocation_requests = run
+            .events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    &event.kind,
+                    WorkflowRunEventKind::SkillInvocationRequested(invocation)
+                        if invocation.step_id == step.id
+                            && invocation.skill_id == skill.id
+                            && invocation.skill_version == skill.version
+                            && invocation.idempotency_key.as_ref() == Some(&expected_idempotency_key)
+                )
+            })
+            .collect::<Vec<_>>();
+        let [invocation_request_event] = invocation_requests.as_slice() else {
+            return Err(trusted_host_three_step_report_error(
+                "invocation_request_binding_invalid",
+            ));
+        };
+        let WorkflowRunEventKind::SkillInvocationRequested(invocation_request) =
+            &invocation_request_event.kind
+        else {
+            return Err(trusted_host_three_step_report_error(
+                "invocation_request_binding_invalid",
+            ));
+        };
         let dispatches = run
             .events
             .iter()
@@ -1296,7 +1336,8 @@ pub fn compose_trusted_host_three_step_terminal_work_report(
                         dispatch.executor_commitment(),
                     );
                 (dispatch.invocation_commitment() == &expected_invocation_commitment
-                    && schedule_event.sequence_number < event.sequence_number
+                    && schedule_event.sequence_number < invocation_request_event.sequence_number
+                    && invocation_request_event.sequence_number < event.sequence_number
                     && event.sequence_number < terminal_event.sequence_number)
                     .then_some((event, dispatch.as_ref()))
             })
@@ -1332,6 +1373,7 @@ pub fn compose_trusted_host_three_step_terminal_work_report(
                     || result.command_kind() != profile.command_contract().command_kind()
                     || result.immutable_run_bundle() != binding
                     || result.attempt_id() != dispatch.attempt_id()
+                    || result.invocation_id() != &invocation_request.invocation_id
                 {
                     return Err(trusted_host_three_step_report_error(
                         "result_binding_mismatch",
@@ -1399,6 +1441,11 @@ pub fn compose_trusted_host_three_step_terminal_work_report(
                                 if step_id == &step.id
                         ) && dispatch_event.sequence_number < event.sequence_number
                             && event.sequence_number < terminal_event.sequence_number
+                            && matches!(
+                                &event.kind,
+                                WorkflowRunEventKind::SkillInvocationFailed { invocation_id, .. }
+                                    if invocation_id == &invocation_request.invocation_id
+                            )
                     })
                     .collect::<Vec<_>>();
                 let [invocation_event] = failed_invocations.as_slice() else {
@@ -1415,7 +1462,7 @@ pub fn compose_trusted_host_three_step_terminal_work_report(
 
         let _ = write!(
             report_material,
-            "\n{}\n{}\n{}\n{}\n{}\n{}",
+            "\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
             step.id.as_str(),
             match profile.profile_id() {
                 ExplicitLocalCheckProfileId::WorkflowOsProjectValidation => {
@@ -1425,10 +1472,12 @@ pub fn compose_trusted_host_three_step_terminal_work_report(
                 ExplicitLocalCheckProfileId::CargoFmtCheck => "cargo_fmt_check",
             },
             profile.command_contract().command_id().as_str(),
+            schedule_event.event_id.as_str(),
             dispatch_event.event_id.as_str(),
             executor_commitment.as_str(),
             result_id.unwrap_or("no-result"),
         );
+        workflow_event_ids.push(schedule_event.event_id.clone());
         workflow_event_ids.push(dispatch_event.event_id.clone());
         if let Some(result_event_id) = result_event_id {
             workflow_event_ids.push(result_event_id);
@@ -12012,7 +12061,13 @@ fn admit_trusted_host_three_step_no_write_operation_internal<'a>(
                 TrustedHostLocalApplicationBlockReason::UnsupportedWorkflow,
             ));
         }
-        validate_trusted_host_three_step_history(&run)?;
+        validate_trusted_host_three_step_history(
+            &run,
+            &stored,
+            registry,
+            &execution.correlation_id,
+            true,
+        )?;
         let selected_step_id = latest_scheduled_step_id(&run)?;
         let step = workflow
             .steps
@@ -12343,7 +12398,14 @@ fn trusted_host_three_step_workflow_is_exact(workflow: &WorkflowDefinition) -> b
 }
 
 #[cfg(feature = "trusted-host-application-spi")]
-fn validate_trusted_host_three_step_history(run: &WorkflowRun) -> Result<(), WorkflowOsError> {
+fn validate_trusted_host_three_step_history(
+    run: &WorkflowRun,
+    stored: &crate::StoredImmutableRunBundle,
+    registry: &TrustedHostThreeStepNoWriteProfileRegistry,
+    correlation_id: &CorrelationId,
+    verify_current_executor_commitment: bool,
+) -> Result<(), WorkflowOsError> {
+    let workflow = immutable_continuation_workflow(stored)?;
     let scheduled = run
         .events
         .iter()
@@ -12354,6 +12416,70 @@ fn validate_trusted_host_three_step_history(run: &WorkflowRun) -> Result<(), Wor
             _ => None,
         })
         .collect::<Vec<_>>();
+    let results = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::LocalCheckResultRecorded(result) => {
+                Some((event.sequence_number, result.as_ref()))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    validate_trusted_host_three_step_prefixes(run, &scheduled, &results)?;
+    let total_dispatches = run
+        .events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event.kind,
+                WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(_)
+            )
+        })
+        .count();
+    let mut matched_dispatches = 0_usize;
+    let mut pre_result_failure = false;
+    let history = TrustedHostThreeStepHistoryContext {
+        run,
+        stored,
+        registry,
+        workflow,
+        correlation_id,
+        verify_current_executor_commitment,
+    };
+    for (index, (scheduled_step_id, schedule_sequence)) in scheduled.iter().enumerate() {
+        let outcome = validate_trusted_host_three_step_attempt(
+            &history,
+            index,
+            scheduled_step_id,
+            *schedule_sequence,
+        )?;
+        matched_dispatches += usize::from(outcome.matched_dispatch);
+        pre_result_failure |= outcome.pre_result_failure;
+    }
+    if matched_dispatches != total_dispatches {
+        return Err(trusted_host_three_step_error("history_dispatch_invalid"));
+    }
+    if run.snapshot.status == WorkflowRunStatus::Failed {
+        let final_result_failed = results.last().is_some_and(|(_, result)| {
+            matches!(
+                result.status(),
+                crate::LocalCheckResultStatus::Failed | crate::LocalCheckResultStatus::TimedOut
+            )
+        });
+        if !final_result_failed && !pre_result_failure {
+            return Err(trusted_host_three_step_error("history_terminal_invalid"));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn validate_trusted_host_three_step_prefixes(
+    run: &WorkflowRun,
+    scheduled: &[(&str, EventSequenceNumber)],
+    results: &[(EventSequenceNumber, &crate::LocalCheckResultRecordedEvent)],
+) -> Result<(), WorkflowOsError> {
     let scheduled_ids = scheduled
         .iter()
         .map(|(step_id, _)| *step_id)
@@ -12366,16 +12492,6 @@ fn validate_trusted_host_three_step_history(run: &WorkflowRun) -> Result<(), Wor
     ) {
         return Err(trusted_host_three_step_error("history_schedule_invalid"));
     }
-    let results = run
-        .events
-        .iter()
-        .filter_map(|event| match &event.kind {
-            WorkflowRunEventKind::LocalCheckResultRecorded(result) => {
-                Some((event.sequence_number, result.as_ref()))
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
     let result_ids = results
         .iter()
         .map(|(_, result)| result.step_id().as_str())
@@ -12392,47 +12508,297 @@ fn validate_trusted_host_three_step_history(run: &WorkflowRun) -> Result<(), Wor
     if !run.snapshot.status.is_terminal() && results.len() + 1 != scheduled.len() {
         return Err(trusted_host_three_step_error("history_progression_invalid"));
     }
-    if run.snapshot.status == WorkflowRunStatus::Completed && results.len() != 3 {
+    let terminal_event = run.events.last();
+    if run.snapshot.status == WorkflowRunStatus::Completed && results.len() != 3
+        || run.snapshot.status.is_terminal()
+            && !terminal_event.is_some_and(|event| {
+                matches!(
+                    event.kind,
+                    WorkflowRunEventKind::RunCompleted | WorkflowRunEventKind::RunFailed(_)
+                )
+            })
+    {
         return Err(trusted_host_three_step_error("history_terminal_invalid"));
     }
-    for (index, (result_sequence, result)) in results.iter().enumerate() {
-        let Some((_, schedule_sequence)) = scheduled.get(index) else {
-            return Err(trusted_host_three_step_error("history_result_invalid"));
-        };
-        let invocation_events = run
+    Ok(())
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+struct TrustedHostThreeStepHistoryContext<'a> {
+    run: &'a WorkflowRun,
+    stored: &'a crate::StoredImmutableRunBundle,
+    registry: &'a TrustedHostThreeStepNoWriteProfileRegistry,
+    workflow: &'a WorkflowDefinition,
+    correlation_id: &'a CorrelationId,
+    verify_current_executor_commitment: bool,
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+struct TrustedHostThreeStepAttemptOutcome {
+    matched_dispatch: bool,
+    pre_result_failure: bool,
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+#[allow(clippy::too_many_lines)]
+fn validate_trusted_host_three_step_attempt(
+    history: &TrustedHostThreeStepHistoryContext<'_>,
+    index: usize,
+    scheduled_step_id: &str,
+    schedule_sequence: EventSequenceNumber,
+) -> Result<TrustedHostThreeStepAttemptOutcome, WorkflowOsError> {
+    let run = history.run;
+    let step = history
+        .workflow
+        .steps
+        .get(index)
+        .filter(|step| step.id.as_str() == scheduled_step_id)
+        .ok_or_else(|| trusted_host_three_step_error("history_schedule_invalid"))?;
+    let skill = immutable_continuation_skill(history.stored, step)?;
+    let profile = history
+        .registry
+        .profile_for_skill(&skill.id, &skill.version)?;
+    let expected_idempotency_key = invocation_idempotency_key(
+        &run.snapshot.identity.run_id,
+        &history.workflow.id,
+        &history.workflow.version,
+        &step.id,
+        &skill.id,
+        &skill.version,
+    )?;
+    let invocation_requests = run
+        .events
+        .iter()
+        .filter(|event| {
+            matches!(
+                &event.kind,
+                WorkflowRunEventKind::SkillInvocationRequested(invocation)
+                    if invocation.step_id == step.id
+                        && invocation.skill_id == skill.id
+                        && invocation.skill_version == skill.version
+                        && invocation.idempotency_key.as_ref() == Some(&expected_idempotency_key)
+            )
+        })
+        .collect::<Vec<_>>();
+    if invocation_requests.is_empty() {
+        let scheduled_count = run
+            .events
+            .iter()
+            .filter(|event| matches!(event.kind, WorkflowRunEventKind::StepScheduled { .. }))
+            .count();
+        let result_count = run
             .events
             .iter()
             .filter(|event| {
-                event.event_id == *result.invocation_terminal_event_id()
-                    && matches!(
-                        &event.kind,
-                        WorkflowRunEventKind::SkillInvocationSucceeded { invocation_id, step_id, .. }
-                            | WorkflowRunEventKind::SkillInvocationFailed { invocation_id, step_id, .. }
-                            if invocation_id == result.invocation_id() && step_id == result.step_id()
-                    )
+                matches!(
+                    event.kind,
+                    WorkflowRunEventKind::LocalCheckResultRecorded(_)
+                )
             })
-            .collect::<Vec<_>>();
-        let [invocation_event] = invocation_events.as_slice() else {
+            .count();
+        if index + 1 != scheduled_count
+            || run.snapshot.status.is_terminal()
+            || result_count != index
+        {
             return Err(trusted_host_three_step_error("history_invocation_invalid"));
-        };
-        let succeeded = result.status() == crate::LocalCheckResultStatus::Passed;
-        if succeeded
+        }
+        return Ok(TrustedHostThreeStepAttemptOutcome {
+            matched_dispatch: false,
+            pre_result_failure: false,
+        });
+    }
+    let [invocation_request_event] = invocation_requests.as_slice() else {
+        return Err(trusted_host_three_step_error("history_invocation_invalid"));
+    };
+    let WorkflowRunEventKind::SkillInvocationRequested(invocation) = &invocation_request_event.kind
+    else {
+        return Err(trusted_host_three_step_error("history_invocation_invalid"));
+    };
+    if schedule_sequence >= invocation_request_event.sequence_number {
+        return Err(trusted_host_three_step_error("history_invocation_invalid"));
+    }
+    let skill_input = SkillInput {
+        run_id: run.snapshot.identity.run_id.clone(),
+        workflow_id: history.workflow.id.clone(),
+        workflow_version: history.workflow.version.clone(),
+        schema_version: history.workflow.schema_version.clone(),
+        spec_hash: history.stored.manifest().workflow_content_hash().clone(),
+        step_id: step.id.clone(),
+        skill_id: skill.id.clone(),
+        skill_version: skill.version.clone(),
+        correlation_id: history.correlation_id.clone(),
+        values: build_input_values(&step.input_mapping)?,
+    };
+    let current_executor_commitment = history
+        .verify_current_executor_commitment
+        .then(|| trusted_host_executor_commitment_from_identity(profile, &skill.id, &skill.version))
+        .transpose()?;
+    let dispatches = run
+        .events
+        .iter()
+        .filter_map(|event| {
+            let WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(dispatch) =
+                &event.kind
+            else {
+                return None;
+            };
+            let invocation_commitment =
+                crate::operational_execution_window_opening::trusted_host_invocation_commitment(
+                    &skill_input,
+                    dispatch.executor_commitment(),
+                );
+            let executor_matches = current_executor_commitment
+                .as_ref()
+                .map_or(true, |expected| dispatch.executor_commitment() == expected);
+            (dispatch.invocation_commitment() == &invocation_commitment
+                && executor_matches
+                && invocation_request_event.sequence_number < event.sequence_number)
+                .then_some((event, dispatch.as_ref()))
+        })
+        .collect::<Vec<_>>();
+    let [(dispatch_event, dispatch)] = dispatches.as_slice() else {
+        return Err(trusted_host_three_step_error("history_dispatch_invalid"));
+    };
+    let results = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::LocalCheckResultRecorded(result) => {
+                Some((event.sequence_number, result.as_ref()))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if let Some((result_sequence, result)) = results.get(index) {
+        validate_trusted_host_three_step_result(&TrustedHostThreeStepResultContext {
+            history,
+            index,
+            step,
+            profile,
+            invocation,
+            dispatch_event,
+            dispatch,
+            result_sequence: *result_sequence,
+            result,
+        })?;
+        return Ok(TrustedHostThreeStepAttemptOutcome {
+            matched_dispatch: true,
+            pre_result_failure: false,
+        });
+    }
+    let terminal_event = run.events.last();
+    if !run.snapshot.status.is_terminal()
+        || index + 1 != history.workflow.steps.len()
+        || !matches!(
+            terminal_event.map(|event| &event.kind),
+            Some(WorkflowRunEventKind::RunFailed(_))
+        )
+    {
+        return Err(trusted_host_three_step_error("history_terminal_invalid"));
+    }
+    let failed_invocations = run
+        .events
+        .iter()
+        .filter(|event| {
+            matches!(
+                &event.kind,
+                WorkflowRunEventKind::SkillInvocationFailed { invocation_id, step_id, .. }
+                    if invocation_id == &invocation.invocation_id && step_id == &step.id
+            ) && dispatch_event.sequence_number < event.sequence_number
+                && terminal_event
+                    .is_some_and(|terminal| event.sequence_number < terminal.sequence_number)
+        })
+        .count();
+    if failed_invocations != 1 {
+        return Err(trusted_host_three_step_error("history_pre_result_invalid"));
+    }
+    Ok(TrustedHostThreeStepAttemptOutcome {
+        matched_dispatch: true,
+        pre_result_failure: true,
+    })
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+struct TrustedHostThreeStepResultContext<'a> {
+    history: &'a TrustedHostThreeStepHistoryContext<'a>,
+    index: usize,
+    step: &'a StepDefinition,
+    profile: &'a ResolvedExplicitLocalCheckProfile,
+    invocation: &'a SkillInvocation,
+    dispatch_event: &'a WorkflowRunEvent,
+    dispatch: &'a crate::dispatch_reservation::DispatchAdmissionProjectionEvent,
+    result_sequence: EventSequenceNumber,
+    result: &'a crate::LocalCheckResultRecordedEvent,
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn validate_trusted_host_three_step_result(
+    context: &TrustedHostThreeStepResultContext<'_>,
+) -> Result<(), WorkflowOsError> {
+    let run = context.history.run;
+    let invocation_events = run
+        .events
+        .iter()
+        .filter(|event| {
+            event.event_id == *context.result.invocation_terminal_event_id()
+                && matches!(
+                    &event.kind,
+                    WorkflowRunEventKind::SkillInvocationSucceeded { invocation_id, step_id, .. }
+                        | WorkflowRunEventKind::SkillInvocationFailed { invocation_id, step_id, .. }
+                        if invocation_id == &context.invocation.invocation_id
+                            && invocation_id == context.result.invocation_id()
+                            && step_id == &context.step.id
+                )
+        })
+        .collect::<Vec<_>>();
+    let [invocation_event] = invocation_events.as_slice() else {
+        return Err(trusted_host_three_step_error("history_invocation_invalid"));
+    };
+    let succeeded = context.result.status() == crate::LocalCheckResultStatus::Passed;
+    let terminal_event = run
+        .snapshot
+        .status
+        .is_terminal()
+        .then(|| run.events.last())
+        .flatten();
+    if context.result.step_id() != &context.step.id
+        || context.result.profile_id() != context.profile.profile_id()
+        || context.result.command_id() != context.profile.command_contract().command_id()
+        || context.result.command_kind() != context.profile.command_contract().command_kind()
+        || context.result.immutable_run_bundle()
+            != run
+                .snapshot
+                .identity
+                .immutable_run_bundle
+                .as_ref()
+                .ok_or_else(immutable_run_bundle_binding_error)?
+        || context.result.attempt_id() != context.dispatch.attempt_id()
+        || context.dispatch_event.sequence_number >= context.result_sequence
+        || context.result_sequence >= invocation_event.sequence_number
+        || terminal_event
+            .is_some_and(|terminal| invocation_event.sequence_number >= terminal.sequence_number)
+        || succeeded
             != matches!(
                 invocation_event.kind,
                 WorkflowRunEventKind::SkillInvocationSucceeded { .. }
             )
-            || schedule_sequence >= result_sequence
-            || result_sequence >= &invocation_event.sequence_number
-        {
-            return Err(trusted_host_three_step_error("history_result_invalid"));
-        }
-        if let Some((_, next_schedule_sequence)) = scheduled.get(index + 1) {
-            if !succeeded || invocation_event.sequence_number >= *next_schedule_sequence {
-                return Err(trusted_host_three_step_error("history_progression_invalid"));
-            }
-        } else if !succeeded && !run.snapshot.status.is_terminal() {
+    {
+        return Err(trusted_host_three_step_error("history_result_invalid"));
+    }
+    let next_schedule_sequence = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { .. } => Some(event.sequence_number),
+            _ => None,
+        })
+        .nth(context.index + 1);
+    if let Some(next_schedule_sequence) = next_schedule_sequence {
+        if !succeeded || invocation_event.sequence_number >= next_schedule_sequence {
             return Err(trusted_host_three_step_error("history_progression_invalid"));
         }
+    } else if !succeeded && !run.snapshot.status.is_terminal() {
+        return Err(trusted_host_three_step_error("history_progression_invalid"));
     }
     Ok(())
 }

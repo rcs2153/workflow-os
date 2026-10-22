@@ -211,6 +211,13 @@ preserved as the phase author's record.
    timeout, artifact-conflict, and privacy regression matrix required by the
    accepted plan.
 
+### Fix-Forward Status
+
+The narrow fix-forward implementation is documented in
+[Trusted-Host Cargo Format Workflow Composition Blocker Fix Report](TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_BLOCKER_FIX_REPORT.md).
+This note preserves the original blocker verdict. Acceptance still requires a
+focused maintainer/security review of the fix.
+
 ## 13. Non-Blocking Follow-Ups
 
 - Include schedule event IDs in v4 report commitment material and citations so

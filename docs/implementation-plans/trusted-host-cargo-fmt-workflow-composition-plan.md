@@ -420,10 +420,10 @@ The focused implementation review must decide:
 
 ## 19. Recommended Next Phase
 
-Implement the blocker fixes from
-[Trusted-Host Cargo Format Workflow Composition Implementation Review](../concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REVIEW.md).
-Complete exact attempted-step dispatch validation, failed-terminal history
-validation, pre-result invocation linkage, and the mandatory corruption and
-privacy regressions. Do not broaden the profile registry, topology, public
-surface, provider access, or write posture before focused re-review accepts
-the fixed boundary.
+The blocker fixes from
+[Trusted-Host Cargo Format Workflow Composition Implementation Review](../concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REVIEW.md)
+are implemented in
+[Trusted-Host Cargo Format Workflow Composition Blocker Fix Report](../concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_BLOCKER_FIX_REPORT.md).
+Perform a focused maintainer/security review of the fix. Do not broaden the
+profile registry, topology, public surface, provider access, or write posture
+before that review accepts the fixed boundary.

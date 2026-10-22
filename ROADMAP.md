@@ -141,16 +141,24 @@ phase` language does not supersede the active queue.
    pre-result identity failure records no fake local-check result and discloses
    later checks as not attempted. Full workspace validation and the opt-in real
    bundled-toolchain Cargo format smoke pass. Focused implementation/security
-   review found blockers: resumed admission does not validate complete
+   review found blockers: resumed admission did not validate complete
    attempted-step dispatch history, failed terminal history is under-
    constrained, pre-result failed invocation identity is not linked to the
    authorized attempt, and required corruption/security regressions are
-   missing. A narrow blocker fix is next. Clippy, tests, arbitrary commands, providers,
+   missing. The narrow blocker fix is implemented. It validates exactly one
+   causally and cryptographically matching dispatch for every attempted step,
+   constrains failed terminal history to accepted-result or exact pre-result
+   truth, binds pre-result failure to the deterministic invocation request,
+   cites schedule events in v4 reports, and adds direct corruption,
+   substitution, artifact-conflict, and privacy regressions. Focused
+   maintainer/security re-review is next. Clippy, tests, arbitrary commands, providers,
    external writes, public surfaces, hosted expansion, and topology broadening
    remain out of scope. See
    [Trusted-Host Cargo Format Workflow Composition Implementation Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REPORT.md)
    and
-   [Trusted-Host Cargo Format Workflow Composition Implementation Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REVIEW.md).
+   [Trusted-Host Cargo Format Workflow Composition Implementation Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REVIEW.md),
+   plus the
+   [Trusted-Host Cargo Format Workflow Composition Blocker Fix Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_BLOCKER_FIX_REPORT.md).
 
    Historical accepted evidence:
 

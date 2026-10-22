@@ -662,6 +662,200 @@ fn three_step_mode_rejects_caller_selected_step_before_state_creation() {
 }
 
 #[test]
+fn three_step_terminal_replay_rejects_dispatch_commitment_substitution() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-dispatch-substitution");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-dispatch-substitution");
+    let bundle_id = fixture.bundle_id("three-step-dispatch-substitution");
+    let initial = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_mutate_event(
+        &fixture.database,
+        &run_id,
+        "AuthorizedExecutionAttemptDispatchAdmitted",
+        |kind| {
+            kind["executor_commitment"] = json!(workflow_core::SpecContentHash::from_text(
+                "substituted executor"
+            ));
+        },
+    );
+    assert_three_step_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+}
+
+#[test]
+fn three_step_terminal_replay_rejects_successor_boundary_corruption() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-successor-corruption");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-successor-corruption");
+    let bundle_id = fixture.bundle_id("three-step-successor-corruption");
+    let initial = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_swap_step_event_order(
+        &fixture.database,
+        &run_id,
+        "SkillInvocationSucceeded",
+        "project-validation",
+        "StepScheduled",
+        "docs-check",
+    );
+    assert_three_step_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+}
+
+#[test]
+fn three_step_terminal_replay_rejects_second_successor_boundary_corruption() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-second-successor-corruption");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-second-successor-corruption");
+    let bundle_id = fixture.bundle_id("three-step-second-successor-corruption");
+    let initial = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_swap_step_event_order(
+        &fixture.database,
+        &run_id,
+        "SkillInvocationSucceeded",
+        "docs-check",
+        "StepScheduled",
+        "cargo-format-check",
+    );
+    assert_three_step_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+}
+
+#[test]
+fn three_step_terminal_replay_rejects_result_profile_substitution() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-result-profile-substitution");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-result-profile-substitution");
+    let bundle_id = fixture.bundle_id("three-step-result-profile-substitution");
+    let initial = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_mutate_step_event(
+        &fixture.database,
+        &run_id,
+        "LocalCheckResultRecorded",
+        "cargo-format-check",
+        |kind| {
+            kind["profile_id"] = json!("docs_check");
+        },
+    );
+    assert_three_step_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+}
+
+#[test]
+fn three_step_terminal_replay_rejects_conflicting_v4_artifact_without_overwrite() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-artifact-conflict");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-artifact-conflict");
+    let bundle_id = fixture.bundle_id("three-step-artifact-conflict");
+    let initial = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let event_count = backend
+        .rehydrate_run(&run_id)
+        .expect("terminal run before conflicting replay")
+        .events
+        .len();
+    let conflicting_payload = mutate_artifact_payload(&fixture.database, &run_id, |value| {
+        value["work_report"]["known_limitations"][0]["summary"] =
+            json!("A different bounded three-step limitation.");
+    });
+
+    let replay = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert_artifact_persistence_failure(&replay);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("terminal run after conflicting replay")
+            .events
+            .len(),
+        event_count
+    );
+    assert_eq!(
+        read_artifact_payload(&fixture.database, &run_id),
+        conflicting_payload
+    );
+}
+
+#[test]
 fn two_step_terminal_replay_rejects_result_before_invocation_history_corruption() {
     let fixture = Fixture::new();
     let governance_root = fixture.root.join("two-step-corrupt-order");
@@ -1092,6 +1286,39 @@ fn three_step_restart_and_pre_result_integrity_failure_remain_honest() -> Result
         .incomplete_work()
         .iter()
         .any(|item| item.summary().contains("No bounded local-check result")));
+    let final_schedule_event = run
+        .events
+        .iter()
+        .rev()
+        .find(|event| matches!(event.kind, WorkflowRunEventKind::StepScheduled { .. }))
+        .expect("final schedule event");
+    assert!(artifacts[0]
+        .work_report()
+        .sections()
+        .iter()
+        .flat_map(workflow_core::WorkReportSection::citations)
+        .any(|citation| matches!(
+            citation.target(),
+            workflow_core::WorkReportCitationTarget::WorkflowEvent { event_id }
+                if event_id == &final_schedule_event.event_id
+        )));
+    clear_artifacts_and_mutate_event(
+        &fixture.database,
+        &run_id,
+        "SkillInvocationFailed",
+        |kind| {
+            kind["invocation_id"] = json!("invocation/substituted-pre-result");
+        },
+    );
+    let corrupt_backend =
+        SqliteStateBackend::open(&fixture.database).expect("reopen corrupt state");
+    let error = workflow_core::compose_trusted_host_three_step_terminal_work_report(
+        &corrupt_backend,
+        &registry,
+        &request,
+    )
+    .expect_err("substituted pre-result invocation must fail closed");
+    assert!(!error.to_string().contains("substituted-pre-result"));
     Ok(())
 }
 
@@ -1909,6 +2136,26 @@ fn clear_artifacts_and_mutate_event(
         .expect("write corrupt event payload");
 }
 
+fn clear_artifacts_and_mutate_step_event(
+    database: &Path,
+    run_id: &WorkflowRunId,
+    target_kind: &str,
+    step_id: &str,
+    mutate: impl FnOnce(&mut Value),
+) {
+    let connection = Connection::open(database).expect("open fixture database for corruption test");
+    clear_artifacts_with_connection(&connection, run_id);
+    let (event_id, payload) = find_step_event_payload(&connection, run_id, target_kind, step_id);
+    let mut value: Value = serde_json::from_str(&payload).expect("event payload JSON");
+    mutate(&mut value["kind"]);
+    connection
+        .execute(
+            "UPDATE events SET payload = ?1 WHERE event_id = ?2",
+            params![value.to_string(), event_id],
+        )
+        .expect("write corrupt step event payload");
+}
+
 fn clear_artifacts(database: &Path, run_id: &WorkflowRunId) {
     let connection = Connection::open(database).expect("open fixture database for artifact reset");
     clear_artifacts_with_connection(&connection, run_id);
@@ -2024,6 +2271,93 @@ fn clear_artifacts_and_swap_event_order(
     transaction.commit().expect("commit corrupt event order");
 }
 
+fn clear_artifacts_and_swap_step_event_order(
+    database: &Path,
+    run_id: &WorkflowRunId,
+    first_kind: &str,
+    first_step: &str,
+    second_kind: &str,
+    second_step: &str,
+) {
+    let mut connection = Connection::open(database).expect("open fixture database for order test");
+    clear_artifacts_with_connection(&connection, run_id);
+    let (first_id, first_payload) =
+        find_step_event_payload(&connection, run_id, first_kind, first_step);
+    let (second_id, second_payload) =
+        find_step_event_payload(&connection, run_id, second_kind, second_step);
+    let mut first_value: Value =
+        serde_json::from_str(&first_payload).expect("first event payload JSON");
+    let mut second_value: Value =
+        serde_json::from_str(&second_payload).expect("second event payload JSON");
+    let first_sequence = i64::try_from(
+        first_value["sequence_number"]
+            .as_u64()
+            .expect("first event sequence"),
+    )
+    .expect("first sequence fits SQLite");
+    let second_sequence = i64::try_from(
+        second_value["sequence_number"]
+            .as_u64()
+            .expect("second event sequence"),
+    )
+    .expect("second sequence fits SQLite");
+    assert!(first_sequence < second_sequence);
+    first_value["sequence_number"] = json!(second_sequence);
+    second_value["sequence_number"] = json!(first_sequence);
+    let temporary_sequence: i64 = connection
+        .query_row(
+            "SELECT MAX(sequence_number) + 100 FROM events WHERE run_id = ?1",
+            params![run_id.as_str()],
+            |row| row.get(0),
+        )
+        .expect("temporary sequence");
+    let transaction = connection.transaction().expect("corruption transaction");
+    transaction
+        .execute(
+            "UPDATE events SET sequence_number = ?1 WHERE event_id = ?2",
+            params![temporary_sequence, first_id],
+        )
+        .expect("move first event temporarily");
+    transaction
+        .execute(
+            "UPDATE events SET sequence_number = ?1, payload = ?2 WHERE event_id = ?3",
+            params![first_sequence, second_value.to_string(), second_id],
+        )
+        .expect("move second event first");
+    transaction
+        .execute(
+            "UPDATE events SET sequence_number = ?1, payload = ?2 WHERE event_id = ?3",
+            params![second_sequence, first_value.to_string(), first_id],
+        )
+        .expect("move first event second");
+    transaction.commit().expect("commit corrupt event order");
+}
+
+fn find_step_event_payload(
+    connection: &Connection,
+    run_id: &WorkflowRunId,
+    target_kind: &str,
+    step_id: &str,
+) -> (String, String) {
+    let mut statement = connection
+        .prepare("SELECT event_id, payload FROM events WHERE run_id = ?1 ORDER BY sequence_number")
+        .expect("prepare step event lookup");
+    let found = statement
+        .query_map(params![run_id.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .expect("query step event payloads")
+        .map(|row| row.expect("step event payload row"))
+        .find(|(_, payload)| {
+            let Ok(value) = serde_json::from_str::<Value>(payload) else {
+                return false;
+            };
+            value["kind"]["kind"].as_str() == Some(target_kind)
+                && value["kind"]["step_id"].as_str() == Some(step_id)
+        });
+    found.expect("target step event")
+}
+
 fn find_event_payload(
     connection: &Connection,
     run_id: &WorkflowRunId,
@@ -2074,6 +2408,43 @@ fn assert_corrupt_replay_fails_before_artifact(
         "trusted_host_local_application: admission.terminal_replay_report_generation_failed\n"
             | "trusted_host_local_application: trusted_host_local_application.failure.invalid_state\n"
     ));
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(run_id)
+            .expect("artifact list remains readable")
+            .len(),
+        0
+    );
+}
+
+fn assert_three_step_corrupt_replay_fails_before_artifact(
+    fixture: &Fixture,
+    governance_root: &Path,
+    run_id: &WorkflowRunId,
+    bundle_id: &ImmutableRunBundleId,
+    observed_at: &str,
+    expires_at: &str,
+) {
+    let replay = invoke_three_step(
+        fixture,
+        governance_root,
+        run_id,
+        bundle_id,
+        observed_at,
+        expires_at,
+    );
+    assert!(!replay.status.success());
+    assert_eq!(replay.stdout, Vec::<u8>::new());
+    let stderr = String::from_utf8(replay.stderr).expect("bounded corrupt replay stderr");
+    assert!(matches!(
+        stderr.as_str(),
+        "trusted_host_local_application: admission.terminal_replay_report_generation_failed\n"
+            | "trusted_host_local_application: trusted_host_local_application.failure.invalid_state\n"
+            | "trusted_host_local_application: trusted_host_local_application.failure.security\n"
+            | "trusted_host_local_application: trusted_host_local_application.failure.unsupported\n"
+    ));
+    assert!(!stderr.contains(fixture.root.to_string_lossy().as_ref()));
     let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
     assert_eq!(
         backend
