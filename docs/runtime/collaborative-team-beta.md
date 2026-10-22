@@ -68,6 +68,19 @@ with a non-disclosing `404`. The default legacy worker may process legacy
 unbound work; the collaborative worker requires project bindings. Disabling the
 collaborative router leaves durable project bindings and catalog records intact.
 
+One explicit opt-in executor path now consumes the Core-owned PostgreSQL
+collaborative identity source for `ApprovalDecide`. It fixes the capability in
+Core, derives the exact organization/project/principal query from trusted
+context, and commits the proof-marked decision, approval projection, and
+payload-free authority receipt in one serializable transaction under the same
+organization advisory lock as authority revision activation. The executor
+rehydrates the committed decision before continuation and reconciles exact
+restart replay without duplicating the decision event.
+
+This is not a collaborative HTTP decision endpoint, hosted authentication
+cutover, identity administration surface, or reusable capability token. Other
+approval paths remain unchanged and do not inherit collaborative authority.
+
 ## Current Limits
 
 This beta does not provide:
