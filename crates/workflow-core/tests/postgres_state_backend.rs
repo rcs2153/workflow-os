@@ -1197,7 +1197,12 @@ fn prove_hosted_project_resource_binding(backend: &PostgresStateBackend, config:
 
 #[test]
 fn restored_postgresql_database_passes_integrity_rehearsal() {
-    let Ok(value) = std::env::var("WORKFLOW_OS_RECOVERY_POSTGRES_URL") else {
+    let value = std::env::var("WORKFLOW_OS_RECOVERY_POSTGRES_URL").ok();
+    assert!(
+        value.is_some() || std::env::var_os("WORKFLOW_OS_REQUIRE_POSTGRES_TESTS").is_none(),
+        "WORKFLOW_OS_RECOVERY_POSTGRES_URL is required"
+    );
+    let Some(value) = value else {
         return;
     };
     let config: Config = value.parse().expect("recovery PostgreSQL URL parses");
@@ -1327,6 +1332,30 @@ fn restored_postgresql_database_passes_integrity_rehearsal() {
         .expect("read restored route indexes")
         .get(0);
     assert_eq!(index_count, 3);
+
+    let receipt_row = client
+        .query_one(
+            "SELECT receipt_id, approval_reference_id, approval_decision_event_id
+               FROM workflow_os.collaborative_approval_authority_receipts
+              ORDER BY receipt_id
+              LIMIT 1",
+            &[],
+        )
+        .expect("read restored collaborative approval authority receipt bindings");
+    let receipt_id: String = receipt_row.get(0);
+    let approval_reference_id =
+        workflow_core::ApprovalReferenceId::new(receipt_row.get::<_, String>(1))
+            .expect("restored approval reference");
+    let approval_decision_event_id =
+        EventId::new(receipt_row.get::<_, String>(2)).expect("restored decision event");
+    let recovered = backend
+        .read_collaborative_approval_authority_receipt_for_decision(
+            &approval_reference_id,
+            &approval_decision_event_id,
+        )
+        .expect("recover restored receipt by approval decision")
+        .expect("restored receipt decision binding exists");
+    assert_eq!(recovered.receipt_id().as_str(), receipt_id);
 }
 
 fn test_config() -> Option<Config> {

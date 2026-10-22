@@ -18,6 +18,15 @@ dump_file="$(mktemp "${TMPDIR:-/tmp}/workflow-os-postgresql-recovery.XXXXXX")"
 trap 'rm -f "${dump_file}"' EXIT
 chmod 600 "${dump_file}"
 
+WORKFLOW_OS_TEST_POSTGRES_URL="${WORKFLOW_OS_POSTGRES_SOURCE_URL}" \
+WORKFLOW_OS_REQUIRE_POSTGRES_TESTS=1 \
+  cargo test \
+  -p workflow-core \
+  --lib \
+  postgres_state::collaborative_approval_receipt_tests::postgresql_collaborative_approval_receipt_is_create_only_and_recovers_exactly \
+  -- \
+  --exact
+
 pg_dump \
   --format=custom \
   --no-owner \
@@ -49,4 +58,4 @@ WORKFLOW_OS_RECOVERY_POSTGRES_URL="${WORKFLOW_OS_POSTGRES_RESTORE_URL}" \
   -- \
   --exact
 
-printf 'PostgreSQL state backup, restore, authority, and approval-route integrity rehearsal passed.\n'
+printf 'PostgreSQL state backup, restore, authority, approval-route, and collaborative approval receipt integrity rehearsal passed.\n'

@@ -95,10 +95,14 @@ phase` language does not supersede the active queue.
    payload-free trusted receipt, explicitly unverified persisted claim, and
    dedicated PostgreSQL v4 create-only store use unique approval/event
    bindings, exact replay, exact recovery, and corruption checks. Focused
-   review found that required CI exercises migration but not those store
-   operations, and backup/restore does not yet prove receipt preservation.
-   Add only that live conformance/restart/recovery evidence and review it before
-   Phase 3. Before the later Phase 3 consumer, move
+   review found that required CI exercised migration but not those store
+   operations, and backup/restore did not prove receipt preservation. The
+   narrow PostgreSQL verification blocker fix is now implemented: required CI
+   invokes the exact receipt conformance test, absence of required database
+   configuration fails closed, restart recovery uses a reopened backend,
+   corrupted replay retains the corruption error, and the established logical
+   backup/restore rehearsal recovers the receipt by its decision bindings.
+   Review this fix before Phase 3. Before the later Phase 3 consumer, move
    database-time observation to the outer decision transaction and implement
    the reviewed advisory-lock and watermark-lock order. Do not add the decision
    consumer during review, substitute another

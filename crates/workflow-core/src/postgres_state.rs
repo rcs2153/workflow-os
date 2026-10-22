@@ -1024,6 +1024,11 @@ impl PostgresStateBackend {
             if inserted == 1 {
                 return Ok(CollaborativeApprovalAuthorityReceiptWriteOutcome::Written);
             }
+            let existing = read_collaborative_approval_authority_receipt_tx(
+                tx,
+                receipt.receipt_id().as_str(),
+            )?
+            .ok_or_else(collaborative_approval_receipt_conflict_error)?;
             let existing_payload = tx
                 .query_opt(
                     "SELECT canonical_payload
@@ -1039,11 +1044,6 @@ impl PostgresStateBackend {
             if existing_payload != payload {
                 return Err(collaborative_approval_receipt_conflict_error());
             }
-            let existing = read_collaborative_approval_authority_receipt_tx(
-                tx,
-                receipt.receipt_id().as_str(),
-            )?
-            .ok_or_else(collaborative_approval_receipt_conflict_error)?;
             if existing.approval_reference_id() != receipt.approval_reference_id()
                 || existing.approval_decision_event_id() != receipt.approval_decision_event_id()
                 || existing.receipt_id() != receipt.receipt_id()
@@ -6438,7 +6438,7 @@ CREATE TABLE workflow_os.collaborative_approval_authority_receipts (
 ";
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(clippy::expect_used, clippy::too_many_lines)]
 mod collaborative_approval_receipt_tests {
     use super::*;
     use crate::collaborative_approval_authority_receipt::CollaborativeApprovalAuthorityReceiptProof;
@@ -6475,7 +6475,12 @@ mod collaborative_approval_receipt_tests {
 
     #[test]
     fn postgresql_collaborative_approval_receipt_is_create_only_and_recovers_exactly() {
-        let Ok(value) = std::env::var("WORKFLOW_OS_TEST_POSTGRES_URL") else {
+        let value = std::env::var("WORKFLOW_OS_TEST_POSTGRES_URL").ok();
+        assert!(
+            value.is_some() || std::env::var_os("WORKFLOW_OS_REQUIRE_POSTGRES_TESTS").is_none(),
+            "WORKFLOW_OS_TEST_POSTGRES_URL is required"
+        );
+        let Some(value) = value else {
             return;
         };
         let config: Config = value.parse().expect("PostgreSQL URL parses");
@@ -6504,13 +6509,18 @@ mod collaborative_approval_receipt_tests {
                 .expect("exact replay"),
             CollaborativeApprovalAuthorityReceiptWriteOutcome::AlreadyExists
         );
-        let stored = backend
+        drop(backend);
+
+        let restarted = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
+            config.clone(),
+        )));
+        let stored = restarted
             .read_collaborative_approval_authority_receipt(stored_receipt.receipt_id())
             .expect("read")
             .expect("stored receipt");
         assert_eq!(stored.receipt_id(), stored_receipt.receipt_id());
         assert_eq!(
-            backend
+            restarted
                 .read_collaborative_approval_authority_receipt_for_decision(
                     stored_receipt.approval_reference_id(),
                     stored_receipt.approval_decision_event_id(),
@@ -6521,7 +6531,7 @@ mod collaborative_approval_receipt_tests {
             stored_receipt.receipt_id()
         );
 
-        let conflict = backend
+        let conflict = restarted
             .write_collaborative_approval_authority_receipt(&receipt("snapshot-b", &nonce))
             .expect_err("approval/event rebinding rejected");
         assert_eq!(
@@ -6548,7 +6558,15 @@ mod collaborative_approval_receipt_tests {
                 &[&stored_receipt.receipt_id().as_str(), &secret],
             )
             .expect("corrupt payload");
-        let error = backend
+        let replay_error = restarted
+            .write_collaborative_approval_authority_receipt(&stored_receipt)
+            .expect_err("corrupted replay rejected as corruption");
+        assert_eq!(
+            replay_error.code(),
+            "postgres_state.collaborative_approval_receipt.corrupt"
+        );
+        assert!(!format!("{replay_error:?} {replay_error}").contains(secret));
+        let error = restarted
             .read_collaborative_approval_authority_receipt(stored_receipt.receipt_id())
             .expect_err("corruption rejected");
         assert_eq!(
