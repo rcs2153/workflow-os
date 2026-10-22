@@ -88,7 +88,26 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Compose scoped capability authority into one opt-in GitHub read-only
+2. **Make capability-source continuity Core-owned and durable for the accepted
+   GitHub read-only path.** Implement one private, local continuity boundary
+   that derives first-versus-prior observation from trusted Core state rather
+   than caller choice, binds the exact registered source and repository-query
+   identity, advances generation and watermark monotonically, and rejects
+   rollback, same-generation substitution, stale replay, or conflicting
+   concurrent observation before the adapter client can run. Compose that
+   boundary into the existing crate-private repository-metadata operation and
+   prove exact restart and concurrency behavior with injected clients. Begin
+   with a focused implementation contract and security review inside the same
+   governed milestone, then implement only the accepted boundary. Do not add a
+   second provider operation, provider mutation, public or executor-facing API,
+   workflow configuration, schema, CLI behavior, hosted identity, reusable
+   authority, or automatic capability grants. This selection is recorded in
+   the [Capability Source Continuity Queue Selection
+   Report](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_QUEUE_SELECTION_REPORT.md).
+
+#### Recently Closed Queue Evidence
+
+- **Scoped capability authority composed into one opt-in GitHub read-only
    adapter path.** Deliver one Core-owned, injected, no-write vertical slice
    that freshly reads the complete current-authority fact set, resolves the
    exact repository-read capability for the workflow/run/step/actor/resource
@@ -153,11 +172,12 @@ reconciliation was stale: both defects were already fixed and accepted in PR
 #344. Current-main verification under Node 20 and Node 24 is recorded in the
 [First-Use CLI And Integration Check Verification
 Report](docs/concepts/FIRST_USE_CLI_INTEGRATION_CHECK_VERIFICATION_REPORT.md).
-The capability integration item above is now the selected executable phase. It
-was chosen through governed queue maintenance rather than by reviving
-historical `next phase` language from the lane evidence below.
+The capability integration item above is closed. Its accepted source-
+continuity limitation is now the selected executable phase through governed
+queue maintenance rather than by reviving historical `next phase` language
+from the lane evidence below.
 
-#### Completed Queue Evidence
+#### Earlier Completed Queue Evidence
 
 - **First-use CLI and integration-check hardening verified complete.** PR #344
   removed duplicate missing-manifest rendering and added bounded, actionable
