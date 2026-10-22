@@ -88,15 +88,33 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
+2. **Compose scoped capability authority into one opt-in GitHub read-only
+   adapter path.** Deliver one Core-owned, injected, no-write vertical slice
+   that freshly reads the complete current-authority fact set, resolves the
+   exact repository-read capability for the workflow/run/step/actor/resource
+   binding, invokes the existing `GitHubReadOnlyAdapter` only when authorized,
+   and issues a local unsigned evidence-only authority receipt only after a
+   successful read outcome. Missing, stale, revoked, ambiguous, insufficient,
+   or prerequisite-bearing authority must fail before the adapter client call;
+   a serialized projection or receipt must never authorize later use. Begin
+   with the focused integration contract and security review inside the same
+   governed vertical-slice milestone, then implement only the accepted
+   boundary. Use injected fixture clients for required tests; no live GitHub
+   access is required. Do not add provider writes, ambient tool exposure,
+   workflow schema or runtime configuration, CLI behavior, hosted identity,
+   nested harness execution, automatic approvals, or another capability
+   family. The selection and acceptance boundary are recorded in the [Scoped
+   Capability Read-Only Integration Queue Selection
+   Report](docs/concepts/SCOPED_CAPABILITY_READ_ONLY_INTEGRATION_QUEUE_SELECTION_REPORT.md).
 
-No unblocked implementation item is currently selected. The first-use CLI and
-integration-check item added during the latest queue reconciliation was stale:
-both defects were already fixed and accepted in PR #344. Current-main
-verification under Node 20 and Node 24 is recorded in the [First-Use CLI And
-Integration Check Verification
+The first-use CLI and integration-check item added during the prior queue
+reconciliation was stale: both defects were already fixed and accepted in PR
+#344. Current-main verification under Node 20 and Node 24 is recorded in the
+[First-Use CLI And Integration Check Verification
 Report](docs/concepts/FIRST_USE_CLI_INTEGRATION_CHECK_VERIFICATION_REPORT.md).
-Select the next executable phase through governed queue maintenance rather than
-reviving historical `next phase` language from the lane evidence below.
+The capability integration item above is now the selected executable phase. It
+was chosen through governed queue maintenance rather than by reviving
+historical `next phase` language from the lane evidence below.
 
 #### Completed Queue Evidence
 
