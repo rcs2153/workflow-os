@@ -36,7 +36,10 @@ use crate::{
 
 mod github_repository_read;
 
-pub(crate) use github_repository_read::SuccessfulCapabilityUseProof;
+pub(crate) use github_repository_read::{
+    CurrentAuthorityGitHubRepositoryReadInput, CurrentAuthorityGitHubRepositoryReadOutcome,
+    PreparedGitHubRepositoryRead, SuccessfulCapabilityUseProof,
+};
 
 const REGISTERED_FACT_FAMILIES: [CurrentAuthorityFactFamily; 3] = [
     CurrentAuthorityFactFamily::CapabilityGrants,
@@ -44,18 +47,18 @@ const REGISTERED_FACT_FAMILIES: [CurrentAuthorityFactFamily; 3] = [
     CurrentAuthorityFactFamily::GovernedContextReferences,
 ];
 
-pub(super) struct RegisteredInMemoryCurrentAuthoritySourceInput {
-    pub(super) source_id: CurrentAuthoritySourceId,
-    pub(super) contract_version: CurrentAuthoritySourceContractVersion,
-    pub(super) configuration_commitment: SpecContentHash,
-    pub(super) core_maximum_observation_age_seconds: u32,
-    pub(super) sensitivity: WorkReportSensitivity,
-    pub(super) observed_at: Timestamp,
-    pub(super) source_valid_through: Option<Timestamp>,
-    pub(super) generation: Option<CurrentAuthoritySourceGeneration>,
-    pub(super) complete_grant_inventory: Vec<CapabilityGrant>,
-    pub(super) complete_availability_inventory: Vec<CapabilityAvailabilityRecord>,
-    pub(super) complete_context_reference_inventory: Vec<GovernedContextReference>,
+pub(crate) struct RegisteredInMemoryCurrentAuthoritySourceInput {
+    pub(crate) source_id: CurrentAuthoritySourceId,
+    pub(crate) contract_version: CurrentAuthoritySourceContractVersion,
+    pub(crate) configuration_commitment: SpecContentHash,
+    pub(crate) core_maximum_observation_age_seconds: u32,
+    pub(crate) sensitivity: WorkReportSensitivity,
+    pub(crate) observed_at: Timestamp,
+    pub(crate) source_valid_through: Option<Timestamp>,
+    pub(crate) generation: Option<CurrentAuthoritySourceGeneration>,
+    pub(crate) complete_grant_inventory: Vec<CapabilityGrant>,
+    pub(crate) complete_availability_inventory: Vec<CapabilityAvailabilityRecord>,
+    pub(crate) complete_context_reference_inventory: Vec<GovernedContextReference>,
 }
 
 pub(crate) struct RegisteredExplicitZeroLocalCheckSourceInput<'a> {
@@ -610,7 +613,7 @@ impl RegisteredInMemoryCurrentAuthoritySource {
         })
     }
 
-    pub(super) fn register(
+    pub(crate) fn register(
         input: RegisteredInMemoryCurrentAuthoritySourceInput,
     ) -> Result<Self, WorkflowOsError> {
         let registration =

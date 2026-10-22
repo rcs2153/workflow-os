@@ -88,25 +88,29 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Implement the reviewed executor capability-gated GitHub read-only
-   composition.** Focused plan review accepts one crate-private, opt-in
-   executor operation for the already accepted GitHub repository-metadata read.
-   The operation must rehydrate the current run and immutable bundle, prove the
-   exact step, operation binding, and cursor, resolve current authority,
-   reconcile durable source continuity, consume one cursor-bound continuation
-   claim, append a write-ahead invocation, invoke the existing injected adapter
-   once, and project bounded telemetry and receipt posture. The review resolves
-   event-vocabulary, operation-selection, evidence, replay, and transaction
-   questions as mandatory implementation constraints: derive the private
-   operation binding from immutable content, keep receipt evidence separate,
-   and fail closed on ambiguous post-dispatch restart. Do not add a second
-   provider operation, provider mutation, public/default behavior, CLI/schema
-   exposure, runtime config, hosted identity, OpenShell, or nested harness
-   execution. See the [queue reconciliation report](docs/concepts/EXECUTOR_CAPABILITY_GITHUB_READ_ONLY_QUEUE_RECONCILIATION_REPORT.md),
-   [implementation plan](docs/implementation-plans/executor-capability-github-read-only-composition-plan.md),
-   and [focused plan review](docs/concepts/EXECUTOR_CAPABILITY_GITHUB_READ_ONLY_COMPOSITION_PLAN_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Executor capability-gated GitHub read-only composition accepted.** The
+  focused maintainer/security review found no blocker in the crate-private
+  SQLite-backed operation. Immutable operation selection, policy and approval
+  ordering, current authority, durable source continuity, one-time claim and
+  post-claim cursor enforcement, write-ahead events, at-most-once provider
+  entry, telemetry, payload-free receipt posture, and privacy match the
+  accepted plan. Crash ambiguity and process-level contention remain explicit
+  non-blocking limits; no public adoption or second provider operation is
+  authorized by this acceptance. See the [focused review](docs/concepts/EXECUTOR_CAPABILITY_GITHUB_READ_ONLY_COMPOSITION_REVIEW.md).
+
+- **Executor capability-gated GitHub read-only composition implemented.** One
+  crate-private SQLite-backed executor operation now derives the exact
+  repository-metadata operation from immutable step and skill content,
+  re-evaluates policy, resolves current scoped authority, reconciles durable
+  source continuity, consumes a cursor-bound continuation claim, revalidates
+  the cursor, writes invocation events before provider entry, invokes the
+  injected adapter at most once, and returns bounded telemetry plus a trusted
+  payload-free receipt. Concurrent exact consumers produce one provider call.
+  No receipt evidence kind is fabricated. See the [implementation
+  report](docs/concepts/EXECUTOR_CAPABILITY_GITHUB_READ_ONLY_COMPOSITION_REPORT.md).
 
 - **Executor capability-gated GitHub read composition plan accepted with
   mandatory constraints.** Existing skill-invocation events may represent the

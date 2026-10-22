@@ -15,10 +15,14 @@ mod registered_in_memory_source;
 
 #[cfg(feature = "trusted-host-application-spi")]
 pub(crate) use registered_in_memory_source::RegisteredExplicitZeroLocalCheckSourceInput;
+#[cfg(test)]
+pub(crate) use registered_in_memory_source::RegisteredInMemoryCurrentAuthoritySourceInput;
 pub(crate) use registered_in_memory_source::{
-    RegisteredCurrentAuthorityConsumerResult, RegisteredCurrentAuthorityUseInput,
-    RegisteredCurrentAuthorityUsePosture, RegisteredInMemoryCurrentAuthoritySource,
-    SuccessfulCapabilityUseProof, SuccessfulWorkReportMetadataReadProof,
+    CurrentAuthorityGitHubRepositoryReadInput, CurrentAuthorityGitHubRepositoryReadOutcome,
+    PreparedGitHubRepositoryRead, RegisteredCurrentAuthorityConsumerResult,
+    RegisteredCurrentAuthorityUseInput, RegisteredCurrentAuthorityUsePosture,
+    RegisteredInMemoryCurrentAuthoritySource, SuccessfulCapabilityUseProof,
+    SuccessfulWorkReportMetadataReadProof,
 };
 
 #[cfg(all(test, feature = "trusted-host-application-spi"))]
