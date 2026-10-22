@@ -81,7 +81,14 @@ separate future composition phase before released or broader trusted-host use.
 
 ## 9. Recommended Next Phase
 
-Perform the focused documentation-only blocker fix required by the plan
-review: define truthful non-passing local-check adaptation for trusted-host
-execution and one exact profile-selection compatibility rule. Re-review the
-corrected plan before implementation.
+Perform focused maintainer/security re-review of the corrected plan before
+implementation.
+
+## 10. Blocker-Fix Status
+
+The focused review's two blockers are corrected in
+[Trusted-Host Project-Validation Profile Plan Blocker Fix
+Report](TRUSTED_HOST_PROJECT_VALIDATION_PROFILE_PLAN_BLOCKER_FIX_REPORT.md).
+The corrected plan defines one private Core-owned trusted-host result adapter
+that accepts only passing checks as skill success, and an exact selector rule
+with a temporary no-profile compatibility alias for docs-check only.

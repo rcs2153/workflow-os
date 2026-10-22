@@ -1,6 +1,7 @@
 # Trusted-Host Project-Validation Profile Plan
 
-Status: planning complete; focused maintainer/security review is next.
+Status: planning blockers corrected; focused maintainer/security re-review is
+next.
 
 Related foundations:
 
@@ -83,16 +84,28 @@ construct workflow events from application arguments.
 
 ## 5. Closed Profile Interface
 
-The unpublished host may add one closed profile selector, for example:
+The unpublished host adds one closed profile selector:
 
 ```text
 --profile docs-check
 --profile workflow-os-project-validation
 ```
 
-The exact spelling may follow current parser conventions. The selector must be
-an exhaustive enum-like match. Unknown values fail before backend opening,
-project loading, run creation, or process execution.
+The selector is an exhaustive enum-like match. Unknown values fail before
+backend opening, project loading, run creation, or process execution.
+
+Selection follows this exact compatibility rule:
+
+- `--profile workflow-os-project-validation` is mandatory for the new path;
+- `--profile docs-check` explicitly selects the existing path; and
+- omitting `--profile` is a temporary, tested compatibility alias for the
+  already accepted docs-check path only.
+
+Project-validation arguments without its explicit selector, mixed
+profile-specific argument families, and unknown selectors fail before backend
+opening or state creation. The host must not infer authority from ambient
+files, executable names, or argument coincidence. The omission alias is an
+unpublished compatibility measure, not a released default-activation promise.
 
 For `workflow-os-project-validation`, the host accepts one explicit
 `--workflow-os-executable` path. It must not accept command arguments, shell
@@ -190,8 +203,27 @@ self-approval.
 
 ## 10. Check And Evidence Posture
 
-The actual same-call `LocalCheckResult` is the check truth. The implementation
-must preserve:
+The actual same-call `LocalCheckResult` is the check truth. The existing
+general result model remains unchanged because proportional-governance and
+other authoritative APIs legitimately consume non-passing results as data.
+
+Trusted-host execution must introduce one private Core-owned closed-profile
+adapter between resolved handler invocation and skill-attempt completion. The
+adapter:
+
+1. invokes the exact resolved handler once and obtains one
+   `LocalCheckResult`;
+2. converts only `LocalCheckStatus::Passed` into the existing bounded
+   `SkillOutput`;
+3. converts `Failed`, `TimedOut`, and internal handler failure into stable,
+   non-leaking execution failure before lifecycle terminalization;
+4. never reruns the process;
+5. never persists stdout, stderr, summaries, or command transcripts in failure
+   events or errors; and
+6. applies identically to both the docs-check and project-validation
+   trusted-host paths.
+
+The implementation must otherwise preserve:
 
 - fixed command-contract identity;
 - bounded success/failure status;
@@ -270,10 +302,12 @@ Implement as one bounded vertical slice:
    project validation;
 5. generalize trusted-host admission messages and identity construction only
    where exhaustive profile matching requires it;
-6. invoke the unchanged opaque prepared-session and lifecycle path;
-7. add actual foreground-binary tests for success, failure, waiting, replay,
-   and substitution; and
-8. update roadmap and implementation report.
+6. add the private trusted-host closed-profile result adapter and use it for
+   both accepted profiles;
+7. invoke the unchanged opaque prepared-session and lifecycle path;
+8. add actual foreground-binary tests for success, failure, timeout, waiting,
+   replay, selector compatibility, and substitution; and
+9. update roadmap and implementation report.
 
 Do not refactor the trusted-host application into a generic command host.
 
@@ -287,10 +321,19 @@ Focused tests must prove:
 - successful validation completes the workflow and persists the expected
   ordered lifecycle;
 - validation failure fails the workflow without raw output leakage;
+- timeout fails the workflow without raw output leakage;
+- nonzero docs-check exit also produces `SkillInvocationFailed` and
+  `RunFailed`, never success or completion;
+- failed and timed-out paths execute once, emit fixed bounded failure data,
+  and exact replay executes no process and appends no event;
 - exact terminal replay executes no process and appends no event;
 - authored approval waits without process execution;
 - policy denial executes nothing;
-- unknown profile and mismatched profile resolver fail before state creation;
+- explicit profile selection accepts only the two closed selectors;
+- omitted profile remains a tested compatibility alias for docs-check only;
+- project-validation arguments without its explicit selector, mixed argument
+  families, unknown profiles, and mismatched profile resolvers fail before
+  state creation;
 - governed-root substitution fails before process execution;
 - executable replacement after resolution fails closed;
 - immutable skill, version, command declaration, selected step, actor, bundle,
@@ -298,7 +341,8 @@ Focused tests must prove:
 - project-validation receives only its own source and contract identities;
 - non-empty or unknown current-authority requirements cannot enter the
   explicit-zero path;
-- docs-check behavior and argument compatibility remain unchanged;
+- passing docs-check behavior and existing no-profile argument compatibility
+  remain unchanged, while non-passing docs-check truth is corrected;
 - output and errors do not leak paths, command output, source contents,
   environment values, or secret-like markers;
 - no `WorkReport`, report artifact, provider call, source write, or released
@@ -341,6 +385,11 @@ The implementation is acceptable only when:
 
 - the unpublished host supports exactly the existing docs-check profile and
   the selected project-validation profile;
+- only passing local checks can become successful trusted-host skill attempts;
+- failed and timed-out checks terminalize the invocation and run as failure
+  without rerun or raw-output persistence;
+- profile selection follows the exact explicit-selector and temporary
+  docs-check compatibility-alias rule;
 - project validation operates on the exact governed project;
 - Core proves profile-specific explicit-zero authority and required context;
 - exact process, immutable, actor, and lifecycle bindings fail closed on
@@ -353,7 +402,7 @@ The implementation is acceptable only when:
 
 ## 19. Recommended Next Phase
 
-Perform a focused maintainer/security review of this plan. If accepted,
-implement the trusted-host project-validation profile as one complete
-foreground-binary vertical slice. Do not begin another profile or broader
-trusted-host scheduler work first.
+Perform a focused maintainer/security re-review of the corrected plan. If
+accepted, implement the trusted-host project-validation profile and shared
+trusted-host result adapter as one complete foreground-binary vertical slice.
+Do not begin another profile or broader trusted-host scheduler work first.

@@ -100,8 +100,11 @@ phase` language does not supersede the active queue.
    planning blockers: non-passing local checks currently become successful
    trusted-host skill outputs, and the proposed explicit profile selector does
    not yet define how existing docs-check invocations remain compatible.
-   Correct and re-review those boundaries before implementation. Do not jump to arbitrary
-   commands, another check family, default activation, scheduling, nested
+   The focused blocker fix now defines a private Core-owned result adapter that
+   accepts only passing checks as trusted-host success and an exact selector
+   rule with a temporary docs-check-only compatibility alias. Focused
+   maintainer/security re-review is next. Do not jump to arbitrary commands,
+   another check family, default activation, scheduling, nested
    harnesses, automatic approval, providers, writes, or hosted expansion.
 
 Queue maintenance rule: every merged roadmap phase must update this list and
