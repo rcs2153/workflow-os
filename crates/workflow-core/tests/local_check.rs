@@ -5,6 +5,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::json;
@@ -123,6 +125,89 @@ fn workflow_os_project_root() -> std::path::PathBuf {
     repository_root().join("dogfood/workflow-os-self-governance")
 }
 
+static CARGO_FMT_FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+struct CargoFmtFixture {
+    root: PathBuf,
+    repository: PathBuf,
+    toolchain: PathBuf,
+    cargo: PathBuf,
+    cargo_fmt: PathBuf,
+    rustfmt: PathBuf,
+}
+
+impl CargoFmtFixture {
+    fn new() -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "workflow-os-cargo-fmt-profile-{}-{}",
+            std::process::id(),
+            CARGO_FMT_FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let repository = root.join("repository");
+        let toolchain = root.join("toolchain");
+        let bin = toolchain.join("bin");
+        fs::create_dir_all(repository.join("src")).expect("repository fixture");
+        fs::create_dir_all(&bin).expect("toolchain fixture");
+        fs::write(
+            repository.join("Cargo.toml"),
+            "[package]\nname = \"fixture\"\nversion = \"0.0.0\"\n",
+        )
+        .expect("manifest fixture");
+        fs::write(
+            repository.join("src/lib.rs"),
+            "pub fn value() -> u8 {\n    1\n}\n",
+        )
+        .expect("source fixture");
+        let cargo = bin.join("cargo");
+        let cargo_fmt = bin.join("cargo-fmt");
+        let rustfmt = bin.join("rustfmt");
+        for executable in [&cargo, &cargo_fmt, &rustfmt] {
+            write_test_executable(executable);
+        }
+        Self {
+            root,
+            repository,
+            toolchain,
+            cargo,
+            cargo_fmt,
+            rustfmt,
+        }
+    }
+
+    fn resolve(
+        &self,
+        runner: Arc<dyn LocalCheckProcessRunner>,
+    ) -> Result<workflow_core::ResolvedExplicitLocalCheckProfile, workflow_core::WorkflowOsError>
+    {
+        ExplicitLocalCheckProfileSelection::cargo_fmt_check()
+            .resolve_cargo_fmt_check_with_process_runner(
+                &self.cargo,
+                &self.cargo_fmt,
+                &self.rustfmt,
+                &self.toolchain,
+                &self.repository,
+                runner,
+            )
+    }
+}
+
+impl Drop for CargoFmtFixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+fn write_test_executable(path: &Path) {
+    fs::write(path, "#!/bin/sh\nexit 0\n").expect("executable fixture");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mut permissions = fs::metadata(path).expect("metadata").permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(path, permissions).expect("executable permissions");
+    }
+}
+
 fn git_status_short(repository_root: &std::path::Path) -> String {
     let output = std::process::Command::new("git")
         .args(["status", "--short"])
@@ -189,6 +274,57 @@ impl LocalCheckProcessRunner for FakeRunner {
                 "fake local check runner failed",
             )
         })
+    }
+}
+
+#[derive(Clone)]
+struct MutatingRunner {
+    path: PathBuf,
+    mutation: FilesystemMutation,
+}
+
+#[derive(Clone, Copy)]
+enum FilesystemMutation {
+    Write,
+    Create,
+    Delete,
+    ReplaceFileWithDirectory,
+}
+
+impl fmt::Debug for MutatingRunner {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("MutatingRunner")
+    }
+}
+
+impl LocalCheckProcessRunner for MutatingRunner {
+    fn run(
+        &self,
+        _request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, workflow_core::WorkflowOsError> {
+        let mutation = match self.mutation {
+            FilesystemMutation::Write | FilesystemMutation::Create => {
+                fs::write(&self.path, "pub fn value() -> u8 {\n    2\n}\n")
+            }
+            FilesystemMutation::Delete => fs::remove_file(&self.path),
+            FilesystemMutation::ReplaceFileWithDirectory => {
+                fs::remove_file(&self.path).and_then(|()| fs::create_dir(&self.path))
+            }
+        };
+        mutation.map_err(|_| {
+            workflow_core::WorkflowOsError::new(
+                workflow_core::WorkflowOsErrorKind::Internal,
+                "local_check.test.mutation_failed",
+                "test mutation failed",
+            )
+        })?;
+        Ok(LocalCheckProcessOutput::completed(
+            Some(0),
+            true,
+            7,
+            Vec::new(),
+            Vec::new(),
+        ))
     }
 }
 
@@ -502,6 +638,219 @@ fn explicit_docs_check_profile_resolves_and_executes_only_when_called() {
         .clone()
         .expect("request captured");
     assert_eq!(request.arguments(), ["run", "check:docs"]);
+}
+
+#[test]
+fn explicit_cargo_fmt_profile_binds_exact_chain_and_executes_only_when_called() {
+    let fixture = CargoFmtFixture::new();
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        9,
+        Vec::new(),
+        Vec::new(),
+    )));
+    let profile = fixture
+        .resolve(Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>)
+        .expect("Cargo format profile resolves");
+
+    assert_eq!(
+        profile.profile_id(),
+        ExplicitLocalCheckProfileId::CargoFmtCheck
+    );
+    assert_eq!(profile.skill_id(), "local/check-cargo-fmt");
+    assert_eq!(profile.skill_version(), "v0");
+    assert_eq!(
+        profile.command_contract().command_kind(),
+        LocalCheckCommandKind::CargoFmtCheck
+    );
+    assert!(runner.last_request.lock().expect("request lock").is_none());
+
+    let result = profile.execute().expect("explicit execution succeeds");
+    assert_eq!(result.status(), LocalCheckResultStatus::Passed);
+    let request = runner
+        .last_request
+        .lock()
+        .expect("request lock")
+        .clone()
+        .expect("request captured");
+    assert_eq!(
+        request.executable(),
+        fixture.cargo.canonicalize().expect("canonical Cargo path")
+    );
+    assert_eq!(request.arguments(), ["fmt", "--all", "--check"]);
+    assert_eq!(
+        request
+            .environment()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec!["PATH", "RUSTFMT"]
+    );
+    assert_eq!(
+        request.environment().get("RUSTFMT").map(String::as_str),
+        Some(
+            fixture
+                .rustfmt
+                .canonicalize()
+                .expect("canonical rustfmt path")
+                .to_str()
+                .expect("rustfmt path is UTF-8")
+        )
+    );
+    let debug = format!("{profile:?}");
+    assert!(!debug.contains(&fixture.root.to_string_lossy().into_owned()));
+}
+
+#[test]
+fn cargo_fmt_profile_rejects_formatter_replacement_before_process_entry() {
+    let fixture = CargoFmtFixture::new();
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        9,
+        Vec::new(),
+        Vec::new(),
+    )));
+    let profile = fixture
+        .resolve(Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>)
+        .expect("Cargo format profile resolves");
+    write_test_executable(&fixture.rustfmt);
+    fs::write(&fixture.rustfmt, "#!/bin/sh\n# replacement\nexit 0\n").expect("replace rustfmt");
+
+    let error = profile
+        .execute()
+        .expect_err("formatter replacement must fail closed");
+
+    assert_eq!(
+        error.code(),
+        "local_check.profile.handler.formatter_identity_changed"
+    );
+    assert!(runner.last_request.lock().expect("request lock").is_none());
+    assert!(!error
+        .to_string()
+        .contains(&fixture.rustfmt.to_string_lossy().into_owned()));
+}
+
+#[test]
+fn cargo_fmt_profile_rejects_persistent_source_mutation_before_result_acceptance() {
+    let fixture = CargoFmtFixture::new();
+    let profile = fixture
+        .resolve(Arc::new(MutatingRunner {
+            path: fixture.repository.join("src/lib.rs"),
+            mutation: FilesystemMutation::Write,
+        }))
+        .expect("Cargo format profile resolves");
+
+    let error = profile
+        .execute()
+        .expect_err("persistent source mutation must fail closed");
+
+    assert_eq!(error.code(), "local_check.profile.protected_state_changed");
+    assert!(!error
+        .to_string()
+        .contains(&fixture.repository.to_string_lossy().into_owned()));
+}
+
+#[test]
+fn cargo_fmt_profile_rejects_added_deleted_and_type_changed_source_entries() {
+    for (relative, mutation) in [
+        ("src/generated.rs", FilesystemMutation::Create),
+        ("src/lib.rs", FilesystemMutation::Delete),
+        ("src/lib.rs", FilesystemMutation::ReplaceFileWithDirectory),
+    ] {
+        let fixture = CargoFmtFixture::new();
+        let profile = fixture
+            .resolve(Arc::new(MutatingRunner {
+                path: fixture.repository.join(relative),
+                mutation,
+            }))
+            .expect("Cargo format profile resolves");
+
+        let error = profile
+            .execute()
+            .expect_err("protected source inventory mutation must fail closed");
+
+        assert_eq!(error.code(), "local_check.profile.protected_state_changed");
+        assert!(!error.to_string().contains(relative));
+    }
+}
+
+#[test]
+fn cargo_fmt_profile_detects_ignored_untracked_source_addition() {
+    let fixture = CargoFmtFixture::new();
+    fs::write(fixture.repository.join(".gitignore"), "generated.rs\n").expect("gitignore");
+    let profile = fixture
+        .resolve(Arc::new(MutatingRunner {
+            path: fixture.repository.join("generated.rs"),
+            mutation: FilesystemMutation::Create,
+        }))
+        .expect("Cargo format profile resolves");
+
+    let error = profile
+        .execute()
+        .expect_err("ignored untracked addition must fail closed");
+
+    assert_eq!(error.code(), "local_check.profile.protected_state_changed");
+    assert!(!error.to_string().contains("generated.rs"));
+}
+
+#[cfg(unix)]
+#[test]
+fn cargo_fmt_profile_rejects_protected_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = CargoFmtFixture::new();
+    let outside = fixture.root.join("outside.rs");
+    fs::write(&outside, "outside\n").expect("outside fixture");
+    symlink(&outside, fixture.repository.join("src/escape.rs")).expect("symlink fixture");
+    let error = fixture
+        .resolve(Arc::new(FakeRunner::with_output(
+            LocalCheckProcessOutput::completed(Some(0), true, 1, Vec::new(), Vec::new()),
+        )))
+        .expect_err("symlink escape must fail closed");
+
+    assert_eq!(
+        error.code(),
+        "local_check.profile.protected_state_symlink_unsupported"
+    );
+    assert!(!error.to_string().contains("outside.rs"));
+}
+
+#[test]
+#[ignore = "opt-in live CargoFmtCheck smoke; requires WORKFLOW_OS_LIVE_CARGO_FMT_SMOKE=1 plus explicit Cargo, cargo-fmt, rustfmt, and toolchain-root paths"]
+fn opt_in_live_cargo_fmt_profile_runs_real_formatter_without_persistent_source_mutation() {
+    if std::env::var("WORKFLOW_OS_LIVE_CARGO_FMT_SMOKE")
+        .ok()
+        .as_deref()
+        != Some("1")
+    {
+        return;
+    }
+    let fixture = CargoFmtFixture::new();
+    let cargo = PathBuf::from(std::env::var("WORKFLOW_OS_LIVE_CARGO").expect("Cargo path"));
+    let cargo_fmt =
+        PathBuf::from(std::env::var("WORKFLOW_OS_LIVE_CARGO_FMT").expect("cargo-fmt path"));
+    let rustfmt = PathBuf::from(std::env::var("WORKFLOW_OS_LIVE_RUSTFMT").expect("rustfmt path"));
+    let toolchain_root =
+        PathBuf::from(std::env::var("WORKFLOW_OS_LIVE_TOOLCHAIN_ROOT").expect("toolchain root"));
+    let profile = ExplicitLocalCheckProfileSelection::cargo_fmt_check()
+        .resolve_cargo_fmt_check(
+            &cargo,
+            &cargo_fmt,
+            &rustfmt,
+            &toolchain_root,
+            &fixture.repository,
+        )
+        .expect("live Cargo format profile resolves");
+
+    let result = profile.execute().expect("live Cargo format check runs");
+
+    assert_eq!(result.status(), LocalCheckResultStatus::Passed);
+    assert_eq!(
+        fs::read_to_string(fixture.repository.join("src/lib.rs")).expect("source remains readable"),
+        "pub fn value() -> u8 {\n    1\n}\n"
+    );
 }
 
 #[test]

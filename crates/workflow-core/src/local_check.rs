@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -1085,6 +1085,36 @@ impl LocalCheckCommandContract {
         })
     }
 
+    /// Creates the canonical model-only Cargo format-check contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only if the built-in definition violates model
+    /// validation.
+    pub fn cargo_fmt_check_model_only() -> Result<Self, WorkflowOsError> {
+        Self::new(LocalCheckCommandContractDefinition {
+            command_id: LocalCheckCommandId::new("local-check/cargo-fmt")?,
+            command_kind: LocalCheckCommandKind::CargoFmtCheck,
+            execution_posture: LocalCheckExecutionPosture::ModelOnly,
+            executable: "cargo".to_owned(),
+            arguments: vec!["fmt".to_owned(), "--all".to_owned(), "--check".to_owned()],
+            working_directory_policy: LocalCheckWorkingDirectoryPolicy::RepositoryRoot,
+            environment_policy: LocalCheckEnvironmentPolicy::ExplicitAllowlistOnly,
+            allowed_environment_variables: vec!["PATH".to_owned(), "RUSTFMT".to_owned()],
+            network_policy: LocalCheckNetworkPolicy::Disabled,
+            timeout_seconds: 120,
+            side_effect_class: LocalCheckSideEffectClass::NoSourceWrites,
+            permitted_output_directories: Vec::new(),
+            output_capture: LocalCheckOutputCapturePolicy::bounded(16 * 1024, 16 * 1024),
+            redaction_policy: LocalCheckRedactionPolicy::BoundedRedactedSummary,
+            citation_kinds: vec![
+                WorkReportCitationKind::ValidationDiagnostic,
+                WorkReportCitationKind::WorkflowEvent,
+                WorkReportCitationKind::AuditEvent,
+            ],
+        })
+    }
+
     /// Validates the contract.
     ///
     /// # Errors
@@ -1525,6 +1555,199 @@ impl SkillHandler for DocsCheckLocalHandler {
     }
 }
 
+/// Explicit local check handler for `cargo fmt --all --check`.
+///
+/// The handler binds one complete formatter chain and compares protected
+/// repository final state before accepting the process result. It does not
+/// provide process-level filesystem isolation and is never registered by
+/// default.
+#[derive(Clone)]
+struct CargoFmtCheckLocalHandler {
+    contract: LocalCheckCommandContract,
+    cargo_executable: PathBuf,
+    cargo_fmt_executable: PathBuf,
+    rustfmt_executable: PathBuf,
+    formatter_chain_identity_hash: crate::SpecContentHash,
+    execution_identity_hash: crate::SpecContentHash,
+    repository_root: PathBuf,
+    toolchain_root: PathBuf,
+    protected_source_commitment: crate::SpecContentHash,
+    process_runner: Arc<dyn LocalCheckProcessRunner>,
+}
+
+impl CargoFmtCheckLocalHandler {
+    /// Creates the handler with an injected process runner.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the closed profile cannot be
+    /// resolved.
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_process_runner(
+        contract: LocalCheckCommandContract,
+        cargo_executable: &Path,
+        cargo_fmt_executable: &Path,
+        rustfmt_executable: &Path,
+        toolchain_root: &Path,
+        repository_root: &Path,
+        process_runner: Arc<dyn LocalCheckProcessRunner>,
+    ) -> Result<Self, WorkflowOsError> {
+        contract.validate()?;
+        if contract != LocalCheckCommandContract::cargo_fmt_check_model_only()? {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.profile.handler.contract_non_canonical",
+                "Cargo format handler requires its complete canonical contract",
+            ));
+        }
+        let repository_root = canonical_directory(
+            repository_root,
+            "local_check.profile.handler.repository_root_invalid",
+            "Cargo format handler requires a valid repository root",
+        )?;
+        if !repository_root.join("Cargo.toml").is_file() {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.profile.handler.repository_root_invalid",
+                "Cargo format handler requires a Cargo repository root",
+            ));
+        }
+        let toolchain_root = canonical_directory(
+            toolchain_root,
+            "local_check.profile.handler.toolchain_root_invalid",
+            "Cargo format handler requires a valid toolchain root",
+        )?;
+        if toolchain_root.starts_with(&repository_root) {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Security,
+                "local_check.profile.handler.toolchain_root_overlaps_repository",
+                "Cargo format toolchain root must be outside the repository root",
+            ));
+        }
+        let cargo_executable =
+            canonical_executable_in_root(cargo_executable, &toolchain_root, "cargo")?;
+        let cargo_fmt_executable =
+            canonical_executable_in_root(cargo_fmt_executable, &toolchain_root, "cargo-fmt")?;
+        let rustfmt_executable =
+            canonical_executable_in_root(rustfmt_executable, &toolchain_root, "rustfmt")?;
+        let formatter_chain_identity_hash = formatter_chain_identity_hash(
+            &cargo_executable,
+            &cargo_fmt_executable,
+            &rustfmt_executable,
+        )?;
+        let protected_source_commitment = protected_tree_commitment(&repository_root)?;
+        let execution_identity_hash = cargo_fmt_execution_identity_hash(
+            &formatter_chain_identity_hash,
+            &protected_source_commitment,
+        );
+
+        Ok(Self {
+            contract,
+            cargo_executable,
+            cargo_fmt_executable,
+            rustfmt_executable,
+            formatter_chain_identity_hash,
+            execution_identity_hash,
+            repository_root,
+            toolchain_root,
+            protected_source_commitment,
+            process_runner,
+        })
+    }
+
+    pub(crate) const fn contract(&self) -> &LocalCheckCommandContract {
+        &self.contract
+    }
+
+    pub(crate) fn build_process_request(
+        &self,
+    ) -> Result<LocalCheckProcessRequest, WorkflowOsError> {
+        self.contract.validate()?;
+        self.validate_current_identity()?;
+        LocalCheckProcessRequest::new(
+            self.cargo_executable.clone(),
+            self.contract.arguments().to_vec(),
+            self.repository_root.clone(),
+            cargo_fmt_environment(&self.cargo_fmt_executable, &self.rustfmt_executable)?,
+            Duration::from_secs(u64::from(self.contract.timeout_seconds())),
+        )
+    }
+
+    pub(crate) fn run_process(
+        &self,
+        request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+        let before = protected_tree_commitment(&self.repository_root)?;
+        if before != self.protected_source_commitment {
+            return Err(protected_state_changed_error());
+        }
+        let output = self.process_runner.run(request);
+        let after = protected_tree_commitment(&self.repository_root)?;
+        if after != before {
+            return Err(protected_state_changed_error());
+        }
+        self.validate_current_identity()?;
+        output
+    }
+
+    fn validate_current_identity(&self) -> Result<(), WorkflowOsError> {
+        for executable in [
+            &self.cargo_executable,
+            &self.cargo_fmt_executable,
+            &self.rustfmt_executable,
+        ] {
+            if !executable.starts_with(&self.toolchain_root) {
+                return Err(formatter_identity_changed_error());
+            }
+        }
+        let current = formatter_chain_identity_hash(
+            &self.cargo_executable,
+            &self.cargo_fmt_executable,
+            &self.rustfmt_executable,
+        )?;
+        if current != self.formatter_chain_identity_hash {
+            return Err(formatter_identity_changed_error());
+        }
+        let protected_source = protected_tree_commitment(&self.repository_root)?;
+        if protected_source != self.protected_source_commitment {
+            return Err(protected_state_changed_error());
+        }
+        if cargo_fmt_execution_identity_hash(&current, &protected_source)
+            != self.execution_identity_hash
+        {
+            return Err(formatter_identity_changed_error());
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for CargoFmtCheckLocalHandler {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CargoFmtCheckLocalHandler")
+            .field("command_kind", &self.contract.command_kind())
+            .field("cargo_executable", &"[REDACTED]")
+            .field("cargo_fmt_executable", &"[REDACTED]")
+            .field("rustfmt_executable", &"[REDACTED]")
+            .field("formatter_chain_identity_hash", &"[REDACTED]")
+            .field("execution_identity_hash", &"[REDACTED]")
+            .field("repository_root", &"[REDACTED]")
+            .field("toolchain_root", &"[REDACTED]")
+            .field("protected_source_commitment", &"[REDACTED]")
+            .field("process_runner", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl SkillHandler for CargoFmtCheckLocalHandler {
+    fn invoke(&self, _input: SkillInput) -> Result<SkillOutput, WorkflowOsError> {
+        let request = self.build_process_request()?;
+        let output = self.run_process(&request)?;
+        let result = LocalCheckResult::from_process_output(&self.contract, &output)?;
+        Ok(result.to_skill_output())
+    }
+}
+
 pub(crate) trait AuthoritativeLocalCheckHandler: fmt::Debug {
     fn contract(&self) -> &LocalCheckCommandContract;
     fn skill_id(&self) -> &'static str;
@@ -1568,6 +1791,36 @@ impl AuthoritativeLocalCheckHandler for DocsCheckLocalHandler {
     }
 }
 
+impl AuthoritativeLocalCheckHandler for CargoFmtCheckLocalHandler {
+    fn contract(&self) -> &LocalCheckCommandContract {
+        self.contract()
+    }
+
+    fn skill_id(&self) -> &'static str {
+        "local/check-cargo-fmt"
+    }
+
+    fn skill_version(&self) -> &'static str {
+        "v0"
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    fn executable_content_hash(&self) -> &crate::SpecContentHash {
+        &self.execution_identity_hash
+    }
+
+    fn build_process_request(&self) -> Result<LocalCheckProcessRequest, WorkflowOsError> {
+        self.build_process_request()
+    }
+
+    fn run_process(
+        &self,
+        request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+        self.run_process(request)
+    }
+}
+
 /// Closed identifier for an explicitly selected local-check profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1576,6 +1829,8 @@ pub enum ExplicitLocalCheckProfileId {
     WorkflowOsProjectValidation,
     /// Run the canonical Workflow OS repository docs check.
     DocsCheck,
+    /// Run the canonical Cargo format check.
+    CargoFmtCheck,
 }
 
 /// Closed, non-executing selection of one local-check profile.
@@ -1598,6 +1853,14 @@ impl ExplicitLocalCheckProfileSelection {
     pub const fn docs_check() -> Self {
         Self {
             profile_id: ExplicitLocalCheckProfileId::DocsCheck,
+        }
+    }
+
+    /// Selects the canonical Cargo format-check profile.
+    #[must_use]
+    pub const fn cargo_fmt_check() -> Self {
+        Self {
+            profile_id: ExplicitLocalCheckProfileId::CargoFmtCheck,
         }
     }
 
@@ -1657,11 +1920,13 @@ impl ExplicitLocalCheckProfileSelection {
                     ),
                 })
             }
-            ExplicitLocalCheckProfileId::DocsCheck => Err(local_check_error(
-                WorkflowOsErrorKind::Validation,
-                "local_check.profile.resolver_mismatch",
-                "selected local-check profile requires its matching explicit resolver",
-            )),
+            ExplicitLocalCheckProfileId::DocsCheck | ExplicitLocalCheckProfileId::CargoFmtCheck => {
+                Err(local_check_error(
+                    WorkflowOsErrorKind::Validation,
+                    "local_check.profile.resolver_mismatch",
+                    "selected local-check profile requires its matching explicit resolver",
+                ))
+            }
         }
     }
 
@@ -1714,6 +1979,68 @@ impl ExplicitLocalCheckProfileSelection {
         Ok(ResolvedExplicitLocalCheckProfile {
             profile_id: self.profile_id,
             handler: ResolvedExplicitLocalCheckHandler::DocsCheck(handler),
+        })
+    }
+
+    /// Resolves the Cargo format-check profile against one explicit formatter
+    /// chain and repository root.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when another profile is selected or
+    /// the formatter chain, toolchain root, or repository root is invalid.
+    pub fn resolve_cargo_fmt_check(
+        self,
+        cargo_executable: &Path,
+        cargo_fmt_executable: &Path,
+        rustfmt_executable: &Path,
+        toolchain_root: &Path,
+        repository_root: &Path,
+    ) -> Result<ResolvedExplicitLocalCheckProfile, WorkflowOsError> {
+        self.resolve_cargo_fmt_check_with_process_runner(
+            cargo_executable,
+            cargo_fmt_executable,
+            rustfmt_executable,
+            toolchain_root,
+            repository_root,
+            Arc::new(StdLocalCheckProcessRunner),
+        )
+    }
+
+    /// Resolves the Cargo format-check profile with an injected process runner.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the closed profile cannot be
+    /// resolved.
+    pub fn resolve_cargo_fmt_check_with_process_runner(
+        self,
+        cargo_executable: &Path,
+        cargo_fmt_executable: &Path,
+        rustfmt_executable: &Path,
+        toolchain_root: &Path,
+        repository_root: &Path,
+        process_runner: Arc<dyn LocalCheckProcessRunner>,
+    ) -> Result<ResolvedExplicitLocalCheckProfile, WorkflowOsError> {
+        if self.profile_id != ExplicitLocalCheckProfileId::CargoFmtCheck {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.profile.resolver_mismatch",
+                "selected local-check profile requires its matching explicit resolver",
+            ));
+        }
+        let handler = CargoFmtCheckLocalHandler::new_with_process_runner(
+            LocalCheckCommandContract::cargo_fmt_check_model_only()?,
+            cargo_executable,
+            cargo_fmt_executable,
+            rustfmt_executable,
+            toolchain_root,
+            repository_root,
+            process_runner,
+        )?;
+        Ok(ResolvedExplicitLocalCheckProfile {
+            profile_id: self.profile_id,
+            handler: ResolvedExplicitLocalCheckHandler::CargoFmtCheck(handler),
         })
     }
 }
@@ -1888,6 +2215,7 @@ pub(crate) struct ExplicitZeroRequiredContextProfileAuthorization {
 enum ResolvedExplicitLocalCheckHandler {
     WorkflowOsProjectValidation(WorkflowOsProjectValidationLocalHandler),
     DocsCheck(DocsCheckLocalHandler),
+    CargoFmtCheck(CargoFmtCheckLocalHandler),
 }
 
 impl ResolvedExplicitLocalCheckHandler {
@@ -1895,6 +2223,7 @@ impl ResolvedExplicitLocalCheckHandler {
         match self {
             Self::WorkflowOsProjectValidation(handler) => handler,
             Self::DocsCheck(handler) => handler,
+            Self::CargoFmtCheck(handler) => handler,
         }
     }
 
@@ -1902,6 +2231,7 @@ impl ResolvedExplicitLocalCheckHandler {
         match self {
             Self::WorkflowOsProjectValidation(handler) => Box::new(handler),
             Self::DocsCheck(handler) => Box::new(handler),
+            Self::CargoFmtCheck(handler) => Box::new(handler),
         }
     }
 }
@@ -1923,6 +2253,9 @@ impl ResolvedExplicitLocalCheckProfile {
             }
             ExplicitLocalCheckProfileId::DocsCheck => {
                 LocalCheckCommandContract::docs_check_model_only()?
+            }
+            ExplicitLocalCheckProfileId::CargoFmtCheck => {
+                LocalCheckCommandContract::cargo_fmt_check_model_only()?
             }
         };
         if self.command_contract() != &canonical {
@@ -2091,7 +2424,6 @@ impl ResolvedExplicitLocalCheckProfile {
     }
 }
 
-#[cfg(any(feature = "trusted-host-application-spi", test))]
 fn hash_private_commitment_field(hasher: &mut Sha256, name: &[u8], value: &[u8]) {
     hasher.update((name.len() as u64).to_be_bytes());
     hasher.update(name);
@@ -2100,23 +2432,26 @@ fn hash_private_commitment_field(hasher: &mut Sha256, name: &[u8], value: &[u8])
 }
 
 fn executable_content_hash(path: &Path) -> Result<crate::SpecContentHash, WorkflowOsError> {
-    let mut file = File::open(path).map_err(|_| {
-        local_check_error(
-            WorkflowOsErrorKind::Security,
-            "local_check.profile.handler.executable_identity_unavailable",
-            "local check executable identity is unavailable",
-        )
-    })?;
+    file_content_hash(
+        path,
+        "local_check.profile.handler.executable_identity_unavailable",
+        "local check executable identity is unavailable",
+    )
+}
+
+fn file_content_hash(
+    path: &Path,
+    code: &'static str,
+    message: &'static str,
+) -> Result<crate::SpecContentHash, WorkflowOsError> {
+    let mut file = File::open(path)
+        .map_err(|_| local_check_error(WorkflowOsErrorKind::Security, code, message))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 16 * 1024];
     loop {
-        let count = file.read(&mut buffer).map_err(|_| {
-            local_check_error(
-                WorkflowOsErrorKind::Security,
-                "local_check.profile.handler.executable_identity_unavailable",
-                "local check executable identity is unavailable",
-            )
-        })?;
+        let count = file
+            .read(&mut buffer)
+            .map_err(|_| local_check_error(WorkflowOsErrorKind::Security, code, message))?;
         if count == 0 {
             break;
         }
@@ -3053,6 +3388,240 @@ fn docs_check_environment(
     }
     validate_process_environment(&environment)?;
     Ok(environment)
+}
+
+fn cargo_fmt_environment(
+    cargo_fmt_executable: &Path,
+    rustfmt_executable: &Path,
+) -> Result<BTreeMap<String, String>, WorkflowOsError> {
+    let cargo_fmt_directory = cargo_fmt_executable.parent().ok_or_else(|| {
+        local_check_error(
+            WorkflowOsErrorKind::Security,
+            "local_check.profile.handler.formatter_identity_unavailable",
+            "Cargo format executable identity is unavailable",
+        )
+    })?;
+    let rustfmt_directory = rustfmt_executable.parent().ok_or_else(|| {
+        local_check_error(
+            WorkflowOsErrorKind::Security,
+            "local_check.profile.handler.formatter_identity_unavailable",
+            "Cargo format executable identity is unavailable",
+        )
+    })?;
+    let path = std::env::join_paths([cargo_fmt_directory, rustfmt_directory]).map_err(|_| {
+        local_check_error(
+            WorkflowOsErrorKind::Security,
+            "local_check.profile.handler.formatter_environment_invalid",
+            "Cargo format environment is invalid",
+        )
+    })?;
+    let mut environment = BTreeMap::new();
+    environment.insert("PATH".to_owned(), path.to_string_lossy().into_owned());
+    environment.insert(
+        "RUSTFMT".to_owned(),
+        rustfmt_executable.to_string_lossy().into_owned(),
+    );
+    validate_process_environment(&environment)?;
+    Ok(environment)
+}
+
+fn canonical_directory(
+    path: &Path,
+    code: &'static str,
+    message: &'static str,
+) -> Result<PathBuf, WorkflowOsError> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| local_check_error(WorkflowOsErrorKind::Validation, code, message))?;
+    if !canonical.is_dir() {
+        return Err(local_check_error(
+            WorkflowOsErrorKind::Validation,
+            code,
+            message,
+        ));
+    }
+    Ok(canonical)
+}
+
+fn canonical_executable_in_root(
+    path: &Path,
+    root: &Path,
+    expected_name: &str,
+) -> Result<PathBuf, WorkflowOsError> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|_| formatter_identity_unavailable_error())?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(formatter_identity_unavailable_error());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return Err(formatter_identity_unavailable_error());
+        }
+    }
+    if path.file_name().and_then(|name| name.to_str()) != Some(expected_name) {
+        return Err(formatter_identity_unavailable_error());
+    }
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| formatter_identity_unavailable_error())?;
+    if !canonical.starts_with(root) {
+        return Err(formatter_identity_unavailable_error());
+    }
+    Ok(canonical)
+}
+
+fn formatter_chain_identity_hash(
+    cargo_executable: &Path,
+    cargo_fmt_executable: &Path,
+    rustfmt_executable: &Path,
+) -> Result<crate::SpecContentHash, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    hash_private_commitment_field(
+        &mut hasher,
+        b"domain",
+        b"workflow-os/cargo-format-executable-chain/v1",
+    );
+    for (name, path) in [
+        (b"cargo".as_slice(), cargo_executable),
+        (b"cargo_fmt".as_slice(), cargo_fmt_executable),
+        (b"rustfmt".as_slice(), rustfmt_executable),
+    ] {
+        let digest = executable_content_hash(path)?;
+        hash_private_commitment_field(&mut hasher, name, digest.as_str().as_bytes());
+    }
+    Ok(crate::SpecContentHash::from_bytes(hasher.finalize()))
+}
+
+fn cargo_fmt_execution_identity_hash(
+    formatter_chain: &crate::SpecContentHash,
+    protected_source: &crate::SpecContentHash,
+) -> crate::SpecContentHash {
+    let mut hasher = Sha256::new();
+    hash_private_commitment_field(
+        &mut hasher,
+        b"domain",
+        b"workflow-os/cargo-format-resolved-execution/v1",
+    );
+    hash_private_commitment_field(
+        &mut hasher,
+        b"formatter_chain",
+        formatter_chain.as_str().as_bytes(),
+    );
+    hash_private_commitment_field(
+        &mut hasher,
+        b"protected_source",
+        protected_source.as_str().as_bytes(),
+    );
+    crate::SpecContentHash::from_bytes(hasher.finalize())
+}
+
+fn protected_tree_commitment(root: &Path) -> Result<crate::SpecContentHash, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    hash_private_commitment_field(
+        &mut hasher,
+        b"domain",
+        b"workflow-os/protected-source-final-state/v1",
+    );
+    commit_protected_directory(root, root, &mut hasher)?;
+    Ok(crate::SpecContentHash::from_bytes(hasher.finalize()))
+}
+
+fn commit_protected_directory(
+    root: &Path,
+    directory: &Path,
+    hasher: &mut Sha256,
+) -> Result<(), WorkflowOsError> {
+    let mut entries = fs::read_dir(directory)
+        .map_err(|_| protected_state_unavailable_error())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| protected_state_unavailable_error())?;
+    entries.sort_by(|left, right| {
+        left.file_name()
+            .as_encoded_bytes()
+            .cmp(right.file_name().as_encoded_bytes())
+    });
+    for entry in entries {
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| protected_state_unavailable_error())?;
+        if protected_inventory_excluded(relative) {
+            continue;
+        }
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|_| protected_state_unavailable_error())?;
+        if metadata.file_type().is_symlink() {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Security,
+                "local_check.profile.protected_state_symlink_unsupported",
+                "protected source inventory cannot contain symbolic links",
+            ));
+        }
+        if metadata.is_dir() {
+            hash_private_commitment_field(
+                hasher,
+                b"directory",
+                relative.as_os_str().as_encoded_bytes(),
+            );
+            commit_protected_directory(root, &path, hasher)?;
+        } else if metadata.is_file() {
+            hash_private_commitment_field(hasher, b"file", relative.as_os_str().as_encoded_bytes());
+            let digest = file_content_hash(
+                &path,
+                "local_check.profile.protected_state_unavailable",
+                "protected source state is unavailable",
+            )?;
+            hash_private_commitment_field(hasher, b"content", digest.as_str().as_bytes());
+        } else {
+            return Err(protected_state_unavailable_error());
+        }
+    }
+    Ok(())
+}
+
+fn protected_inventory_excluded(relative: &Path) -> bool {
+    [
+        Path::new(".git"),
+        Path::new(".workflow-os"),
+        Path::new("dogfood/.workflow-os"),
+        Path::new("target"),
+    ]
+    .iter()
+    .any(|excluded| relative == *excluded || relative.starts_with(excluded))
+}
+
+fn formatter_identity_unavailable_error() -> WorkflowOsError {
+    local_check_error(
+        WorkflowOsErrorKind::Security,
+        "local_check.profile.handler.formatter_identity_unavailable",
+        "Cargo format executable identity is unavailable",
+    )
+}
+
+fn formatter_identity_changed_error() -> WorkflowOsError {
+    local_check_error(
+        WorkflowOsErrorKind::Security,
+        "local_check.profile.handler.formatter_identity_changed",
+        "Cargo format executable identity changed after resolution",
+    )
+}
+
+fn protected_state_unavailable_error() -> WorkflowOsError {
+    local_check_error(
+        WorkflowOsErrorKind::Security,
+        "local_check.profile.protected_state_unavailable",
+        "protected source state is unavailable",
+    )
+}
+
+fn protected_state_changed_error() -> WorkflowOsError {
+    local_check_error(
+        WorkflowOsErrorKind::Security,
+        "local_check.profile.protected_state_changed",
+        "protected source final state changed during local check execution",
+    )
 }
 
 fn duration_millis(duration: Duration) -> u64 {
