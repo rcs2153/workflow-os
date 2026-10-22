@@ -72,19 +72,21 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the same-call collaborative `ApprovalDecide` consumer plan.** The
+2. **Implement the transaction-scoped collaborative authority source refactor.** The
    source planning, implementation, and review are accepted in the
    [Authoritative Collaborative Identity Source Boundary
    Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
    and [implementation review](docs/concepts/AUTHORITATIVE_COLLABORATIVE_IDENTITY_SOURCE_IMPLEMENTATION_REVIEW.md).
    The [Collaborative ApprovalDecide Consumer
    Plan](docs/implementation-plans/collaborative-approval-decide-consumer-plan.md)
-   now defines one exact-project transaction boundary that resolves current
-   authority and atomically records a payload-free receipt with the approval
-   decision. Perform its focused maintainer/security review next. Do not
-   implement it before acceptance, substitute another caller-assembled
-   projection, or begin OIDC, SCIM, dynamic groups, enterprise administration,
-   hosted authentication cutover, or provider writes.
+   and [focused review](docs/concepts/COLLABORATIVE_APPROVAL_DECIDE_CONSUMER_PLAN_REVIEW.md)
+   are accepted. Implement Phase 1 only: extract a private source read that
+   operates inside a caller-owned PostgreSQL transaction while preserving the
+   existing public non-authorizing read and proving equivalent evidence and
+   non-leakage. Do not add the receipt table or decision consumer yet,
+   substitute another caller-assembled projection, or begin OIDC, SCIM,
+   dynamic groups, enterprise administration, hosted authentication cutover,
+   or provider writes.
 3. **Select the next runnable no-write trusted-host profile.** Generalize the
    accepted private docs-check proof through one additional closed profile only
    after its authority, required-context, check, evidence, and terminal-report

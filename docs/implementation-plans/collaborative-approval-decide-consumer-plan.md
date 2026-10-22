@@ -1,6 +1,7 @@
 # Collaborative ApprovalDecide Consumer Plan
 
-Status: planning only; pending focused maintainer/security review
+Status: planning and focused maintainer/security review accepted; implementation
+not started
 
 Related foundations:
 
@@ -9,6 +10,7 @@ Related foundations:
 - [Collaborative Identity Lifecycle Plan](collaborative-identity-lifecycle-plan.md)
 - [Collaborative Team Beta Threat Model](../security/collaborative-team-beta-threat-model.md)
 - [Project-Scoped Approval Route Persistence Plan](project-scoped-approval-route-persistence-plan.md)
+- [Collaborative ApprovalDecide Consumer Plan Review](../concepts/COLLABORATIVE_APPROVAL_DECIDE_CONSUMER_PLAN_REVIEW.md)
 
 ## 1. Executive Summary
 
@@ -103,13 +105,27 @@ This plan does not authorize:
 
 ## 5. Selected Consumer Boundary
 
-The first consumer should be a PostgreSQL-backed function or backend method
-with the conceptual shape:
+The first consumer must include an executor-facing composition function with
+the conceptual shape:
+
+```text
+decide_collaborative_project_approval_with_presentation(request)
+    -> CollaborativeApprovalDecisionResult
+```
+
+That function should use a PostgreSQL-backed atomic operation with the narrower
+conceptual shape:
 
 ```text
 record_collaborative_approval_decision(request)
-    -> CollaborativeApprovalDecisionResult
+    -> CollaborativeApprovalDecisionCommit
 ```
+
+The backend operation alone is not the accepted runtime consumer. The existing
+`PostgresStateBackend::record_approval_decision(...)` is currently a low-level
+primitive exercised by persistence tests, not an executor-integrated approval
+callsite. The implementation must wire the collaborative operation through one
+explicit proof-enforced executor path before claiming a consequential consumer.
 
 The request should contain only already-validated decision material and trusted
 subjects required to derive the exact query:
@@ -254,9 +270,17 @@ If authority resolution or atomic persistence fails, no decision event,
 approval mutation, authority receipt, resume event, handler invocation, or
 side effect may occur. Retry starts from current durable state.
 
-After a successful commit, existing resume logic may proceed from the durable
-granted decision. It must not rely on the private source view surviving the
-transaction.
+After a successful commit, the executor-facing composition function must
+rehydrate the newly committed approval event and continue through a private
+resume-from-committed-decision path. It must not call an existing helper that
+appends `ApprovalGranted` or `ApprovalDenied` a second time. A crash after the
+decision commit but before resumption leaves an inspectable committed decision
+that a restart-safe worker can rehydrate; it does not roll back or duplicate
+the decision.
+
+The private source view must not survive the transaction. Subsequent workflow
+execution relies on the durable decision and receipt, not on a reusable
+identity-authority object.
 
 ## 12. Existing Gates Remain Mandatory
 
@@ -350,11 +374,14 @@ Timing-only sleeps are not sufficient evidence.
 
 ### Phase 3: Same-Call ApprovalDecide Consumer
 
-- Add one explicit collaborative decision request/result boundary.
+- Add one explicit proof-enforced executor-facing collaborative decision
+  request/result boundary.
 - Derive the query from trusted scope and principal context.
 - Resolve and lock current authority in the approval transaction.
 - Preserve all existing gates.
 - Atomically persist event, projection, and receipt.
+- Rehydrate the committed event and continue without appending a duplicate
+  decision event.
 - Prove races cannot commit stale authority.
 
 ### Phase 4: Focused Maintainer/Security Review
@@ -371,23 +398,40 @@ and an end-of-phase report. Documentation must keep hosted authentication,
 identity administration, additional consumers, provider writes, and production
 enterprise identity explicitly unimplemented.
 
-## 19. Open Questions For Plan Review
+## 19. Focused Review Resolutions
 
-The focused review must resolve:
+The focused maintainer/security review resolved the implementation choices as
+follows:
 
-1. Dedicated receipt table versus bounded generic records storage.
-2. `FOR UPDATE`, `FOR SHARE`, or the organization advisory-lock domain for a
-   provable serial order with revision activation.
-3. Exact durable source for the project/run binding inside the transaction.
-4. Narrowest high-assurance approval boundary to reuse without importing
-   artifact or provider-write behavior.
-5. Whether denied decisions require `ApprovalDecide`; the conservative default
-   is yes because denial changes durable project workflow state.
-6. Whether a decision serialized immediately before revocation activation is
-   valid; the recommended answer is yes only when database serialization proves
-   that order.
+1. Use a dedicated create-only collaborative approval-authority receipt table
+   with unique approval and decision-event bindings. Generic records storage
+   would obscure the security boundary and exact recovery query.
+2. Acquire the same organization-scoped session advisory lock used by revision
+   activation before starting the serializable decision transaction, then read
+   the watermark row `FOR UPDATE`. The shared advisory lock covers the missing-
+   row/first-activation case; the row lock makes the in-transaction comparison
+   explicit. Lock acquisition and release must use one reviewed helper and a
+   single global order.
+3. Reuse the existing PostgreSQL project resource binding table through a
+   transaction-scoped exact run-binding read with locking. Do not add a caller-
+   asserted project binding.
+4. The first executor-facing callsite must require durable approval-
+   presentation proof and reuse existing decision preparation. It must not
+   claim high-assurance approval unless the selected request also satisfies the
+   accepted high-assurance controls. Receipt/report-artifact and provider-write
+   behavior remain outside this consumer.
+5. Granted and denied decisions both require current `ApprovalDecide`
+   authority because either decision changes durable project workflow state.
+6. A decision serialized immediately before revocation activation is valid
+   only when the shared lock and PostgreSQL transaction establish that order.
+   Wall-clock overlap is not enough; a decision that loses that order must
+   retry and reassess.
+7. The low-level backend transaction is not sufficient product integration.
+   Phase 3 must include one explicit executor-facing callsite and a private
+   resume-from-committed-decision path that never duplicates the approval
+   event.
 
-These questions do not authorize broader implementation.
+These resolutions do not authorize broader implementation.
 
 ## 20. Final Recommendation
 
