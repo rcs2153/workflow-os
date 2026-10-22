@@ -1,7 +1,7 @@
 # Authoritative Collaborative Identity Source Boundary Plan
 
-Status: planning and focused maintainer/security review accepted; implementation
-not started
+Status: planning, focused maintainer/security review, persistent fact-store and
+Core-owned exact-query source implementation, and phase-level review accepted
 
 Related foundations:
 
@@ -37,6 +37,23 @@ Only a complete, current, Core-owned source read may authorize an action.
 This phase does not add OIDC, SCIM, hosted authentication cutover, groups,
 administration, provider writes, workflow schema fields, or production identity
 claims.
+
+Implementation status: Workflow OS now has the closed collaborative query and
+complete identity fact-family vocabulary, a managed PostgreSQL V3 schema for
+complete canonical authority revisions, monotonic activation, rollback and
+same-revision conflict rejection, database-time exact reads, restart-safe
+reconstruction, and payload-free source snapshot evidence. The implementation
+uses a separate versioned collaborative request sharing the existing source
+registration and snapshot commitment machinery, preserving the V1 required-
+context request unchanged. No approval-decision consumer or hosted identity
+cutover is implemented.
+
+The phase-level review required and applied five integrity corrections before
+acceptance: organization-scoped activation locking for the first-revision race,
+durable source-model version verification, fail-closed ambiguous matching
+grants, canonical closed fact-family ordering, and query-minimized emitted fact
+counts. Restored-state rehearsal now also checks exact replay, negative read
+posture, and rollback rejection.
 
 ## 2. Why This Phase Is Next
 

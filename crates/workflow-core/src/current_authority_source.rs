@@ -281,6 +281,14 @@ pub enum CurrentAuthorityFactFamily {
     CapabilityAvailability,
     /// Governed context reference posture.
     GovernedContextReferences,
+    /// Authoritative identity-provider registrations.
+    IdentityProviderRegistrations,
+    /// Opaque external-subject to local-principal bindings.
+    PrincipalIdentityBindings,
+    /// Current principal lifecycle records.
+    PrincipalLifecycle,
+    /// Additive capability-grant revocations.
+    CapabilityGrantRevocations,
 }
 
 impl<'de> Deserialize<'de> for CurrentAuthorityFactFamily {
@@ -292,6 +300,10 @@ impl<'de> Deserialize<'de> for CurrentAuthorityFactFamily {
             "capability_grants" => Ok(Self::CapabilityGrants),
             "capability_availability" => Ok(Self::CapabilityAvailability),
             "governed_context_references" => Ok(Self::GovernedContextReferences),
+            "identity_provider_registrations" => Ok(Self::IdentityProviderRegistrations),
+            "principal_identity_bindings" => Ok(Self::PrincipalIdentityBindings),
+            "principal_lifecycle" => Ok(Self::PrincipalLifecycle),
+            "capability_grant_revocations" => Ok(Self::CapabilityGrantRevocations),
             _ => Err(serde::de::Error::custom(
                 "current authority fact family is invalid",
             )),
@@ -1024,6 +1036,31 @@ pub struct CurrentAuthoritySourceSnapshotInput<'a> {
     pub records_commitment: SpecContentHash,
 }
 
+/// Internal payload-free request commitment shared by versioned source request models.
+pub(crate) struct CurrentAuthoritySourceSnapshotRequest<'a> {
+    pub(crate) registration_commitment: &'a SpecContentHash,
+    pub(crate) request_commitment: &'a SpecContentHash,
+    pub(crate) requested_fact_families: &'a [CurrentAuthorityFactFamily],
+    pub(crate) query_count: u64,
+    pub(crate) evaluated_at: Timestamp,
+}
+
+/// Internal common snapshot input for a validated versioned source request.
+pub(crate) struct CurrentAuthoritySourceCommittedSnapshotInput<'a> {
+    pub(crate) request: CurrentAuthoritySourceSnapshotRequest<'a>,
+    pub(crate) registration: &'a CurrentAuthoritySourceRegistration,
+    pub(crate) snapshot_id: CurrentAuthoritySourceSnapshotId,
+    pub(crate) watermark: CurrentAuthoritySourceWatermark,
+    pub(crate) generation: Option<CurrentAuthoritySourceGeneration>,
+    pub(crate) read_window: CurrentAuthoritySourceReadWindow,
+    pub(crate) completeness: CurrentAuthoritySourceCompleteness,
+    pub(crate) consistency: CurrentAuthoritySourceConsistency,
+    pub(crate) source_valid_through: Option<Timestamp>,
+    pub(crate) returned_fact_families: Vec<CurrentAuthorityFactFamily>,
+    pub(crate) fact_counts: Vec<CurrentAuthoritySourceFactCount>,
+    pub(crate) records_commitment: SpecContentHash,
+}
+
 /// Payload-free commitment to one current-authority source snapshot.
 ///
 /// This model cannot confer authority, readiness, or target access.
@@ -1064,7 +1101,34 @@ impl CurrentAuthoritySourceSnapshot {
     pub fn new(input: CurrentAuthoritySourceSnapshotInput<'_>) -> Result<Self, WorkflowOsError> {
         input.registration.validate()?;
         input.request.validate()?;
-        if input.request.registration_commitment != *input.registration.registration_commitment() {
+        Self::new_from_committed_request(CurrentAuthoritySourceCommittedSnapshotInput {
+            request: CurrentAuthoritySourceSnapshotRequest {
+                registration_commitment: &input.request.registration_commitment,
+                request_commitment: &input.request.request_commitment,
+                requested_fact_families: &input.request.requested_fact_families,
+                query_count: input.request.query_count,
+                evaluated_at: input.request.evaluated_at,
+            },
+            registration: input.registration,
+            snapshot_id: input.snapshot_id,
+            watermark: input.watermark,
+            generation: input.generation,
+            read_window: input.read_window,
+            completeness: input.completeness,
+            consistency: input.consistency,
+            source_valid_through: input.source_valid_through,
+            returned_fact_families: input.returned_fact_families,
+            fact_counts: input.fact_counts,
+            records_commitment: input.records_commitment,
+        })
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn new_from_committed_request(
+        input: CurrentAuthoritySourceCommittedSnapshotInput<'_>,
+    ) -> Result<Self, WorkflowOsError> {
+        input.registration.validate()?;
+        if input.request.registration_commitment != input.registration.registration_commitment() {
             return Err(source_error(
                 "snapshot.registration_mismatch",
                 "current authority source snapshot registration does not match request",
@@ -1145,7 +1209,7 @@ impl CurrentAuthoritySourceSnapshot {
             model_version: CurrentAuthoritySourceModelVersion::V1,
             registration_commitment: input.registration.registration_commitment.clone(),
             request_commitment: input.request.request_commitment.clone(),
-            requested_fact_families: input.request.requested_fact_families.clone(),
+            requested_fact_families: input.request.requested_fact_families.to_vec(),
             query_count: input.request.query_count,
             evaluated_at: input.request.evaluated_at,
             snapshot_id: input.snapshot_id,

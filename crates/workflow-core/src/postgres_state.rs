@@ -8,6 +8,9 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::collaborative_identity_authority_source::{
+    build_postgres_collaborative_identity_source_read, POSTGRES_SOURCE_VERSION,
+};
 use crate::hosted::{
     HostedExecutionAttempt, HostedExecutionAttemptStatus, HostedExecutionProviderId,
     HostedExecutionProviderVersion, HostedSkillDispatch, HostedTerminalReportArtifact,
@@ -17,31 +20,38 @@ use crate::{
     validate_approval_presentation_for_request, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, ApprovalPresentationId, ApprovalPresentationRecord,
     ApprovalPresentationRecordStore, ApprovalPresentationValidationInput, ApprovalReferenceId,
-    ApprovalRequest, ApprovalStore, BackendHealthCheck, DurableLeaseSemantics, DurableRevision,
-    DurableStateBackendKind, DurableStateCapability, DurableStateContractProvider,
-    DurableStateContractVersion, DurableStateSchemaMetadata, DurableStateSchemaPosture,
-    DurableStateSemanticContract, DurableStateSupport, DurableStateTransactionKind,
-    DurableStateTransactionSupport, EventLogStore, HostedExecutionReceipt, HostedExecutionStatus,
-    HostedProjectAccessDecision, HostedProjectCatalogVersion, HostedProjectResourceBinding,
-    HostedProjectResourceBindingReader, HostedProjectResourceBindingStatus,
-    HostedProjectResourceKind, HostedProjectScope, HostedWorkItem, HostedWorkItemId,
-    HostedWorkItemStatus, IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite,
-    ImmutableRunBundleBuildResult, ImmutableRunBundleDefinitionRecord, ImmutableRunBundleId,
-    ImmutableRunBundleManifest, LockLease, LockStore, OrganizationId, PolicyAuditRecord,
-    PolicyAuditStore, ProjectApprovalAuthoritySnapshotCommitment,
-    ProjectApprovalAuthorityViewCommitmentAlgorithm, ProjectApprovalNotificationPosture,
-    ProjectApprovalRouteCreateResult, ProjectApprovalRouteLogicalSubjectId,
-    ProjectApprovalRouteRecord, ProjectApprovalRouteRecordVersion,
-    ProjectApprovalRouteSourceCommitmentAlgorithm, ProjectApprovalRouteStatus,
-    ProjectApprovalRouteStore, ProjectApprovalRoutingReason, ProjectId, ProjectStateRecord,
-    ProjectStateStore, RunSnapshotStore, SideEffectId, SideEffectRecord, SideEffectRecordStore,
-    SpecContentHash, StateBackend, StoredImmutableRunBundle, WorkReportArtifactRecord,
-    WorkReportArtifactStore, WorkReportId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot, WorkflowRunStatus,
+    ApprovalRequest, ApprovalStore, BackendHealthCheck, CollaborativeIdentityAuthorityQuery,
+    CollaborativeIdentityAuthorityRevisionActivation,
+    CollaborativeIdentityAuthorityRevisionCandidate, CollaborativeIdentityAuthoritySourceRead,
+    CollaborativeIdentityProviderRegistration, CollaborativePrincipalIdentityBinding,
+    CollaborativePrincipalRecord, CollaborativeProjectGrant, CollaborativeProjectGrantRevocation,
+    CurrentAuthorityFactFamily, DurableLeaseSemantics, DurableRevision, DurableStateBackendKind,
+    DurableStateCapability, DurableStateContractProvider, DurableStateContractVersion,
+    DurableStateSchemaMetadata, DurableStateSchemaPosture, DurableStateSemanticContract,
+    DurableStateSupport, DurableStateTransactionKind, DurableStateTransactionSupport,
+    EventLogStore, HostedExecutionReceipt, HostedExecutionStatus, HostedProjectAccessDecision,
+    HostedProjectCatalogVersion, HostedProjectResourceBinding, HostedProjectResourceBindingReader,
+    HostedProjectResourceBindingStatus, HostedProjectResourceKind, HostedProjectScope,
+    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
+    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildResult,
+    ImmutableRunBundleDefinitionRecord, ImmutableRunBundleId, ImmutableRunBundleManifest,
+    LockLease, LockStore, OrganizationId, PolicyAuditRecord, PolicyAuditStore,
+    ProjectApprovalAuthoritySnapshotCommitment, ProjectApprovalAuthorityViewCommitmentAlgorithm,
+    ProjectApprovalNotificationPosture, ProjectApprovalRouteCreateResult,
+    ProjectApprovalRouteLogicalSubjectId, ProjectApprovalRouteRecord,
+    ProjectApprovalRouteRecordVersion, ProjectApprovalRouteSourceCommitmentAlgorithm,
+    ProjectApprovalRouteStatus, ProjectApprovalRouteStore, ProjectApprovalRoutingReason, ProjectId,
+    ProjectStateRecord, ProjectStateStore, RunSnapshotStore, SideEffectId, SideEffectRecord,
+    SideEffectRecordStore, SpecContentHash, StateBackend, StoredImmutableRunBundle,
+    WorkReportArtifactRecord, WorkReportArtifactStore, WorkReportId, WorkflowOsError,
+    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
+    WorkflowRunStatus,
 };
 
-const SCHEMA_VERSION: i32 = 2;
-const SCHEMA_CHECKSUM: &str = "workflow-os-postgresql-v2";
+const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_CHECKSUM: &str = "workflow-os-postgresql-v3";
+const SCHEMA_V2_VERSION: i32 = 2;
+const SCHEMA_V2_CHECKSUM: &str = "workflow-os-postgresql-v2";
 const SCHEMA_V1_VERSION: i32 = 1;
 const SCHEMA_V1_CHECKSUM: &str = "workflow-os-postgresql-v1";
 const MAX_TRANSACTION_ATTEMPTS: usize = 3;
@@ -675,6 +685,8 @@ impl PostgresStateBackend {
                     .map_err(|error| database_error("schema_install_v1", &error))?;
                 tx.batch_execute(SCHEMA_V2_SQL)
                     .map_err(|error| database_error("schema_install_v2", &error))?;
+                tx.batch_execute(SCHEMA_V3_SQL)
+                    .map_err(|error| database_error("schema_install_v3", &error))?;
                 tx.execute(
                     "INSERT INTO workflow_os.schema_metadata
                        (singleton, schema_version, checksum, recovery_required)
@@ -696,6 +708,8 @@ impl PostgresStateBackend {
                 if version == SCHEMA_V1_VERSION && checksum == SCHEMA_V1_CHECKSUM {
                     tx.batch_execute(SCHEMA_V2_SQL)
                         .map_err(|error| database_error("schema_migrate_v2", &error))?;
+                    tx.batch_execute(SCHEMA_V3_SQL)
+                        .map_err(|error| database_error("schema_migrate_v3", &error))?;
                     tx.execute(
                         "UPDATE workflow_os.schema_metadata
                             SET schema_version = $1, checksum = $2,
@@ -704,6 +718,17 @@ impl PostgresStateBackend {
                         &[&SCHEMA_VERSION, &SCHEMA_CHECKSUM],
                     )
                     .map_err(|error| database_error("schema_advance_v2", &error))?;
+                } else if version == SCHEMA_V2_VERSION && checksum == SCHEMA_V2_CHECKSUM {
+                    tx.batch_execute(SCHEMA_V3_SQL)
+                        .map_err(|error| database_error("schema_migrate_v3", &error))?;
+                    tx.execute(
+                        "UPDATE workflow_os.schema_metadata
+                            SET schema_version = $1, checksum = $2,
+                                updated_at = clock_timestamp()
+                          WHERE singleton = TRUE",
+                        &[&SCHEMA_VERSION, &SCHEMA_CHECKSUM],
+                    )
+                    .map_err(|error| database_error("schema_advance_v3", &error))?;
                 } else if version != SCHEMA_VERSION || checksum != SCHEMA_CHECKSUM {
                     return Err(state_error(
                         "postgres_state.schema.incompatible",
@@ -816,6 +841,154 @@ impl PostgresStateBackend {
                     Ok(())
                 }
             }
+        })
+    }
+
+    /// Atomically activates one complete collaborative identity authority revision.
+    ///
+    /// Exact replay reconciles only after the durable inventory reconstructs to the same
+    /// canonical candidate. Rollback and same-revision content conflicts fail closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable non-leaking errors for rollback, conflicts, corruption, or unavailable
+    /// durable state.
+    pub fn activate_collaborative_identity_authority_revision(
+        &self,
+        candidate: &CollaborativeIdentityAuthorityRevisionCandidate,
+    ) -> Result<CollaborativeIdentityAuthorityRevisionActivation, WorkflowOsError> {
+        let revision = authority_revision_to_i64(candidate.authority_revision())?;
+        let organization_id = candidate.organization_id().as_str();
+        let mut client = self.connections.connect()?;
+        let activation_lock = format!("workflow_os_collaborative_identity:{organization_id}");
+        client
+            .query_one("SELECT pg_advisory_lock(hashtext($1))", &[&activation_lock])
+            .map_err(|error| database_error("collaborative_authority_activation_lock", &error))?;
+        let activation = serializable(&mut client, |tx| {
+            let existing = tx
+                .query_opt(
+                    "SELECT authority_revision, revision_commitment, source_model_version
+                       FROM workflow_os.collaborative_identity_authority_high_watermarks
+                      WHERE organization_id = $1 FOR UPDATE",
+                    &[&organization_id],
+                )
+                .map_err(|error| {
+                    database_error("collaborative_authority_watermark_read", &error)
+                })?;
+            if let Some(row) = existing {
+                let stored_revision: i64 = row.get(0);
+                let stored_commitment: String = row.get(1);
+                let stored_source_model_version: String = row.get(2);
+                if stored_source_model_version != POSTGRES_SOURCE_VERSION {
+                    return Err(collaborative_authority_corruption_error());
+                }
+                if revision < stored_revision {
+                    return Err(state_error(
+                        "postgres_state.collaborative_authority.revision.rollback",
+                        "collaborative authority revision would roll back durable state",
+                    ));
+                }
+                if revision == stored_revision {
+                    let durable = read_collaborative_identity_candidate_tx(
+                        tx,
+                        organization_id,
+                        stored_revision,
+                    )?;
+                    if stored_commitment == candidate.commitment().as_str() && durable == *candidate
+                    {
+                        return Ok(
+                            CollaborativeIdentityAuthorityRevisionActivation::ReconciledExisting,
+                        );
+                    }
+                    return Err(state_error(
+                        "postgres_state.collaborative_authority.revision.conflict",
+                        "collaborative authority revision conflicts with durable state",
+                    ));
+                }
+            }
+
+            insert_collaborative_identity_candidate_tx(tx, candidate)?;
+            tx.execute(
+                "INSERT INTO workflow_os.collaborative_identity_authority_high_watermarks
+                    (organization_id, authority_revision, revision_commitment,
+                     source_model_version)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (organization_id) DO UPDATE
+                    SET authority_revision = EXCLUDED.authority_revision,
+                        revision_commitment = EXCLUDED.revision_commitment,
+                        source_model_version = EXCLUDED.source_model_version,
+                        accepted_at = clock_timestamp()",
+                &[
+                    &organization_id,
+                    &revision,
+                    &candidate.commitment().as_str(),
+                    &POSTGRES_SOURCE_VERSION,
+                ],
+            )
+            .map_err(|error| database_error("collaborative_authority_watermark_write", &error))?;
+            Ok(CollaborativeIdentityAuthorityRevisionActivation::Activated)
+        });
+        let unlock = client
+            .query_one(
+                "SELECT pg_advisory_unlock(hashtext($1))",
+                &[&activation_lock],
+            )
+            .map_err(|error| database_error("collaborative_authority_activation_unlock", &error))?;
+        let unlocked: bool = unlock.get(0);
+        if !unlocked {
+            return Err(state_error(
+                "postgres_state.collaborative_authority.activation_lock.invalid",
+                "collaborative authority activation lock state is invalid",
+            ));
+        }
+        activation
+    }
+
+    /// Reads one exact collaborative authority query from the active complete revision.
+    ///
+    /// The read uses database time and returns payload-free evidence. It does not authorize or
+    /// execute any action.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable non-leaking errors for missing authority, corruption, scope mismatch, or
+    /// unavailable durable state.
+    pub fn read_collaborative_identity_authority(
+        &self,
+        query: &CollaborativeIdentityAuthorityQuery,
+    ) -> Result<CollaborativeIdentityAuthoritySourceRead, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let evaluated_at = database_timestamp_tx(tx)?;
+            let row = tx
+                .query_opt(
+                    "SELECT authority_revision, revision_commitment, source_model_version
+                       FROM workflow_os.collaborative_identity_authority_high_watermarks
+                      WHERE organization_id = $1",
+                    &[&query.organization_id().as_str()],
+                )
+                .map_err(|error| database_error("collaborative_authority_watermark_read", &error))?
+                .ok_or_else(|| {
+                    state_error(
+                        "postgres_state.collaborative_authority.missing",
+                        "collaborative authority source is not initialized",
+                    )
+                })?;
+            let revision: i64 = row.get(0);
+            let commitment: String = row.get(1);
+            let source_model_version: String = row.get(2);
+            if source_model_version != POSTGRES_SOURCE_VERSION {
+                return Err(collaborative_authority_corruption_error());
+            }
+            let candidate = read_collaborative_identity_candidate_tx(
+                tx,
+                query.organization_id().as_str(),
+                revision,
+            )?;
+            if candidate.commitment().as_str() != commitment {
+                return Err(collaborative_authority_corruption_error());
+            }
+            build_postgres_collaborative_identity_source_read(query, &candidate, evaluated_at)
         })
     }
 
@@ -3559,6 +3732,243 @@ fn serializable<T>(
     }))
 }
 
+fn authority_revision_to_i64(
+    revision: crate::HostedAuthorityRegistryRevision,
+) -> Result<i64, WorkflowOsError> {
+    i64::try_from(revision.get()).map_err(|_| {
+        state_error(
+            "postgres_state.collaborative_authority.revision.invalid",
+            "collaborative authority revision is invalid",
+        )
+    })
+}
+
+fn collaborative_authority_family_label(family: CurrentAuthorityFactFamily) -> &'static str {
+    match family {
+        CurrentAuthorityFactFamily::IdentityProviderRegistrations => {
+            "identity_provider_registrations"
+        }
+        CurrentAuthorityFactFamily::PrincipalIdentityBindings => "principal_identity_bindings",
+        CurrentAuthorityFactFamily::PrincipalLifecycle => "principal_lifecycle",
+        CurrentAuthorityFactFamily::CapabilityGrants => "capability_grants",
+        CurrentAuthorityFactFamily::CapabilityGrantRevocations => "capability_grant_revocations",
+        _ => "unsupported",
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_collaborative_identity_fact_tx<T: Serialize>(
+    tx: &mut Transaction<'_>,
+    organization_id: &str,
+    revision: i64,
+    family: CurrentAuthorityFactFamily,
+    logical_id: &str,
+    project_id: Option<&str>,
+    principal_id: Option<&str>,
+    value: &T,
+) -> Result<(), WorkflowOsError> {
+    let payload = encode(value)?;
+    let payload_hash = SpecContentHash::from_text(&payload);
+    tx.execute(
+        "INSERT INTO workflow_os.collaborative_identity_authority_facts
+            (organization_id, authority_revision, fact_family, logical_id,
+             project_id, principal_id, canonical_payload, canonical_payload_hash)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        &[
+            &organization_id,
+            &revision,
+            &collaborative_authority_family_label(family),
+            &logical_id,
+            &project_id,
+            &principal_id,
+            &payload,
+            &payload_hash.as_str(),
+        ],
+    )
+    .map_err(|error| database_error("collaborative_authority_fact_insert", &error))?;
+    Ok(())
+}
+
+fn insert_collaborative_identity_candidate_tx(
+    tx: &mut Transaction<'_>,
+    candidate: &CollaborativeIdentityAuthorityRevisionCandidate,
+) -> Result<(), WorkflowOsError> {
+    let revision = authority_revision_to_i64(candidate.authority_revision())?;
+    let organization_id = candidate.organization_id().as_str();
+    for provider in candidate.providers() {
+        insert_collaborative_identity_fact_tx(
+            tx,
+            organization_id,
+            revision,
+            CurrentAuthorityFactFamily::IdentityProviderRegistrations,
+            provider.provider_id().as_str(),
+            None,
+            None,
+            provider,
+        )?;
+    }
+    for binding in candidate.bindings() {
+        insert_collaborative_identity_fact_tx(
+            tx,
+            organization_id,
+            revision,
+            CurrentAuthorityFactFamily::PrincipalIdentityBindings,
+            binding.binding_id().as_str(),
+            None,
+            Some(binding.principal_id().as_str()),
+            binding,
+        )?;
+    }
+    for principal in candidate.principals() {
+        insert_collaborative_identity_fact_tx(
+            tx,
+            organization_id,
+            revision,
+            CurrentAuthorityFactFamily::PrincipalLifecycle,
+            principal.principal_id().as_str(),
+            None,
+            Some(principal.principal_id().as_str()),
+            principal,
+        )?;
+    }
+    for grant in candidate.grants() {
+        insert_collaborative_identity_fact_tx(
+            tx,
+            organization_id,
+            revision,
+            CurrentAuthorityFactFamily::CapabilityGrants,
+            grant.grant_id().as_str(),
+            Some(grant.project_id().as_str()),
+            Some(grant.principal_id().as_str()),
+            grant,
+        )?;
+    }
+    for revocation in candidate.revocations() {
+        insert_collaborative_identity_fact_tx(
+            tx,
+            organization_id,
+            revision,
+            CurrentAuthorityFactFamily::CapabilityGrantRevocations,
+            revocation.revocation_id().as_str(),
+            Some(revocation.project_id().as_str()),
+            Some(revocation.principal_id().as_str()),
+            revocation,
+        )?;
+    }
+    Ok(())
+}
+
+fn read_collaborative_identity_candidate_tx(
+    tx: &mut Transaction<'_>,
+    organization_id: &str,
+    revision: i64,
+) -> Result<CollaborativeIdentityAuthorityRevisionCandidate, WorkflowOsError> {
+    let rows = tx
+        .query(
+            "SELECT fact_family, logical_id, project_id, principal_id,
+                    canonical_payload, canonical_payload_hash
+               FROM workflow_os.collaborative_identity_authority_facts
+              WHERE organization_id = $1 AND authority_revision = $2
+              ORDER BY fact_family, logical_id",
+            &[&organization_id, &revision],
+        )
+        .map_err(|error| database_error("collaborative_authority_fact_read", &error))?;
+    let mut providers = Vec::new();
+    let mut bindings = Vec::new();
+    let mut principals = Vec::new();
+    let mut grants = Vec::new();
+    let mut revocations = Vec::new();
+    for row in rows {
+        let family: String = row.get(0);
+        let logical_id: String = row.get(1);
+        let project_id: Option<String> = row.get(2);
+        let principal_id: Option<String> = row.get(3);
+        let payload: String = row.get(4);
+        let payload_hash: String = row.get(5);
+        if SpecContentHash::from_text(&payload).as_str() != payload_hash {
+            return Err(collaborative_authority_corruption_error());
+        }
+        match family.as_str() {
+            "identity_provider_registrations" => {
+                let value: CollaborativeIdentityProviderRegistration = decode(&payload)?;
+                if value.provider_id().as_str() != logical_id
+                    || value.organization_id().as_str() != organization_id
+                    || project_id.is_some()
+                    || principal_id.is_some()
+                {
+                    return Err(collaborative_authority_corruption_error());
+                }
+                providers.push(value);
+            }
+            "principal_identity_bindings" => {
+                let value: CollaborativePrincipalIdentityBinding = decode(&payload)?;
+                if value.binding_id().as_str() != logical_id
+                    || value.organization_id().as_str() != organization_id
+                    || project_id.is_some()
+                    || principal_id.as_deref() != Some(value.principal_id().as_str())
+                {
+                    return Err(collaborative_authority_corruption_error());
+                }
+                bindings.push(value);
+            }
+            "principal_lifecycle" => {
+                let value: CollaborativePrincipalRecord = decode(&payload)?;
+                if value.principal_id().as_str() != logical_id
+                    || value.organization_id().as_str() != organization_id
+                    || project_id.is_some()
+                    || principal_id.as_deref() != Some(value.principal_id().as_str())
+                {
+                    return Err(collaborative_authority_corruption_error());
+                }
+                principals.push(value);
+            }
+            "capability_grants" => {
+                let value: CollaborativeProjectGrant = decode(&payload)?;
+                if value.grant_id().as_str() != logical_id
+                    || value.organization_id().as_str() != organization_id
+                    || project_id.as_deref() != Some(value.project_id().as_str())
+                    || principal_id.as_deref() != Some(value.principal_id().as_str())
+                {
+                    return Err(collaborative_authority_corruption_error());
+                }
+                grants.push(value);
+            }
+            "capability_grant_revocations" => {
+                let value: CollaborativeProjectGrantRevocation = decode(&payload)?;
+                if value.revocation_id().as_str() != logical_id
+                    || value.organization_id().as_str() != organization_id
+                    || project_id.as_deref() != Some(value.project_id().as_str())
+                    || principal_id.as_deref() != Some(value.principal_id().as_str())
+                {
+                    return Err(collaborative_authority_corruption_error());
+                }
+                revocations.push(value);
+            }
+            _ => return Err(collaborative_authority_corruption_error()),
+        }
+    }
+    let revision = u64::try_from(revision)
+        .ok()
+        .and_then(|value| crate::HostedAuthorityRegistryRevision::new(value).ok())
+        .ok_or_else(collaborative_authority_corruption_error)?;
+    CollaborativeIdentityAuthorityRevisionCandidate::new(
+        revision,
+        providers,
+        bindings,
+        principals,
+        grants,
+        revocations,
+    )
+    .map_err(|_| collaborative_authority_corruption_error())
+}
+
+fn collaborative_authority_corruption_error() -> WorkflowOsError {
+    state_error(
+        "postgres_state.collaborative_authority.corrupt",
+        "collaborative authority durable state is corrupt",
+    )
+}
+
 fn append_event_tx(
     tx: &mut Transaction<'_>,
     event: &WorkflowRunEvent,
@@ -5774,4 +6184,30 @@ CREATE INDEX project_approval_routes_reconciliation_idx
     ON workflow_os.project_approval_routes
        (organization_id, project_id, run_id, approval_id,
         routing_reason, escalation_id, logical_subject_id);
+";
+
+const SCHEMA_V3_SQL: &str = r"
+CREATE TABLE workflow_os.collaborative_identity_authority_facts (
+    organization_id TEXT NOT NULL,
+    authority_revision BIGINT NOT NULL CHECK (authority_revision > 0),
+    fact_family TEXT NOT NULL,
+    logical_id TEXT NOT NULL,
+    project_id TEXT,
+    principal_id TEXT,
+    canonical_payload TEXT NOT NULL,
+    canonical_payload_hash TEXT NOT NULL,
+    inserted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (organization_id, authority_revision, fact_family, logical_id)
+);
+CREATE INDEX collaborative_identity_authority_query_idx
+    ON workflow_os.collaborative_identity_authority_facts
+       (organization_id, authority_revision, fact_family, project_id, principal_id);
+
+CREATE TABLE workflow_os.collaborative_identity_authority_high_watermarks (
+    organization_id TEXT PRIMARY KEY,
+    authority_revision BIGINT NOT NULL CHECK (authority_revision > 0),
+    revision_commitment TEXT NOT NULL,
+    source_model_version TEXT NOT NULL,
+    accepted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
 ";

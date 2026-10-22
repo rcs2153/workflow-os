@@ -13,6 +13,7 @@ mod authorized_execution_continuity_state;
 mod capability_authority;
 mod ci;
 mod collaborative_identity;
+mod collaborative_identity_authority_source;
 mod current_authority_fact_set;
 mod current_authority_proportional_governance;
 mod current_authority_source;
@@ -163,6 +164,13 @@ pub use collaborative_identity::{
     CollaborativeProjectGrantRevocationDefinition, CollaborativeProjectGrantRevocationId,
     CollaborativeProjectGrantRevocationReason, CollaborativeProjectGrantRevocationReconciliation,
     UnverifiedCollaborativeAuthorityProjectionClaim,
+};
+pub use collaborative_identity_authority_source::{
+    CollaborativeIdentityAuthorityMatchPosture, CollaborativeIdentityAuthorityQuery,
+    CollaborativeIdentityAuthorityRevisionActivation,
+    CollaborativeIdentityAuthorityRevisionCandidate, CollaborativeIdentityAuthoritySourceRead,
+    CollaborativeIdentityAuthoritySourceRequestVersion,
+    COLLABORATIVE_IDENTITY_AUTHORITY_FACT_FAMILIES,
 };
 pub use current_authority_fact_set::{
     AuthorityFactCompletenessPosture, AuthorityFactSourceBinding, AuthorityFactSourceKind,
