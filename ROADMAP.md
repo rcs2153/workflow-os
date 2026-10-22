@@ -59,28 +59,22 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Close the collaborative identity authority-claim blocker.** Finish final
-   validation, close the governed blocker-fix phase, perform focused
-   maintainer/security re-review, and merge only if every public caller-authored
-   projection remains explicitly non-authorizing. Do not begin OIDC transport,
-   identity persistence, hosted authentication cutover, administration, or
-   production identity claims in this phase.
-2. **Complete the dedicated draft-pull-request live sandbox proof.** Once the
+1. **Complete the dedicated draft-pull-request live sandbox proof.** Once the
    dedicated least-privilege sandbox credential is available, rerun the existing
    ignored smoke unchanged. The proof may create or reconcile one managed draft
    in `rcs2153/workflow-os-sandbox`; it does not authorize another provider,
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-3. **Plan the authoritative collaborative identity source boundary.** After the
-   model blocker fix is accepted, define how Core obtains complete current
+2. **Plan the authoritative collaborative identity source boundary.** The model
+   blocker fix is accepted. Define how Core obtains complete current
    provider, binding, principal, grant, and revocation facts with trusted time
    and rollback protection. The next implementation must be a bounded vertical
    slice with persistence and current-authority consumption, not another
    caller-assembled authority claim. OIDC protocol handling, SCIM, dynamic
    groups, enterprise administration, and hosted authentication cutover remain
    separately scoped.
-4. **Select the next runnable no-write trusted-host profile.** Generalize the
+3. **Select the next runnable no-write trusted-host profile.** Generalize the
    accepted private docs-check proof through one additional closed profile only
    after its authority, required-context, check, evidence, and terminal-report
    obligations are explicit. Do not jump from the one-step proof to general
