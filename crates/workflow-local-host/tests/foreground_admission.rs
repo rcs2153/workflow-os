@@ -19,6 +19,7 @@ struct Fixture {
     root: PathBuf,
     database: PathBuf,
     npm: PathBuf,
+    workflow_os: PathBuf,
 }
 
 impl Fixture {
@@ -34,10 +35,22 @@ impl Fixture {
         let mut permissions = fs::metadata(&npm).expect("fake npm metadata").permissions();
         permissions.set_mode(0o700);
         fs::set_permissions(&npm, permissions).expect("fake npm executable");
+        let workflow_os = root.join("workflow-os");
+        fs::write(
+            &workflow_os,
+            "#!/bin/sh\ntest \"$1\" = validate || exit 9\nexit 0\n",
+        )
+        .expect("fake workflow-os");
+        let mut permissions = fs::metadata(&workflow_os)
+            .expect("fake workflow-os metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&workflow_os, permissions).expect("fake workflow-os executable");
         Self {
             id,
             database: root.join("state.sqlite3"),
             npm,
+            workflow_os,
             root,
         }
     }
@@ -50,6 +63,291 @@ impl Fixture {
         ImmutableRunBundleId::new(format!("bundle/local-host-{label}-{}", self.id))
             .expect("bundle id")
     }
+}
+
+#[test]
+fn foreground_binary_executes_explicit_project_validation_profile() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("project-validation");
+    write_project_validation_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("project-validation");
+    let bundle_id = fixture.bundle_id("project-validation");
+
+    let output = invoke_project_validation(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+
+    assert!(
+        output.status.success(),
+        "foreground stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("bounded stdout"),
+        "trusted_host_local_application: operation.terminal\n"
+    );
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let run = backend.rehydrate_run(&run_id).expect("durable run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert!(run.events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::SkillInvocationSucceeded { .. }
+    )));
+}
+
+#[test]
+fn foreground_binary_terminalizes_nonpassing_checks_as_failure() {
+    let fixture = Fixture::new();
+    fs::write(&fixture.npm, "#!/bin/sh\nexit 7\n").expect("failing npm");
+    let repository_root = repository_root();
+    let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("docs-failure");
+    let bundle_id = fixture.bundle_id("docs-failure");
+
+    let output = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(output.status.success());
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let run = backend.rehydrate_run(&run_id).expect("durable failed run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert!(run.events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::SkillInvocationFailed { .. }
+    )));
+    assert!(!run.events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::SkillInvocationSucceeded { .. } | WorkflowRunEventKind::RunCompleted
+    )));
+
+    let event_count = run.events.len();
+    let replay = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(replay.status.success());
+    assert_eq!(
+        String::from_utf8(replay.stdout).expect("bounded replay stdout"),
+        "trusted_host_local_application: admission.terminal_replay\n"
+    );
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("replayed failed run")
+            .events
+            .len(),
+        event_count
+    );
+}
+
+#[test]
+fn foreground_binary_project_validation_failure_is_bounded() {
+    let fixture = Fixture::new();
+    fs::write(
+        &fixture.workflow_os,
+        "#!/bin/sh\necho private-output >&2\nexit 8\n",
+    )
+    .expect("failing workflow-os");
+    let governance_root = fixture.root.join("project-validation-failure");
+    write_project_validation_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("project-validation-failure");
+    let bundle_id = fixture.bundle_id("project-validation-failure");
+
+    let output = invoke_project_validation(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("private-output"));
+    let run = SqliteStateBackend::open(&fixture.database)
+        .expect("reopen SQLite")
+        .rehydrate_run(&run_id)
+        .expect("durable failed run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert!(!format!("{run:?}").contains("private-output"));
+}
+
+#[test]
+fn foreground_binary_rejects_invalid_profile_shape_before_state_creation() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("project-validation-selection");
+    write_project_validation_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("invalid-selection");
+    let bundle_id = fixture.bundle_id("invalid-selection");
+
+    let output = base_foreground_command(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    )
+    .args([
+        "--workflow-os-executable",
+        fixture.workflow_os.to_str().expect("workflow-os path"),
+        "--workflow-id",
+        "test/trusted-host-project-validation",
+        "--step-id",
+        "project-validation",
+        "--actor",
+        "system/local-host-invalid-selection-test",
+        "--correlation-id",
+        "correlation-local-host-invalid-selection-test",
+    ])
+    .output()
+    .expect("foreground binary");
+
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("bounded stderr"),
+        "trusted_host_local_application: input.invalid\n"
+    );
+    assert!(!fixture.database.exists());
+}
+
+#[test]
+fn foreground_binary_rejects_mixed_profile_arguments_before_state_creation() {
+    let fixture = Fixture::new();
+    let repository_root = repository_root();
+    let governance_root = fixture.root.join("mixed-profile-selection");
+    write_project_validation_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("mixed-profile-selection");
+    let bundle_id = fixture.bundle_id("mixed-profile-selection");
+
+    let output = base_foreground_command(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    )
+    .args([
+        "--profile",
+        "workflow-os-project-validation",
+        "--workflow-os-executable",
+        fixture.workflow_os.to_str().expect("workflow-os path"),
+        "--repository-root",
+        repository_root.to_str().expect("repository root"),
+        "--npm-executable",
+        fixture.npm.to_str().expect("npm path"),
+        "--workflow-id",
+        "test/trusted-host-project-validation",
+        "--step-id",
+        "project-validation",
+        "--actor",
+        "system/local-host-mixed-profile-test",
+        "--correlation-id",
+        "correlation-local-host-mixed-profile-test",
+    ])
+    .output()
+    .expect("foreground binary");
+
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("bounded stderr"),
+        "trusted_host_local_application: input.invalid\n"
+    );
+    assert!(!fixture.database.exists());
+}
+
+#[test]
+fn foreground_binary_accepts_explicit_docs_profile_and_rejects_unknown_profile() {
+    let fixture = Fixture::new();
+    let repository_root = repository_root();
+    let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("explicit-docs-profile");
+    let bundle_id = fixture.bundle_id("explicit-docs-profile");
+    let explicit = base_foreground_command(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    )
+    .args([
+        "--profile",
+        "docs-check",
+        "--repository-root",
+        repository_root.to_str().expect("repository root"),
+        "--npm-executable",
+        fixture.npm.to_str().expect("npm path"),
+        "--workflow-id",
+        "dg/trusted-host-docs-check",
+        "--step-id",
+        "docs-check",
+        "--actor",
+        "system/local-host-explicit-docs-test",
+        "--correlation-id",
+        "correlation-local-host-explicit-docs-test",
+    ])
+    .output()
+    .expect("foreground binary");
+    assert!(
+        explicit.status.success(),
+        "foreground stderr: {}",
+        String::from_utf8_lossy(&explicit.stderr)
+    );
+
+    let unknown_fixture = Fixture::new();
+    let unknown_run_id = unknown_fixture.run_id("unknown-profile");
+    let unknown_bundle_id = unknown_fixture.bundle_id("unknown-profile");
+    let unknown = base_foreground_command(
+        &unknown_fixture,
+        &governance_root,
+        &unknown_run_id,
+        &unknown_bundle_id,
+        &observed_at,
+        &expires_at,
+    )
+    .args([
+        "--profile",
+        "unknown-profile",
+        "--workflow-id",
+        "dg/trusted-host-docs-check",
+        "--step-id",
+        "docs-check",
+        "--actor",
+        "system/local-host-unknown-profile-test",
+        "--correlation-id",
+        "correlation-local-host-unknown-profile-test",
+    ])
+    .output()
+    .expect("foreground binary");
+    assert!(!unknown.status.success());
+    assert_eq!(
+        String::from_utf8(unknown.stderr).expect("bounded stderr"),
+        "trusted_host_local_application: profile.invalid\n"
+    );
+    assert!(!unknown_fixture.database.exists());
 }
 
 impl Drop for Fixture {
@@ -514,6 +812,136 @@ fn write_output_contract_project(repository_root: &Path, project_root: &Path) {
         .expect("write skill fixture");
 }
 
+fn write_project_validation_project(project_root: &Path) {
+    fs::create_dir_all(project_root.join("workflows")).expect("workflow directory");
+    fs::create_dir_all(project_root.join("skills")).expect("skill directory");
+    fs::create_dir_all(project_root.join("policies")).expect("policy directory");
+    fs::create_dir_all(project_root.join("tests")).expect("tests directory");
+    fs::write(
+        project_root.join("workflow-os.yml"),
+        PROJECT_VALIDATION_MANIFEST,
+    )
+    .expect("manifest");
+    fs::write(
+        project_root.join("workflows/project-validation.workflow.yml"),
+        PROJECT_VALIDATION_WORKFLOW,
+    )
+    .expect("workflow");
+    fs::write(
+        project_root.join("skills/project-validation.skill.yml"),
+        PROJECT_VALIDATION_SKILL,
+    )
+    .expect("skill");
+    fs::write(
+        project_root.join("policies/local.policy.yml"),
+        "schema_version: workflowos.dev/v0\nid: local/d\nname: Local\ndescription: Bounded local policy.\nrules:\n  - id: allow-local\n    effect: allow_local\n",
+    )
+    .expect("policy");
+}
+
+const PROJECT_VALIDATION_MANIFEST: &str = r"schema_version: workflowos.dev/v0
+project:
+  id: test/trusted-host-project-validation
+  name: Trusted Host Project Validation
+  description: Bounded project-validation fixture.
+layout:
+  workflows: workflows
+  skills: skills
+  policies: policies
+  tests: tests
+";
+
+const PROJECT_VALIDATION_WORKFLOW: &str = r"schema_version: workflowos.dev/v0
+id: test/trusted-host-project-validation
+version: v0
+display_name: Trusted Host Project Validation
+description: One-step project validation fixture.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_1
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states: [requested, checked]
+steps:
+  - id: project-validation
+    skill_ref:
+      id: local/workflow-os-validate
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: trusted-host-project-validation
+        to: request
+    policy_requirements:
+      - id: local/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events: [RunCreated, SkillInvocationRequested, RunCompleted]
+  store_references_only: true
+observability_requirements:
+  metrics: [workflow_latency]
+  tracing: true
+  latency_tracking: true
+";
+
+const PROJECT_VALIDATION_SKILL: &str = r"schema_version: workflowos.dev/v0
+id: local/workflow-os-validate
+version: v0
+display_name: Validate Workflow OS Project
+description: Explicit local project-validation skill.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+input_contract:
+  fields:
+    - name: request
+      field_type: string
+      description: Non-secret validation request marker.
+  required: [request]
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+      description: Bounded local check summary.
+    - name: local_check_status
+      field_type: string
+      description: Bounded local check status.
+  required: [summary, local_check_status]
+allowed_capabilities:
+  - name: local.read
+failure_modes:
+  - code: project_validation_failed
+    description: Project validation failed.
+    retryable: false
+evaluation_criteria:
+  - name: explicit_handler_only
+    description: Execute only through the selected closed handler.
+retry_compatibility: requires_policy
+approval_sensitivity: low
+audit_requirements:
+  required: true
+  events: [SkillInvocationRequested, SkillInvocationSucceeded]
+  store_references_only: true
+observability_requirements:
+  metrics: [skill_latency]
+  tracing: true
+  latency_tracking: true
+";
+
 const APPROVAL_WORKFLOW: &str = r"schema_version: workflowos.dev/v0
 id: test/trusted-host-approval
 version: v0
@@ -609,33 +1037,88 @@ struct ForegroundInvocation<'a> {
 }
 
 fn invoke_foreground_with(input: ForegroundInvocation<'_>) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_workflow-local-host"))
-        .args([
-            "--governance-project-root",
-            input.governance_root.to_str().expect("governance root"),
-            "--repository-root",
-            input.repository_root.to_str().expect("repository root"),
-            "--state-database",
-            input.fixture.database.to_str().expect("database"),
-            "--npm-executable",
-            input.npm_executable.to_str().expect("fake npm"),
-            "--workflow-id",
-            input.workflow_id,
-            "--step-id",
-            input.step_id,
-            "--run-id",
-            input.run_id.as_str(),
-            "--bundle-id",
-            input.bundle_id.as_str(),
-            "--observed-at",
-            input.observed_at,
-            "--expires-at",
-            input.expires_at,
-            "--actor",
-            input.actor,
-            "--correlation-id",
-            input.correlation_id,
-        ])
-        .output()
-        .expect("foreground binary")
+    base_foreground_command(
+        input.fixture,
+        input.governance_root,
+        input.run_id,
+        input.bundle_id,
+        input.observed_at,
+        input.expires_at,
+    )
+    .args([
+        "--repository-root",
+        input.repository_root.to_str().expect("repository root"),
+        "--npm-executable",
+        input.npm_executable.to_str().expect("fake npm"),
+        "--workflow-id",
+        input.workflow_id,
+        "--step-id",
+        input.step_id,
+        "--actor",
+        input.actor,
+        "--correlation-id",
+        input.correlation_id,
+    ])
+    .output()
+    .expect("foreground binary")
+}
+
+fn invoke_project_validation(
+    fixture: &Fixture,
+    governance_root: &Path,
+    run_id: &WorkflowRunId,
+    bundle_id: &ImmutableRunBundleId,
+    observed_at: &str,
+    expires_at: &str,
+) -> Output {
+    base_foreground_command(
+        fixture,
+        governance_root,
+        run_id,
+        bundle_id,
+        observed_at,
+        expires_at,
+    )
+    .args([
+        "--profile",
+        "workflow-os-project-validation",
+        "--workflow-os-executable",
+        fixture.workflow_os.to_str().expect("workflow-os path"),
+        "--workflow-id",
+        "test/trusted-host-project-validation",
+        "--step-id",
+        "project-validation",
+        "--actor",
+        "system/local-host-project-validation-test",
+        "--correlation-id",
+        "correlation-local-host-project-validation-test",
+    ])
+    .output()
+    .expect("foreground binary")
+}
+
+fn base_foreground_command(
+    fixture: &Fixture,
+    governance_root: &Path,
+    run_id: &WorkflowRunId,
+    bundle_id: &ImmutableRunBundleId,
+    observed_at: &str,
+    expires_at: &str,
+) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_workflow-local-host"));
+    command.args([
+        "--governance-project-root",
+        governance_root.to_str().expect("governance root"),
+        "--state-database",
+        fixture.database.to_str().expect("database"),
+        "--run-id",
+        run_id.as_str(),
+        "--bundle-id",
+        bundle_id.as_str(),
+        "--observed-at",
+        observed_at,
+        "--expires-at",
+        expires_at,
+    ]);
+    command
 }

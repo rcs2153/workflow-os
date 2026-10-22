@@ -28,6 +28,8 @@ use crate::{
     SkillOutput, SpecContentHash, SqliteStateBackend, Timestamp, WorkflowOsError,
     WorkflowOsErrorKind,
 };
+#[cfg(feature = "trusted-host-application-spi")]
+use crate::{LocalCheckResultStatus, ResolvedExplicitLocalCheckProfile};
 
 pub(crate) trait TrustedHostAttemptExecutor {
     fn binding_commitment(&self) -> SpecContentHash;
@@ -87,6 +89,61 @@ impl TrustedHostAttemptExecutor for LocalSkillAttemptExecutor<'_> {
         match self.handler.invoke(context.skill_input.clone()) {
             Ok(output) => TrustedHostAttemptExecutionResult::Succeeded(output),
             Err(_) => TrustedHostAttemptExecutionResult::TerminalFailure,
+        }
+    }
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+pub(crate) struct TrustedHostLocalCheckAttemptExecutor<'a> {
+    profile: &'a ResolvedExplicitLocalCheckProfile,
+    binding_commitment: SpecContentHash,
+    workflow_lifecycle:
+        Option<crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext>,
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+impl<'a> TrustedHostLocalCheckAttemptExecutor<'a> {
+    pub(crate) fn new(
+        profile: &'a ResolvedExplicitLocalCheckProfile,
+        binding_commitment: SpecContentHash,
+    ) -> Self {
+        Self {
+            profile,
+            binding_commitment,
+            workflow_lifecycle: None,
+        }
+    }
+
+    pub(crate) fn with_workflow_lifecycle(
+        mut self,
+        workflow_lifecycle: crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+    ) -> Self {
+        self.workflow_lifecycle = Some(workflow_lifecycle);
+        self
+    }
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+impl TrustedHostAttemptExecutor for TrustedHostLocalCheckAttemptExecutor<'_> {
+    fn binding_commitment(&self) -> SpecContentHash {
+        self.binding_commitment.clone()
+    }
+
+    fn workflow_lifecycle_context(
+        &self,
+    ) -> Option<&crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext> {
+        self.workflow_lifecycle.as_ref()
+    }
+
+    fn execute(
+        &self,
+        _context: &TrustedHostAttemptExecutionContext<'_>,
+    ) -> TrustedHostAttemptExecutionResult {
+        match self.profile.execute() {
+            Ok(result) if result.status() == LocalCheckResultStatus::Passed => {
+                TrustedHostAttemptExecutionResult::Succeeded(result.to_skill_output())
+            }
+            Ok(_) | Err(_) => TrustedHostAttemptExecutionResult::TerminalFailure,
         }
     }
 }
@@ -701,4 +758,82 @@ fn reconcile_persistence(
 
 fn supervisor_error(kind: WorkflowOsErrorKind, suffix: &str, message: &str) -> WorkflowOsError {
     WorkflowOsError::new(kind, format!("trusted_host_supervisor.{suffix}"), message)
+}
+
+#[cfg(all(test, feature = "trusted-host-application-spi"))]
+mod local_check_attempt_tests {
+    #![allow(clippy::expect_used)]
+
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::{
+        CorrelationId, ExplicitLocalCheckProfileSelection, LocalCheckProcessOutput,
+        LocalCheckProcessRequest, LocalCheckProcessRunner, SchemaVersion, SkillId, SkillVersion,
+        StepId, WorkflowId, WorkflowRunId, WorkflowVersion,
+    };
+
+    #[derive(Debug)]
+    struct TimedOutRunner;
+
+    impl LocalCheckProcessRunner for TimedOutRunner {
+        fn run(
+            &self,
+            _request: &LocalCheckProcessRequest,
+        ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+            Ok(LocalCheckProcessOutput::timed_out(
+                120_000,
+                b"private-timeout-output".to_vec(),
+                b"private-timeout-error".to_vec(),
+            ))
+        }
+    }
+
+    #[test]
+    fn timed_out_closed_profile_is_terminal_failure() {
+        let root = std::env::temp_dir().join(format!(
+            "workflow-os-trusted-host-timeout-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("fixture root");
+        fs::write(
+            root.join("workflow-os.yml"),
+            "schema_version: workflowos.dev/v0\n",
+        )
+        .expect("fixture manifest");
+        let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+            .resolve_with_process_runner(
+                std::env::current_exe().expect("test executable"),
+                root.clone(),
+                Arc::new(TimedOutRunner),
+            )
+            .expect("resolved profile");
+        let executor = TrustedHostLocalCheckAttemptExecutor::new(
+            &profile,
+            SpecContentHash::from_text("timeout-binding"),
+        );
+        let input = SkillInput {
+            run_id: WorkflowRunId::new("run-timeout-adapter").expect("run id"),
+            workflow_id: WorkflowId::new("test/timeout-adapter").expect("workflow id"),
+            workflow_version: WorkflowVersion::new("v0").expect("workflow version"),
+            schema_version: SchemaVersion::new("workflowos.dev/v0").expect("schema version"),
+            spec_hash: SpecContentHash::from_text("timeout-spec"),
+            step_id: StepId::new("timeout-check").expect("step id"),
+            skill_id: SkillId::new("local/workflow-os-validate").expect("skill id"),
+            skill_version: SkillVersion::new("v0").expect("skill version"),
+            correlation_id: CorrelationId::new("correlation-timeout-adapter")
+                .expect("correlation id"),
+            values: BTreeMap::new(),
+        };
+
+        assert!(matches!(
+            executor.execute(&TrustedHostAttemptExecutionContext {
+                skill_input: &input
+            }),
+            TrustedHostAttemptExecutionResult::TerminalFailure
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
 }

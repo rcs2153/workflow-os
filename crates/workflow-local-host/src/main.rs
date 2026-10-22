@@ -17,11 +17,13 @@ use workflow_core::{
 };
 use workflow_local_host::LocalHostPreparedOperation;
 
-const ALLOWED_ARGUMENTS: [&str; 13] = [
+const ALLOWED_ARGUMENTS: [&str; 15] = [
+    "profile",
     "governance-project-root",
     "repository-root",
     "state-database",
     "npm-executable",
+    "workflow-os-executable",
     "workflow-id",
     "step-id",
     "run-id",
@@ -32,11 +34,9 @@ const ALLOWED_ARGUMENTS: [&str; 13] = [
     "correlation-id",
     "npm-cache-directory",
 ];
-const REQUIRED_ARGUMENTS: [&str; 12] = [
+const REQUIRED_ARGUMENTS: [&str; 10] = [
     "governance-project-root",
-    "repository-root",
     "state-database",
-    "npm-executable",
     "workflow-id",
     "step-id",
     "run-id",
@@ -63,12 +63,7 @@ fn main() -> ExitCode {
 fn run() -> Result<&'static str, &'static str> {
     let arguments = parse_arguments()?;
     let governance_project_root = path_argument(&arguments, "governance-project-root")?;
-    let repository_root = path_argument(&arguments, "repository-root")?;
-    let npm_executable = path_argument(&arguments, "npm-executable")?;
-    let npm_cache_directory = arguments.get("npm-cache-directory").map(PathBuf::from);
-    let profile = ExplicitLocalCheckProfileSelection::docs_check()
-        .resolve_docs_check(npm_executable, repository_root, npm_cache_directory)
-        .map_err(|_| "profile.invalid")?;
+    let profile = resolve_profile(&arguments, &governance_project_root)?;
     let backend = SqliteStateBackend::open(path_argument(&arguments, "state-database")?)
         .map_err(|_| "state.unavailable")?;
     let observed_at = timestamp_argument(&arguments, "observed-at")?;
@@ -135,6 +130,38 @@ fn run() -> Result<&'static str, &'static str> {
             }
         }),
         TrustedHostLocalApplicationAdmissionOutcome::Denied => Ok("admission.denied"),
+    }
+}
+
+fn resolve_profile(
+    arguments: &BTreeMap<String, String>,
+    governance_project_root: &std::path::Path,
+) -> Result<workflow_core::ResolvedExplicitLocalCheckProfile, &'static str> {
+    match arguments.get("profile").map(String::as_str) {
+        None | Some("docs-check") => {
+            if arguments.contains_key("workflow-os-executable") {
+                return Err("input.invalid");
+            }
+            let repository_root = path_argument(arguments, "repository-root")?;
+            let npm_executable = path_argument(arguments, "npm-executable")?;
+            let npm_cache_directory = arguments.get("npm-cache-directory").map(PathBuf::from);
+            ExplicitLocalCheckProfileSelection::docs_check()
+                .resolve_docs_check(npm_executable, repository_root, npm_cache_directory)
+                .map_err(|_| "profile.invalid")
+        }
+        Some("workflow-os-project-validation") => {
+            if arguments.contains_key("repository-root")
+                || arguments.contains_key("npm-executable")
+                || arguments.contains_key("npm-cache-directory")
+            {
+                return Err("input.invalid");
+            }
+            let executable = path_argument(arguments, "workflow-os-executable")?;
+            ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+                .resolve(executable, governance_project_root.to_path_buf())
+                .map_err(|_| "profile.invalid")
+        }
+        Some(_) => Err("profile.invalid"),
     }
 }
 

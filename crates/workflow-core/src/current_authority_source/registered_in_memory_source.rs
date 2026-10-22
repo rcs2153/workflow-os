@@ -54,7 +54,7 @@ pub(super) struct RegisteredInMemoryCurrentAuthoritySourceInput {
     pub(super) complete_context_reference_inventory: Vec<GovernedContextReference>,
 }
 
-pub(crate) struct RegisteredExplicitZeroDocsCheckSourceInput<'a> {
+pub(crate) struct RegisteredExplicitZeroLocalCheckSourceInput<'a> {
     pub(crate) source_id: CurrentAuthoritySourceId,
     pub(crate) contract_version: CurrentAuthoritySourceContractVersion,
     pub(crate) profile: &'a ResolvedExplicitLocalCheckProfile,
@@ -561,8 +561,8 @@ impl fmt::Debug for RegisteredCurrentAuthorityResolutionAssessment {
 }
 
 impl RegisteredInMemoryCurrentAuthoritySource {
-    pub(crate) fn register_explicit_zero_docs_check(
-        input: RegisteredExplicitZeroDocsCheckSourceInput<'_>,
+    pub(crate) fn register_explicit_zero_local_check(
+        input: RegisteredExplicitZeroLocalCheckSourceInput<'_>,
     ) -> Result<Self, WorkflowOsError> {
         input
             .profile
@@ -576,8 +576,9 @@ impl RegisteredInMemoryCurrentAuthoritySource {
             ));
         }
         let configuration_commitment = hash_serializable(
-            "registered-in-memory-explicit-zero-docs-check-v1",
+            "registered-in-memory-explicit-zero-local-check-v2",
             &(
+                input.profile.profile_id(),
                 input.execution_binding.binding_hash(),
                 input.contract.contract_id(),
                 input.contract.contract_version(),
@@ -2074,8 +2075,8 @@ pub(crate) mod tests {
                 Arc::new(NeverRunDocsCheck),
             )
             .expect("docs profile");
-        let source = RegisteredInMemoryCurrentAuthoritySource::register_explicit_zero_docs_check(
-            RegisteredExplicitZeroDocsCheckSourceInput {
+        let source = RegisteredInMemoryCurrentAuthoritySource::register_explicit_zero_local_check(
+            RegisteredExplicitZeroLocalCheckSourceInput {
                 source_id: CurrentAuthoritySourceId::new("authority/docs-check").expect("source"),
                 contract_version: CurrentAuthoritySourceContractVersion::new("v1")
                     .expect("version"),
