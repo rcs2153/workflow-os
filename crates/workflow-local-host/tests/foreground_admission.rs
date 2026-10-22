@@ -268,6 +268,112 @@ fn concurrent_terminal_replays_converge_on_one_equal_artifact() {
 }
 
 #[test]
+fn terminal_replay_rejects_valid_conflicting_artifact_without_overwrite() {
+    let fixture = Fixture::new();
+    let repository_root = repository_root();
+    let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("artifact-conflict");
+    let bundle_id = fixture.bundle_id("artifact-conflict");
+    let initial = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let event_count = backend
+        .rehydrate_run(&run_id)
+        .expect("terminal run before conflicting replay")
+        .events
+        .len();
+    let conflicting_payload = mutate_artifact_payload(&fixture.database, &run_id, |value| {
+        value["work_report"]["known_limitations"][0]["summary"] =
+            json!("A different valid limitation remains bounded and local.");
+    });
+
+    let replay = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert_artifact_persistence_failure(&replay);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("terminal run after conflicting replay")
+            .events
+            .len(),
+        event_count
+    );
+    assert_eq!(
+        read_artifact_payload(&fixture.database, &run_id),
+        conflicting_payload
+    );
+}
+
+#[test]
+fn terminal_replay_rejects_unreadable_artifact_without_repair() {
+    let fixture = Fixture::new();
+    let repository_root = repository_root();
+    let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("artifact-unreadable");
+    let bundle_id = fixture.bundle_id("artifact-unreadable");
+    let initial = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let event_count = backend
+        .rehydrate_run(&run_id)
+        .expect("terminal run before unreadable replay")
+        .events
+        .len();
+    let unreadable_payload = "not-json";
+    write_artifact_payload(&fixture.database, &run_id, unreadable_payload);
+
+    let replay = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert_artifact_persistence_failure(&replay);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("terminal run after unreadable replay")
+            .events
+            .len(),
+        event_count
+    );
+    assert_eq!(
+        read_artifact_payload(&fixture.database, &run_id),
+        unreadable_payload
+    );
+}
+
+#[test]
 fn foreground_binary_terminalizes_nonpassing_checks_as_failure() {
     let fixture = Fixture::new();
     fs::write(&fixture.npm, "#!/bin/sh\nexit 7\n").expect("failing npm");
@@ -849,6 +955,49 @@ fn clear_artifacts_with_connection(connection: &Connection, run_id: &WorkflowRun
         .expect("clear prior artifact");
 }
 
+fn mutate_artifact_payload(
+    database: &Path,
+    run_id: &WorkflowRunId,
+    mutate: impl FnOnce(&mut Value),
+) -> String {
+    let payload = read_artifact_payload(database, run_id);
+    let mut value: Value = serde_json::from_str(&payload).expect("artifact payload JSON");
+    mutate(&mut value);
+    let payload = value.to_string();
+    write_artifact_payload(database, run_id, &payload);
+    payload
+}
+
+fn read_artifact_payload(database: &Path, run_id: &WorkflowRunId) -> String {
+    Connection::open(database)
+        .expect("open fixture database for artifact read")
+        .query_row(
+            "SELECT payload FROM work_report_artifacts WHERE run_id = ?1",
+            params![run_id.as_str()],
+            |row| row.get(0),
+        )
+        .expect("artifact payload")
+}
+
+fn write_artifact_payload(database: &Path, run_id: &WorkflowRunId, payload: &str) {
+    Connection::open(database)
+        .expect("open fixture database for artifact mutation")
+        .execute(
+            "UPDATE work_report_artifacts SET payload = ?1 WHERE run_id = ?2",
+            params![payload, run_id.as_str()],
+        )
+        .expect("mutate artifact payload");
+}
+
+fn assert_artifact_persistence_failure(output: &Output) {
+    assert!(!output.status.success());
+    assert_eq!(output.stdout, Vec::<u8>::new());
+    assert_eq!(
+        String::from_utf8(output.stderr.clone()).expect("bounded artifact failure stderr"),
+        "trusted_host_local_application: admission.terminal_replay_report_artifact_persistence_failed\n"
+    );
+}
+
 fn clear_artifacts_and_swap_event_order(
     database: &Path,
     run_id: &WorkflowRunId,
@@ -949,17 +1098,14 @@ fn assert_corrupt_replay_fails_before_artifact(
         observed_at,
         expires_at,
     );
-    if replay.status.success() {
-        assert_eq!(
-            String::from_utf8(replay.stdout).expect("bounded corrupt replay stdout"),
-            "trusted_host_local_application: admission.terminal_replay_report_generation_failed\n"
-        );
-    } else {
-        assert_eq!(
-            String::from_utf8(replay.stderr).expect("bounded corrupt replay stderr"),
-            "trusted_host_local_application: trusted_host_local_application.failure.invalid_state\n"
-        );
-    }
+    assert!(!replay.status.success());
+    assert_eq!(replay.stdout, Vec::<u8>::new());
+    let stderr = String::from_utf8(replay.stderr).expect("bounded corrupt replay stderr");
+    assert!(matches!(
+        stderr.as_str(),
+        "trusted_host_local_application: admission.terminal_replay_report_generation_failed\n"
+            | "trusted_host_local_application: trusted_host_local_application.failure.invalid_state\n"
+    ));
     let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
     assert_eq!(
         backend
@@ -990,15 +1136,14 @@ fn foreground_binary_fails_closed_when_required_output_is_missing() {
         &expires_at,
     );
 
-    assert!(
-        output.status.success(),
-        "foreground stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+    assert!(!output.status.success());
+    assert_eq!(output.stdout, Vec::<u8>::new());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("bounded generation failure stderr"),
+        "trusted_host_local_application: operation.terminal_report_generation_failed\n"
     );
-    let run = SqliteStateBackend::open(&fixture.database)
-        .expect("reopen SQLite")
-        .rehydrate_run(&run_id)
-        .expect("durable failed run");
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let run = backend.rehydrate_run(&run_id).expect("durable failed run");
     assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
     let failure = run
         .events
@@ -1009,6 +1154,13 @@ fn foreground_binary_fails_closed_when_required_output_is_missing() {
         })
         .expect("durable invocation failure");
     assert_eq!(failure.code, "executor.output.required_missing");
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("artifact list remains readable")
+            .len(),
+        0
+    );
 }
 
 #[test]

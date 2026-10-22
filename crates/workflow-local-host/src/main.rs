@@ -113,7 +113,7 @@ fn run() -> Result<&'static str, &'static str> {
         TrustedHostLocalApplicationAdmissionOutcome::Prepared(prepared) => {
             let outcome = run_prepared(prepared)?;
             if matches!(outcome, "operation.terminal" | "continuation.terminal") {
-                Ok(artifact_posture(&backend, &profile, &request, false))
+                artifact_posture(&backend, &profile, &request, false)
             } else {
                 Ok(outcome)
             }
@@ -127,7 +127,7 @@ fn run() -> Result<&'static str, &'static str> {
             }
         }),
         TrustedHostLocalApplicationAdmissionOutcome::TerminalReplay => {
-            Ok(artifact_posture(&backend, &profile, &request, true))
+            artifact_posture(&backend, &profile, &request, true)
         }
         TrustedHostLocalApplicationAdmissionOutcome::Blocked(reason) => Ok(match reason {
             workflow_core::TrustedHostLocalApplicationBlockReason::UnsupportedWorkflow => {
@@ -146,34 +146,34 @@ fn artifact_posture(
     profile: &workflow_core::ResolvedExplicitLocalCheckProfile,
     request: &TrustedHostLocalApplicationAdmissionRequest,
     replay: bool,
-) -> &'static str {
+) -> Result<&'static str, &'static str> {
     match (
         persist_trusted_host_terminal_work_report_artifact(backend, profile, request).posture(),
         replay,
     ) {
         (TrustedHostTerminalWorkReportArtifactPosture::Persisted, false) => {
-            "operation.terminal_report_artifact_persisted"
+            Ok("operation.terminal_report_artifact_persisted")
         }
         (TrustedHostTerminalWorkReportArtifactPosture::AlreadyPersisted, false) => {
-            "operation.terminal_report_artifact_already_persisted"
+            Ok("operation.terminal_report_artifact_already_persisted")
         }
         (TrustedHostTerminalWorkReportArtifactPosture::GenerationFailed, false) => {
-            "operation.terminal_report_generation_failed"
+            Err("operation.terminal_report_generation_failed")
         }
         (TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed, false) => {
-            "operation.terminal_report_artifact_persistence_failed"
+            Err("operation.terminal_report_artifact_persistence_failed")
         }
         (TrustedHostTerminalWorkReportArtifactPosture::Persisted, true) => {
-            "admission.terminal_replay_report_artifact_persisted"
+            Ok("admission.terminal_replay_report_artifact_persisted")
         }
         (TrustedHostTerminalWorkReportArtifactPosture::AlreadyPersisted, true) => {
-            "admission.terminal_replay_report_artifact_already_persisted"
+            Ok("admission.terminal_replay_report_artifact_already_persisted")
         }
         (TrustedHostTerminalWorkReportArtifactPosture::GenerationFailed, true) => {
-            "admission.terminal_replay_report_generation_failed"
+            Err("admission.terminal_replay_report_generation_failed")
         }
         (TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed, true) => {
-            "admission.terminal_replay_report_artifact_persistence_failed"
+            Err("admission.terminal_replay_report_artifact_persistence_failed")
         }
     }
 }

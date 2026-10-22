@@ -88,7 +88,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Fix the private trusted-host terminal WorkReport artifact failure exit contract.**
+2. **Review the private trusted-host terminal WorkReport artifact blocker fix.**
    The second closed no-write profile is implemented and focused-review
    accepted. The next executable composition slice is now implemented from the
    [Trusted-Host Terminal WorkReport Composition
@@ -131,12 +131,17 @@ phase` language does not supersede the active queue.
    WorkReport Artifact Implementation Report](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_ARTIFACT_IMPLEMENTATION_REPORT.md).
    Focused maintainer/security review found one blocker in [Trusted-Host
    Terminal WorkReport Artifact Implementation Review](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_ARTIFACT_IMPLEMENTATION_REVIEW.md):
-   generation and persistence failure postures are rendered as fixed failure
-   text but still return through the host success path, and the corruption
-   fixtures currently permit that zero-exit behavior. Add a bounded non-success
-   host result for both artifact failure postures, require it in the corruption
-   fixtures, and add focused conflicting/unreadable duplicate branch coverage
-   before acceptance.
+   generation and persistence failure postures were rendered as fixed failure
+   text but still returned through the host success path, and the corruption
+   fixtures permitted that zero-exit behavior. The narrow blocker fix is now
+   implemented in [Trusted-Host Terminal WorkReport Artifact Blocker Fix
+   Report](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_ARTIFACT_BLOCKER_FIX_REPORT.md).
+   Both artifact failure postures now return bounded non-success host results;
+   corrupt-history fixtures require non-success; and focused real-SQLite tests
+   prove valid conflicting and unreadable duplicates fail closed without
+   overwrite, repair, event mutation, or identifier disclosure. Perform one
+   focused maintainer/security review of this correction before accepting the
+   private artifact path.
    Do not add released CLI output, another profile, arbitrary commands,
    scheduling, nested harnesses, automatic approval, providers, external
    writes, schemas, examples, or hosted expansion.
