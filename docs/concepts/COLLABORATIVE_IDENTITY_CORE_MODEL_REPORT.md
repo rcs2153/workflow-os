@@ -27,10 +27,13 @@ and fail-closed before transport or storage is added.
 - Added complete-set validation that rejects duplicate binding IDs, one active
   subject mapped to multiple principals, and one principal with multiple active
   external identities.
-- Added a trusted constructor-only current-authority projection that rejects
+- Added a validated current-authority projection claim that rejects
   inactive identity facts, stale revisions, cross-scope grants, ambiguous
   revocations, orphaned revocations, expired grants, and fully revoked grants.
-- Added an explicitly untrusted deserializable projection shape for future
+- Added a fixed, serialized `non_authorizing` posture and removed
+  permission-sounding claim APIs after focused review found that caller-owned
+  facts could not establish trusted authority.
+- Added an explicitly untrusted deserializable claim shape for future
   evidence or persistence work.
 - Exported the model through `workflow-core` and added focused tests.
 
@@ -55,16 +58,20 @@ enums; and validated records for each authority fact.
 
 `validate_collaborative_identity_binding_set` validates complete binding sets.
 `reconcile_collaborative_project_grant_revocation` distinguishes create, exact
-replay, and conflicting replay. `project_collaborative_current_authority`
-constructs one trusted point-in-time projection from explicit current facts.
+replay, and conflicting replay.
+`validate_collaborative_authority_projection_claim` validates one internally
+coherent, explicitly non-authorizing point-in-time claim from caller-supplied
+facts.
 
 ## 5. Validation Boundary Summary
 
 Construction rejects empty, oversized, malformed, duplicate, secret-like, or
 cross-scope inputs with stable non-leaking errors. Provider, grant, and
 revocation deserialization reconstructs through validated constructors and
-verifies canonical commitments. Trusted current authority is not ordinarily
-deserializable and can only be produced by the resolver.
+verifies canonical commitments. The public projection claim cannot authorize
+an operation and has no conversion into trusted authority. A future trusted
+resolver requires a Core-owned authoritative source, complete fact-set proof,
+and trusted time.
 
 The resolver requires active provider, binding, and principal records; matching
 organization, provider, revision, and principal context; non-future identity
@@ -77,8 +84,8 @@ Grants are immutable. Revocation is additive and binds the exact grant ID,
 commitment, organization, project, principal, reason, actor, and effective
 time. Exact replay is idempotent; conflicting replay fails closed.
 
-The projection records its evaluation time and source authority revision. It is
-a point-in-time decision artifact, not a reusable bearer credential. Trusted
+The claim records its asserted evaluation time and authority revision. It is a
+point-in-time descriptive artifact, not a reusable bearer credential. Trusted
 database time, persistence concurrency, active-session invalidation, and
 runtime rechecks remain deferred.
 
@@ -98,7 +105,8 @@ absence, secret-like input rejection, canonical grant ordering, duplicate
 capabilities, invalid time windows, additive revocation, replay conflict,
 active authority union, expired and revoked exclusion, inactive identity facts,
 stale authority, cross-project contamination, ambiguous active bindings,
-trusted/untrusted projection separation, and absence of fake authority.
+validated/unverified claim separation, explicit non-authorizing posture, and
+absence of fake authority.
 
 ## 9. Validation Commands And Results
 
@@ -117,8 +125,9 @@ trusted/untrusted projection separation, and absence of fake authority.
 
 - No external identity assertion is validated.
 - No durable identity, principal, grant, or revocation store exists.
-- Trusted time and concurrent revocation semantics are not implemented.
-- Current authority is not wired into hosted request handling, approval routing,
+- Authoritative source provenance, complete fact-set proof, trusted time, and
+  concurrent revocation semantics are not implemented.
+- Authority claims are not wired into hosted request handling, approval routing,
   capability consumption, provider invocation, or SideEffect transitions.
 - The one-active-binding-per-principal rule is conservative and may require a
   separately reviewed multi-identity policy later.
@@ -128,9 +137,9 @@ trusted/untrusted projection separation, and absence of fake authority.
 ## 11. Recommended Next Phase
 
 Perform focused maintainer/security review of the Collaborative Identity Core
-Model. Review canonicalization, commitment verification, complete-set
-ambiguity rejection, exact-project isolation, additive revocation,
-constructor-only trusted projection, privacy, and non-leaking failures.
+Model blocker fix. Confirm that caller-authored facts can produce only an
+explicitly non-authorizing validated claim and that no alias, deserialization,
+or capability-membership API regains trusted authority semantics.
 
 Do not begin external identity transport, persistence, hosted cutover,
 administration, provider writes, schema exposure, or production identity work

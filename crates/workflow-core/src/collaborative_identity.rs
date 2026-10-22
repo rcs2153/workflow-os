@@ -19,8 +19,8 @@ const MAX_REVOCATIONS: usize = 128;
 const PROVIDER_COMMITMENT_DOMAIN: &str = "workflow-os/collaborative-identity-provider/v1";
 const GRANT_COMMITMENT_DOMAIN: &str = "workflow-os/collaborative-project-grant/v1";
 const REVOCATION_COMMITMENT_DOMAIN: &str = "workflow-os/collaborative-project-grant-revocation/v1";
-const PROJECTION_COMMITMENT_DOMAIN: &str =
-    "workflow-os/collaborative-current-authority-projection/v1";
+const PROJECTION_CLAIM_COMMITMENT_DOMAIN: &str =
+    "workflow-os/collaborative-authority-projection-claim/v1";
 
 macro_rules! redacted_string_id {
     ($(#[$meta:meta])* $name:ident, $label:literal) => {
@@ -268,10 +268,10 @@ hash_commitment!(
     "collaborative project grant revocation commitment is invalid"
 );
 hash_commitment!(
-    /// Canonical commitment to one point-in-time collaborative authority projection.
-    CollaborativeCurrentAuthorityProjectionCommitment,
+    /// Canonical commitment to one validated collaborative authority projection claim.
+    CollaborativeAuthorityProjectionClaimCommitment,
     "collaborative_identity.projection.commitment.invalid",
-    "collaborative current authority projection commitment is invalid"
+    "collaborative authority projection claim commitment is invalid"
 );
 
 /// Lifecycle of one configured identity-provider trust registration.
@@ -1329,7 +1329,7 @@ pub fn reconcile_collaborative_project_grant_revocation(
     ))
 }
 
-/// Stable active-grant reference inside a trusted point-in-time projection.
+/// Stable active-grant reference inside a validated non-authorizing claim.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CollaborativeActiveGrantReference {
@@ -1361,8 +1361,8 @@ impl fmt::Debug for CollaborativeActiveGrantReference {
     }
 }
 
-/// Explicit same-call inputs for resolving one current collaborative authority projection.
-pub struct CollaborativeCurrentAuthorityProjectionInput<'a> {
+/// Caller-supplied inputs for validating one collaborative authority projection claim.
+pub struct CollaborativeAuthorityProjectionClaimInput<'a> {
     /// Current provider registration.
     pub provider: &'a CollaborativeIdentityProviderRegistration,
     /// Current opaque subject binding.
@@ -1373,19 +1373,32 @@ pub struct CollaborativeCurrentAuthorityProjectionInput<'a> {
     pub organization_id: &'a OrganizationId,
     /// Exact project requested by the authority consumer.
     pub project_id: &'a ProjectId,
-    /// Current canonical deployment authority revision.
+    /// Authority revision asserted by the caller.
     pub authority_registry_revision: HostedAuthorityRegistryRevision,
-    /// Complete bounded grant facts supplied for same-call resolution.
+    /// Bounded grant facts asserted by the caller.
     pub grants: &'a [CollaborativeProjectGrant],
-    /// Complete bounded revocation facts supplied for same-call resolution.
+    /// Bounded revocation facts asserted by the caller.
     pub revocations: &'a [CollaborativeProjectGrantRevocation],
-    /// Trusted point-in-time evaluation time.
+    /// Point-in-time evaluation value asserted by the caller.
     pub evaluated_at: Timestamp,
 }
 
-/// Trusted point-in-time collaborative authority produced only from same-call current facts.
+/// Fixed authority posture for a caller-supplied projection claim.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CollaborativeAuthorityProjectionClaimPosture {
+    /// The claim is internally valid but cannot authorize an operation.
+    NonAuthorizing,
+}
+
+/// Internally validated, explicitly non-authorizing authority projection claim.
+///
+/// The claim proves only that the supplied facts are mutually coherent. It does not prove that
+/// they came from an authoritative source, form a complete current fact set, or use trusted time.
+/// Runtime authorization must not consume this value as current authority.
 #[derive(Clone, Eq, PartialEq, Serialize)]
-pub struct CollaborativeCurrentAuthorityProjection {
+pub struct CollaborativeAuthorityProjectionClaim {
+    posture: CollaborativeAuthorityProjectionClaimPosture,
     provider_id: CollaborativeIdentityProviderId,
     provider_revision: HostedAuthorityRegistryRevision,
     binding_id: CollaborativePrincipalIdentityBindingId,
@@ -1397,16 +1410,18 @@ pub struct CollaborativeCurrentAuthorityProjection {
     active_grants: Vec<CollaborativeActiveGrantReference>,
     capabilities: Vec<HostedProjectCapability>,
     evaluated_at: Timestamp,
-    commitment: CollaborativeCurrentAuthorityProjectionCommitment,
+    commitment: CollaborativeAuthorityProjectionClaimCommitment,
 }
 
-/// Untrusted serialized claim corresponding to a current-authority projection.
+/// Untrusted serialized shape corresponding to an authority projection claim.
 ///
-/// This type intentionally has no conversion into trusted authority. Callers must resolve fresh
-/// current facts through [`project_collaborative_current_authority`].
+/// This type intentionally has no conversion into authoritative runtime state. Callers may only
+/// validate asserted facts into a non-authorizing claim through
+/// [`validate_collaborative_authority_projection_claim`].
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct UnverifiedCollaborativeCurrentAuthorityProjection {
+pub struct UnverifiedCollaborativeAuthorityProjectionClaim {
+    posture: CollaborativeAuthorityProjectionClaimPosture,
     provider_id: CollaborativeIdentityProviderId,
     provider_revision: HostedAuthorityRegistryRevision,
     binding_id: CollaborativePrincipalIdentityBindingId,
@@ -1418,10 +1433,16 @@ pub struct UnverifiedCollaborativeCurrentAuthorityProjection {
     active_grants: Vec<CollaborativeActiveGrantReference>,
     capabilities: Vec<HostedProjectCapability>,
     evaluated_at: Timestamp,
-    commitment: CollaborativeCurrentAuthorityProjectionCommitment,
+    commitment: CollaborativeAuthorityProjectionClaimCommitment,
 }
 
-impl CollaborativeCurrentAuthorityProjection {
+impl CollaborativeAuthorityProjectionClaim {
+    /// Returns the fixed non-authorizing posture of this caller-supplied claim.
+    #[must_use]
+    pub const fn posture(&self) -> CollaborativeAuthorityProjectionClaimPosture {
+        self.posture
+    }
+
     /// Returns the provider identity.
     #[must_use]
     pub const fn provider_id(&self) -> &CollaborativeIdentityProviderId {
@@ -1464,9 +1485,11 @@ impl CollaborativeCurrentAuthorityProjection {
         &self.capabilities
     }
 
-    /// Returns whether the projection permits one project capability.
+    /// Returns whether the validated claim contains one project capability assertion.
+    ///
+    /// Membership is descriptive only and does not authorize an operation.
     #[must_use]
-    pub fn allows(&self, capability: HostedProjectCapability) -> bool {
+    pub fn contains_capability(&self, capability: HostedProjectCapability) -> bool {
         self.capabilities.binary_search(&capability).is_ok()
     }
 
@@ -1478,12 +1501,13 @@ impl CollaborativeCurrentAuthorityProjection {
 
     /// Returns the canonical projection commitment.
     #[must_use]
-    pub const fn commitment(&self) -> &CollaborativeCurrentAuthorityProjectionCommitment {
+    pub const fn commitment(&self) -> &CollaborativeAuthorityProjectionClaimCommitment {
         &self.commitment
     }
 
-    fn compute_commitment(&self) -> CollaborativeCurrentAuthorityProjectionCommitment {
-        let mut hasher = domain_hasher(PROJECTION_COMMITMENT_DOMAIN);
+    fn compute_commitment(&self) -> CollaborativeAuthorityProjectionClaimCommitment {
+        let mut hasher = domain_hasher(PROJECTION_CLAIM_COMMITMENT_DOMAIN);
+        hash_text(&mut hasher, "posture", "non_authorizing");
         hash_text(&mut hasher, "provider_id", self.provider_id.as_str());
         hash_u64(
             &mut hasher,
@@ -1518,14 +1542,15 @@ impl CollaborativeCurrentAuthorityProjection {
             hash_text(&mut hasher, "capability", capability_label(*capability));
         }
         hash_text(&mut hasher, "evaluated_at", &self.evaluated_at.to_rfc3339());
-        CollaborativeCurrentAuthorityProjectionCommitment::from_hasher(hasher)
+        CollaborativeAuthorityProjectionClaimCommitment::from_hasher(hasher)
     }
 }
 
-impl fmt::Debug for CollaborativeCurrentAuthorityProjection {
+impl fmt::Debug for CollaborativeAuthorityProjectionClaim {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("CollaborativeCurrentAuthorityProjection")
+            .debug_struct("CollaborativeAuthorityProjectionClaim")
+            .field("posture", &self.posture)
             .field("provider", &"[REDACTED]")
             .field("binding", &"[REDACTED]")
             .field("principal", &"[REDACTED]")
@@ -1542,10 +1567,11 @@ impl fmt::Debug for CollaborativeCurrentAuthorityProjection {
     }
 }
 
-impl fmt::Debug for UnverifiedCollaborativeCurrentAuthorityProjection {
+impl fmt::Debug for UnverifiedCollaborativeAuthorityProjectionClaim {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("UnverifiedCollaborativeCurrentAuthorityProjection")
+            .debug_struct("UnverifiedCollaborativeAuthorityProjectionClaim")
+            .field("posture", &self.posture)
             .field("provider", &"[REDACTED]")
             .field("binding", &"[REDACTED]")
             .field("principal", &"[REDACTED]")
@@ -1557,20 +1583,24 @@ impl fmt::Debug for UnverifiedCollaborativeCurrentAuthorityProjection {
     }
 }
 
-/// Resolves one trusted point-in-time collaborative authority projection.
+/// Validates one caller-supplied, non-authorizing authority projection claim.
+///
+/// This function establishes internal coherence only. It does not establish authoritative source
+/// provenance, completeness of current facts, or trusted time. Its result must not authorize a
+/// runtime operation.
 ///
 /// # Errors
 ///
 /// Fails closed for inactive or mismatched identity facts, stale authority revisions, ambiguous
 /// records, invalid revocations, or absence of one active exact-project grant.
-pub fn project_collaborative_current_authority(
-    input: &CollaborativeCurrentAuthorityProjectionInput<'_>,
-) -> Result<CollaborativeCurrentAuthorityProjection, WorkflowOsError> {
+pub fn validate_collaborative_authority_projection_claim(
+    input: &CollaborativeAuthorityProjectionClaimInput<'_>,
+) -> Result<CollaborativeAuthorityProjectionClaim, WorkflowOsError> {
     validate_projection_identity(input)?;
     if input.grants.len() > MAX_GRANTS || input.revocations.len() > MAX_REVOCATIONS {
         return Err(identity_error(
             "collaborative_identity.projection.input_too_large",
-            "collaborative authority projection input is too large",
+            "collaborative authority projection claim input is too large",
         ));
     }
 
@@ -1579,13 +1609,13 @@ pub fn project_collaborative_current_authority(
         if grants_by_id.insert(grant.grant_id(), grant).is_some() {
             return Err(identity_error(
                 "collaborative_identity.projection.duplicate_grant",
-                "collaborative authority projection contains duplicate grants",
+                "collaborative authority projection claim contains duplicate grants",
             ));
         }
         if grant.authority_registry_revision() > input.authority_registry_revision {
             return Err(identity_error(
                 "collaborative_identity.projection.authority_revision.stale",
-                "collaborative authority projection revision is stale",
+                "collaborative authority projection claim revision is stale",
             ));
         }
         validate_projection_grant_scope(input, grant)?;
@@ -1599,13 +1629,13 @@ pub fn project_collaborative_current_authority(
         {
             return Err(identity_error(
                 "collaborative_identity.projection.revocation_ambiguous",
-                "collaborative authority projection contains ambiguous revocation state",
+                "collaborative authority projection claim contains ambiguous revocation state",
             ));
         }
         let Some(grant) = grants_by_id.get(revocation.grant_id()) else {
             return Err(identity_error(
                 "collaborative_identity.projection.revocation_orphaned",
-                "collaborative authority projection contains an orphaned revocation",
+                "collaborative authority projection claim contains an orphaned revocation",
             ));
         };
         if revocation.grant_commitment() != grant.commitment()
@@ -1617,7 +1647,7 @@ pub fn project_collaborative_current_authority(
         {
             return Err(identity_error(
                 "collaborative_identity.projection.revocation_invalid",
-                "collaborative authority projection contains an invalid revocation",
+                "collaborative authority projection claim contains an invalid revocation",
             ));
         }
     }
@@ -1642,11 +1672,12 @@ pub fn project_collaborative_current_authority(
     if active_grants.is_empty() {
         return Err(identity_error(
             "collaborative_identity.projection.active_grant_missing",
-            "collaborative authority projection requires an active exact-project grant",
+            "collaborative authority projection claim requires an active exact-project grant",
         ));
     }
     active_grants.sort_by(|left, right| left.grant_id.cmp(&right.grant_id));
-    let mut projection = CollaborativeCurrentAuthorityProjection {
+    let mut projection = CollaborativeAuthorityProjectionClaim {
+        posture: CollaborativeAuthorityProjectionClaimPosture::NonAuthorizing,
         provider_id: input.provider.provider_id().clone(),
         provider_revision: input.provider.revision(),
         binding_id: input.binding.binding_id().clone(),
@@ -1658,7 +1689,7 @@ pub fn project_collaborative_current_authority(
         active_grants,
         capabilities: capabilities.into_iter().collect(),
         evaluated_at: input.evaluated_at,
-        commitment: CollaborativeCurrentAuthorityProjectionCommitment::new(
+        commitment: CollaborativeAuthorityProjectionClaimCommitment::new(
             SpecContentHash::from_text("uninitialized").as_str(),
         )?,
     };
@@ -1667,24 +1698,24 @@ pub fn project_collaborative_current_authority(
 }
 
 fn validate_projection_identity(
-    input: &CollaborativeCurrentAuthorityProjectionInput<'_>,
+    input: &CollaborativeAuthorityProjectionClaimInput<'_>,
 ) -> Result<(), WorkflowOsError> {
     if input.provider.lifecycle() != CollaborativeIdentityProviderLifecycle::Active {
         return Err(identity_error(
             "collaborative_identity.projection.provider_inactive",
-            "collaborative authority projection requires an active provider",
+            "collaborative authority projection claim requires an active provider",
         ));
     }
     if input.binding.lifecycle() != CollaborativePrincipalIdentityBindingLifecycle::Active {
         return Err(identity_error(
             "collaborative_identity.projection.binding_inactive",
-            "collaborative authority projection requires an active identity binding",
+            "collaborative authority projection claim requires an active identity binding",
         ));
     }
     if input.principal.lifecycle() != CollaborativePrincipalLifecycle::Active {
         return Err(identity_error(
             "collaborative_identity.projection.principal_inactive",
-            "collaborative authority projection requires an active principal",
+            "collaborative authority projection claim requires an active principal",
         ));
     }
     if input.provider.organization_id() != input.organization_id
@@ -1696,7 +1727,7 @@ fn validate_projection_identity(
     {
         return Err(identity_error(
             "collaborative_identity.projection.identity_mismatch",
-            "collaborative authority projection identity context does not match",
+            "collaborative authority projection claim identity context does not match",
         ));
     }
     if input.provider.revision() > input.authority_registry_revision
@@ -1704,7 +1735,7 @@ fn validate_projection_identity(
     {
         return Err(identity_error(
             "collaborative_identity.projection.authority_revision.stale",
-            "collaborative authority projection revision is stale",
+            "collaborative authority projection claim revision is stale",
         ));
     }
     if input.binding.issued_at() > input.evaluated_at
@@ -1712,14 +1743,14 @@ fn validate_projection_identity(
     {
         return Err(identity_error(
             "collaborative_identity.projection.fact_in_future",
-            "collaborative authority projection contains a future identity fact",
+            "collaborative authority projection claim contains a future identity fact",
         ));
     }
     Ok(())
 }
 
 fn validate_projection_grant_scope(
-    input: &CollaborativeCurrentAuthorityProjectionInput<'_>,
+    input: &CollaborativeAuthorityProjectionClaimInput<'_>,
     grant: &CollaborativeProjectGrant,
 ) -> Result<(), WorkflowOsError> {
     if grant.organization_id() != input.organization_id
@@ -1728,7 +1759,7 @@ fn validate_projection_grant_scope(
     {
         return Err(identity_error(
             "collaborative_identity.projection.grant_scope_mismatch",
-            "collaborative authority projection contains a mismatched grant scope",
+            "collaborative authority projection claim contains a mismatched grant scope",
         ));
     }
     Ok(())

@@ -227,3 +227,15 @@ administration, provider writes, schema exposure, or production identity work.
   documentation edits, validation, and later git/PR operations are performed by
   the delegated maintainer; the kernel governs review scope and records the
   approval/event trail.
+
+## 16. Fix-Forward Status
+
+The blocker is fixed forward without erasing this finding. The public resolver
+and trusted-looking result vocabulary were replaced by
+`validate_collaborative_authority_projection_claim` and
+`CollaborativeAuthorityProjectionClaim`. The result carries a fixed serialized
+`non_authorizing` posture, exposes descriptive capability membership rather
+than permission semantics, and has no conversion into trusted current
+authority. Authoritative source provenance, complete current fact coverage,
+and trusted time remain deferred prerequisites for any future authorizing
+projection.

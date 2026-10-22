@@ -1,12 +1,13 @@
 #![allow(clippy::expect_used)]
 
-//! Focused tests for collaborative identity lifecycle and point-in-time authority projection.
+//! Focused tests for collaborative identity lifecycle and non-authorizing projection claims.
 
 use serde_json::Value;
 use workflow_core::{
-    project_collaborative_current_authority, reconcile_collaborative_project_grant_revocation,
-    validate_collaborative_identity_binding_set, ActorId,
-    CollaborativeCurrentAuthorityProjectionInput, CollaborativeExternalSubjectCommitment,
+    reconcile_collaborative_project_grant_revocation,
+    validate_collaborative_authority_projection_claim, validate_collaborative_identity_binding_set,
+    ActorId, CollaborativeAuthorityProjectionClaimInput,
+    CollaborativeAuthorityProjectionClaimPosture, CollaborativeExternalSubjectCommitment,
     CollaborativeIdentityAudienceCommitment, CollaborativeIdentityIssuerCommitment,
     CollaborativeIdentityProviderId, CollaborativeIdentityProviderLifecycle,
     CollaborativeIdentityProviderRegistration, CollaborativeIdentityProviderRegistrationVersion,
@@ -18,7 +19,7 @@ use workflow_core::{
     CollaborativeProjectGrantRevocationDefinition, CollaborativeProjectGrantRevocationId,
     CollaborativeProjectGrantRevocationReason, CollaborativeProjectGrantRevocationReconciliation,
     HostedAuthorityRegistryRevision, HostedPrincipalKind, HostedProjectCapability, OrganizationId,
-    ProjectId, SpecContentHash, Timestamp, UnverifiedCollaborativeCurrentAuthorityProjection,
+    ProjectId, SpecContentHash, Timestamp, UnverifiedCollaborativeAuthorityProjectionClaim,
     WorkflowOsErrorKind,
 };
 
@@ -306,7 +307,7 @@ fn revocation_is_additive_and_distinguishes_exact_replay_from_conflict() {
 }
 
 #[test]
-fn current_authority_projection_unions_only_active_exact_project_grants() {
+fn validated_projection_claim_is_non_authorizing_and_uses_active_exact_project_grants() {
     let provider = provider(CollaborativeIdentityProviderLifecycle::Active);
     let binding = binding(CollaborativePrincipalIdentityBindingLifecycle::Active);
     let principal = principal(CollaborativePrincipalLifecycle::Active);
@@ -333,7 +334,7 @@ fn current_authority_projection_unions_only_active_exact_project_grants() {
     let revocation = revocation(&revoked, "revocation/revoked", "2026-10-20T11:00:00Z");
     let grants = vec![revoked, active.clone(), expired];
     let revocations = vec![revocation];
-    let input = CollaborativeCurrentAuthorityProjectionInput {
+    let input = CollaborativeAuthorityProjectionClaimInput {
         provider: &provider,
         binding: &binding,
         principal: &principal,
@@ -345,18 +346,23 @@ fn current_authority_projection_unions_only_active_exact_project_grants() {
         revocations: &revocations,
         evaluated_at: timestamp("2026-10-20T12:00:00Z"),
     };
-    let projection = project_collaborative_current_authority(&input).expect("projection");
+    let projection = validate_collaborative_authority_projection_claim(&input).expect("projection");
     assert_eq!(projection.active_grants().len(), 1);
     assert_eq!(projection.active_grants()[0].grant_id(), active.grant_id());
     assert_eq!(
         projection.capabilities(),
         &[HostedProjectCapability::RunRead]
     );
-    assert!(projection.allows(HostedProjectCapability::RunRead));
-    assert!(!projection.allows(HostedProjectCapability::ApprovalDecide));
+    assert_eq!(
+        projection.posture(),
+        CollaborativeAuthorityProjectionClaimPosture::NonAuthorizing
+    );
+    assert!(projection.contains_capability(HostedProjectCapability::RunRead));
+    assert!(!projection.contains_capability(HostedProjectCapability::ApprovalDecide));
 
-    let serialized = serde_json::to_string(&projection).expect("serialize trusted projection");
-    let unverified: UnverifiedCollaborativeCurrentAuthorityProjection =
+    let serialized = serde_json::to_string(&projection).expect("serialize validated claim");
+    assert!(serialized.contains("\"posture\":\"non_authorizing\""));
+    let unverified: UnverifiedCollaborativeAuthorityProjectionClaim =
         serde_json::from_str(&serialized).expect("decode only as unverified claim");
     let debug = format!("{unverified:?}");
     assert!(!debug.contains("user/alice"));
@@ -376,8 +382,8 @@ fn lifecycle_and_current_revision_fail_closed() {
         "2026-10-20T10:00:00Z",
         None,
     )];
-    let error =
-        project_collaborative_current_authority(&CollaborativeCurrentAuthorityProjectionInput {
+    let error = validate_collaborative_authority_projection_claim(
+        &CollaborativeAuthorityProjectionClaimInput {
             provider: &disabled_provider,
             binding: &active_binding,
             principal: &active_principal,
@@ -388,16 +394,17 @@ fn lifecycle_and_current_revision_fail_closed() {
             grants: &grants,
             revocations: &[],
             evaluated_at: timestamp("2026-10-20T12:00:00Z"),
-        })
-        .expect_err("disabled provider must fail");
+        },
+    )
+    .expect_err("disabled provider must fail");
     assert_eq!(
         error.code(),
         "collaborative_identity.projection.provider_inactive"
     );
 
     let active_provider = provider(CollaborativeIdentityProviderLifecycle::Active);
-    let stale =
-        project_collaborative_current_authority(&CollaborativeCurrentAuthorityProjectionInput {
+    let stale = validate_collaborative_authority_projection_claim(
+        &CollaborativeAuthorityProjectionClaimInput {
             provider: &active_provider,
             binding: &active_binding,
             principal: &active_principal,
@@ -408,8 +415,9 @@ fn lifecycle_and_current_revision_fail_closed() {
             grants: &grants,
             revocations: &[],
             evaluated_at: timestamp("2026-10-20T12:00:00Z"),
-        })
-        .expect_err("stale authority must fail");
+        },
+    )
+    .expect_err("stale authority must fail");
     assert_eq!(
         stale.code(),
         "collaborative_identity.projection.authority_revision.stale"
@@ -430,8 +438,8 @@ fn missing_or_fully_revoked_grants_do_not_create_fake_authority() {
         None,
     );
     let revocation = revocation(&grant, "revocation/revoked", "2026-10-20T11:00:00Z");
-    let error =
-        project_collaborative_current_authority(&CollaborativeCurrentAuthorityProjectionInput {
+    let error = validate_collaborative_authority_projection_claim(
+        &CollaborativeAuthorityProjectionClaimInput {
             provider: &provider,
             binding: &binding,
             principal: &principal,
@@ -442,8 +450,9 @@ fn missing_or_fully_revoked_grants_do_not_create_fake_authority() {
             grants: &[grant],
             revocations: &[revocation],
             evaluated_at: timestamp("2026-10-20T12:00:00Z"),
-        })
-        .expect_err("fully revoked authority must fail");
+        },
+    )
+    .expect_err("fully revoked authority must fail");
     assert_eq!(
         error.code(),
         "collaborative_identity.projection.active_grant_missing"
@@ -471,8 +480,8 @@ fn projection_rejects_cross_scope_grants_instead_of_filtering_them() {
         expires_at: None,
     })
     .expect("grant");
-    let error =
-        project_collaborative_current_authority(&CollaborativeCurrentAuthorityProjectionInput {
+    let error = validate_collaborative_authority_projection_claim(
+        &CollaborativeAuthorityProjectionClaimInput {
             provider: &provider,
             binding: &binding,
             principal: &principal,
@@ -483,8 +492,9 @@ fn projection_rejects_cross_scope_grants_instead_of_filtering_them() {
             grants: &[mismatched_grant],
             revocations: &[],
             evaluated_at: timestamp("2026-10-20T12:00:00Z"),
-        })
-        .expect_err("cross-scope input must fail closed");
+        },
+    )
+    .expect_err("cross-scope input must fail closed");
     assert_eq!(
         error.code(),
         "collaborative_identity.projection.grant_scope_mismatch"

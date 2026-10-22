@@ -532,10 +532,16 @@ The collaborative identity lifecycle Core model is now implemented in
 `workflow-core`. It provides validated provider registrations, opaque external
 subject bindings, principal lifecycle records, immutable exact-project grants,
 create-only revocations, aggregate active-binding ambiguity checks, and a
-constructor-only point-in-time authority projection.
+validated point-in-time authority projection claim.
+
+The phase review found that the original public projection API described
+caller-assembled facts as trusted current authority. The blocker fix demotes
+that result to an explicitly non-authorizing claim. It proves internal
+coherence only; authoritative provenance, complete current fact coverage, and
+trusted time remain prerequisites for any future trusted authority resolver.
 
 The implementation remains model-only. It does not validate external identity
 protocols, persist identity or grant state, change hosted authentication,
 expose a principal inbox, add directory synchronization or groups, execute
 provider writes, change workflow schemas, add CLI behavior, or claim production
-identity readiness. Focused maintainer/security review is the next phase.
+identity readiness. Focused blocker-fix review is the next phase.

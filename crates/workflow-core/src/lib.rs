@@ -146,10 +146,11 @@ pub use capability_authority::{
     StepScopedCapabilityProjectionInput,
 };
 pub use collaborative_identity::{
-    project_collaborative_current_authority, reconcile_collaborative_project_grant_revocation,
-    validate_collaborative_identity_binding_set, CollaborativeActiveGrantReference,
-    CollaborativeCurrentAuthorityProjection, CollaborativeCurrentAuthorityProjectionCommitment,
-    CollaborativeCurrentAuthorityProjectionInput, CollaborativeExternalSubjectCommitment,
+    reconcile_collaborative_project_grant_revocation,
+    validate_collaborative_authority_projection_claim, validate_collaborative_identity_binding_set,
+    CollaborativeActiveGrantReference, CollaborativeAuthorityProjectionClaim,
+    CollaborativeAuthorityProjectionClaimCommitment, CollaborativeAuthorityProjectionClaimInput,
+    CollaborativeAuthorityProjectionClaimPosture, CollaborativeExternalSubjectCommitment,
     CollaborativeIdentityAudienceCommitment, CollaborativeIdentityIssuerCommitment,
     CollaborativeIdentityProviderId, CollaborativeIdentityProviderLifecycle,
     CollaborativeIdentityProviderRegistration, CollaborativeIdentityProviderRegistrationVersion,
@@ -161,7 +162,7 @@ pub use collaborative_identity::{
     CollaborativeProjectGrantRevocation, CollaborativeProjectGrantRevocationCommitment,
     CollaborativeProjectGrantRevocationDefinition, CollaborativeProjectGrantRevocationId,
     CollaborativeProjectGrantRevocationReason, CollaborativeProjectGrantRevocationReconciliation,
-    UnverifiedCollaborativeCurrentAuthorityProjection,
+    UnverifiedCollaborativeAuthorityProjectionClaim,
 };
 pub use current_authority_fact_set::{
     AuthorityFactCompletenessPosture, AuthorityFactSourceBinding, AuthorityFactSourceKind,
