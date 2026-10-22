@@ -1,7 +1,8 @@
 # Trusted-Host Cargo Format Workflow Composition Plan
 
 Status: implemented after accepted focused maintainer/security plan review;
-focused implementation/security review found blocker fixes are required.
+the remaining blocker-fix revision is implemented and awaiting final focused
+review.
 
 Related foundations:
 
@@ -429,5 +430,7 @@ Focused re-review in
 found one remaining correctness blocker and two mandatory proof gaps: valid
 pre-result failure on the first or second scheduled step is rejected, and
 direct duplicate-dispatch and composed-timeout regressions remain absent.
-Perform one additional narrow blocker fix and re-review. Do not broaden the
-profile registry, topology, public surface, provider access, or write posture.
+The additional narrow fix is implemented in
+[Trusted-Host Cargo Format Workflow Composition Final Blocker Fix Report](../concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_FINAL_BLOCKER_FIX_REPORT.md).
+Perform final focused re-review. Do not broaden the profile registry,
+topology, public surface, provider access, or write posture.

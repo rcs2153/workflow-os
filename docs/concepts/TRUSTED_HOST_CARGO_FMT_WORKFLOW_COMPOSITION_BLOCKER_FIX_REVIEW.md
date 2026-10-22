@@ -164,3 +164,11 @@ Perform one additional narrow blocker-fix phase for the early pre-result
 terminal condition and the two missing direct regressions. Then repeat focused
 maintainer/security review. Do not broaden profiles, topology, providers,
 writes, public surfaces, hosted behavior, or release posture.
+
+## 14. Fix-Forward Status
+
+The blockers in this review are addressed in
+[Trusted-Host Cargo Format Workflow Composition Final Blocker Fix Report](TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_FINAL_BLOCKER_FIX_REPORT.md).
+The original verdict above is preserved as the decision on the reviewed
+revision. A separate focused review must accept the fix-forward revision
+before this composition lane is complete.

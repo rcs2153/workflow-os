@@ -154,8 +154,12 @@ phase` language does not supersede the active queue.
    maintainer/security re-review found one remaining correctness blocker and
    two proof gaps: pre-result failure is incorrectly limited to the final
    workflow step rather than the last scheduled step, and direct duplicate-
-   dispatch and composed-timeout regressions are still missing. One additional
-   narrow blocker fix is next. Clippy, tests, arbitrary commands, providers,
+   dispatch and composed-timeout regressions are still missing. The additional
+   narrow blocker fix is implemented: history validation now uses the durable
+   scheduled prefix, early pre-result failures remain reportable without fake
+   result truth, duplicate dispatch commitments fail closed, and composed
+   Cargo timeout produces a bounded v4 artifact. Final focused re-review is
+   next. Clippy, tests, arbitrary commands, providers,
    external writes, public surfaces, hosted expansion, and topology broadening
    remain out of scope. See
    [Trusted-Host Cargo Format Workflow Composition Implementation Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REPORT.md)
@@ -165,6 +169,8 @@ phase` language does not supersede the active queue.
    [Trusted-Host Cargo Format Workflow Composition Blocker Fix Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_BLOCKER_FIX_REPORT.md)
    and
    [Trusted-Host Cargo Format Workflow Composition Blocker Fix Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_BLOCKER_FIX_REVIEW.md).
+   The final narrow fix record is in
+   [Trusted-Host Cargo Format Workflow Composition Final Blocker Fix Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_FINAL_BLOCKER_FIX_REPORT.md).
 
    Historical accepted evidence:
 

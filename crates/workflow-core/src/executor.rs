@@ -12548,6 +12548,11 @@ fn validate_trusted_host_three_step_attempt(
     schedule_sequence: EventSequenceNumber,
 ) -> Result<TrustedHostThreeStepAttemptOutcome, WorkflowOsError> {
     let run = history.run;
+    let scheduled_count = run
+        .events
+        .iter()
+        .filter(|event| matches!(event.kind, WorkflowRunEventKind::StepScheduled { .. }))
+        .count();
     let step = history
         .workflow
         .steps
@@ -12581,11 +12586,6 @@ fn validate_trusted_host_three_step_attempt(
         })
         .collect::<Vec<_>>();
     if invocation_requests.is_empty() {
-        let scheduled_count = run
-            .events
-            .iter()
-            .filter(|event| matches!(event.kind, WorkflowRunEventKind::StepScheduled { .. }))
-            .count();
         let result_count = run
             .events
             .iter()
@@ -12688,7 +12688,7 @@ fn validate_trusted_host_three_step_attempt(
     }
     let terminal_event = run.events.last();
     if !run.snapshot.status.is_terminal()
-        || index + 1 != history.workflow.steps.len()
+        || index + 1 != scheduled_count
         || !matches!(
             terminal_event.map(|event| &event.kind),
             Some(WorkflowRunEventKind::RunFailed(_))
