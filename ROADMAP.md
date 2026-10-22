@@ -88,33 +88,20 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Add one second closed no-write trusted-host profile.** Planning selects
-   the existing `WorkflowOsProjectValidation` profile in the
-   [Trusted-Host Project-Validation Profile
-   Plan](docs/implementation-plans/trusted-host-project-validation-profile-plan.md).
-   The plan requires exact governed-root and executable binding, a separate
-   Core-owned explicit-zero authority decision, same-call validation truth,
-   unchanged lifecycle and replay semantics, and explicit disclosure that the
-   unpublished host still creates no WorkReport artifact. Perform focused
-   maintainer/security review before implementation. Focused review found two
-   planning blockers: non-passing local checks currently become successful
-   trusted-host skill outputs, and the proposed explicit profile selector does
-   not yet define how existing docs-check invocations remain compatible.
-   The focused blocker fix now defines a private Core-owned result adapter that
-   accepts only passing checks as trusted-host success and an exact selector
-   rule with a temporary docs-check-only compatibility alias. Focused
-   maintainer/security [re-review](docs/concepts/TRUSTED_HOST_PROJECT_VALIDATION_PROFILE_PLAN_BLOCKER_FIX_REVIEW.md)
-   accepts both corrections with no remaining planning blocker. The bounded
-   implementation vertical slice is now complete: the unpublished host accepts
-   the explicit project-validation profile, preserves the temporary docs-check
-   compatibility alias, binds validation to the exact governed root, uses
-   profile-specific explicit-zero source identities, and terminalizes failed
-   or timed-out checks instead of converting them to successful skill output.
-   Focused maintainer/security implementation review is accepted with one
-   non-blocking test-depth follow-up: timeout is proven at the private adapter
-   boundary rather than through a 120-second foreground-binary timeout run.
-   Do not jump to arbitrary commands, another check family, default activation, scheduling, nested
-   harnesses, automatic approval, providers, writes, or hosted expansion.
+2. **Compose an in-memory terminal WorkReport for the trusted-host path.** The
+   second closed no-write profile is implemented and focused-review accepted.
+   Planning for the next executable composition slice is complete in the
+   [Trusted-Host Terminal WorkReport Composition
+   Plan](docs/implementation-plans/trusted-host-terminal-work-report-composition-plan.md).
+   Core must preserve the actual same-call local-check result, commit terminal
+   workflow state, rehydrate the exact run and immutable bundle, and only then
+   construct a validated report with deterministic private identity. Report
+   failure cannot rewrite workflow pass/fail semantics, and exact replay cannot
+   rerun the process or append events. Implement this in-memory private path,
+   then perform focused maintainer/security review. Do not add report
+   persistence, artifacts, released CLI output, another profile, arbitrary
+   commands, scheduling, nested harnesses, automatic approval, providers,
+   writes, or hosted expansion.
 
 Queue maintenance rule: every merged roadmap phase must update this list and
 the status date in the same PR. Completed work moves into the lane evidence or
