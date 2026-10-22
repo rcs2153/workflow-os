@@ -214,10 +214,16 @@ impl TrustedHostWorkflowLifecycleContext {
         }
     }
 
-    pub(crate) fn completion_event_domain(&self) -> &'static str {
-        match self.success_progression {
-            TrustedHostWorkflowSuccessProgression::Terminal => "run-terminal",
-            TrustedHostWorkflowSuccessProgression::Continue { .. } => "step-scheduled",
+    pub(crate) fn completion_event_domain(
+        &self,
+        outcome: &TrustedHostWorkflowTerminalOutcome,
+    ) -> &'static str {
+        match (outcome, &self.success_progression) {
+            (
+                TrustedHostWorkflowTerminalOutcome::Succeeded { .. },
+                TrustedHostWorkflowSuccessProgression::Continue { .. },
+            ) => "step-scheduled",
+            _ => "run-terminal",
         }
     }
 
@@ -467,6 +473,14 @@ mod tests {
             WorkflowRunEventKind::StepScheduled { step_id }
                 if step_id.as_str() == "docs-check-next"
         ));
-        assert_eq!(lifecycle.completion_event_domain(), "step-scheduled");
+        assert_eq!(
+            lifecycle.completion_event_domain(&outcome),
+            "step-scheduled"
+        );
+
+        let failure = TrustedHostWorkflowTerminalOutcome::terminal_failure();
+        let [_, failure_event] = lifecycle.completion_events(&failure);
+        assert!(matches!(failure_event, WorkflowRunEventKind::RunFailed(_)));
+        assert_eq!(lifecycle.completion_event_domain(&failure), "run-terminal");
     }
 }

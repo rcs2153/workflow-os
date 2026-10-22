@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
+#[cfg(feature = "trusted-host-application-spi")]
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -11648,12 +11649,18 @@ fn validate_trusted_host_two_step_history(run: &WorkflowRun) -> Result<(), Workf
         .events
         .iter()
         .filter_map(|event| match &event.kind {
-            WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+            WorkflowRunEventKind::StepScheduled { step_id } => {
+                Some((step_id.as_str(), event.sequence_number))
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
     if !matches!(
-        scheduled.as_slice(),
+        scheduled
+            .iter()
+            .map(|(step_id, _)| *step_id)
+            .collect::<Vec<_>>()
+            .as_slice(),
         ["project-validation"] | ["project-validation", "docs-check"]
     ) {
         return Err(trusted_host_two_step_error("history_schedule_invalid"));
@@ -11663,28 +11670,71 @@ fn validate_trusted_host_two_step_history(run: &WorkflowRun) -> Result<(), Workf
         .iter()
         .filter_map(|event| match &event.kind {
             WorkflowRunEventKind::LocalCheckResultRecorded(result) => {
-                Some(result.step_id().as_str())
+                Some((event.sequence_number, result.as_ref()))
             }
             _ => None,
         })
         .collect::<Vec<_>>();
     if !matches!(
-        results.as_slice(),
+        results
+            .iter()
+            .map(|(_, result)| result.step_id().as_str())
+            .collect::<Vec<_>>()
+            .as_slice(),
         [] | ["project-validation"] | ["project-validation", "docs-check"]
     ) {
         return Err(trusted_host_two_step_error("history_result_invalid"));
     }
-    if scheduled.len() == 2 && results.first() != Some(&"project-validation") {
+    if scheduled.len() == 2 && results.is_empty() {
         return Err(trusted_host_two_step_error("history_progression_invalid"));
     }
     if !run.snapshot.status.is_terminal()
         && ((scheduled.len() == 1 && !results.is_empty())
-            || (scheduled.len() == 2 && results.as_slice() != ["project-validation"]))
+            || (scheduled.len() == 2 && results.len() != 1))
     {
         return Err(trusted_host_two_step_error("history_progression_invalid"));
     }
     if run.snapshot.status == WorkflowRunStatus::Completed && results.len() != 2 {
         return Err(trusted_host_two_step_error("history_terminal_invalid"));
+    }
+    for (index, (result_sequence, result)) in results.iter().enumerate() {
+        let Some((_, schedule_sequence)) = scheduled.get(index) else {
+            return Err(trusted_host_two_step_error("history_result_invalid"));
+        };
+        let invocation_events = run
+            .events
+            .iter()
+            .filter(|event| {
+                event.event_id == *result.invocation_terminal_event_id()
+                    && matches!(
+                        &event.kind,
+                        WorkflowRunEventKind::SkillInvocationSucceeded { invocation_id, step_id, .. }
+                            | WorkflowRunEventKind::SkillInvocationFailed { invocation_id, step_id, .. }
+                            if invocation_id == result.invocation_id() && step_id == result.step_id()
+                    )
+            })
+            .collect::<Vec<_>>();
+        let [invocation_event] = invocation_events.as_slice() else {
+            return Err(trusted_host_two_step_error("history_invocation_invalid"));
+        };
+        let succeeded = result.status() == crate::LocalCheckResultStatus::Passed;
+        if succeeded
+            != matches!(
+                invocation_event.kind,
+                WorkflowRunEventKind::SkillInvocationSucceeded { .. }
+            )
+            || schedule_sequence >= result_sequence
+            || result_sequence >= &invocation_event.sequence_number
+        {
+            return Err(trusted_host_two_step_error("history_result_invalid"));
+        }
+        if let Some((_, next_schedule_sequence)) = scheduled.get(index + 1) {
+            if !succeeded || invocation_event.sequence_number >= *next_schedule_sequence {
+                return Err(trusted_host_two_step_error("history_progression_invalid"));
+            }
+        } else if !succeeded && !run.snapshot.status.is_terminal() {
+            return Err(trusted_host_two_step_error("history_progression_invalid"));
+        }
     }
     Ok(())
 }

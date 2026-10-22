@@ -221,7 +221,7 @@ impl SqliteContinuityStore {
             expected_cursor.clone()
         };
         let lifecycle_completion_cursor =
-            if let Some((lifecycle, _, local_check_event)) = workflow_lifecycle {
+            if let Some((lifecycle, outcome, local_check_event)) = workflow_lifecycle {
                 ContinuityCursor {
                     sequence_number: crate::EventSequenceNumber::new(
                         projection_cursor
@@ -230,8 +230,10 @@ impl SqliteContinuityStore {
                             .checked_add(if local_check_event.is_some() { 3 } else { 2 })
                             .ok_or_else(corrupt)?,
                     )?,
-                    event_id: lifecycle
-                        .event_id(lifecycle.completion_event_domain(), operation_id.as_str())?,
+                    event_id: lifecycle.event_id(
+                        lifecycle.completion_event_domain(outcome),
+                        operation_id.as_str(),
+                    )?,
                 }
             } else {
                 projection_cursor.clone()
@@ -1959,7 +1961,7 @@ fn persist_runtime_projection(
                 correlation_id: None,
                 actor: None,
                 idempotency_key: Some(
-                    lifecycle.idempotency_key(lifecycle.completion_event_domain())?,
+                    lifecycle.idempotency_key(lifecycle.completion_event_domain(outcome))?,
                 ),
                 kind: completion_event,
             },

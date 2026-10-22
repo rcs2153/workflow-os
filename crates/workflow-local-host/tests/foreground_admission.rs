@@ -217,6 +217,63 @@ fn foreground_binary_executes_exact_two_step_no_write_workflow() {
 }
 
 #[test]
+fn two_step_terminal_replay_rejects_result_before_invocation_history_corruption() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("two-step-corrupt-order");
+    write_two_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("two-step-corrupt-order");
+    let bundle_id = fixture.bundle_id("two-step-corrupt-order");
+
+    let initial = invoke_two_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_swap_event_order(
+        &fixture.database,
+        &run_id,
+        "LocalCheckResultRecorded",
+        "SkillInvocationSucceeded",
+    );
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen corrupt SQLite");
+    let corrupt_events = backend
+        .rehydrate_run(&run_id)
+        .expect("corrupt run remains readable")
+        .events;
+
+    let replay = invoke_two_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(!replay.status.success());
+    assert_eq!(replay.stdout, Vec::<u8>::new());
+    assert_eq!(
+        String::from_utf8(replay.stderr).expect("bounded corrupt replay stderr"),
+        "trusted_host_local_application: trusted_host_local_application.failure.unsupported\n"
+    );
+    let after = backend
+        .rehydrate_run(&run_id)
+        .expect("corrupt run remains readable after rejection");
+    assert_eq!(after.events, corrupt_events);
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("artifact list remains readable")
+            .len(),
+        0
+    );
+}
+
+#[test]
 fn two_step_first_failure_never_schedules_docs_check() {
     let fixture = Fixture::new();
     fs::write(

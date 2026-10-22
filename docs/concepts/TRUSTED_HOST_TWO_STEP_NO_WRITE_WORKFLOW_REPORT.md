@@ -104,7 +104,10 @@ Focused coverage proves:
 - artifact recovery and duplicate reconciliation; and
 - unchanged existing one-step behavior.
 
-The focused foreground admission suite contains 26 passing tests.
+The focused foreground admission suite initially contained 26 passing tests.
+Focused review added a 27th real-SQLite corruption regression that proves
+causally invalid result/invocation ordering fails closed before artifact
+recreation.
 
 ## 10. Validation
 
@@ -150,3 +153,8 @@ should prioritize atomic progression, history validation, restart behavior,
 profile/step non-substitution, v3 report integrity, failure honesty, and
 one-step compatibility. Any blocker should be fixed before the trusted-host
 runtime is broadened.
+
+That review is complete in
+[Trusted-Host Two-Step No-Write Workflow Review](TRUSTED_HOST_TWO_STEP_NO_WRITE_WORKFLOW_REVIEW.md).
+It found and fixed outcome-domain and causal-history validation blockers before
+accepting the phase.
