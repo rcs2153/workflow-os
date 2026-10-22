@@ -220,8 +220,8 @@ impl SqliteContinuityStore {
         } else {
             expected_cursor.clone()
         };
-        let lifecycle_terminal_cursor =
-            if let Some((lifecycle, _, local_check_event)) = workflow_lifecycle {
+        let lifecycle_completion_cursor =
+            if let Some((lifecycle, outcome, local_check_event)) = workflow_lifecycle {
                 ContinuityCursor {
                     sequence_number: crate::EventSequenceNumber::new(
                         projection_cursor
@@ -230,7 +230,10 @@ impl SqliteContinuityStore {
                             .checked_add(if local_check_event.is_some() { 3 } else { 2 })
                             .ok_or_else(corrupt)?,
                     )?,
-                    event_id: lifecycle.event_id("run-terminal", operation_id.as_str())?,
+                    event_id: lifecycle.event_id(
+                        lifecycle.completion_event_domain(outcome),
+                        operation_id.as_str(),
+                    )?,
                 }
             } else {
                 projection_cursor.clone()
@@ -240,7 +243,7 @@ impl SqliteContinuityStore {
         mutation(
             &mut preflight,
             window.trusted_time_watermark,
-            &lifecycle_terminal_cursor,
+            &lifecycle_completion_cursor,
             MutationPhase::Preflight,
         )?;
 
@@ -312,7 +315,7 @@ impl SqliteContinuityStore {
             CommittedOperationDisposition::CommittedSuccess(mutation(
                 &mut state,
                 observed_at,
-                &lifecycle_terminal_cursor,
+                &lifecycle_completion_cursor,
                 MutationPhase::Commit,
             )?)
         };
@@ -323,7 +326,7 @@ impl SqliteContinuityStore {
         .then_some(workflow_lifecycle)
         .flatten();
         let committed_cursor = if projected_workflow_lifecycle.is_some() {
-            lifecycle_terminal_cursor
+            lifecycle_completion_cursor
         } else {
             projection_cursor.clone()
         };
@@ -1888,7 +1891,7 @@ fn persist_runtime_projection(
     };
     let mut snapshot = append_event_and_project_snapshot(transaction, &event)?;
     if let Some((lifecycle, outcome, local_check_event)) = workflow_lifecycle {
-        let [invocation_terminal, run_terminal] = lifecycle.terminal_events(outcome);
+        let [invocation_terminal, completion_event] = lifecycle.completion_events(outcome);
         let invocation_offset = if let Some(local_check_event) = local_check_event {
             append_event_and_project_snapshot(
                 transaction,
@@ -1957,8 +1960,10 @@ fn persist_runtime_projection(
                 spec_content_hash: first.spec_content_hash.clone(),
                 correlation_id: None,
                 actor: None,
-                idempotency_key: Some(lifecycle.idempotency_key("run-terminal")?),
-                kind: run_terminal,
+                idempotency_key: Some(
+                    lifecycle.idempotency_key(lifecycle.completion_event_domain(outcome))?,
+                ),
+                kind: completion_event,
             },
         )?;
     }

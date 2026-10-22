@@ -10,10 +10,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use workflow_core::{
-    EventLogStore, ImmutableRunBundleId, ImmutableRunBundleStore, SqliteStateBackend, StateBackend,
-    Timestamp, WorkReportArtifactStore, WorkflowRunEventKind, WorkflowRunEventKindName,
+    admit_trusted_host_two_step_no_write_operation, ActorId, CorrelationId, EventLogStore,
+    ExplicitLocalCheckProfileSelection, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
+    ImmutableRunBundleStore, ImmutableRunBundleVersion,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
+    LocalExecutionRequest, LocalExecutionWithImmutableRunBundleRequest, SqliteStateBackend,
+    StateBackend, Timestamp, TrustedHostLocalApplicationAdmissionOutcome,
+    TrustedHostTwoStepNoWriteAdmissionRequest, TrustedHostTwoStepNoWriteProfileRegistry,
+    WorkReportArtifactStore, WorkflowId, WorkflowRunEventKind, WorkflowRunEventKindName,
     WorkflowRunId, WorkflowRunStatus,
 };
+use workflow_local_host::LocalHostPreparedOperation;
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 
@@ -125,6 +132,380 @@ fn foreground_binary_executes_explicit_project_validation_profile() {
     assert!(limitations
         .iter()
         .any(|summary| summary.contains("no released inspection or export surface exists")));
+}
+
+#[test]
+fn foreground_binary_executes_exact_two_step_no_write_workflow() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("two-step-success");
+    write_two_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("two-step-success");
+    let bundle_id = fixture.bundle_id("two-step-success");
+
+    let output = invoke_two_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(
+        output.status.success(),
+        "foreground stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("bounded stdout"),
+        "trusted_host_local_application: operation.terminal_report_artifact_persisted\n"
+    );
+
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let run = backend.rehydrate_run(&run_id).expect("durable run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    let scheduled = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scheduled, vec!["project-validation", "docs-check"]);
+    let results = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::LocalCheckResultRecorded(result) => {
+                Some(result.step_id().as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(results, vec!["project-validation", "docs-check"]);
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("persisted report artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(
+        artifacts[0]
+            .work_report()
+            .report_contract_version()
+            .as_str(),
+        "v3"
+    );
+    assert_eq!(local_check_citation_count(artifacts[0].work_report()), 2);
+
+    let replay = invoke_two_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(replay.status.success());
+    assert_eq!(
+        String::from_utf8(replay.stdout).expect("bounded replay stdout"),
+        "trusted_host_local_application: admission.terminal_replay_report_artifact_already_persisted\n"
+    );
+    assert_eq!(
+        backend.rehydrate_run(&run_id).expect("replayed run").events,
+        run.events
+    );
+}
+
+#[test]
+fn two_step_terminal_replay_rejects_result_before_invocation_history_corruption() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("two-step-corrupt-order");
+    write_two_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("two-step-corrupt-order");
+    let bundle_id = fixture.bundle_id("two-step-corrupt-order");
+
+    let initial = invoke_two_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_swap_event_order(
+        &fixture.database,
+        &run_id,
+        "LocalCheckResultRecorded",
+        "SkillInvocationSucceeded",
+    );
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen corrupt SQLite");
+    let corrupt_events = backend
+        .rehydrate_run(&run_id)
+        .expect("corrupt run remains readable")
+        .events;
+
+    let replay = invoke_two_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(!replay.status.success());
+    assert_eq!(replay.stdout, Vec::<u8>::new());
+    assert_eq!(
+        String::from_utf8(replay.stderr).expect("bounded corrupt replay stderr"),
+        "trusted_host_local_application: trusted_host_local_application.failure.unsupported\n"
+    );
+    let after = backend
+        .rehydrate_run(&run_id)
+        .expect("corrupt run remains readable after rejection");
+    assert_eq!(after.events, corrupt_events);
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("artifact list remains readable")
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn two_step_first_failure_never_schedules_docs_check() {
+    let fixture = Fixture::new();
+    fs::write(
+        &fixture.workflow_os,
+        "#!/bin/sh\ntest \"$1\" = validate || exit 9\nexit 7\n",
+    )
+    .expect("failing workflow-os fixture");
+    let governance_root = fixture.root.join("two-step-first-failure");
+    write_two_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("two-step-first-failure");
+    let bundle_id = fixture.bundle_id("two-step-first-failure");
+
+    let output = invoke_two_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(output.status.success());
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let run = backend.rehydrate_run(&run_id).expect("failed run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(
+                event.kind,
+                WorkflowRunEventKind::LocalCheckResultRecorded(_)
+            ))
+            .count(),
+        1
+    );
+    assert!(!run.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::StepScheduled { step_id } if step_id.as_str() == "docs-check"
+    )));
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("failure artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(local_check_citation_count(artifacts[0].work_report()), 1);
+    assert!(artifacts[0]
+        .work_report()
+        .incomplete_work()
+        .iter()
+        .any(|item| item.summary().contains("not attempted")));
+}
+
+#[test]
+fn two_step_second_failure_records_both_results_and_fails_honestly() {
+    let fixture = Fixture::new();
+    fs::write(&fixture.npm, "#!/bin/sh\nexit 8\n").expect("failing npm fixture");
+    let governance_root = fixture.root.join("two-step-second-failure");
+    write_two_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("two-step-second-failure");
+    let bundle_id = fixture.bundle_id("two-step-second-failure");
+
+    let output = invoke_two_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(output.status.success());
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let run = backend.rehydrate_run(&run_id).expect("failed run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(
+                event.kind,
+                WorkflowRunEventKind::LocalCheckResultRecorded(_)
+            ))
+            .count(),
+        2
+    );
+    assert!(run.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::SkillInvocationFailed { step_id, .. }
+            if step_id.as_str() == "docs-check"
+    )));
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("failure artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(local_check_citation_count(artifacts[0].work_report()), 2);
+}
+
+#[test]
+fn two_step_mode_rejects_caller_selected_step_before_state_creation() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("two-step-caller-step");
+    write_two_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("two-step-caller-step");
+    let bundle_id = fixture.bundle_id("two-step-caller-step");
+    let mut command = base_foreground_command(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    let output = command
+        .args([
+            "--mode",
+            "two-step-no-write",
+            "--step-id",
+            "project-validation",
+            "--repository-root",
+            repository_root().to_str().expect("repository root"),
+            "--npm-executable",
+            fixture.npm.to_str().expect("npm"),
+            "--workflow-os-executable",
+            fixture.workflow_os.to_str().expect("workflow-os"),
+            "--workflow-id",
+            "test/trusted-host-two-step",
+            "--actor",
+            "system/local-host-two-step-test",
+            "--correlation-id",
+            "correlation-local-host-two-step-test",
+        ])
+        .output()
+        .expect("foreground binary");
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("bounded stderr"),
+        "trusted_host_local_application: input.invalid\n"
+    );
+    assert!(!fixture.database.exists());
+}
+
+#[test]
+fn two_step_restart_after_first_commit_resumes_only_docs_check() -> Result<(), &'static str> {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("two-step-restart");
+    write_two_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("two-step-restart");
+    let bundle_id = fixture.bundle_id("two-step-restart");
+    let project_validation = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve(fixture.workflow_os.clone(), governance_root.clone())
+        .expect("project validation profile");
+    let docs_check = ExplicitLocalCheckProfileSelection::docs_check()
+        .resolve_docs_check(fixture.npm.clone(), repository_root(), None)
+        .expect("docs profile");
+    let registry = TrustedHostTwoStepNoWriteProfileRegistry::new(project_validation, docs_check)
+        .expect("closed registry");
+    let backend = SqliteStateBackend::open(&fixture.database).expect("open state");
+    let mut request = TrustedHostTwoStepNoWriteAdmissionRequest {
+        execution: LocalExecutionWithImmutableRunBundleRequest {
+            execution: LocalExecutionRequest {
+                project_root: governance_root,
+                workflow_id: WorkflowId::new("test/trusted-host-two-step").expect("workflow"),
+                run_id: Some(run_id.clone()),
+                correlation_id: CorrelationId::new("correlation-two-step-restart")
+                    .expect("correlation"),
+                actor: ActorId::new("system/two-step-restart-test").expect("actor"),
+                before_skill_invocation_checkpoints:
+                    LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+                before_skill_invocation_hook: None,
+                side_effect_events: Vec::new(),
+                side_effect_lifecycle_events: Vec::new(),
+            },
+            bundle: LocalExecutionImmutableRunBundleInputs {
+                bundle_id,
+                bundle_version: ImmutableRunBundleVersion::new("v1").expect("version"),
+                created_at: Timestamp::parse_rfc3339(&observed_at).expect("observed at"),
+                sensitivity: ImmutableRunBundleSensitivity::Internal,
+                redaction_required: true,
+            },
+        },
+        observed_at: Timestamp::parse_rfc3339(&observed_at).expect("observed at"),
+        expires_at: Timestamp::parse_rfc3339(&expires_at).expect("expires at"),
+    };
+    let first = admit_trusted_host_two_step_no_write_operation(&backend, &registry, &request)
+        .expect("first admission");
+    let TrustedHostLocalApplicationAdmissionOutcome::Prepared(first) = first else {
+        return Err("first operation must be prepared");
+    };
+    LocalHostPreparedOperation::from_prepared(first)
+        .run()
+        .expect("first operation");
+    let before = backend.rehydrate_run(&run_id).expect("intermediate run");
+    assert_eq!(before.snapshot.status, WorkflowRunStatus::Running);
+    assert_eq!(
+        before
+            .events
+            .iter()
+            .filter(|event| matches!(
+                event.kind,
+                WorkflowRunEventKind::LocalCheckResultRecorded(_)
+            ))
+            .count(),
+        1
+    );
+    request.observed_at = Timestamp::now_utc();
+    let second = admit_trusted_host_two_step_no_write_operation(&backend, &registry, &request)
+        .expect("second admission");
+    let TrustedHostLocalApplicationAdmissionOutcome::Prepared(second) = second else {
+        return Err("second operation must be prepared");
+    };
+    LocalHostPreparedOperation::from_prepared(second)
+        .run()
+        .expect("second operation");
+    let after = backend.rehydrate_run(&run_id).expect("terminal run");
+    assert_eq!(after.snapshot.status, WorkflowRunStatus::Completed);
+    let result_steps = after
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::LocalCheckResultRecorded(result) => {
+                Some(result.step_id().as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(result_steps, vec!["project-validation", "docs-check"]);
+    assert!(matches!(
+        admit_trusted_host_two_step_no_write_operation(&backend, &registry, &request)
+            .expect("terminal replay"),
+        TrustedHostLocalApplicationAdmissionOutcome::TerminalReplay
+    ));
+    Ok(())
 }
 
 #[test]
@@ -1517,6 +1898,38 @@ fn write_project_validation_project(project_root: &Path) {
     .expect("policy");
 }
 
+fn write_two_step_project(project_root: &Path) {
+    fs::create_dir_all(project_root.join("workflows")).expect("workflow directory");
+    fs::create_dir_all(project_root.join("skills")).expect("skill directory");
+    fs::create_dir_all(project_root.join("policies")).expect("policy directory");
+    fs::create_dir_all(project_root.join("tests")).expect("tests directory");
+    fs::write(
+        project_root.join("workflow-os.yml"),
+        PROJECT_VALIDATION_MANIFEST,
+    )
+    .expect("manifest");
+    fs::write(
+        project_root.join("workflows/two-step.workflow.yml"),
+        TWO_STEP_WORKFLOW,
+    )
+    .expect("workflow");
+    fs::write(
+        project_root.join("skills/project-validation.skill.yml"),
+        PROJECT_VALIDATION_SKILL,
+    )
+    .expect("project validation skill");
+    fs::write(
+        project_root.join("skills/docs-check.skill.yml"),
+        DOCS_CHECK_SKILL,
+    )
+    .expect("docs check skill");
+    fs::write(
+        project_root.join("policies/local.policy.yml"),
+        "schema_version: workflowos.dev/v0\nid: local/d\nname: Local\ndescription: Bounded local policy.\nrules:\n  - id: allow-local\n    effect: allow_local\n",
+    )
+    .expect("policy");
+}
+
 const PROJECT_VALIDATION_MANIFEST: &str = r"schema_version: workflowos.dev/v0
 project:
   id: test/trusted-host-project-validation
@@ -1616,6 +2029,113 @@ audit_requirements:
   store_references_only: true
 observability_requirements:
   metrics: [skill_latency]
+  tracing: true
+  latency_tracking: true
+";
+
+const DOCS_CHECK_SKILL: &str = r"schema_version: workflowos.dev/v0
+id: local/check-docs
+version: v0
+display_name: Check Documentation
+description: Explicit local documentation-check skill.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+input_contract:
+  fields:
+    - name: request
+      field_type: string
+      description: Non-secret documentation request marker.
+  required: [request]
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+      description: Bounded local check summary.
+    - name: local_check_status
+      field_type: string
+      description: Bounded local check status.
+  required: [summary, local_check_status]
+allowed_capabilities:
+  - name: local.read
+failure_modes:
+  - code: docs_check_failed
+    description: Documentation check failed.
+    retryable: false
+evaluation_criteria:
+  - name: explicit_handler_only
+    description: Execute only through the selected closed handler.
+retry_compatibility: requires_policy
+approval_sensitivity: low
+audit_requirements:
+  required: true
+  events: [SkillInvocationRequested, SkillInvocationSucceeded]
+  store_references_only: true
+observability_requirements:
+  metrics: [skill_latency]
+  tracing: true
+  latency_tracking: true
+";
+
+const TWO_STEP_WORKFLOW: &str = r"schema_version: workflowos.dev/v0
+id: test/trusted-host-two-step
+version: v0
+display_name: Trusted Host Two Step
+description: Exact two-step no-write trusted-host fixture.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_1
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states: [requested, validated, checked]
+steps:
+  - id: project-validation
+    skill_ref:
+      id: local/workflow-os-validate
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: trusted-host-two-step
+        to: request
+    policy_requirements:
+      - id: local/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: docs-check
+    skill_ref:
+      id: local/check-docs
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: trusted-host-two-step
+        to: request
+    policy_requirements:
+      - id: local/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events: [RunCreated, SkillInvocationRequested, SkillInvocationSucceeded, RunCompleted]
+  store_references_only: true
+observability_requirements:
+  metrics: [workflow_latency]
   tracing: true
   latency_tracking: true
 ";
@@ -1778,6 +2298,75 @@ fn invoke_project_validation(
     ])
     .output()
     .expect("foreground binary")
+}
+
+fn invoke_two_step(
+    fixture: &Fixture,
+    governance_root: &Path,
+    run_id: &WorkflowRunId,
+    bundle_id: &ImmutableRunBundleId,
+    observed_at: &str,
+    expires_at: &str,
+) -> Output {
+    two_step_command(
+        fixture,
+        governance_root,
+        run_id,
+        bundle_id,
+        observed_at,
+        expires_at,
+    )
+    .output()
+    .expect("foreground binary")
+}
+
+fn two_step_command(
+    fixture: &Fixture,
+    governance_root: &Path,
+    run_id: &WorkflowRunId,
+    bundle_id: &ImmutableRunBundleId,
+    observed_at: &str,
+    expires_at: &str,
+) -> Command {
+    let mut command = base_foreground_command(
+        fixture,
+        governance_root,
+        run_id,
+        bundle_id,
+        observed_at,
+        expires_at,
+    );
+    command.args([
+        "--mode",
+        "two-step-no-write",
+        "--repository-root",
+        repository_root().to_str().expect("repository root"),
+        "--npm-executable",
+        fixture.npm.to_str().expect("fake npm"),
+        "--workflow-os-executable",
+        fixture.workflow_os.to_str().expect("workflow-os path"),
+        "--workflow-id",
+        "test/trusted-host-two-step",
+        "--actor",
+        "system/local-host-two-step-test",
+        "--correlation-id",
+        "correlation-local-host-two-step-test",
+    ]);
+    command
+}
+
+fn local_check_citation_count(report: &workflow_core::WorkReport) -> usize {
+    report
+        .sections()
+        .iter()
+        .flat_map(workflow_core::WorkReportSection::citations)
+        .filter(|citation| {
+            matches!(
+                citation.target(),
+                workflow_core::WorkReportCitationTarget::LocalCheckResult { .. }
+            )
+        })
+        .count()
 }
 
 fn base_foreground_command(
