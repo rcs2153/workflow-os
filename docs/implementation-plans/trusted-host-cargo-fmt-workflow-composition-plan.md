@@ -1,8 +1,7 @@
 # Trusted-Host Cargo Format Workflow Composition Plan
 
-Status: implemented after accepted focused maintainer/security plan review;
-the remaining blocker-fix revision is implemented and awaiting final focused
-review.
+Status: implemented and accepted after focused maintainer/security review and
+two narrow blocker-fix cycles.
 
 Related foundations:
 
@@ -432,5 +431,8 @@ pre-result failure on the first or second scheduled step is rejected, and
 direct duplicate-dispatch and composed-timeout regressions remain absent.
 The additional narrow fix is implemented in
 [Trusted-Host Cargo Format Workflow Composition Final Blocker Fix Report](../concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_FINAL_BLOCKER_FIX_REPORT.md).
-Perform final focused re-review. Do not broaden the profile registry,
-topology, public surface, provider access, or write posture.
+Final focused re-review accepts the correction with no remaining blocker in
+[Trusted-Host Cargo Format Workflow Composition Final Blocker Fix Review](../concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_FINAL_BLOCKER_FIX_REVIEW.md).
+The exact composition lane is closed. Do not broaden the profile registry,
+topology, public surface, provider access, or write posture without a separate
+approved phase.
