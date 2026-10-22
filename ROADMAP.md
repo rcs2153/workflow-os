@@ -88,7 +88,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the implemented trusted-host Cargo format-check profile.** The prior queue
+2. **Fix the reviewed trusted-host Cargo format-check profile blockers.** The prior queue
    entry incorrectly pointed to a required-context review already accepted and
    merged in PR #374. The bounded two-step no-write trusted-host workflow is
    implemented and accepted after focused review fixed outcome-domain and
@@ -104,7 +104,14 @@ phase` language does not supersede the active queue.
    repository final-state commitments, terminal report/artifact composition,
    and exact replay without rerunning the formatter. Deterministic mutation
    tests and an opt-in smoke against the real bundled stable formatter chain
-   pass. Focused implementation/security review is next.
+   pass. Focused implementation/security review found three blockers: the
+   complete bounded toolchain input inventory is not committed before and
+   after execution, the Core-owned protected-tree exclusion policy is not part
+   of the resolved execution identity, and the mandatory Cargo-specific
+   failure, timeout, toolchain-mutation, root-boundary, and privacy regression
+   matrix is incomplete. Perform that narrow blocker fix next, then conduct a
+   focused blocker-fix review. See
+   [Trusted-Host Cargo Format Check Profile Implementation Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_PROFILE_IMPLEMENTATION_REVIEW.md).
    The plan selects the already modeled `cargo fmt --all --check` command as a
    third closed profile, requires complete formatter-chain identity and
    persistent-mutation detection without claiming sandbox prevention, and

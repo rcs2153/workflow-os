@@ -125,6 +125,7 @@ Focused tests cover:
 - `cargo test --workspace`: passed.
 - `npm run check`: passed.
 - `npm run check:integrations`: passed.
+- `npm run check:docs`: passed.
 - `git diff --check`: passed.
 
 The dedicated Cargo format live smoke was explicitly enabled and passed. Other
@@ -135,6 +136,8 @@ simulated for this phase.
 ## 11. Remaining Known Limitations
 
 - No process sandbox or kernel-enforced filesystem write denial exists.
+- No operating-system network egress enforcement exists; disabled network is
+  contract posture for this trusted local process, not a sandbox guarantee.
 - Transient restored writes are not detectable.
 - Executable-chain identity does not claim independent third-party attestation.
 - The toolchain must already exist and operate without declared writes.
