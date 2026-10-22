@@ -117,8 +117,11 @@ phase` language does not supersede the active queue.
    truthful policy-precheck provenance, canonical repository identity, a
    dedicated non-context query/fact set, a separate capability-use receipt,
    and explicit read-success/receipt-failure posture. Those bounded plan fixes
-   are now incorporated and await focused blocker-fix review. No adapter
-   runtime composition is implemented yet.
+   are incorporated and accepted in the [Scoped Capability GitHub Read-Only
+   Integration Plan Blocker Fix
+   Review](docs/concepts/SCOPED_CAPABILITY_GITHUB_READ_ONLY_INTEGRATION_PLAN_BLOCKER_FIX_REVIEW.md).
+   Proceed directly to the complete no-write implementation milestone. No
+   adapter runtime composition is implemented yet.
 
 The first-use CLI and integration-check item added during the prior queue
 reconciliation was stale: both defects were already fixed and accepted in PR
