@@ -38,9 +38,12 @@ query-minimized count disclosure, and recovery-rehearsal fixes. The source
 remains non-consuming: no approval decision accepts this evidence yet, and no
 hosted authentication cutover is implemented. A dedicated payload-free
 collaborative approval-authority receipt and PostgreSQL v4 create-only store
-are now implemented pending focused review. The receipt is point-in-time,
-serialize-only trusted evidence; persisted claims remain unverified and cannot
-authorize another action.
+are implemented. Focused review accepted the model boundary but found a
+blocking verification gap: required CI proves v4 migration/table creation but
+does not execute receipt store behavior or preserve a receipt through the
+backup/restore rehearsal. The receipt remains point-in-time, serialize-only
+trusted evidence; persisted claims remain unverified and cannot authorize
+another action.
 
 The first provider-write sandbox is implemented and accepted for GitHub pull
 request comments only. The second bounded Core slice now implements an
@@ -76,8 +79,8 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the collaborative approval-authority receipt core model and
-   persistence.** The
+2. **Fix and review collaborative approval-authority receipt PostgreSQL
+   verification.** The
    source planning, implementation, and review are accepted in the
    [Authoritative Collaborative Identity Source Boundary
    Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
@@ -88,11 +91,14 @@ phase` language does not supersede the active queue.
    are accepted. Phase 1 is implemented and reviewed: a private source read now operates
    inside a caller-owned PostgreSQL transaction while the existing public
    non-authorizing read preserves its serializable behavior and payload-free
-   evidence posture. Phase 2 is implemented pending review: the minimal
+   evidence posture. Phase 2 is implemented: the minimal
    payload-free trusted receipt, explicitly unverified persisted claim, and
    dedicated PostgreSQL v4 create-only store use unique approval/event
-   bindings, exact replay, exact recovery, and corruption checks. Review this
-   boundary before Phase 3. Before the later Phase 3 consumer, move
+   bindings, exact replay, exact recovery, and corruption checks. Focused
+   review found that required CI exercises migration but not those store
+   operations, and backup/restore does not yet prove receipt preservation.
+   Add only that live conformance/restart/recovery evidence and review it before
+   Phase 3. Before the later Phase 3 consumer, move
    database-time observation to the outer decision transaction and implement
    the reviewed advisory-lock and watermark-lock order. Do not add the decision
    consumer during review, substitute another

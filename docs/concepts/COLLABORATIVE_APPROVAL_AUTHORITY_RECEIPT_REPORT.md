@@ -107,8 +107,11 @@ the required shared PostgreSQL CI job remains the live execution proof.
 - `git diff --check` - passed.
 
 The live PostgreSQL branches did not run locally because the required test and
-recovery database URLs were not configured. The shared PostgreSQL CI job is
-therefore the required live persistence proof for this phase.
+recovery database URLs were not configured. The shared PostgreSQL CI job
+proved the v4 migration and receipt-table creation, but focused review found
+that it did not execute the environment-gated receipt write/replay/recovery and
+corruption scenario. Live receipt behavior and backup/restore preservation
+remain blocker-fix requirements before Phase 3.
 
 ## 10. Governed Phase Record
 
@@ -139,6 +142,7 @@ therefore the required live persistence proof for this phase.
 
 ## 12. Recommended Next Phase
 
-Perform a focused maintainer/security review of the collaborative approval-
-authority receipt model and PostgreSQL persistence. Only after acceptance
-should Phase 3 implement the same-call collaborative `ApprovalDecide` consumer.
+The focused maintainer/security review found a PostgreSQL verification blocker.
+Execute the narrow receipt conformance and recovery blocker fix, then review
+that fix. Only after acceptance should Phase 3 implement the same-call
+collaborative `ApprovalDecide` consumer.
