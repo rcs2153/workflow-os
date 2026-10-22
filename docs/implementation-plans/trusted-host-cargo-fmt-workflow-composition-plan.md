@@ -1,7 +1,7 @@
 # Trusted-Host Cargo Format Workflow Composition Plan
 
 Status: implemented after accepted focused maintainer/security plan review;
-focused implementation/security review is the next phase.
+focused implementation/security review found blocker fixes are required.
 
 Related foundations:
 
@@ -420,9 +420,10 @@ The focused implementation review must decide:
 
 ## 19. Recommended Next Phase
 
-Perform a focused maintainer/security review of the implementation. Do not
-broaden the profile registry, topology, public surface, provider access, or
-write posture until that review accepts the exact topology, additive
-compatibility boundary, v4 report identity, dispatch binding, pre-result
-failure truth, history/replay requirements, Cargo integrity treatment, and
-test matrix.
+Implement the blocker fixes from
+[Trusted-Host Cargo Format Workflow Composition Implementation Review](../concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REVIEW.md).
+Complete exact attempted-step dispatch validation, failed-terminal history
+validation, pre-result invocation linkage, and the mandatory corruption and
+privacy regressions. Do not broaden the profile registry, topology, public
+surface, provider access, or write posture before focused re-review accepts
+the fixed boundary.

@@ -141,10 +141,16 @@ phase` language does not supersede the active queue.
    pre-result identity failure records no fake local-check result and discloses
    later checks as not attempted. Full workspace validation and the opt-in real
    bundled-toolchain Cargo format smoke pass. Focused implementation/security
-   review is the next phase. Clippy, tests, arbitrary commands, providers,
+   review found blockers: resumed admission does not validate complete
+   attempted-step dispatch history, failed terminal history is under-
+   constrained, pre-result failed invocation identity is not linked to the
+   authorized attempt, and required corruption/security regressions are
+   missing. A narrow blocker fix is next. Clippy, tests, arbitrary commands, providers,
    external writes, public surfaces, hosted expansion, and topology broadening
    remain out of scope. See
-   [Trusted-Host Cargo Format Workflow Composition Implementation Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REPORT.md).
+   [Trusted-Host Cargo Format Workflow Composition Implementation Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REPORT.md)
+   and
+   [Trusted-Host Cargo Format Workflow Composition Implementation Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REVIEW.md).
 
    Historical accepted evidence:
 
