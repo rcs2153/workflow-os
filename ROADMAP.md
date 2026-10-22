@@ -4,13 +4,17 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-10-07.
+Status date: 2026-10-21.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
 immutable run bundles, current-fact reassessment, independent local-check proof,
 SideEffect governance, evidence-backed WorkReports, existing-repository
-onboarding, and bounded workflow recommendation and authoring paths.
+onboarding, and bounded workflow recommendation and authoring paths. Selected
+runtime paths now prove authoritative continuation rehydration, atomic execution
+continuity, trusted-host admission, one-step no-write execution, and terminal
+workflow reconciliation without treating agent memory or a host process as the
+governance authority.
 
 The shared `PostgreSQL` state milestone and the single-tenant hosted no-write
 evaluation milestone are implemented and reviewed. The hosted milestone proves
@@ -18,6 +22,15 @@ one authenticated trust domain, stateless fenced workers, Core-owned dispatch,
 provider outcome reconciliation, terminal report persistence, restart behavior,
 and database-interruption recovery. It is not a production-readiness,
 multi-tenancy, enterprise-identity, high-availability, or hosted-SaaS claim.
+
+Project-scoped approval routing and its PostgreSQL authority integration are
+implemented and reviewed. The collaborative identity lifecycle Core model is
+implemented on the active development branch. Its focused review found that a
+caller-assembled fact set was represented too strongly as trusted current
+authority; the in-progress blocker fix demotes that surface to an explicitly
+non-authorizing validated claim. A genuinely authorizing identity projection
+still requires a Core-owned authoritative source, complete current fact-set
+proof, trusted time, persistence, and separate review.
 
 The first provider-write sandbox is implemented and accepted for GitHub pull
 request comments only. The second bounded Core slice now implements an
@@ -39,11 +52,44 @@ follow-ups; the live sandbox smoke has not yet been run.
 
 ## Roadmap At A Glance
 
-This section is the authoritative forward-looking roadmap. The detailed phase
-records below are retained as implementation evidence and do not redefine the
-current queue when they contain historical `next phase` language.
+Only **Active Delivery Queue** is the authoritative forward-looking sequence.
+The lane records and historical phase evidence below preserve accepted
+boundaries and explain how the project arrived here; their embedded `next
+phase` language does not supersede the active queue.
 
-### In Flight
+### Active Delivery Queue
+
+1. **Complete the dedicated draft-pull-request live sandbox proof.** Once the
+   dedicated least-privilege sandbox credential is available, rerun the existing
+   ignored smoke unchanged. The proof may create or reconcile one managed draft
+   in `rcs2153/workflow-os-sandbox`; it does not authorize another provider,
+   another mutation family, default writes, merge behavior, or automatic
+   cleanup. Until the credential exists, this item remains dependency-tracked
+   and must not block unrelated no-write work.
+2. **Plan the authoritative collaborative identity source boundary.** The model
+   blocker fix is accepted. Define how Core obtains complete current
+   provider, binding, principal, grant, and revocation facts with trusted time
+   and rollback protection. The next implementation must be a bounded vertical
+   slice with persistence and current-authority consumption, not another
+   caller-assembled authority claim. OIDC protocol handling, SCIM, dynamic
+   groups, enterprise administration, and hosted authentication cutover remain
+   separately scoped.
+3. **Select the next runnable no-write trusted-host profile.** Generalize the
+   accepted private docs-check proof through one additional closed profile only
+   after its authority, required-context, check, evidence, and terminal-report
+   obligations are explicit. Do not jump from the one-step proof to general
+   scheduling, nested harnesses, automatic approval, or broad command
+   execution.
+
+Queue maintenance rule: every merged roadmap phase must update this list and
+the status date in the same PR. Completed work moves into the lane evidence or
+milestone table; dependency-blocked work stays explicit and does not masquerade
+as the next executable phase.
+
+### Current Lane Evidence
+
+This section records the active architectural lanes and their accepted proof
+history. It is reference material, not a second delivery queue.
 
 1. **P0 authoritative agent continuation context and rehydration.** External
    dogfood testing found that long-running model sessions, context compaction,
@@ -1180,7 +1226,10 @@ current queue when they contain historical `next phase` language.
    [Plan Review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_PROVIDER_MUTATION_PLAN_REVIEW.md),
    and [Implementation Review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_PROVIDER_MUTATION_REVIEW.md).
 
-### Next Three Delivery Milestones
+### Recently Delivered And Active Milestones
+
+These records summarize milestones that are complete, dependency-tracked, or
+being closed. Use **Active Delivery Queue** above for execution order.
 
 1. **Ownership, escalation, approval routing, and bounded notifications.** The
    deterministic Core route model and resolver are implemented. Focused review
@@ -1235,20 +1284,26 @@ current queue when they contain historical `next phase` language.
    transport, cross-repository pull requests, non-draft PRs, merges, automatic cleanup,
    Jira writes, default executor writes, hidden auth, and automatic broad write
    enablement remain unauthorized.
-3. **Collaborative identity lifecycle planning.** Project-scoped routing and
-   hosted authority integration are accepted, so the next identity boundary is
-   now defined in the [Collaborative Identity Lifecycle
+3. **Collaborative identity lifecycle Core model.** Project-scoped routing and
+   hosted authority integration are accepted, and the first identity boundary
+   is implemented as a model-only Core surface following the [Collaborative Identity Lifecycle
    Plan](docs/implementation-plans/collaborative-identity-lifecycle-plan.md)
-   and its [planning
-   report](docs/concepts/COLLABORATIVE_IDENTITY_LIFECYCLE_PLAN_REPORT.md).
-   The plan separates external authentication, opaque local principal binding,
+   and its [implementation
+   report](docs/concepts/COLLABORATIVE_IDENTITY_CORE_MODEL_REPORT.md).
+   Core now models provider registration, opaque local principal binding,
    principal lifecycle, immutable exact-project grants, additive revocation,
-   point-in-time current authority, hosted sessions, historical routes, and
-   evidence. The first recommended implementation is Core model only. OIDC
+   ambiguous-binding rejection, and a validated point-in-time projection claim.
+   The focused maintainer/security review found that the original public API
+   overstated caller-assembled facts as trusted current authority. The blocker
+   fix demotes that API to an explicitly non-authorizing claim with no trusted
+   conversion or runtime consumer. A genuinely authoritative projection remains
+   blocked on a Core-owned source, complete fact-set proof, and trusted time.
+   OIDC
    protocol handling, PostgreSQL identity storage, hosted authentication
    cutover, principal inboxes, SCIM, groups, administration, hostile-tenant
    isolation, provider writes, and production identity claims remain deferred
-   until separately reviewed phases.
+   until separately reviewed phases. See the [core model review](docs/concepts/COLLABORATIVE_IDENTITY_CORE_MODEL_REVIEW.md)
+   and [blocker fix report](docs/concepts/COLLABORATIVE_IDENTITY_CORE_MODEL_BLOCKER_FIX_REPORT.md).
 
 ### Blocked Or Dependency-Tracked
 

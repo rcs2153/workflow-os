@@ -1,5 +1,9 @@
 # Collaborative Identity Lifecycle Plan Report
 
+> Fix-forward status: the accepted model-only recommendation is now
+> implemented. See
+> [Collaborative Identity Core Model Report](COLLABORATIVE_IDENTITY_CORE_MODEL_REPORT.md).
+
 ## 1. Executive Summary
 
 Workflow OS now has a phase-ready plan for moving from static collaborative
