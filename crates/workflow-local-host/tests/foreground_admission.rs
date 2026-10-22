@@ -6,23 +6,43 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use workflow_core::{
+    admit_trusted_host_three_step_no_write_operation,
     admit_trusted_host_two_step_no_write_operation, ActorId, CorrelationId, EventLogStore,
     ExplicitLocalCheckProfileSelection, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
-    ImmutableRunBundleStore, ImmutableRunBundleVersion,
+    ImmutableRunBundleStore, ImmutableRunBundleVersion, LocalCheckProcessOutput,
+    LocalCheckProcessRequest, LocalCheckProcessRunner,
     LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
     LocalExecutionRequest, LocalExecutionWithImmutableRunBundleRequest, SqliteStateBackend,
     StateBackend, Timestamp, TrustedHostLocalApplicationAdmissionOutcome,
+    TrustedHostThreeStepNoWriteAdmissionRequest, TrustedHostThreeStepNoWriteProfileRegistry,
     TrustedHostTwoStepNoWriteAdmissionRequest, TrustedHostTwoStepNoWriteProfileRegistry,
-    WorkReportArtifactStore, WorkflowId, WorkflowRunEventKind, WorkflowRunEventKindName,
-    WorkflowRunId, WorkflowRunStatus,
+    WorkReportArtifactStore, WorkflowId, WorkflowOsError, WorkflowRunEventKind,
+    WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
 };
 use workflow_local_host::LocalHostPreparedOperation;
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug)]
+struct TimedOutRunner;
+
+impl LocalCheckProcessRunner for TimedOutRunner {
+    fn run(
+        &self,
+        _request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+        Ok(LocalCheckProcessOutput::timed_out(
+            120_000,
+            b"private-timeout-output".to_vec(),
+            b"private-timeout-error".to_vec(),
+        ))
+    }
+}
 
 struct Fixture {
     id: u64,
@@ -44,6 +64,29 @@ impl Fixture {
             std::process::id()
         ));
         fs::create_dir_all(&root).expect("fixture root");
+        let cargo_repository = root.join("cargo-repository");
+        fs::create_dir_all(cargo_repository.join("src")).expect("Cargo repository source");
+        fs::write(
+            cargo_repository.join("Cargo.toml"),
+            "[package]\nname = \"fixture\"\nversion = \"0.0.0\"\n",
+        )
+        .expect("Cargo repository manifest");
+        fs::write(
+            cargo_repository.join("src/lib.rs"),
+            "pub fn value() -> u8 { 1 }\n",
+        )
+        .expect("Cargo repository source");
+        fs::create_dir_all(cargo_repository.join("scripts")).expect("repository scripts");
+        fs::write(
+            cargo_repository.join("package.json"),
+            "{\"private\":true}\n",
+        )
+        .expect("repository package manifest");
+        fs::write(
+            cargo_repository.join("scripts/check-docs.mjs"),
+            "process.exit(0);\n",
+        )
+        .expect("repository docs check");
         let npm = root.join("npm");
         fs::write(&npm, "#!/bin/sh\nexit 0\n").expect("fake npm");
         let mut permissions = fs::metadata(&npm).expect("fake npm metadata").permissions();
@@ -385,6 +428,603 @@ fn foreground_binary_executes_exact_two_step_no_write_workflow() {
 }
 
 #[test]
+fn foreground_binary_executes_exact_three_step_no_write_workflow() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-success");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-success");
+    let bundle_id = fixture.bundle_id("three-step-success");
+
+    let output = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(
+        output.status.success(),
+        "foreground stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("bounded stdout"),
+        "trusted_host_local_application: operation.terminal_report_artifact_persisted\n"
+    );
+
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let run = backend.rehydrate_run(&run_id).expect("durable run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(
+        run.events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["project-validation", "docs-check", "cargo-format-check"]
+    );
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(
+                event.kind,
+                WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(_)
+            ))
+            .count(),
+        3
+    );
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("persisted report artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(
+        artifacts[0]
+            .work_report()
+            .report_contract_version()
+            .as_str(),
+        "v4"
+    );
+    assert_eq!(local_check_citation_count(artifacts[0].work_report()), 3);
+    for dispatch_event in run.events.iter().filter(|event| {
+        matches!(
+            event.kind,
+            WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(_)
+        )
+    }) {
+        assert!(artifacts[0]
+            .work_report()
+            .sections()
+            .iter()
+            .flat_map(workflow_core::WorkReportSection::citations)
+            .any(|citation| matches!(
+                citation.target(),
+                workflow_core::WorkReportCitationTarget::WorkflowEvent { event_id }
+                    if event_id == &dispatch_event.event_id
+            )));
+    }
+
+    let replay = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(replay.status.success());
+    assert_eq!(
+        String::from_utf8(replay.stdout).expect("bounded replay stdout"),
+        "trusted_host_local_application: admission.terminal_replay_report_artifact_already_persisted\n"
+    );
+}
+
+#[test]
+fn three_step_cargo_format_failure_records_all_results_and_fails_honestly() {
+    let fixture = Fixture::new();
+    fs::write(&fixture.cargo, "#!/bin/sh\nexit 8\n").expect("failing Cargo fixture");
+    let mut permissions = fs::metadata(&fixture.cargo)
+        .expect("Cargo metadata")
+        .permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&fixture.cargo, permissions).expect("Cargo executable");
+    let governance_root = fixture.root.join("three-step-cargo-failure");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-cargo-failure");
+    let bundle_id = fixture.bundle_id("three-step-cargo-failure");
+
+    let output = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(output.status.success());
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let run = backend.rehydrate_run(&run_id).expect("failed run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(
+                event.kind,
+                WorkflowRunEventKind::LocalCheckResultRecorded(_)
+            ))
+            .count(),
+        3
+    );
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("failure artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(local_check_citation_count(artifacts[0].work_report()), 3);
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn three_step_cargo_timeout_records_terminal_truth_and_honest_v4_artifact(
+) -> Result<(), &'static str> {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-cargo-timeout");
+    write_three_step_project(&governance_root);
+    let repository_root = fixture.root.join("cargo-repository");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-cargo-timeout");
+    let bundle_id = fixture.bundle_id("three-step-cargo-timeout");
+    let project_validation = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve(fixture.workflow_os.clone(), governance_root.clone())
+        .expect("project validation profile");
+    let docs_check = ExplicitLocalCheckProfileSelection::docs_check()
+        .resolve_docs_check(fixture.npm.clone(), repository_root.clone(), None)
+        .expect("docs profile");
+    let cargo_fmt_check = ExplicitLocalCheckProfileSelection::cargo_fmt_check()
+        .resolve_cargo_fmt_check_with_process_runner(
+            &fixture.cargo,
+            &fixture.cargo_fmt,
+            &fixture.rustfmt,
+            &fixture.toolchain,
+            &repository_root,
+            Arc::new(TimedOutRunner),
+        )
+        .expect("timed-out Cargo format profile");
+    let registry = TrustedHostThreeStepNoWriteProfileRegistry::new(
+        project_validation,
+        docs_check,
+        cargo_fmt_check,
+    )
+    .expect("closed registry");
+    let backend = SqliteStateBackend::open(&fixture.database).expect("open state");
+    let mut request = TrustedHostThreeStepNoWriteAdmissionRequest {
+        execution: LocalExecutionWithImmutableRunBundleRequest {
+            execution: LocalExecutionRequest {
+                project_root: governance_root,
+                workflow_id: WorkflowId::new("test/trusted-host-three-step").expect("workflow"),
+                run_id: Some(run_id.clone()),
+                correlation_id: CorrelationId::new("correlation-three-step-timeout")
+                    .expect("correlation"),
+                actor: ActorId::new("system/three-step-timeout-test").expect("actor"),
+                before_skill_invocation_checkpoints:
+                    LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+                before_skill_invocation_hook: None,
+                side_effect_events: Vec::new(),
+                side_effect_lifecycle_events: Vec::new(),
+            },
+            bundle: LocalExecutionImmutableRunBundleInputs {
+                bundle_id,
+                bundle_version: ImmutableRunBundleVersion::new("v1").expect("version"),
+                created_at: Timestamp::parse_rfc3339(&observed_at).expect("observed at"),
+                sensitivity: ImmutableRunBundleSensitivity::Internal,
+                redaction_required: true,
+            },
+        },
+        observed_at: Timestamp::parse_rfc3339(&observed_at).expect("observed at"),
+        expires_at: Timestamp::parse_rfc3339(&expires_at).expect("expires at"),
+    };
+
+    for _ in 0..3 {
+        let admitted =
+            admit_trusted_host_three_step_no_write_operation(&backend, &registry, &request)
+                .expect("admission");
+        let TrustedHostLocalApplicationAdmissionOutcome::Prepared(prepared) = admitted else {
+            return Err("expected prepared operation");
+        };
+        LocalHostPreparedOperation::from_prepared(prepared)
+            .run()
+            .expect("trusted-host operation");
+        request.observed_at = Timestamp::now_utc();
+    }
+
+    let run = backend.rehydrate_run(&run_id).expect("timed-out run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    let results = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::LocalCheckResultRecorded(result) => Some(result.as_ref()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(results.len(), 3);
+    assert_eq!(
+        results[2].status(),
+        workflow_core::LocalCheckResultStatus::TimedOut
+    );
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(event.kind, WorkflowRunEventKind::StepScheduled { .. }))
+            .count(),
+        3
+    );
+    let artifact_result =
+        workflow_core::persist_trusted_host_three_step_terminal_work_report_artifact(
+            &backend, &registry, &request,
+        );
+    assert_eq!(
+        artifact_result.posture(),
+        workflow_core::TrustedHostTerminalWorkReportArtifactPosture::Persisted
+    );
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("timeout artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(
+        artifacts[0]
+            .work_report()
+            .report_contract_version()
+            .as_str(),
+        "v4"
+    );
+    assert_eq!(local_check_citation_count(artifacts[0].work_report()), 3);
+    let serialized = serde_json::to_string(artifacts[0].work_report()).expect("serialize report");
+    assert!(!serialized.contains("private-timeout-output"));
+    assert!(!serialized.contains("private-timeout-error"));
+    assert!(!serialized.contains(fixture.root.to_string_lossy().as_ref()));
+    Ok(())
+}
+
+#[test]
+fn three_step_project_validation_failure_schedules_no_later_work() {
+    let fixture = Fixture::new();
+    fs::write(
+        &fixture.workflow_os,
+        "#!/bin/sh\ntest \"$1\" = validate || exit 9\nexit 7\n",
+    )
+    .expect("failing workflow-os fixture");
+    assert_three_step_early_failure(
+        &fixture,
+        "three-step-project-failure",
+        &["project-validation"],
+        1,
+    );
+}
+
+#[test]
+fn three_step_docs_failure_never_schedules_cargo_format() {
+    let fixture = Fixture::new();
+    fs::write(&fixture.npm, "#!/bin/sh\nexit 8\n").expect("failing npm fixture");
+    assert_three_step_early_failure(
+        &fixture,
+        "three-step-docs-failure",
+        &["project-validation", "docs-check"],
+        2,
+    );
+}
+
+fn assert_three_step_early_failure(
+    fixture: &Fixture,
+    label: &str,
+    expected_scheduled: &[&str],
+    expected_results: usize,
+) {
+    let governance_root = fixture.root.join(label);
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id(label);
+    let bundle_id = fixture.bundle_id(label);
+    let output = invoke_three_step(
+        fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(output.status.success());
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let run = backend.rehydrate_run(&run_id).expect("failed run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        run.events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        expected_scheduled
+    );
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(
+                event.kind,
+                WorkflowRunEventKind::LocalCheckResultRecorded(_)
+            ))
+            .count(),
+        expected_results
+    );
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("failure artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(
+        local_check_citation_count(artifacts[0].work_report()),
+        expected_results
+    );
+    assert!(artifacts[0]
+        .work_report()
+        .incomplete_work()
+        .iter()
+        .any(|item| item.summary().contains("not attempted")));
+}
+
+#[test]
+fn three_step_mode_rejects_caller_selected_step_before_state_creation() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-caller-step");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-caller-step");
+    let bundle_id = fixture.bundle_id("three-step-caller-step");
+    let output = three_step_command(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    )
+    .args(["--step-id", "cargo-format-check"])
+    .output()
+    .expect("foreground binary");
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("bounded stderr"),
+        "trusted_host_local_application: input.invalid\n"
+    );
+    assert!(!fixture.database.exists());
+}
+
+#[test]
+fn three_step_terminal_replay_rejects_dispatch_commitment_substitution() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-dispatch-substitution");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-dispatch-substitution");
+    let bundle_id = fixture.bundle_id("three-step-dispatch-substitution");
+    let initial = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_mutate_event(
+        &fixture.database,
+        &run_id,
+        "AuthorizedExecutionAttemptDispatchAdmitted",
+        |kind| {
+            kind["executor_commitment"] = json!(workflow_core::SpecContentHash::from_text(
+                "substituted executor"
+            ));
+        },
+    );
+    assert_three_step_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+}
+
+#[test]
+fn three_step_terminal_replay_rejects_duplicate_dispatch_commitment() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-duplicate-dispatch");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-duplicate-dispatch");
+    let bundle_id = fixture.bundle_id("three-step-duplicate-dispatch");
+    let initial = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_duplicate_dispatch_commitment(&fixture.database, &run_id);
+    assert_three_step_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+}
+
+#[test]
+fn three_step_terminal_replay_rejects_successor_boundary_corruption() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-successor-corruption");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-successor-corruption");
+    let bundle_id = fixture.bundle_id("three-step-successor-corruption");
+    let initial = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_swap_step_event_order(
+        &fixture.database,
+        &run_id,
+        "SkillInvocationSucceeded",
+        "project-validation",
+        "StepScheduled",
+        "docs-check",
+    );
+    assert_three_step_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+}
+
+#[test]
+fn three_step_terminal_replay_rejects_second_successor_boundary_corruption() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-second-successor-corruption");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-second-successor-corruption");
+    let bundle_id = fixture.bundle_id("three-step-second-successor-corruption");
+    let initial = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_swap_step_event_order(
+        &fixture.database,
+        &run_id,
+        "SkillInvocationSucceeded",
+        "docs-check",
+        "StepScheduled",
+        "cargo-format-check",
+    );
+    assert_three_step_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+}
+
+#[test]
+fn three_step_terminal_replay_rejects_result_profile_substitution() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-result-profile-substitution");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-result-profile-substitution");
+    let bundle_id = fixture.bundle_id("three-step-result-profile-substitution");
+    let initial = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_mutate_step_event(
+        &fixture.database,
+        &run_id,
+        "LocalCheckResultRecorded",
+        "cargo-format-check",
+        |kind| {
+            kind["profile_id"] = json!("docs_check");
+        },
+    );
+    assert_three_step_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+}
+
+#[test]
+fn three_step_terminal_replay_rejects_conflicting_v4_artifact_without_overwrite() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-artifact-conflict");
+    write_three_step_project(&governance_root);
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-artifact-conflict");
+    let bundle_id = fixture.bundle_id("three-step-artifact-conflict");
+    let initial = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let event_count = backend
+        .rehydrate_run(&run_id)
+        .expect("terminal run before conflicting replay")
+        .events
+        .len();
+    let conflicting_payload = mutate_artifact_payload(&fixture.database, &run_id, |value| {
+        value["work_report"]["known_limitations"][0]["summary"] =
+            json!("A different bounded three-step limitation.");
+    });
+
+    let replay = invoke_three_step(
+        &fixture,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert_artifact_persistence_failure(&replay);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("terminal run after conflicting replay")
+            .events
+            .len(),
+        event_count
+    );
+    assert_eq!(
+        read_artifact_payload(&fixture.database, &run_id),
+        conflicting_payload
+    );
+}
+
+#[test]
 fn two_step_terminal_replay_rejects_result_before_invocation_history_corruption() {
     let fixture = Fixture::new();
     let governance_root = fixture.root.join("two-step-corrupt-order");
@@ -673,6 +1313,349 @@ fn two_step_restart_after_first_commit_resumes_only_docs_check() -> Result<(), &
             .expect("terminal replay"),
         TrustedHostLocalApplicationAdmissionOutcome::TerminalReplay
     ));
+    Ok(())
+}
+
+#[test]
+fn three_step_pre_result_integrity_failure_on_early_steps_remains_honest(
+) -> Result<(), &'static str> {
+    assert_three_step_pre_result_integrity_failure(0)?;
+    assert_three_step_pre_result_integrity_failure(1)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn assert_three_step_pre_result_integrity_failure(
+    failure_index: usize,
+) -> Result<(), &'static str> {
+    let fixture = Fixture::new();
+    let label = format!("three-step-early-pre-result-{failure_index}");
+    let governance_root = fixture.root.join(&label);
+    write_three_step_project(&governance_root);
+    let repository_root = fixture.root.join("cargo-repository");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id(&label);
+    let bundle_id = fixture.bundle_id(&label);
+    let project_validation = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve(fixture.workflow_os.clone(), governance_root.clone())
+        .expect("project validation profile");
+    let docs_check = ExplicitLocalCheckProfileSelection::docs_check()
+        .resolve_docs_check(fixture.npm.clone(), repository_root.clone(), None)
+        .expect("docs profile");
+    let cargo_fmt_check = ExplicitLocalCheckProfileSelection::cargo_fmt_check()
+        .resolve_cargo_fmt_check(
+            &fixture.cargo,
+            &fixture.cargo_fmt,
+            &fixture.rustfmt,
+            &fixture.toolchain,
+            &repository_root,
+        )
+        .expect("Cargo format profile");
+    let registry = TrustedHostThreeStepNoWriteProfileRegistry::new(
+        project_validation,
+        docs_check,
+        cargo_fmt_check,
+    )
+    .expect("closed registry");
+    let backend = SqliteStateBackend::open(&fixture.database).expect("open state");
+    let mut request = TrustedHostThreeStepNoWriteAdmissionRequest {
+        execution: LocalExecutionWithImmutableRunBundleRequest {
+            execution: LocalExecutionRequest {
+                project_root: governance_root,
+                workflow_id: WorkflowId::new("test/trusted-host-three-step").expect("workflow"),
+                run_id: Some(run_id.clone()),
+                correlation_id: CorrelationId::new(format!(
+                    "correlation-three-step-early-{failure_index}"
+                ))
+                .expect("correlation"),
+                actor: ActorId::new("system/three-step-early-integrity-test").expect("actor"),
+                before_skill_invocation_checkpoints:
+                    LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+                before_skill_invocation_hook: None,
+                side_effect_events: Vec::new(),
+                side_effect_lifecycle_events: Vec::new(),
+            },
+            bundle: LocalExecutionImmutableRunBundleInputs {
+                bundle_id,
+                bundle_version: ImmutableRunBundleVersion::new("v1").expect("version"),
+                created_at: Timestamp::parse_rfc3339(&observed_at).expect("observed at"),
+                sensitivity: ImmutableRunBundleSensitivity::Internal,
+                redaction_required: true,
+            },
+        },
+        observed_at: Timestamp::parse_rfc3339(&observed_at).expect("observed at"),
+        expires_at: Timestamp::parse_rfc3339(&expires_at).expect("expires at"),
+    };
+    let step_ids = ["project-validation", "docs-check", "cargo-format-check"];
+    for expected_step in &step_ids[..failure_index] {
+        let admitted =
+            admit_trusted_host_three_step_no_write_operation(&backend, &registry, &request)
+                .expect("admission");
+        let TrustedHostLocalApplicationAdmissionOutcome::Prepared(prepared) = admitted else {
+            return Err("expected prepared operation");
+        };
+        LocalHostPreparedOperation::from_prepared(prepared)
+            .run()
+            .expect("trusted-host operation");
+        assert_eq!(
+            backend
+                .rehydrate_run(&run_id)
+                .expect("intermediate run")
+                .events
+                .iter()
+                .filter_map(|event| match &event.kind {
+                    WorkflowRunEventKind::LocalCheckResultRecorded(result) => {
+                        Some(result.step_id().as_str())
+                    }
+                    _ => None,
+                })
+                .next_back(),
+            Some(*expected_step)
+        );
+        request.observed_at = Timestamp::now_utc();
+    }
+
+    let admitted = admit_trusted_host_three_step_no_write_operation(&backend, &registry, &request)
+        .expect("failing admission");
+    let TrustedHostLocalApplicationAdmissionOutcome::Prepared(prepared) = admitted else {
+        return Err("failing operation must be prepared");
+    };
+    let executable_options = [&fixture.workflow_os, &fixture.npm];
+    let executable = executable_options
+        .get(failure_index)
+        .ok_or("early integrity helper supports only the first two steps")?;
+    fs::write(executable, "#!/bin/sh\nexit 0\n# changed after admission\n")
+        .expect("mutate executable after dispatch admission");
+    LocalHostPreparedOperation::from_prepared(prepared)
+        .run()
+        .expect("integrity failure terminalizes through supervisor");
+
+    let run = backend.rehydrate_run(&run_id).expect("failed run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        run.events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        step_ids[..=failure_index]
+    );
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(
+                event.kind,
+                WorkflowRunEventKind::LocalCheckResultRecorded(_)
+            ))
+            .count(),
+        failure_index
+    );
+    assert!(run.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::SkillInvocationFailed { step_id, .. }
+            if step_id.as_str() == step_ids[failure_index]
+    )));
+    workflow_core::compose_trusted_host_three_step_terminal_work_report(
+        &backend, &registry, &request,
+    )
+    .expect("early pre-result report composition");
+    let artifact_result =
+        workflow_core::persist_trusted_host_three_step_terminal_work_report_artifact(
+            &backend, &registry, &request,
+        );
+    assert_eq!(
+        artifact_result.posture(),
+        workflow_core::TrustedHostTerminalWorkReportArtifactPosture::Persisted
+    );
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("early failure artifact");
+    assert_eq!(
+        local_check_citation_count(artifacts[0].work_report()),
+        failure_index
+    );
+    assert!(artifacts[0]
+        .work_report()
+        .incomplete_work()
+        .iter()
+        .any(|item| item.summary().contains("No bounded local-check result")));
+    Ok(())
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn three_step_restart_and_pre_result_integrity_failure_remain_honest() -> Result<(), &'static str> {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("three-step-pre-result-failure");
+    write_three_step_project(&governance_root);
+    let repository_root = fixture.root.join("cargo-repository");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("three-step-pre-result-failure");
+    let bundle_id = fixture.bundle_id("three-step-pre-result-failure");
+    let project_validation = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve(fixture.workflow_os.clone(), governance_root.clone())
+        .expect("project validation profile");
+    let docs_check = ExplicitLocalCheckProfileSelection::docs_check()
+        .resolve_docs_check(fixture.npm.clone(), repository_root.clone(), None)
+        .expect("docs profile");
+    let cargo_fmt_check = ExplicitLocalCheckProfileSelection::cargo_fmt_check()
+        .resolve_cargo_fmt_check(
+            &fixture.cargo,
+            &fixture.cargo_fmt,
+            &fixture.rustfmt,
+            &fixture.toolchain,
+            &repository_root,
+        )
+        .expect("Cargo format profile");
+    let registry = TrustedHostThreeStepNoWriteProfileRegistry::new(
+        project_validation,
+        docs_check,
+        cargo_fmt_check,
+    )
+    .expect("closed registry");
+    let backend = SqliteStateBackend::open(&fixture.database).expect("open state");
+    let mut request = TrustedHostThreeStepNoWriteAdmissionRequest {
+        execution: LocalExecutionWithImmutableRunBundleRequest {
+            execution: LocalExecutionRequest {
+                project_root: governance_root,
+                workflow_id: WorkflowId::new("test/trusted-host-three-step").expect("workflow"),
+                run_id: Some(run_id.clone()),
+                correlation_id: CorrelationId::new("correlation-three-step-integrity")
+                    .expect("correlation"),
+                actor: ActorId::new("system/three-step-integrity-test").expect("actor"),
+                before_skill_invocation_checkpoints:
+                    LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+                before_skill_invocation_hook: None,
+                side_effect_events: Vec::new(),
+                side_effect_lifecycle_events: Vec::new(),
+            },
+            bundle: LocalExecutionImmutableRunBundleInputs {
+                bundle_id,
+                bundle_version: ImmutableRunBundleVersion::new("v1").expect("version"),
+                created_at: Timestamp::parse_rfc3339(&observed_at).expect("observed at"),
+                sensitivity: ImmutableRunBundleSensitivity::Internal,
+                redaction_required: true,
+            },
+        },
+        observed_at: Timestamp::parse_rfc3339(&observed_at).expect("observed at"),
+        expires_at: Timestamp::parse_rfc3339(&expires_at).expect("expires at"),
+    };
+
+    for expected_step in ["project-validation", "docs-check"] {
+        let admitted =
+            admit_trusted_host_three_step_no_write_operation(&backend, &registry, &request)
+                .expect("admission");
+        let TrustedHostLocalApplicationAdmissionOutcome::Prepared(prepared) = admitted else {
+            return Err("expected prepared operation");
+        };
+        LocalHostPreparedOperation::from_prepared(prepared)
+            .run()
+            .expect("trusted-host operation");
+        assert_eq!(
+            backend
+                .rehydrate_run(&run_id)
+                .expect("intermediate run")
+                .events
+                .iter()
+                .filter_map(|event| match &event.kind {
+                    WorkflowRunEventKind::LocalCheckResultRecorded(result) => {
+                        Some(result.step_id().as_str())
+                    }
+                    _ => None,
+                })
+                .next_back(),
+            Some(expected_step)
+        );
+        request.observed_at = Timestamp::now_utc();
+    }
+
+    let third = admit_trusted_host_three_step_no_write_operation(&backend, &registry, &request)
+        .expect("third admission");
+    let TrustedHostLocalApplicationAdmissionOutcome::Prepared(third) = third else {
+        return Err("third operation must be prepared");
+    };
+    fs::write(
+        &fixture.cargo,
+        "#!/bin/sh\nexit 0\n# changed after admission\n",
+    )
+    .expect("mutate Cargo after dispatch admission");
+    LocalHostPreparedOperation::from_prepared(third)
+        .run()
+        .expect("integrity failure terminalizes through supervisor");
+
+    let run = backend.rehydrate_run(&run_id).expect("failed run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(
+                event.kind,
+                WorkflowRunEventKind::LocalCheckResultRecorded(_)
+            ))
+            .count(),
+        2
+    );
+    assert!(run.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::SkillInvocationFailed { step_id, .. }
+            if step_id.as_str() == "cargo-format-check"
+    )));
+    workflow_core::compose_trusted_host_three_step_terminal_work_report(
+        &backend, &registry, &request,
+    )
+    .expect("three-step report composition");
+    let artifact_result =
+        workflow_core::persist_trusted_host_three_step_terminal_work_report_artifact(
+            &backend, &registry, &request,
+        );
+    assert_eq!(
+        artifact_result.posture(),
+        workflow_core::TrustedHostTerminalWorkReportArtifactPosture::Persisted
+    );
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("failure artifact");
+    assert_eq!(local_check_citation_count(artifacts[0].work_report()), 2);
+    assert!(artifacts[0]
+        .work_report()
+        .incomplete_work()
+        .iter()
+        .any(|item| item.summary().contains("No bounded local-check result")));
+    let final_schedule_event = run
+        .events
+        .iter()
+        .rev()
+        .find(|event| matches!(event.kind, WorkflowRunEventKind::StepScheduled { .. }))
+        .expect("final schedule event");
+    assert!(artifacts[0]
+        .work_report()
+        .sections()
+        .iter()
+        .flat_map(workflow_core::WorkReportSection::citations)
+        .any(|citation| matches!(
+            citation.target(),
+            workflow_core::WorkReportCitationTarget::WorkflowEvent { event_id }
+                if event_id == &final_schedule_event.event_id
+        )));
+    clear_artifacts_and_mutate_event(
+        &fixture.database,
+        &run_id,
+        "SkillInvocationFailed",
+        |kind| {
+            kind["invocation_id"] = json!("invocation/substituted-pre-result");
+        },
+    );
+    let corrupt_backend =
+        SqliteStateBackend::open(&fixture.database).expect("reopen corrupt state");
+    let error = workflow_core::compose_trusted_host_three_step_terminal_work_report(
+        &corrupt_backend,
+        &registry,
+        &request,
+    )
+    .expect_err("substituted pre-result invocation must fail closed");
+    assert!(!error.to_string().contains("substituted-pre-result"));
     Ok(())
 }
 
@@ -1490,6 +2473,56 @@ fn clear_artifacts_and_mutate_event(
         .expect("write corrupt event payload");
 }
 
+fn clear_artifacts_and_mutate_step_event(
+    database: &Path,
+    run_id: &WorkflowRunId,
+    target_kind: &str,
+    step_id: &str,
+    mutate: impl FnOnce(&mut Value),
+) {
+    let connection = Connection::open(database).expect("open fixture database for corruption test");
+    clear_artifacts_with_connection(&connection, run_id);
+    let (event_id, payload) = find_step_event_payload(&connection, run_id, target_kind, step_id);
+    let mut value: Value = serde_json::from_str(&payload).expect("event payload JSON");
+    mutate(&mut value["kind"]);
+    connection
+        .execute(
+            "UPDATE events SET payload = ?1 WHERE event_id = ?2",
+            params![value.to_string(), event_id],
+        )
+        .expect("write corrupt step event payload");
+}
+
+fn clear_artifacts_and_duplicate_dispatch_commitment(database: &Path, run_id: &WorkflowRunId) {
+    let connection = Connection::open(database).expect("open fixture database for corruption test");
+    clear_artifacts_with_connection(&connection, run_id);
+    let mut statement = connection
+        .prepare("SELECT event_id, payload FROM events WHERE run_id = ?1 ORDER BY sequence_number")
+        .expect("prepare dispatch lookup");
+    let dispatches = statement
+        .query_map(params![run_id.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .expect("query dispatch payloads")
+        .map(|row| row.expect("dispatch payload row"))
+        .filter_map(|(event_id, payload)| {
+            let value = serde_json::from_str::<Value>(&payload).ok()?;
+            (value["kind"]["kind"].as_str() == Some("AuthorizedExecutionAttemptDispatchAdmitted"))
+                .then_some((event_id, value))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(dispatches.len(), 3);
+    let duplicated_commitment = dispatches[0].1["kind"]["invocation_commitment"].clone();
+    let (second_event_id, mut second_value) = dispatches[1].clone();
+    second_value["kind"]["invocation_commitment"] = duplicated_commitment;
+    connection
+        .execute(
+            "UPDATE events SET payload = ?1 WHERE event_id = ?2",
+            params![second_value.to_string(), second_event_id],
+        )
+        .expect("write duplicate dispatch commitment");
+}
+
 fn clear_artifacts(database: &Path, run_id: &WorkflowRunId) {
     let connection = Connection::open(database).expect("open fixture database for artifact reset");
     clear_artifacts_with_connection(&connection, run_id);
@@ -1605,6 +2638,93 @@ fn clear_artifacts_and_swap_event_order(
     transaction.commit().expect("commit corrupt event order");
 }
 
+fn clear_artifacts_and_swap_step_event_order(
+    database: &Path,
+    run_id: &WorkflowRunId,
+    first_kind: &str,
+    first_step: &str,
+    second_kind: &str,
+    second_step: &str,
+) {
+    let mut connection = Connection::open(database).expect("open fixture database for order test");
+    clear_artifacts_with_connection(&connection, run_id);
+    let (first_id, first_payload) =
+        find_step_event_payload(&connection, run_id, first_kind, first_step);
+    let (second_id, second_payload) =
+        find_step_event_payload(&connection, run_id, second_kind, second_step);
+    let mut first_value: Value =
+        serde_json::from_str(&first_payload).expect("first event payload JSON");
+    let mut second_value: Value =
+        serde_json::from_str(&second_payload).expect("second event payload JSON");
+    let first_sequence = i64::try_from(
+        first_value["sequence_number"]
+            .as_u64()
+            .expect("first event sequence"),
+    )
+    .expect("first sequence fits SQLite");
+    let second_sequence = i64::try_from(
+        second_value["sequence_number"]
+            .as_u64()
+            .expect("second event sequence"),
+    )
+    .expect("second sequence fits SQLite");
+    assert!(first_sequence < second_sequence);
+    first_value["sequence_number"] = json!(second_sequence);
+    second_value["sequence_number"] = json!(first_sequence);
+    let temporary_sequence: i64 = connection
+        .query_row(
+            "SELECT MAX(sequence_number) + 100 FROM events WHERE run_id = ?1",
+            params![run_id.as_str()],
+            |row| row.get(0),
+        )
+        .expect("temporary sequence");
+    let transaction = connection.transaction().expect("corruption transaction");
+    transaction
+        .execute(
+            "UPDATE events SET sequence_number = ?1 WHERE event_id = ?2",
+            params![temporary_sequence, first_id],
+        )
+        .expect("move first event temporarily");
+    transaction
+        .execute(
+            "UPDATE events SET sequence_number = ?1, payload = ?2 WHERE event_id = ?3",
+            params![first_sequence, second_value.to_string(), second_id],
+        )
+        .expect("move second event first");
+    transaction
+        .execute(
+            "UPDATE events SET sequence_number = ?1, payload = ?2 WHERE event_id = ?3",
+            params![second_sequence, first_value.to_string(), first_id],
+        )
+        .expect("move first event second");
+    transaction.commit().expect("commit corrupt event order");
+}
+
+fn find_step_event_payload(
+    connection: &Connection,
+    run_id: &WorkflowRunId,
+    target_kind: &str,
+    step_id: &str,
+) -> (String, String) {
+    let mut statement = connection
+        .prepare("SELECT event_id, payload FROM events WHERE run_id = ?1 ORDER BY sequence_number")
+        .expect("prepare step event lookup");
+    let found = statement
+        .query_map(params![run_id.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .expect("query step event payloads")
+        .map(|row| row.expect("step event payload row"))
+        .find(|(_, payload)| {
+            let Ok(value) = serde_json::from_str::<Value>(payload) else {
+                return false;
+            };
+            value["kind"]["kind"].as_str() == Some(target_kind)
+                && value["kind"]["step_id"].as_str() == Some(step_id)
+        });
+    found.expect("target step event")
+}
+
 fn find_event_payload(
     connection: &Connection,
     run_id: &WorkflowRunId,
@@ -1655,6 +2775,43 @@ fn assert_corrupt_replay_fails_before_artifact(
         "trusted_host_local_application: admission.terminal_replay_report_generation_failed\n"
             | "trusted_host_local_application: trusted_host_local_application.failure.invalid_state\n"
     ));
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(run_id)
+            .expect("artifact list remains readable")
+            .len(),
+        0
+    );
+}
+
+fn assert_three_step_corrupt_replay_fails_before_artifact(
+    fixture: &Fixture,
+    governance_root: &Path,
+    run_id: &WorkflowRunId,
+    bundle_id: &ImmutableRunBundleId,
+    observed_at: &str,
+    expires_at: &str,
+) {
+    let replay = invoke_three_step(
+        fixture,
+        governance_root,
+        run_id,
+        bundle_id,
+        observed_at,
+        expires_at,
+    );
+    assert!(!replay.status.success());
+    assert_eq!(replay.stdout, Vec::<u8>::new());
+    let stderr = String::from_utf8(replay.stderr).expect("bounded corrupt replay stderr");
+    assert!(matches!(
+        stderr.as_str(),
+        "trusted_host_local_application: admission.terminal_replay_report_generation_failed\n"
+            | "trusted_host_local_application: trusted_host_local_application.failure.invalid_state\n"
+            | "trusted_host_local_application: trusted_host_local_application.failure.security\n"
+            | "trusted_host_local_application: trusted_host_local_application.failure.unsupported\n"
+    ));
+    assert!(!stderr.contains(fixture.root.to_string_lossy().as_ref()));
     let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
     assert_eq!(
         backend
@@ -2098,6 +3255,43 @@ fn write_two_step_project(project_root: &Path) {
     .expect("policy");
 }
 
+fn write_three_step_project(project_root: &Path) {
+    fs::create_dir_all(project_root.join("workflows")).expect("workflow directory");
+    fs::create_dir_all(project_root.join("skills")).expect("skill directory");
+    fs::create_dir_all(project_root.join("policies")).expect("policy directory");
+    fs::create_dir_all(project_root.join("tests")).expect("tests directory");
+    fs::write(
+        project_root.join("workflow-os.yml"),
+        PROJECT_VALIDATION_MANIFEST,
+    )
+    .expect("manifest");
+    fs::write(
+        project_root.join("workflows/three-step.workflow.yml"),
+        THREE_STEP_WORKFLOW,
+    )
+    .expect("workflow");
+    fs::write(
+        project_root.join("skills/project-validation.skill.yml"),
+        PROJECT_VALIDATION_SKILL,
+    )
+    .expect("project validation skill");
+    fs::write(
+        project_root.join("skills/docs-check.skill.yml"),
+        DOCS_CHECK_SKILL,
+    )
+    .expect("docs check skill");
+    fs::write(
+        project_root.join("skills/cargo-fmt.skill.yml"),
+        CARGO_FMT_SKILL,
+    )
+    .expect("Cargo format skill");
+    fs::write(
+        project_root.join("policies/local.policy.yml"),
+        "schema_version: workflowos.dev/v0\nid: local/d\nname: Local\ndescription: Bounded local policy.\nrules:\n  - id: allow-local\n    effect: allow_local\n",
+    )
+    .expect("policy");
+}
+
 fn write_cargo_fmt_project(project_root: &Path) {
     fs::create_dir_all(project_root.join("workflows")).expect("workflow directory");
     fs::create_dir_all(project_root.join("skills")).expect("skill directory");
@@ -2426,6 +3620,83 @@ observability_requirements:
   latency_tracking: true
 ";
 
+const THREE_STEP_WORKFLOW: &str = r"schema_version: workflowos.dev/v0
+id: test/trusted-host-three-step
+version: v0
+display_name: Trusted Host Three Step
+description: Exact three-step no-write trusted-host fixture.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_1
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states: [requested, validated, docs_checked, format_checked]
+steps:
+  - id: project-validation
+    skill_ref:
+      id: local/workflow-os-validate
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: trusted-host-three-step
+        to: request
+    policy_requirements:
+      - id: local/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: docs-check
+    skill_ref:
+      id: local/check-docs
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: trusted-host-three-step
+        to: request
+    policy_requirements:
+      - id: local/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: cargo-format-check
+    skill_ref:
+      id: local/check-cargo-fmt
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: trusted-host-three-step
+        to: request
+    policy_requirements:
+      - id: local/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events: [RunCreated, SkillInvocationRequested, SkillInvocationSucceeded, RunCompleted]
+  store_references_only: true
+observability_requirements:
+  metrics: [workflow_latency]
+  tracing: true
+  latency_tracking: true
+";
+
 const APPROVAL_WORKFLOW: &str = r"schema_version: workflowos.dev/v0
 id: test/trusted-host-approval
 version: v0
@@ -2681,6 +3952,73 @@ fn two_step_command(
         "system/local-host-two-step-test",
         "--correlation-id",
         "correlation-local-host-two-step-test",
+    ]);
+    command
+}
+
+fn invoke_three_step(
+    fixture: &Fixture,
+    governance_root: &Path,
+    run_id: &WorkflowRunId,
+    bundle_id: &ImmutableRunBundleId,
+    observed_at: &str,
+    expires_at: &str,
+) -> Output {
+    three_step_command(
+        fixture,
+        governance_root,
+        run_id,
+        bundle_id,
+        observed_at,
+        expires_at,
+    )
+    .output()
+    .expect("foreground binary")
+}
+
+fn three_step_command(
+    fixture: &Fixture,
+    governance_root: &Path,
+    run_id: &WorkflowRunId,
+    bundle_id: &ImmutableRunBundleId,
+    observed_at: &str,
+    expires_at: &str,
+) -> Command {
+    let mut command = base_foreground_command(
+        fixture,
+        governance_root,
+        run_id,
+        bundle_id,
+        observed_at,
+        expires_at,
+    );
+    command.args([
+        "--mode",
+        "three-step-no-write",
+        "--repository-root",
+        fixture
+            .root
+            .join("cargo-repository")
+            .to_str()
+            .expect("repository root"),
+        "--npm-executable",
+        fixture.npm.to_str().expect("fake npm"),
+        "--workflow-os-executable",
+        fixture.workflow_os.to_str().expect("workflow-os path"),
+        "--cargo-executable",
+        fixture.cargo.to_str().expect("Cargo path"),
+        "--cargo-fmt-executable",
+        fixture.cargo_fmt.to_str().expect("cargo-fmt path"),
+        "--rustfmt-executable",
+        fixture.rustfmt.to_str().expect("rustfmt path"),
+        "--toolchain-root",
+        fixture.toolchain.to_str().expect("toolchain root"),
+        "--workflow-id",
+        "test/trusted-host-three-step",
+        "--actor",
+        "system/local-host-three-step-test",
+        "--correlation-id",
+        "correlation-local-host-three-step-test",
     ]);
     command
 }

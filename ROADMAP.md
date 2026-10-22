@@ -129,14 +129,51 @@ phase` language does not supersede the active queue.
    accepted project-validation and docs-check prefix, appends Cargo format,
    retains the existing two-step v3 path unchanged, and uses a distinct v4
    report/artifact commitment. Focused plan review accepts the plan after
-   correcting two blockers: every attempted step must bind and reproduce its
-   durable trusted-host dispatch executor commitment, and pre-result integrity
-   failure must be reported from the exact failed-invocation history without a
-   fabricated local-check result or unpersisted cause. Implementation is now
-   the next phase. The reviewed plan preserves closed profiles, ordered
-   result/report truth, and exact replay. It keeps clippy, tests, arbitrary
-   commands, providers, external writes, public surfaces, hosted expansion,
-   and topology broadening out of scope.
+   correcting two blockers: every attempted step must bind its durable
+   trusted-host dispatch executor commitment, and pre-result integrity failure
+   must be reported from the exact failed-invocation history without a
+   fabricated local-check result or unpersisted cause. The implementation is
+   complete. It adds the exact closed three-profile registry, immutable
+   three-contract bundle, Core-derived three-step progression, bounded
+   three-operation host loop, causal-history validation, restart-safe exact
+   replay, and a distinct create-only v4 terminal report artifact. The report
+   verifies each durable dispatch commitment against immutable step input;
+   pre-result identity failure records no fake local-check result and discloses
+   later checks as not attempted. Full workspace validation and the opt-in real
+   bundled-toolchain Cargo format smoke pass. Focused implementation/security
+   review found blockers: resumed admission did not validate complete
+   attempted-step dispatch history, failed terminal history is under-
+   constrained, pre-result failed invocation identity is not linked to the
+   authorized attempt, and required corruption/security regressions are
+   missing. The narrow blocker fix is implemented. It validates exactly one
+   causally and cryptographically matching dispatch for every attempted step,
+   constrains failed terminal history to accepted-result or exact pre-result
+   truth, binds pre-result failure to the deterministic invocation request,
+   cites schedule events in v4 reports, and adds direct corruption,
+   substitution, artifact-conflict, and privacy regressions. Focused
+   maintainer/security re-review found one remaining correctness blocker and
+   two proof gaps: pre-result failure is incorrectly limited to the final
+   workflow step rather than the last scheduled step, and direct duplicate-
+   dispatch and composed-timeout regressions are still missing. The additional
+   narrow blocker fix is implemented: history validation now uses the durable
+   scheduled prefix, early pre-result failures remain reportable without fake
+   result truth, duplicate dispatch commitments fail closed, and composed
+   Cargo timeout produces a bounded v4 artifact. Final focused re-review
+   accepts the fix with no remaining blocker, closing this exact composition
+   lane. Clippy, tests, arbitrary commands, providers,
+   external writes, public surfaces, hosted expansion, and topology broadening
+   remain out of scope. See
+   [Trusted-Host Cargo Format Workflow Composition Implementation Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REPORT.md)
+   and
+   [Trusted-Host Cargo Format Workflow Composition Implementation Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REVIEW.md),
+   plus the
+   [Trusted-Host Cargo Format Workflow Composition Blocker Fix Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_BLOCKER_FIX_REPORT.md)
+   and
+   [Trusted-Host Cargo Format Workflow Composition Blocker Fix Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_BLOCKER_FIX_REVIEW.md).
+   The final narrow fix record is in
+   [Trusted-Host Cargo Format Workflow Composition Final Blocker Fix Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_FINAL_BLOCKER_FIX_REPORT.md).
+   The final acceptance record is in
+   [Trusted-Host Cargo Format Workflow Composition Final Blocker Fix Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_FINAL_BLOCKER_FIX_REVIEW.md).
 
    Historical accepted evidence:
 

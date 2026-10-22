@@ -7,14 +7,17 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use workflow_core::{
-    admit_trusted_host_local_application_operation, admit_trusted_host_two_step_no_write_operation,
+    admit_trusted_host_local_application_operation,
+    admit_trusted_host_three_step_no_write_operation,
+    admit_trusted_host_two_step_no_write_operation,
     persist_trusted_host_terminal_work_report_artifact, ActorId, CorrelationId,
     ExplicitLocalCheckProfileSelection, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
     ImmutableRunBundleVersion, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
     LocalExecutionWithImmutableRunBundleRequest, SqliteStateBackend, StepId, Timestamp,
     TrustedHostLocalApplicationAdmissionOutcome, TrustedHostLocalApplicationAdmissionRequest,
-    TrustedHostTerminalWorkReportArtifactPosture, TrustedHostTwoStepNoWriteAdmissionRequest,
+    TrustedHostTerminalWorkReportArtifactPosture, TrustedHostThreeStepNoWriteAdmissionRequest,
+    TrustedHostThreeStepNoWriteProfileRegistry, TrustedHostTwoStepNoWriteAdmissionRequest,
     TrustedHostTwoStepNoWriteProfileRegistry, WorkflowId, WorkflowRunId,
 };
 use workflow_local_host::LocalHostPreparedOperation;
@@ -71,6 +74,7 @@ fn run() -> Result<&'static str, &'static str> {
     match arguments.get("mode").map(String::as_str) {
         None | Some("one-step") => run_one_step(&arguments),
         Some("two-step-no-write") => run_two_step(&arguments),
+        Some("three-step-no-write") => run_three_step(&arguments),
         Some(_) => Err("input.invalid"),
     }
 }
@@ -269,6 +273,167 @@ fn run_two_step(arguments: &BTreeMap<String, String>) -> Result<&'static str, &'
                 });
             }
             TrustedHostLocalApplicationAdmissionOutcome::Denied => return Ok("admission.denied"),
+        }
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_three_step(arguments: &BTreeMap<String, String>) -> Result<&'static str, &'static str> {
+    if arguments.contains_key("profile") || arguments.contains_key("step-id") {
+        return Err("input.invalid");
+    }
+    let governance_project_root = path_argument(arguments, "governance-project-root")?;
+    let repository_root = path_argument(arguments, "repository-root")?;
+    let npm_executable = path_argument(arguments, "npm-executable")?;
+    let npm_cache_directory = arguments.get("npm-cache-directory").map(PathBuf::from);
+    let docs_check = ExplicitLocalCheckProfileSelection::docs_check()
+        .resolve_docs_check(npm_executable, repository_root.clone(), npm_cache_directory)
+        .map_err(|_| "profile.invalid")?;
+    let project_validation = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve(
+            path_argument(arguments, "workflow-os-executable")?,
+            governance_project_root.clone(),
+        )
+        .map_err(|_| "profile.invalid")?;
+    let cargo_fmt_check = ExplicitLocalCheckProfileSelection::cargo_fmt_check()
+        .resolve_cargo_fmt_check(
+            &path_argument(arguments, "cargo-executable")?,
+            &path_argument(arguments, "cargo-fmt-executable")?,
+            &path_argument(arguments, "rustfmt-executable")?,
+            &path_argument(arguments, "toolchain-root")?,
+            &repository_root,
+        )
+        .map_err(|_| "profile.invalid")?;
+    let registry = TrustedHostThreeStepNoWriteProfileRegistry::new(
+        project_validation,
+        docs_check,
+        cargo_fmt_check,
+    )
+    .map_err(|_| "profile.invalid")?;
+    let backend = SqliteStateBackend::open(path_argument(arguments, "state-database")?)
+        .map_err(|_| "state.unavailable")?;
+    let observed_at = timestamp_argument(arguments, "observed-at")?;
+    let expires_at = timestamp_argument(arguments, "expires-at")?;
+    if expires_at <= observed_at {
+        return Err("input.invalid");
+    }
+    let mut request = TrustedHostThreeStepNoWriteAdmissionRequest {
+        execution: LocalExecutionWithImmutableRunBundleRequest {
+            execution: LocalExecutionRequest {
+                project_root: governance_project_root,
+                workflow_id: WorkflowId::new(argument(arguments, "workflow-id")?)
+                    .map_err(|_| "input.invalid")?,
+                run_id: Some(
+                    WorkflowRunId::new(argument(arguments, "run-id")?)
+                        .map_err(|_| "input.invalid")?,
+                ),
+                correlation_id: CorrelationId::new(argument(arguments, "correlation-id")?)
+                    .map_err(|_| "input.invalid")?,
+                actor: ActorId::new(argument(arguments, "actor")?).map_err(|_| "input.invalid")?,
+                before_skill_invocation_checkpoints:
+                    LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+                before_skill_invocation_hook: None,
+                side_effect_events: Vec::new(),
+                side_effect_lifecycle_events: Vec::new(),
+            },
+            bundle: LocalExecutionImmutableRunBundleInputs {
+                bundle_id: ImmutableRunBundleId::new(argument(arguments, "bundle-id")?)
+                    .map_err(|_| "input.invalid")?,
+                bundle_version: ImmutableRunBundleVersion::new("v1")
+                    .map_err(|_| "input.invalid")?,
+                created_at: observed_at,
+                sensitivity: ImmutableRunBundleSensitivity::Internal,
+                redaction_required: true,
+            },
+        },
+        observed_at,
+        expires_at,
+    };
+
+    let mut executed = 0_u8;
+    loop {
+        let admitted =
+            admit_trusted_host_three_step_no_write_operation(&backend, &registry, &request)
+                .map_err(workflow_core::TrustedHostLocalApplicationFailure::code)?;
+        match admitted {
+            TrustedHostLocalApplicationAdmissionOutcome::Prepared(prepared) => {
+                if executed == 3 {
+                    return Err("operation.bound_exceeded");
+                }
+                let outcome = run_prepared(prepared)?;
+                executed += 1;
+                if !matches!(outcome, "operation.terminal" | "continuation.terminal") {
+                    return Ok(outcome);
+                }
+                request.observed_at = Timestamp::now_utc();
+                if request.observed_at >= request.expires_at {
+                    return Err("operation.window_expired");
+                }
+            }
+            TrustedHostLocalApplicationAdmissionOutcome::TerminalReplay => {
+                return three_step_artifact_posture(&backend, &registry, &request, executed == 0);
+            }
+            TrustedHostLocalApplicationAdmissionOutcome::Waiting(reason) => {
+                return Ok(match reason {
+                    workflow_core::TrustedHostLocalApplicationWaitReason::Approval => {
+                        "admission.waiting_approval"
+                    }
+                    workflow_core::TrustedHostLocalApplicationWaitReason::ExternalCondition => {
+                        "admission.waiting_external_condition"
+                    }
+                });
+            }
+            TrustedHostLocalApplicationAdmissionOutcome::Blocked(reason) => {
+                return Ok(match reason {
+                    workflow_core::TrustedHostLocalApplicationBlockReason::UnsupportedWorkflow => {
+                        "admission.blocked_unsupported_workflow"
+                    }
+                    workflow_core::TrustedHostLocalApplicationBlockReason::CurrentState => {
+                        "admission.blocked_current_state"
+                    }
+                });
+            }
+            TrustedHostLocalApplicationAdmissionOutcome::Denied => return Ok("admission.denied"),
+        }
+    }
+}
+
+fn three_step_artifact_posture(
+    backend: &SqliteStateBackend,
+    registry: &TrustedHostThreeStepNoWriteProfileRegistry,
+    request: &TrustedHostThreeStepNoWriteAdmissionRequest,
+    replay: bool,
+) -> Result<&'static str, &'static str> {
+    match (
+        workflow_core::persist_trusted_host_three_step_terminal_work_report_artifact(
+            backend, registry, request,
+        )
+        .posture(),
+        replay,
+    ) {
+        (TrustedHostTerminalWorkReportArtifactPosture::Persisted, false) => {
+            Ok("operation.terminal_report_artifact_persisted")
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::AlreadyPersisted, false) => {
+            Ok("operation.terminal_report_artifact_already_persisted")
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::GenerationFailed, false) => {
+            Err("operation.terminal_report_generation_failed")
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed, false) => {
+            Err("operation.terminal_report_artifact_persistence_failed")
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::Persisted, true) => {
+            Ok("admission.terminal_replay_report_artifact_persisted")
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::AlreadyPersisted, true) => {
+            Ok("admission.terminal_replay_report_artifact_already_persisted")
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::GenerationFailed, true) => {
+            Err("admission.terminal_replay_report_generation_failed")
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed, true) => {
+            Err("admission.terminal_replay_report_artifact_persistence_failed")
         }
     }
 }
@@ -481,8 +646,10 @@ fn parse_arguments() -> Result<BTreeMap<String, String>, &'static str> {
     {
         return Err("input.invalid");
     }
-    if parsed.get("mode").map(String::as_str) != Some("two-step-no-write")
-        && !parsed.contains_key("step-id")
+    if !matches!(
+        parsed.get("mode").map(String::as_str),
+        Some("two-step-no-write" | "three-step-no-write")
+    ) && !parsed.contains_key("step-id")
     {
         return Err("input.invalid");
     }

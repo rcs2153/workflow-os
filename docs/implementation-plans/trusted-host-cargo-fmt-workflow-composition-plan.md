@@ -1,8 +1,7 @@
 # Trusted-Host Cargo Format Workflow Composition Plan
 
-Status: focused maintainer/security plan review accepted after incorporated
-dispatch-identity and pre-result failure-truth corrections; implementation is
-the next phase.
+Status: implemented and accepted after focused maintainer/security review and
+two narrow blocker-fix cycles.
 
 Related foundations:
 
@@ -40,9 +39,9 @@ identity, and tests remain unchanged. The new path uses a distinct closed
 three-profile registry, exact three-step topology, bounded three-operation host
 loop, and private v4 terminal report commitment.
 
-This plan does not implement anything. It does not authorize clippy, tests,
-builds, generic Cargo execution, source-writing format mode, providers,
-external writes, public CLI behavior, schemas, examples, hosted expansion,
+The implementation described by this plan is complete. It does not authorize
+clippy, tests, builds, generic Cargo execution, source-writing format mode,
+providers, external writes, public CLI behavior, schemas, examples, hosted expansion,
 parallelism, nested harnesses, or release changes.
 
 ## 2. Why Composition Is Next
@@ -184,10 +183,15 @@ protected-source identity. Each admitted operation must also durably record the
 existing trusted-host executor commitment in its dispatch event. That
 commitment includes the command-contract fingerprint and private resolved
 execution fingerprint; for Cargo format, the latter includes the accepted
-formatter-chain inventory and protected-source commitment. Re-admission and
-terminal report composition must reproduce and verify the exact dispatch
-commitment for every attempted step. A command-contract match without the
-matching dispatch executor commitment is insufficient.
+formatter-chain inventory and protected-source commitment. Re-admission must
+reproduce and verify the exact dispatch commitment before execution. Terminal
+report composition must verify the durable dispatch executor commitment
+against the immutable step input and use that durable commitment as the
+authoritative admitted execution identity. This matters for an honest
+pre-result identity failure: the current mutated executable or source state
+intentionally may no longer reproduce the admitted identity at report time. A
+command-contract match without the matching durable dispatch executor
+commitment is insufficient.
 
 Re-admission must load the exact stored bundle, validate request identity,
 validate the complete causal history, derive the latest scheduled step, derive
@@ -400,9 +404,9 @@ toolchain without installation or network access.
 9. Perform focused maintainer/security review before any further profile or
    topology expansion.
 
-## 18. Review Questions
+## 18. Implementation Review Questions
 
-The focused plan review must decide:
+The focused implementation review must decide:
 
 - whether an additive three-step sibling is preferable to any private shared
   helper extraction;
@@ -416,7 +420,19 @@ The focused plan review must decide:
 
 ## 19. Recommended Next Phase
 
-Perform a focused maintainer/security review of this plan. Do not begin
-implementation until that review accepts the exact topology, additive
-compatibility boundary, v4 report identity, history/replay requirements,
-Cargo integrity treatment, and test matrix.
+The first blocker fixes from
+[Trusted-Host Cargo Format Workflow Composition Implementation Review](../concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REVIEW.md)
+are implemented in
+[Trusted-Host Cargo Format Workflow Composition Blocker Fix Report](../concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_BLOCKER_FIX_REPORT.md).
+Focused re-review in
+[Trusted-Host Cargo Format Workflow Composition Blocker Fix Review](../concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_BLOCKER_FIX_REVIEW.md)
+found one remaining correctness blocker and two mandatory proof gaps: valid
+pre-result failure on the first or second scheduled step is rejected, and
+direct duplicate-dispatch and composed-timeout regressions remain absent.
+The additional narrow fix is implemented in
+[Trusted-Host Cargo Format Workflow Composition Final Blocker Fix Report](../concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_FINAL_BLOCKER_FIX_REPORT.md).
+Final focused re-review accepts the correction with no remaining blocker in
+[Trusted-Host Cargo Format Workflow Composition Final Blocker Fix Review](../concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_FINAL_BLOCKER_FIX_REVIEW.md).
+The exact composition lane is closed. Do not broaden the profile registry,
+topology, public surface, provider access, or write posture without a separate
+approved phase.
