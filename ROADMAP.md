@@ -88,33 +88,33 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Add one second closed no-write trusted-host profile.** Planning selects
-   the existing `WorkflowOsProjectValidation` profile in the
-   [Trusted-Host Project-Validation Profile
-   Plan](docs/implementation-plans/trusted-host-project-validation-profile-plan.md).
-   The plan requires exact governed-root and executable binding, a separate
-   Core-owned explicit-zero authority decision, same-call validation truth,
-   unchanged lifecycle and replay semantics, and explicit disclosure that the
-   unpublished host still creates no WorkReport artifact. Perform focused
-   maintainer/security review before implementation. Focused review found two
-   planning blockers: non-passing local checks currently become successful
-   trusted-host skill outputs, and the proposed explicit profile selector does
-   not yet define how existing docs-check invocations remain compatible.
-   The focused blocker fix now defines a private Core-owned result adapter that
-   accepts only passing checks as trusted-host success and an exact selector
-   rule with a temporary docs-check-only compatibility alias. Focused
-   maintainer/security [re-review](docs/concepts/TRUSTED_HOST_PROJECT_VALIDATION_PROFILE_PLAN_BLOCKER_FIX_REVIEW.md)
-   accepts both corrections with no remaining planning blocker. The bounded
-   implementation vertical slice is now complete: the unpublished host accepts
-   the explicit project-validation profile, preserves the temporary docs-check
-   compatibility alias, binds validation to the exact governed root, uses
-   profile-specific explicit-zero source identities, and terminalizes failed
-   or timed-out checks instead of converting them to successful skill output.
-   Focused maintainer/security implementation review is accepted with one
-   non-blocking test-depth follow-up: timeout is proven at the private adapter
-   boundary rather than through a 120-second foreground-binary timeout run.
-   Do not jump to arbitrary commands, another check family, default activation, scheduling, nested
-   harnesses, automatic approval, providers, writes, or hosted expansion.
+2. **Plan the private trusted-host terminal WorkReport artifact boundary.**
+   The second closed no-write profile is implemented and focused-review
+   accepted. The next executable composition slice is now implemented from the
+   [Trusted-Host Terminal WorkReport Composition
+   Plan](docs/implementation-plans/trusted-host-terminal-work-report-composition-plan.md).
+   Core preserves the actual same-call local-check result in one payload-free
+   event committed atomically with invocation and run terminalization,
+   rehydrates the exact run and immutable bundle, and only then constructs a
+   validated report with deterministic private identity. Report failure does
+   not rewrite workflow pass/fail semantics, and exact replay neither reruns
+   the process nor appends events. The implementation report is recorded in
+   [Trusted-Host Terminal WorkReport Composition Report](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_COMPOSITION_REPORT.md).
+   Focused maintainer/security review found one blocker: composition validated
+   identities but did not enforce result-status compatibility with the
+   invocation/run terminal kinds or the strict result-to-invocation-to-run
+   event order promised by the plan. The narrow fix is implemented with
+   fail-closed status and ordering checks plus mismatch tests, as documented in
+   [Trusted-Host Terminal WorkReport Composition Blocker Fix Report](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_COMPOSITION_BLOCKER_FIX_REPORT.md).
+   Focused blocker-fix review now accepts the integrity correction in
+   [Trusted-Host Terminal WorkReport Composition Blocker Fix
+   Review](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_COMPOSITION_BLOCKER_FIX_REVIEW.md).
+   The next executable phase is planning only for the smallest private report
+   artifact boundary. It must preserve terminal truth, deterministic report
+   identity, payload-free references, replay safety, and corrupt-history
+   rejection before authorizing any artifact write. Do not add released CLI
+   output, another profile, arbitrary commands, scheduling, nested harnesses,
+   automatic approval, providers, external writes, or hosted expansion.
 
 Queue maintenance rule: every merged roadmap phase must update this list and
 the status date in the same PR. Completed work moves into the lane evidence or

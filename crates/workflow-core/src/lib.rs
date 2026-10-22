@@ -236,9 +236,9 @@ pub use evidence::{
 #[cfg(feature = "trusted-host-application-spi")]
 #[doc(hidden)]
 pub use executor::{
-    admit_trusted_host_local_application_operation, TrustedHostLocalApplicationAdmissionOutcome,
-    TrustedHostLocalApplicationAdmissionRequest, TrustedHostLocalApplicationBlockReason,
-    TrustedHostLocalApplicationWaitReason,
+    admit_trusted_host_local_application_operation, compose_trusted_host_terminal_work_report,
+    TrustedHostLocalApplicationAdmissionOutcome, TrustedHostLocalApplicationAdmissionRequest,
+    TrustedHostLocalApplicationBlockReason, TrustedHostLocalApplicationWaitReason,
 };
 pub use executor::{
     compose_github_pr_comment_live_sandbox_event_proof,
@@ -871,6 +871,7 @@ pub use local_check::{
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRedactionPolicy,
     LocalCheckRegisteredHandler, LocalCheckRegistrationMode, LocalCheckRegistrationProfile,
     LocalCheckRequirementId, LocalCheckResult, LocalCheckResultDefinition, LocalCheckResultId,
+    LocalCheckResultRecordedEvent, LocalCheckResultRecordedEventDefinition,
     LocalCheckResultReference, LocalCheckResultReferenceDefinition, LocalCheckResultStatus,
     LocalCheckSideEffectBoundary, LocalCheckSideEffectBoundaryDefinition,
     LocalCheckSideEffectClass, LocalCheckSideEffectKind, LocalCheckWorkingDirectoryPolicy,

@@ -327,6 +327,7 @@ impl WorkflowRunSnapshot {
             | WorkflowRunEventKind::StepScheduled { .. }
             | WorkflowRunEventKind::SkillInvocationSucceeded { .. }
             | WorkflowRunEventKind::SkillInvocationFailed { .. }
+            | WorkflowRunEventKind::LocalCheckResultRecorded(_)
             | WorkflowRunEventKind::ExternalEventReceived { .. }
             | WorkflowRunEventKind::RunPaused { .. }
             | WorkflowRunEventKind::RunResumed
@@ -429,6 +430,8 @@ pub enum WorkflowRunEventKindName {
     SkillInvocationSucceeded,
     /// `SkillInvocationFailed`.
     SkillInvocationFailed,
+    /// `LocalCheckResultRecorded`.
+    LocalCheckResultRecorded,
     /// `ApprovalRequested`.
     ApprovalRequested,
     /// `ApprovalGranted`.
@@ -536,6 +539,8 @@ pub enum WorkflowRunEventKind {
         /// Failure record.
         failure: FailureRecord,
     },
+    /// One payload-free trusted-host local-check result binding was recorded.
+    LocalCheckResultRecorded(Box<crate::LocalCheckResultRecordedEvent>),
     /// Approval was requested.
     ApprovalRequested(Box<ApprovalRequest>),
     /// Approval was granted.
@@ -617,6 +622,7 @@ impl WorkflowRunEventKind {
                 WorkflowRunEventKindName::SkillInvocationSucceeded
             }
             Self::SkillInvocationFailed { .. } => WorkflowRunEventKindName::SkillInvocationFailed,
+            Self::LocalCheckResultRecorded(_) => WorkflowRunEventKindName::LocalCheckResultRecorded,
             Self::ApprovalRequested(_) => WorkflowRunEventKindName::ApprovalRequested,
             Self::ApprovalGranted(_) => WorkflowRunEventKindName::ApprovalGranted,
             Self::ApprovalDenied(_) => WorkflowRunEventKindName::ApprovalDenied,
@@ -1227,6 +1233,7 @@ fn transition_target(
         | WorkflowRunEventKindName::SkillInvocationStarted
         | WorkflowRunEventKindName::SkillInvocationSucceeded
         | WorkflowRunEventKindName::SkillInvocationFailed
+        | WorkflowRunEventKindName::LocalCheckResultRecorded
         | WorkflowRunEventKindName::HookInvocationRequested
         | WorkflowRunEventKindName::HookInvocationEvaluated
         | WorkflowRunEventKindName::SideEffectProposed

@@ -67,15 +67,16 @@ use crate::{
     HighAssuranceApprovalSuppliedReference, HostedCatalogEntryId, HostedExecutionBudget,
     HostedExecutionPolicyBinding, HostedExecutionRequest, HostedProjectCapability,
     HostedProjectScope, HostedSkillDispatch, HostedWorkItem, HostedWorkItemId, IdempotencyKey,
-    IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalApprovalProofMarkerAuditProjectionStore,
-    LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger, MappingExpression,
-    ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
-    PolicyEffect, PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument,
-    PostgresDispatchHostedSkillRequest, PostgresRecordCollaborativeApprovalDecisionRequest,
-    PostgresStateBackend, ProjectBundle, ProjectValidationCapability, RedactionDisposition,
-    RedactionFieldState, RedactionMetadata, ReportArtifactWriteIntegrationInput,
-    ReportArtifactWriteIntegrationResult, ReportArtifactWriteProviderIntegration, RetryRecord,
-    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
+    IdempotencyResult, IdempotencyWrite, ImmutableRunBundleBinding, LoadedSpec,
+    LocalApprovalProofMarkerAuditProjectionStore, LocalAuditSink, LocalObservabilitySink,
+    LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
+    PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect, PolicyEffectSet,
+    PolicyEvaluationContext, PolicySpecDocument, PostgresDispatchHostedSkillRequest,
+    PostgresRecordCollaborativeApprovalDecisionRequest, PostgresStateBackend, ProjectBundle,
+    ProjectValidationCapability, RedactionDisposition, RedactionFieldState, RedactionMetadata,
+    ReportArtifactWriteIntegrationInput, ReportArtifactWriteIntegrationResult,
+    ReportArtifactWriteProviderIntegration, RetryRecord, RuntimeAgentHarnessHookInput,
+    SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
     SideEffectApprovalLinkageFromStoreResult, SideEffectApprovalLinkageStoreLoadMode,
     SideEffectAuthorityDecision, SideEffectId, SideEffectLifecycleState,
     SideEffectLifecycleTransitionResult, SideEffectMissingRecordPolicy, SideEffectRecord,
@@ -430,6 +431,357 @@ pub enum TrustedHostLocalApplicationAdmissionOutcome<'a> {
     Blocked(TrustedHostLocalApplicationBlockReason),
     /// Policy denied admission before handler preparation.
     Denied,
+}
+
+/// Composes one private in-memory terminal report from the exact durable trusted-host run.
+///
+/// The caller supplies only the already-admitted request and closed profile. Report identity,
+/// contract identity, generator identity, references, disclosures, and timestamps are derived by
+/// Core from durable run history. The function never persists a report or writes an artifact.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the run is not terminal, its immutable binding differs,
+/// or the payload-free result binding is missing, duplicated, or inconsistent.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+pub fn compose_trusted_host_terminal_work_report(
+    backend: &crate::SqliteStateBackend,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    request: &TrustedHostLocalApplicationAdmissionRequest,
+) -> Result<WorkReport, WorkflowOsError> {
+    let run_id = request
+        .execution
+        .execution
+        .run_id
+        .as_ref()
+        .ok_or_else(|| trusted_host_terminal_report_error("run_id_missing"))?;
+    let run = backend.rehydrate_run(run_id)?;
+    let bindings = trusted_host_terminal_report_bindings(&run, profile, request)?;
+
+    let report_material = format!(
+        "workflow-os/trusted-host-terminal-report/v1\n{}\n{}\n{}\n{}\n{}\n{}",
+        run.snapshot.identity.run_id.as_str(),
+        bindings.durable_bundle.root_hash().as_str(),
+        match profile.profile_id() {
+            ExplicitLocalCheckProfileId::WorkflowOsProjectValidation => {
+                "workflow_os_project_validation"
+            }
+            ExplicitLocalCheckProfileId::DocsCheck => "docs_check",
+        },
+        bindings.result_binding.step_id().as_str(),
+        bindings.result_binding.command_id().as_str(),
+        bindings.result_binding.result_id().as_str(),
+    );
+    let report_digest = SpecContentHash::from_text(&report_material);
+    crate::generate_terminal_local_work_report(TerminalLocalWorkReportInput {
+        report_id: WorkReportId::new(format!(
+            "report/trusted-host-{}",
+            &report_digest.as_str()[..24]
+        ))?,
+        report_contract_id: WorkReportContractId::new("trusted-host-terminal-no-write")?,
+        report_contract_version: WorkReportContractVersion::new("v1")?,
+        run: &run,
+        generated_at: bindings.terminal_event.timestamp,
+        generated_by: ActorId::new("system/trusted-host-report-composer")?,
+        correlation_id: run
+            .events
+            .first()
+            .and_then(|event| event.correlation_id.clone()),
+        sensitivity: WorkReportSensitivity::Internal,
+        redaction: RedactionMetadata::empty(),
+        evidence_reference_ids: Vec::new(),
+        validation_reference_ids: Vec::new(),
+        local_check_result_references: vec![WorkReportStableReference::new(
+            bindings.result_binding.result_id().as_str().to_owned(),
+        )?],
+        workflow_event_ids: vec![
+            bindings.result_event.event_id.clone(),
+            bindings
+                .result_binding
+                .invocation_terminal_event_id()
+                .clone(),
+            bindings.terminal_event.event_id.clone(),
+        ],
+        audit_event_ids: Vec::new(),
+        adapter_telemetry_references: Vec::new(),
+        policy_event_ids: Vec::new(),
+        approval_reference_ids: Vec::new(),
+        approval_proof_marker_citation_policy: None,
+        high_assurance_approval: None,
+        typed_handoff_ids: Vec::new(),
+        agent_harness_hook_invocation_ids: Vec::new(),
+        agent_harness_hook_disclosure_ids: Vec::new(),
+        side_effect_ids: Vec::new(),
+        github_pr_comment_provider_disclosures: Vec::new(),
+        incomplete_work: Vec::new(),
+        known_limitations: vec![
+            "Report remains in memory and is not persisted or written as an artifact.".to_owned(),
+            "Trusted-host execution remains local, closed-profile, and no-write.".to_owned(),
+        ],
+        risks: Vec::new(),
+        handoff_notes: vec![
+            "Inspect durable workflow events for the authoritative terminal history.".to_owned(),
+        ],
+    })
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+struct TrustedHostTerminalReportBindings<'a> {
+    durable_bundle: &'a ImmutableRunBundleBinding,
+    result_event: &'a WorkflowRunEvent,
+    result_binding: &'a crate::LocalCheckResultRecordedEvent,
+    terminal_event: &'a WorkflowRunEvent,
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_terminal_report_bindings<'a>(
+    run: &'a WorkflowRun,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    request: &TrustedHostLocalApplicationAdmissionRequest,
+) -> Result<TrustedHostTerminalReportBindings<'a>, WorkflowOsError> {
+    if !run.snapshot.status.is_terminal() {
+        return Err(trusted_host_terminal_report_error("run_not_terminal"));
+    }
+    let durable_bundle = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| trusted_host_terminal_report_error("bundle_missing"))?;
+    if durable_bundle.bundle_id() != &request.execution.bundle.bundle_id
+        || durable_bundle.bundle_version() != &request.execution.bundle.bundle_version
+    {
+        return Err(trusted_host_terminal_report_error("bundle_mismatch"));
+    }
+    let mut result_events = run.events.iter().filter_map(|event| {
+        let WorkflowRunEventKind::LocalCheckResultRecorded(binding) = &event.kind else {
+            return None;
+        };
+        Some((event, binding.as_ref()))
+    });
+    let (result_event, result_binding) = result_events
+        .next()
+        .ok_or_else(|| trusted_host_terminal_report_error("result_binding_missing"))?;
+    if result_events.next().is_some() {
+        return Err(trusted_host_terminal_report_error(
+            "result_binding_duplicate",
+        ));
+    }
+    if result_binding.profile_id() != profile.profile_id()
+        || result_binding.command_id() != profile.command_contract().command_id()
+        || result_binding.command_kind() != profile.command_contract().command_kind()
+        || result_binding.step_id() != &request.selected_step_id
+        || result_binding.immutable_run_bundle() != durable_bundle
+    {
+        return Err(trusted_host_terminal_report_error(
+            "result_binding_mismatch",
+        ));
+    }
+    let mut invocation_events = run.events.iter().filter(|event| {
+        event.event_id == *result_binding.invocation_terminal_event_id()
+            && matches!(
+                &event.kind,
+                WorkflowRunEventKind::SkillInvocationSucceeded { invocation_id, step_id, .. }
+                    | WorkflowRunEventKind::SkillInvocationFailed { invocation_id, step_id, .. }
+                    if invocation_id == result_binding.invocation_id()
+                        && step_id == result_binding.step_id()
+            )
+    });
+    let invocation_event = invocation_events
+        .next()
+        .ok_or_else(|| trusted_host_terminal_report_error("invocation_binding_mismatch"))?;
+    if invocation_events.next().is_some() {
+        return Err(trusted_host_terminal_report_error(
+            "invocation_binding_mismatch",
+        ));
+    }
+    let terminal_event = run
+        .events
+        .last()
+        .ok_or_else(|| trusted_host_terminal_report_error("terminal_event_missing"))?;
+    let invocation_succeeded = matches!(
+        invocation_event.kind,
+        WorkflowRunEventKind::SkillInvocationSucceeded { .. }
+    );
+    let terminal_status = match terminal_event.kind {
+        WorkflowRunEventKind::RunCompleted => WorkflowRunStatus::Completed,
+        WorkflowRunEventKind::RunFailed(_) => WorkflowRunStatus::Failed,
+        WorkflowRunEventKind::RunCanceled(_) => WorkflowRunStatus::Canceled,
+        _ => {
+            return Err(trusted_host_terminal_report_error(
+                "terminal_event_mismatch",
+            ))
+        }
+    };
+    validate_trusted_host_terminal_result_shape(
+        result_binding.status(),
+        invocation_succeeded,
+        terminal_status,
+        result_event.sequence_number,
+        invocation_event.sequence_number,
+        terminal_event.sequence_number,
+    )?;
+    Ok(TrustedHostTerminalReportBindings {
+        durable_bundle,
+        result_event,
+        result_binding,
+        terminal_event,
+    })
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn validate_trusted_host_terminal_result_shape(
+    result_status: crate::LocalCheckResultStatus,
+    invocation_succeeded: bool,
+    terminal_status: WorkflowRunStatus,
+    result_sequence: EventSequenceNumber,
+    invocation_sequence: EventSequenceNumber,
+    terminal_sequence: EventSequenceNumber,
+) -> Result<(), WorkflowOsError> {
+    let status_matches = match result_status {
+        crate::LocalCheckResultStatus::Passed => {
+            invocation_succeeded && terminal_status == WorkflowRunStatus::Completed
+        }
+        crate::LocalCheckResultStatus::Failed | crate::LocalCheckResultStatus::TimedOut => {
+            !invocation_succeeded && terminal_status == WorkflowRunStatus::Failed
+        }
+        _ => false,
+    };
+    if !status_matches {
+        return Err(trusted_host_terminal_report_error(
+            "terminal_status_mismatch",
+        ));
+    }
+    if !(result_sequence < invocation_sequence && invocation_sequence < terminal_sequence) {
+        return Err(trusted_host_terminal_report_error(
+            "terminal_event_order_mismatch",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_terminal_report_error(code: &str) -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        format!("trusted_host_terminal_report.{code}"),
+        "trusted-host terminal report composition failed closed",
+    )
+}
+
+#[cfg(all(test, feature = "trusted-host-application-spi"))]
+mod trusted_host_terminal_report_integrity_tests {
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+    use crate::LocalCheckResultStatus;
+
+    fn sequence(value: u64) -> EventSequenceNumber {
+        EventSequenceNumber::new(value).expect("positive sequence")
+    }
+
+    #[test]
+    fn terminal_result_shape_accepts_only_matching_success_and_failure_truth() {
+        for (result_status, invocation_succeeded, terminal_status) in [
+            (
+                LocalCheckResultStatus::Passed,
+                true,
+                WorkflowRunStatus::Completed,
+            ),
+            (
+                LocalCheckResultStatus::Failed,
+                false,
+                WorkflowRunStatus::Failed,
+            ),
+            (
+                LocalCheckResultStatus::TimedOut,
+                false,
+                WorkflowRunStatus::Failed,
+            ),
+        ] {
+            validate_trusted_host_terminal_result_shape(
+                result_status,
+                invocation_succeeded,
+                terminal_status,
+                sequence(10),
+                sequence(11),
+                sequence(12),
+            )
+            .expect("matching terminal truth");
+        }
+    }
+
+    #[test]
+    fn terminal_result_shape_rejects_status_conflicts_and_cancellation() {
+        for (result_status, invocation_succeeded, terminal_status) in [
+            (
+                LocalCheckResultStatus::Passed,
+                false,
+                WorkflowRunStatus::Failed,
+            ),
+            (
+                LocalCheckResultStatus::Passed,
+                true,
+                WorkflowRunStatus::Failed,
+            ),
+            (
+                LocalCheckResultStatus::Failed,
+                true,
+                WorkflowRunStatus::Completed,
+            ),
+            (
+                LocalCheckResultStatus::Failed,
+                false,
+                WorkflowRunStatus::Completed,
+            ),
+            (
+                LocalCheckResultStatus::TimedOut,
+                true,
+                WorkflowRunStatus::Completed,
+            ),
+            (
+                LocalCheckResultStatus::TimedOut,
+                false,
+                WorkflowRunStatus::Canceled,
+            ),
+        ] {
+            let error = validate_trusted_host_terminal_result_shape(
+                result_status,
+                invocation_succeeded,
+                terminal_status,
+                sequence(10),
+                sequence(11),
+                sequence(12),
+            )
+            .expect_err("conflicting terminal truth must fail closed");
+            assert_eq!(
+                error.code(),
+                "trusted_host_terminal_report.terminal_status_mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_result_shape_rejects_non_monotonic_event_order() {
+        for (result_sequence, invocation_sequence, terminal_sequence) in
+            [(11, 10, 12), (10, 10, 12), (10, 12, 11), (10, 12, 12)]
+        {
+            let error = validate_trusted_host_terminal_result_shape(
+                LocalCheckResultStatus::Passed,
+                true,
+                WorkflowRunStatus::Completed,
+                sequence(result_sequence),
+                sequence(invocation_sequence),
+                sequence(terminal_sequence),
+            )
+            .expect_err("non-monotonic terminal history must fail closed");
+            assert_eq!(
+                error.code(),
+                "trusted_host_terminal_report.terminal_event_order_mismatch"
+            );
+        }
+    }
 }
 
 #[cfg(feature = "trusted-host-application-spi")]
@@ -10609,6 +10961,7 @@ fn prepare_fresh_trusted_host_local_application_operation<'a>(
         );
     let executor = Box::new(
         TrustedHostLocalCheckAttemptExecutor::new(profile, executor_commitment)
+            .with_immutable_run_bundle(stored.manifest().run_binding())
             .with_workflow_lifecycle(workflow_lifecycle),
     );
     let fresh = crate::sqlite_state::TrustedHostLocalApplicationOwnedFreshPreparation {
@@ -10845,6 +11198,7 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
         );
     let executor = Box::new(
         TrustedHostLocalCheckAttemptExecutor::new(profile, executor_commitment)
+            .with_immutable_run_bundle(binding.clone())
             .with_workflow_lifecycle(workflow_lifecycle),
     );
     let prepared = crate::sqlite_state::prepare_owned_trusted_host_local_application_session(
