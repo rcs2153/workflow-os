@@ -88,7 +88,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the in-memory terminal WorkReport composition blocker fix.**
+2. **Plan the private trusted-host terminal WorkReport artifact boundary.**
    The second closed no-write profile is implemented and focused-review
    accepted. The next executable composition slice is now implemented from the
    [Trusted-Host Terminal WorkReport Composition
@@ -106,10 +106,15 @@ phase` language does not supersede the active queue.
    event order promised by the plan. The narrow fix is implemented with
    fail-closed status and ordering checks plus mismatch tests, as documented in
    [Trusted-Host Terminal WorkReport Composition Blocker Fix Report](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_COMPOSITION_BLOCKER_FIX_REPORT.md).
-   Perform focused blocker-fix review next. Do not add report
-   persistence, artifacts, released CLI output, another profile, arbitrary
-   commands, scheduling, nested harnesses, automatic approval, providers,
-   writes, or hosted expansion.
+   Focused blocker-fix review now accepts the integrity correction in
+   [Trusted-Host Terminal WorkReport Composition Blocker Fix
+   Review](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_COMPOSITION_BLOCKER_FIX_REVIEW.md).
+   The next executable phase is planning only for the smallest private report
+   artifact boundary. It must preserve terminal truth, deterministic report
+   identity, payload-free references, replay safety, and corrupt-history
+   rejection before authorizing any artifact write. Do not add released CLI
+   output, another profile, arbitrary commands, scheduling, nested harnesses,
+   automatic approval, providers, external writes, or hosted expansion.
 
 Queue maintenance rule: every merged roadmap phase must update this list and
 the status date in the same PR. Completed work moves into the lane evidence or

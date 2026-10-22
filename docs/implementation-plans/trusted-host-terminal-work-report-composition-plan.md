@@ -1,7 +1,8 @@
 # Trusted-Host Terminal WorkReport Composition Plan
 
-Status: implementation complete; focused maintainer/security review found one
-blocker, and the narrow fix-forward implementation is complete pending review.
+Status: implementation complete; the focused maintainer/security review found
+one blocker, and the independently reviewed fix is accepted in
+[Trusted-Host Terminal WorkReport Composition Blocker Fix Review](../concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_COMPOSITION_BLOCKER_FIX_REVIEW.md).
 
 Related foundations:
 
@@ -20,11 +21,10 @@ binding atomically with invocation and run terminalization, then composes the
 report only from the rehydrated terminal run. Exact replay reuses that durable
 binding without rerunning the process or appending events.
 
-The next implementation should add one private, in-memory terminal
-`WorkReport` composition path for trusted-host operations. Core must compose
-the report only after terminal events are durably committed and the exact run
-is rehydrated. The report must cite the actual same-call local-check result,
-not a caller assertion, reconstructed command output, or fabricated evidence.
+The implemented private path composes only after terminal events are durably
+committed and the exact run is rehydrated. It cites the actual same-call
+local-check result rather than a caller assertion, reconstructed command
+output, or fabricated evidence.
 
 This implementation does not persist reports, write artifacts, expose report
 contents through a released CLI, add provider access or writes, schedule work,
