@@ -88,23 +88,25 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Harden first-use CLI and repository integration-check failures.** Fresh
-   external-repository evaluation found two bounded but confidence-eroding
-   defects: pre-scaffold `workflow-os validate` repeats the missing-manifest
-   diagnostic, and `npm run check:integrations` can surface an opaque child-
-   process failure under Node 24 even though the documented Node 20 path
-   passes. Reproduce both paths from current `main`, remove duplicate
-   diagnostic emission at its source, and make the integration check either
-   execute correctly on the declared supported Node range or fail with a
-   precise actionable toolchain message. Preserve validation semantics,
-   supported-toolchain truth, exit status, privacy, and machine-readable
-   output. Do not add provider calls, external writes, workflow schema changes,
-   runtime authority, automatic approvals, hosted behavior, or release posture
-   changes. The queue reconciliation and bounded implementation contract are
-   recorded in the [Active Delivery Queue Maintenance
-   Report](docs/concepts/ACTIVE_DELIVERY_QUEUE_MAINTENANCE_REPORT.md).
+
+No unblocked implementation item is currently selected. The first-use CLI and
+integration-check item added during the latest queue reconciliation was stale:
+both defects were already fixed and accepted in PR #344. Current-main
+verification under Node 20 and Node 24 is recorded in the [First-Use CLI And
+Integration Check Verification
+Report](docs/concepts/FIRST_USE_CLI_INTEGRATION_CHECK_VERIFICATION_REPORT.md).
+Select the next executable phase through governed queue maintenance rather than
+reviving historical `next phase` language from the lane evidence below.
 
 #### Completed Queue Evidence
+
+- **First-use CLI and integration-check hardening verified complete.** PR #344
+  removed duplicate missing-manifest rendering and added bounded, actionable
+  child-process error handling. Current main retains the exact diagnostic-count
+  regression, the integration-helper failure/overflow regressions, and a
+  successful complete integration check under Node 20.19.5 and Node 24.18.0.
+  The queue item was closed without unnecessary implementation changes; see the
+  [verification report](docs/concepts/FIRST_USE_CLI_INTEGRATION_CHECK_VERIFICATION_REPORT.md).
 
 - **Trusted-host Cargo format workflow composition accepted.** The prior queue
    entry incorrectly pointed to a required-context review already accepted and
