@@ -548,6 +548,8 @@ identity readiness. The blocker fix and focused review are complete.
 
 Authoritative source-boundary planning is now documented in
 [Authoritative Collaborative Identity Source Boundary Plan](authoritative-collaborative-identity-source-boundary-plan.md).
+The first persistent source slice is implemented and awaits phase-level review;
+it does not yet authorize approval decisions or replace hosted authentication.
 It reuses the existing generic current-authority source contracts and recommends
 a PostgreSQL persistent fact-store and Core-owned exact-query source as the
 first implementation. No authoritative source or runtime identity consumer is

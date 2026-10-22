@@ -20,9 +20,22 @@ use workflow_core::{
     ApprovalDecisionProofMarkerDefinition, ApprovalDecisionProofValidationPolicy,
     ApprovalPresentationChannel, ApprovalPresentationId, ApprovalPresentationRecord,
     ApprovalPresentationRecordDefinition, ApprovalPresentationRecordStore,
-    ApprovalPresentationSensitivity, ApprovalRequest, ApprovalStore, CorrelationId,
-    DurableStateBackendKind, DurableStateCapability, DurableStateContractProvider,
-    DurableStateSupport, DurableStateTransactionKind, EventId, EventLogStore, EventSequenceNumber,
+    ApprovalPresentationSensitivity, ApprovalRequest, ApprovalStore,
+    CollaborativeExternalSubjectCommitment, CollaborativeIdentityAudienceCommitment,
+    CollaborativeIdentityAuthorityMatchPosture, CollaborativeIdentityAuthorityQuery,
+    CollaborativeIdentityAuthorityRevisionActivation,
+    CollaborativeIdentityAuthorityRevisionCandidate, CollaborativeIdentityIssuerCommitment,
+    CollaborativeIdentityProviderId, CollaborativeIdentityProviderLifecycle,
+    CollaborativeIdentityProviderRegistration, CollaborativeIdentityProviderRegistrationVersion,
+    CollaborativePrincipalIdentityBinding, CollaborativePrincipalIdentityBindingId,
+    CollaborativePrincipalIdentityBindingLifecycle, CollaborativePrincipalLifecycle,
+    CollaborativePrincipalRecord, CollaborativePrincipalRevision, CollaborativeProjectGrant,
+    CollaborativeProjectGrantDefinition, CollaborativeProjectGrantId,
+    CollaborativeProjectGrantRevision, CollaborativeProjectGrantRevocation,
+    CollaborativeProjectGrantRevocationDefinition, CollaborativeProjectGrantRevocationId,
+    CollaborativeProjectGrantRevocationReason, CorrelationId, DurableStateBackendKind,
+    DurableStateCapability, DurableStateContractProvider, DurableStateSupport,
+    DurableStateTransactionKind, EventId, EventLogStore, EventSequenceNumber,
     HostedAuthorityRegistryRevision, HostedCatalogEntryId, HostedExecutionBudget,
     HostedExecutionId, HostedExecutionPolicyBinding, HostedExecutionPolicyId,
     HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
@@ -123,7 +136,7 @@ fn postgresql_backend_proves_shared_state_milestone() {
         return;
     };
     reset_schema(&config);
-    prove_schema_v1_to_v2_migration(&config);
+    prove_schema_v1_to_v3_migration(&config);
     reset_schema(&config);
     let backend = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
         config.clone(),
@@ -141,6 +154,7 @@ fn postgresql_backend_proves_shared_state_milestone() {
     prove_authoritative_projection_and_shared_consumer(&backend);
     prove_hosted_project_resource_binding(&backend, &config);
     prove_project_approval_route_persistence(&backend, &config);
+    prove_collaborative_identity_authority_source(&backend, &config);
     prove_projection_rebuild(&backend);
     prove_corrupt_payload_nonleak(&config, &backend);
     prove_schema_fail_closed(&config, &backend);
@@ -151,7 +165,7 @@ fn postgresql_backend_proves_shared_state_milestone() {
     assert!(!format!("{backend:?}").contains("postgres://"));
 }
 
-fn prove_schema_v1_to_v2_migration(config: &Config) {
+fn prove_schema_v1_to_v3_migration(config: &Config) {
     let mut client = config.connect(NoTls).expect("connect migration fixture");
     client
         .batch_execute(
@@ -188,7 +202,7 @@ fn prove_schema_v1_to_v2_migration(config: &Config) {
     let report = backend
         .initialize_schema()
         .expect("migrate schema v1 to v2");
-    assert_eq!(report.schema_version(), 2);
+    assert_eq!(report.schema_version(), 3);
 
     let mut client = config.connect(NoTls).expect("inspect migrated schema");
     let metadata = client
@@ -198,8 +212,8 @@ fn prove_schema_v1_to_v2_migration(config: &Config) {
             &[],
         )
         .expect("read v2 metadata");
-    assert_eq!(metadata.get::<_, i32>(0), 2);
-    assert_eq!(metadata.get::<_, String>(1), "workflow-os-postgresql-v2");
+    assert_eq!(metadata.get::<_, i32>(0), 3);
+    assert_eq!(metadata.get::<_, String>(1), "workflow-os-postgresql-v3");
     assert_eq!(
         client
             .query_one(
@@ -227,6 +241,73 @@ fn prove_schema_v1_to_v2_migration(config: &Config) {
             1
         );
     }
+}
+
+fn prove_collaborative_identity_authority_source(backend: &PostgresStateBackend, config: &Config) {
+    let active = collaborative_authority_candidate(7, false);
+    assert_eq!(
+        backend
+            .activate_collaborative_identity_authority_revision(&active)
+            .expect("activate authority"),
+        CollaborativeIdentityAuthorityRevisionActivation::Activated
+    );
+    assert_eq!(
+        backend
+            .activate_collaborative_identity_authority_revision(&active)
+            .expect("reconcile authority"),
+        CollaborativeIdentityAuthorityRevisionActivation::ReconciledExisting
+    );
+    let query = collaborative_authority_query();
+    let read = backend
+        .read_collaborative_identity_authority(&query)
+        .expect("authority read");
+    assert_eq!(
+        read.match_posture(),
+        CollaborativeIdentityAuthorityMatchPosture::MatchingGrantPresent
+    );
+    assert_eq!(read.matching_active_grant_count(), 1);
+
+    let restarted = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
+        config.clone(),
+    )));
+    assert_eq!(
+        restarted
+            .read_collaborative_identity_authority(&query)
+            .expect("restart authority read")
+            .authority_revision()
+            .get(),
+        7
+    );
+
+    let conflict = collaborative_authority_candidate(7, true);
+    assert_eq!(
+        backend
+            .activate_collaborative_identity_authority_revision(&conflict)
+            .expect_err("same revision conflict")
+            .code(),
+        "postgres_state.collaborative_authority.revision.conflict"
+    );
+    let revoked = collaborative_authority_candidate(8, true);
+    assert_eq!(
+        backend
+            .activate_collaborative_identity_authority_revision(&revoked)
+            .expect("advance authority"),
+        CollaborativeIdentityAuthorityRevisionActivation::Activated
+    );
+    assert_eq!(
+        backend
+            .read_collaborative_identity_authority(&query)
+            .expect("revoked authority read")
+            .match_posture(),
+        CollaborativeIdentityAuthorityMatchPosture::NoMatchingGrant
+    );
+    assert_eq!(
+        backend
+            .activate_collaborative_identity_authority_revision(&active)
+            .expect_err("rollback must fail")
+            .code(),
+        "postgres_state.collaborative_authority.revision.rollback"
+    );
 }
 
 fn prove_project_approval_route_persistence(backend: &PostgresStateBackend, config: &Config) {
@@ -2349,7 +2430,7 @@ fn prove_schema_fail_closed(config: &Config, backend: &PostgresStateBackend) {
     client
         .execute(
             "UPDATE workflow_os.schema_metadata
-                SET checksum = 'workflow-os-postgresql-v2',
+                SET checksum = 'workflow-os-postgresql-v3',
                     recovery_required = TRUE
               WHERE singleton = TRUE",
             &[],
@@ -2587,6 +2668,114 @@ fn approval_request(
 
 fn timestamp() -> Timestamp {
     Timestamp::parse_rfc3339("2026-07-29T12:00:00Z").expect("timestamp")
+}
+
+fn collaborative_authority_query() -> CollaborativeIdentityAuthorityQuery {
+    CollaborativeIdentityAuthorityQuery::new(
+        OrganizationId::new("org/collaborative-source").expect("organization"),
+        ProjectId::new("project/collaborative-source").expect("project"),
+        ActorId::new("user/collaborative-source").expect("principal"),
+        HostedProjectCapability::ApprovalDecide,
+    )
+    .expect("query")
+}
+
+fn collaborative_authority_candidate(
+    revision: u64,
+    revoked: bool,
+) -> CollaborativeIdentityAuthorityRevisionCandidate {
+    let organization_id = OrganizationId::new("org/collaborative-source").expect("organization");
+    let principal_id = ActorId::new("user/collaborative-source").expect("principal");
+    let provider = CollaborativeIdentityProviderRegistration::new(
+        CollaborativeIdentityProviderId::new("provider/collaborative-source").expect("provider"),
+        CollaborativeIdentityProviderRegistrationVersion::new(1).expect("provider version"),
+        HostedAuthorityRegistryRevision::new(7).expect("provider revision"),
+        organization_id.clone(),
+        CollaborativeIdentityIssuerCommitment::new(
+            SpecContentHash::from_text("collaborative issuer")
+                .as_str()
+                .to_owned(),
+        )
+        .expect("issuer"),
+        vec![CollaborativeIdentityAudienceCommitment::new(
+            SpecContentHash::from_text("collaborative audience")
+                .as_str()
+                .to_owned(),
+        )
+        .expect("audience")],
+        CollaborativeIdentityProviderLifecycle::Active,
+    )
+    .expect("provider");
+    let binding = CollaborativePrincipalIdentityBinding::new(
+        CollaborativePrincipalIdentityBindingId::new("binding/collaborative-source")
+            .expect("binding"),
+        provider.provider_id().clone(),
+        provider.revision(),
+        organization_id.clone(),
+        principal_id.clone(),
+        CollaborativeExternalSubjectCommitment::new(
+            SpecContentHash::from_text("collaborative subject")
+                .as_str()
+                .to_owned(),
+        )
+        .expect("subject"),
+        Timestamp::parse_rfc3339("2020-01-01T00:00:00Z").expect("issued at"),
+        CollaborativePrincipalIdentityBindingLifecycle::Active,
+    )
+    .expect("binding");
+    let principal = CollaborativePrincipalRecord::new(
+        organization_id.clone(),
+        principal_id.clone(),
+        HostedPrincipalKind::Human,
+        CollaborativePrincipalRevision::new(1).expect("principal revision"),
+        Timestamp::parse_rfc3339("2020-01-01T00:00:00Z").expect("effective at"),
+        CollaborativePrincipalLifecycle::Active,
+    )
+    .expect("principal");
+    let grant = CollaborativeProjectGrant::new(CollaborativeProjectGrantDefinition {
+        grant_id: CollaborativeProjectGrantId::new("grant/collaborative-source").expect("grant"),
+        organization_id: organization_id.clone(),
+        project_id: ProjectId::new("project/collaborative-source").expect("project"),
+        principal_id: principal_id.clone(),
+        capabilities: vec![HostedProjectCapability::ApprovalDecide],
+        issued_by: ActorId::new("user/collaborative-admin").expect("issuer"),
+        revision: CollaborativeProjectGrantRevision::new(1).expect("grant revision"),
+        authority_registry_revision: HostedAuthorityRegistryRevision::new(7)
+            .expect("authority revision"),
+        effective_at: Timestamp::parse_rfc3339("2020-01-01T00:00:00Z").expect("effective at"),
+        expires_at: None,
+    })
+    .expect("grant");
+    let revocations = if revoked {
+        vec![CollaborativeProjectGrantRevocation::new(
+            CollaborativeProjectGrantRevocationDefinition {
+                revocation_id: CollaborativeProjectGrantRevocationId::new(
+                    "revocation/collaborative-source",
+                )
+                .expect("revocation"),
+                grant_id: grant.grant_id().clone(),
+                grant_commitment: grant.commitment().clone(),
+                organization_id: organization_id.clone(),
+                project_id: grant.project_id().clone(),
+                principal_id: principal_id.clone(),
+                revoked_at: Timestamp::parse_rfc3339("2020-01-02T00:00:00Z").expect("revoked at"),
+                reason: CollaborativeProjectGrantRevocationReason::AccessRemoved,
+                revoked_by: ActorId::new("user/collaborative-admin").expect("revoker"),
+            },
+        )
+        .expect("revocation")]
+    } else {
+        Vec::new()
+    };
+    CollaborativeIdentityAuthorityRevisionCandidate::new(
+        HostedAuthorityRegistryRevision::new(revision).expect("authority revision"),
+        vec![provider],
+        vec![binding],
+        vec![principal],
+        vec![grant],
+        revocations,
+    )
+    .expect("candidate")
 }
 
 struct TestProject {

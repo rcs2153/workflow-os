@@ -221,7 +221,11 @@ fn snapshot(
         .copied()
         .map(|family| {
             let count = match family {
-                CurrentAuthorityFactFamily::CapabilityGrants => 0,
+                CurrentAuthorityFactFamily::CapabilityGrants
+                | CurrentAuthorityFactFamily::CapabilityGrantRevocations
+                | CurrentAuthorityFactFamily::IdentityProviderRegistrations
+                | CurrentAuthorityFactFamily::PrincipalIdentityBindings
+                | CurrentAuthorityFactFamily::PrincipalLifecycle => 0,
                 CurrentAuthorityFactFamily::CapabilityAvailability
                 | CurrentAuthorityFactFamily::GovernedContextReferences => 2,
             };
