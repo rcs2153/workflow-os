@@ -248,3 +248,11 @@ Cargo-specific regressions as blockers rather than simulating them.
   writing and validation were performed by the delegated maintainer. Git and
   PR operations remain outside the kernel and will be disclosed when complete.
   The kernel governed scope and approval but did not perform those actions.
+
+## 17. Fix-Forward Note
+
+The blockers identified by this review were addressed in the subsequent
+narrow fix recorded in [Trusted-Host Cargo Format Check Profile Blocker Fix
+Report](TRUSTED_HOST_CARGO_FMT_PROFILE_BLOCKER_FIX_REPORT.md). This note does
+not erase or revise the original verdict. A separate focused blocker-fix
+review remains required before acceptance or workflow composition.

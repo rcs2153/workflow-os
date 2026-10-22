@@ -88,7 +88,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Fix the reviewed trusted-host Cargo format-check profile blockers.** The prior queue
+2. **Review the trusted-host Cargo format-check profile blocker fix.** The prior queue
    entry incorrectly pointed to a required-context review already accepted and
    merged in PR #374. The bounded two-step no-write trusted-host workflow is
    implemented and accepted after focused review fixed outcome-domain and
@@ -109,9 +109,14 @@ phase` language does not supersede the active queue.
    after execution, the Core-owned protected-tree exclusion policy is not part
    of the resolved execution identity, and the mandatory Cargo-specific
    failure, timeout, toolchain-mutation, root-boundary, and privacy regression
-   matrix is incomplete. Perform that narrow blocker fix next, then conduct a
-   focused blocker-fix review. See
+   matrix is incomplete. The narrow blocker fix now commits an exact
+   Core-owned toolchain input inventory and protected-tree exclusion policy,
+   rejects repository/toolchain overlap in either direction, and completes the
+   required Core and foreground failure/privacy regressions. Conduct a focused
+   blocker-fix review next. See
    [Trusted-Host Cargo Format Check Profile Implementation Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_PROFILE_IMPLEMENTATION_REVIEW.md).
+   The fix record is in
+   [Trusted-Host Cargo Format Check Profile Blocker Fix Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_PROFILE_BLOCKER_FIX_REPORT.md).
    The plan selects the already modeled `cargo fmt --all --check` command as a
    third closed profile, requires complete formatter-chain identity and
    persistent-mutation detection without claiming sandbox prevention, and

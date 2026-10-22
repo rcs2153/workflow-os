@@ -176,6 +176,74 @@ fn foreground_binary_executes_exact_cargo_fmt_profile_and_replays_terminal_state
 }
 
 #[test]
+fn foreground_binary_terminalizes_failed_cargo_fmt_without_persisting_raw_output_or_paths() {
+    let fixture = Fixture::new();
+    fs::write(
+        &fixture.cargo,
+        "#!/bin/sh\necho raw-cargo-output-marker >&2\nexit 7\n",
+    )
+    .expect("failing Cargo fixture");
+    let governance_root = fixture.root.join("cargo-fmt-failure-governance");
+    let repository_root = fixture.root.join("cargo-failure-repository");
+    write_cargo_fmt_project(&governance_root);
+    fs::create_dir_all(repository_root.join("src")).expect("Cargo source directory");
+    fs::write(
+        repository_root.join("Cargo.toml"),
+        "[package]\nname = \"fixture\"\nversion = \"0.0.0\"\n",
+    )
+    .expect("Cargo manifest");
+    fs::write(
+        repository_root.join("src/lib.rs"),
+        "pub fn value() -> u8 { 1 }\n",
+    )
+    .expect("Cargo source");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("cargo-fmt-failure");
+    let bundle_id = fixture.bundle_id("cargo-fmt-failure");
+
+    let output = invoke_cargo_fmt(
+        &fixture,
+        &governance_root,
+        &repository_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+
+    assert!(output.status.success());
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let run = backend
+        .rehydrate_run(&run_id)
+        .expect("durable failed Cargo format run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_terminal_result_binding(&run, workflow_core::LocalCheckResultStatus::Failed);
+    assert!(run.events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::SkillInvocationFailed { .. }
+    )));
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("failed Cargo format report artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(
+        artifacts[0].metadata().terminal_run_status(),
+        workflow_core::WorkReportStatus::Failed
+    );
+    assert_eq!(local_check_citation_count(artifacts[0].work_report()), 1);
+
+    let durable_payload = format!(
+        "{}\n{}\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+        serde_json::to_string(&run.events).expect("events serialize"),
+        read_artifact_payload(&fixture.database, &run_id),
+    );
+    assert!(!durable_payload.contains("raw-cargo-output-marker"));
+    assert!(!durable_payload.contains(&fixture.root.to_string_lossy().into_owned()));
+}
+
+#[test]
 fn foreground_binary_executes_explicit_project_validation_profile() {
     let fixture = Fixture::new();
     let governance_root = fixture.root.join("project-validation");
