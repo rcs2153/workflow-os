@@ -120,10 +120,11 @@ phase` language does not supersede the active queue.
    direct public executor-consumer tests for success, exact replay/restart,
    post-commit recovery, and revoked-authority non-invocation. Run the proof in
    required Shared PostgreSQL State CI and repeat focused review. The first
-   required run exposed a time-varying exact-replay receipt collision; the
-   bounded fix preserves the original database observation only after
-   re-deriving the same query and re-proving current authority. Rerun the live
-   proof before acceptance. Do
+   first two required runs exposed time-varying exact-replay receipt collisions
+   in the observation time and source-snapshot commitment; the bounded fix
+   reconstructs the historical receipt only after re-deriving the same query
+   and re-proving current authority commitments. Rerun the live proof before
+   acceptance. Do
    not add another
    identity consumer during review, substitute another caller-assembled
    projection, or begin OIDC, SCIM,

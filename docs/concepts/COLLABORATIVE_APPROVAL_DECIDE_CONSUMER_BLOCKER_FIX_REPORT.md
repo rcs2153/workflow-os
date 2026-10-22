@@ -105,13 +105,15 @@ provider, or skill payloads.
 - Broader gate composition and additional collaborative capabilities remain
   separately reviewed work.
 
-The first required Shared PostgreSQL State run exposed an exact-replay defect:
-the backend recomputed the receipt with a fresh database observation time, so
-the deterministic decision binding collided with a different receipt identity.
-The bounded fix reuses the original persisted observation time only after the
-same authority query is re-derived and the current authority commitments are
-re-proven. Query or authority drift still fails closed. Required CI must rerun
-the live proof before this phase is accepted.
+The first two required Shared PostgreSQL State runs exposed one exact-replay
+defect in two layers: the backend recomputed the receipt with a fresh database
+observation time and a fresh time-bound source-snapshot commitment, so the
+deterministic decision binding collided with a different receipt identity. The
+bounded fix reconstructs the historical point-in-time receipt only after the
+same authority query, authority revision, revision commitment, active-grant
+commitment, and decision kind are re-proven against current state. Query or
+authority drift still fails closed. Required CI must rerun the live proof before
+this phase is accepted.
 
 ## 10. Recommended Next Phase
 

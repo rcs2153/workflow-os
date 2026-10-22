@@ -66,6 +66,36 @@ impl PersistedCollaborativeApprovalAuthorityReceiptRecord {
         self.claim.observed_at()
     }
 
+    /// Returns the authority revision bound into the historical proof.
+    #[must_use]
+    pub(crate) const fn authority_revision(&self) -> crate::HostedAuthorityRegistryRevision {
+        self.claim.authority_revision()
+    }
+
+    /// Returns the authority-revision commitment bound into the historical proof.
+    #[must_use]
+    pub(crate) const fn authority_revision_commitment(&self) -> &crate::SpecContentHash {
+        self.claim.authority_revision_commitment()
+    }
+
+    /// Returns the source-snapshot commitment bound into the historical proof.
+    #[must_use]
+    pub(crate) const fn source_snapshot_commitment(&self) -> &crate::SpecContentHash {
+        self.claim.source_snapshot_commitment()
+    }
+
+    /// Returns the active-grant commitment bound into the historical proof.
+    #[must_use]
+    pub(crate) const fn active_grant_commitment(&self) -> &crate::SpecContentHash {
+        self.claim.active_grant_commitment()
+    }
+
+    /// Returns the exact decision kind bound into the historical proof.
+    #[must_use]
+    pub(crate) const fn decision_kind(&self) -> crate::ApprovalDecisionKind {
+        self.claim.decision_kind()
+    }
+
     /// Returns the complete deterministic receipt commitment.
     #[must_use]
     pub const fn receipt_commitment(&self) -> &crate::SpecContentHash {

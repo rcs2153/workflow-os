@@ -352,6 +352,36 @@ impl UnverifiedCollaborativeApprovalAuthorityReceipt {
         self.record.observed_at
     }
 
+    /// Returns the authority revision bound into the historical proof.
+    #[must_use]
+    pub(crate) const fn authority_revision(&self) -> HostedAuthorityRegistryRevision {
+        self.record.authority_revision
+    }
+
+    /// Returns the authority-revision commitment bound into the historical proof.
+    #[must_use]
+    pub(crate) const fn authority_revision_commitment(&self) -> &SpecContentHash {
+        &self.record.authority_revision_commitment
+    }
+
+    /// Returns the source-snapshot commitment bound into the historical proof.
+    #[must_use]
+    pub(crate) const fn source_snapshot_commitment(&self) -> &SpecContentHash {
+        &self.record.source_snapshot_commitment
+    }
+
+    /// Returns the active-grant commitment bound into the historical proof.
+    #[must_use]
+    pub(crate) const fn active_grant_commitment(&self) -> &SpecContentHash {
+        &self.record.active_grant_commitment
+    }
+
+    /// Returns the exact decision kind bound into the historical proof.
+    #[must_use]
+    pub(crate) const fn decision_kind(&self) -> ApprovalDecisionKind {
+        self.record.decision_kind
+    }
+
     /// Returns the complete receipt commitment.
     #[must_use]
     pub const fn receipt_commitment(&self) -> &SpecContentHash {

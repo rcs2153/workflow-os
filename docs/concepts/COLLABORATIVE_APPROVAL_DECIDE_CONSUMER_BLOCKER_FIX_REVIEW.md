@@ -8,10 +8,10 @@ Status: required Shared PostgreSQL State CI pending
 
 The original run-binding lock and executor-boundary test blockers are fixed.
 Focused re-review also identified and fixed a project-scope substitution gap in
-restart recovery. The first required live CI run then exposed and the branch
-fixed a time-varying receipt replay defect. Local validation is green. Final
-acceptance is intentionally withheld until required Shared PostgreSQL State CI
-reruns the complete live consumer path.
+restart recovery. The first two required live CI runs then exposed and the
+branch fixed both time-varying fields in exact receipt replay. Local validation
+is green. Final acceptance is intentionally withheld until required Shared
+PostgreSQL State CI reruns the complete live consumer path.
 
 ## 2. Scope Verification
 
@@ -61,10 +61,11 @@ Exactly one `ApprovalGranted` and one `RunResumed` event are asserted for the
 successful recovery path.
 
 The low-level exact replay path also preserves the original database-time
-authority observation instead of minting a new point-in-time receipt. It does
-so only after re-deriving the same query and re-proving current authority. Any
-query, authority-revision, source-snapshot, or active-grant commitment drift
-continues to fail as a durable-state conflict.
+authority observation and its time-bound source-snapshot commitment instead of
+minting a new point-in-time receipt. It does so only after re-deriving the same
+query and re-proving the authority revision, revision commitment, active grant,
+and decision kind against current state. Any decision-relevant drift continues
+to fail as a durable-state conflict.
 
 ## 6. Failed-Authority Assessment
 
@@ -104,8 +105,9 @@ Local validation after the complete fix:
 - `cargo test --workspace`: passed;
 - `npm run check:docs`: passed;
 - `git diff --check`: passed; and
-- first live PostgreSQL consumer proof: failed on time-varying exact receipt
-  replay and produced the bounded fix described above; and
+- first two live PostgreSQL consumer proofs: failed on the observation-time and
+  source-snapshot layers of time-varying exact receipt replay and produced the
+  bounded fix described above; and
 - corrected live PostgreSQL consumer proof: pending required Shared PostgreSQL
   State CI rerun.
 

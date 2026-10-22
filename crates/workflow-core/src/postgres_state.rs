@@ -4015,7 +4015,13 @@ fn build_collaborative_approval_authority_receipt(
     approval_decision_event_id: crate::EventId,
     decision_kind: crate::ApprovalDecisionKind,
 ) -> Result<CollaborativeApprovalAuthorityReceipt, WorkflowOsError> {
-    if existing.is_some_and(|receipt| receipt.query_commitment() != query.query_commitment()) {
+    if existing.is_some_and(|receipt| {
+        receipt.query_commitment() != query.query_commitment()
+            || receipt.authority_revision() != authority.source_read.authority_revision()
+            || receipt.authority_revision_commitment() != &authority.authority_revision_commitment
+            || receipt.active_grant_commitment() != &authority.active_grant_commitment
+            || receipt.decision_kind() != decision_kind
+    }) {
         return Err(collaborative_approval_receipt_conflict_error());
     }
     let observed_at = existing.map_or(
@@ -4030,11 +4036,16 @@ fn build_collaborative_approval_authority_receipt(
             query_commitment: query.query_commitment().clone(),
             authority_revision: authority.source_read.authority_revision(),
             authority_revision_commitment: authority.authority_revision_commitment,
-            source_snapshot_commitment: authority
-                .source_read
-                .source_snapshot()
-                .snapshot_commitment()
-                .clone(),
+            source_snapshot_commitment: existing.map_or_else(
+                || {
+                    authority
+                        .source_read
+                        .source_snapshot()
+                        .snapshot_commitment()
+                        .clone()
+                },
+                |receipt| receipt.source_snapshot_commitment().clone(),
+            ),
             active_grant_commitment: authority.active_grant_commitment,
             observed_at,
             decision_kind,
