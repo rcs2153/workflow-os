@@ -283,6 +283,10 @@ where
         Self { config, client }
     }
 
+    pub(crate) const fn operation_mode(&self) -> AdapterOperationMode {
+        self.config.operation_mode
+    }
+
     /// Returns adapter health without exposing credential values.
     #[must_use]
     pub fn health(&self) -> AdapterHealth {

@@ -34,6 +34,10 @@ use crate::{
     WorkflowRunId,
 };
 
+mod github_repository_read;
+
+pub(crate) use github_repository_read::SuccessfulCapabilityUseProof;
+
 const REGISTERED_FACT_FAMILIES: [CurrentAuthorityFactFamily; 3] = [
     CurrentAuthorityFactFamily::CapabilityGrants,
     CurrentAuthorityFactFamily::CapabilityAvailability,

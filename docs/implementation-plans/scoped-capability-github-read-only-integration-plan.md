@@ -1,7 +1,7 @@
 # Scoped Capability GitHub Read-Only Integration Plan
 
-Status: planning complete; focused maintainer and security review required
-before implementation.
+Status: implemented as a crate-private, opt-in, no-write runtime vertical slice;
+focused implementation review required before any broader adoption.
 
 Related foundations:
 
@@ -434,20 +434,20 @@ The blocker-fix review should verify these decisions are internally consistent.
 
 ## 18. Validation
 
-This planning phase requires:
+The planning phase required:
 
 - `npm run check:docs`; and
 - `git diff --check`.
 
-Both checks passed. No Rust implementation or runtime behavior changed. Source
-inspection, documentation edits, validation commands, Git operations, and
-pull-request work were performed outside the kernel and are disclosed here;
-the kernel coordinated the governed phase and preserved its approval and event
-trail.
+Both planning checks passed. The subsequently approved implementation is
+documented in the [Scoped Capability GitHub Read-Only Integration
+Report](../concepts/SCOPED_CAPABILITY_GITHUB_READ_ONLY_INTEGRATION_REPORT.md).
+The implementation remains internal and does not make existing direct adapter
+APIs capability-gated.
 
 ## 19. Final Recommendation
 
-Proceed next to a focused maintainer and security review of this plan. If the
-review accepts the source-query, exact-scope, failure-ordering, and receipt-
-compatibility boundaries, implement the complete no-write vertical slice in
-one governed milestone.
+Proceed next to a focused maintainer and security review of the implemented
+vertical slice. Do not expose the helper publicly or broaden to another read
+or write operation before that review accepts the source, scope, failure,
+privacy, and receipt boundaries.

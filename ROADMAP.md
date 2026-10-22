@@ -120,8 +120,16 @@ phase` language does not supersede the active queue.
    are incorporated and accepted in the [Scoped Capability GitHub Read-Only
    Integration Plan Blocker Fix
    Review](docs/concepts/SCOPED_CAPABILITY_GITHUB_READ_ONLY_INTEGRATION_PLAN_BLOCKER_FIX_REVIEW.md).
-   Proceed directly to the complete no-write implementation milestone. No
-   adapter runtime composition is implemented yet.
+   The complete crate-private, no-write repository-metadata vertical slice is
+   now implemented and recorded in the [Scoped Capability GitHub Read-Only
+   Integration
+   Report](docs/concepts/SCOPED_CAPABILITY_GITHUB_READ_ONLY_INTEGRATION_REPORT.md).
+   It composes fresh source-backed authority, exact step projection, the
+   existing injected adapter, explicit failure postures, and a separate
+   payload-free capability-use receipt. Existing direct adapter APIs remain
+   unchanged and are not automatically capability-gated. Proceed next to the
+   focused implementation review before considering another operation or any
+   provider mutation.
 
 The first-use CLI and integration-check item added during the prior queue
 reconciliation was stale: both defects were already fixed and accepted in PR
