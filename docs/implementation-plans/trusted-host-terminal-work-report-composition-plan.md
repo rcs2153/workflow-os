@@ -1,6 +1,7 @@
 # Trusted-Host Terminal WorkReport Composition Plan
 
-Status: implementation complete; focused maintainer/security review pending.
+Status: implementation complete; focused maintainer/security review found one
+blocker requiring a narrow fix-forward phase.
 
 Related foundations:
 

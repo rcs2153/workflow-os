@@ -88,7 +88,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the implemented in-memory terminal WorkReport composition path.**
+2. **Fix the reviewed in-memory terminal WorkReport composition blocker.**
    The second closed no-write profile is implemented and focused-review
    accepted. The next executable composition slice is now implemented from the
    [Trusted-Host Terminal WorkReport Composition
@@ -100,7 +100,11 @@ phase` language does not supersede the active queue.
    not rewrite workflow pass/fail semantics, and exact replay neither reruns
    the process nor appends events. The implementation report is recorded in
    [Trusted-Host Terminal WorkReport Composition Report](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_COMPOSITION_REPORT.md).
-   Perform focused maintainer/security review next. Do not add report
+   Focused maintainer/security review found one blocker: composition validates
+   identities but does not yet enforce result-status compatibility with the
+   invocation/run terminal kinds or the strict result-to-invocation-to-run
+   event order promised by the plan. Add those fail-closed checks and tampered
+   history tests, then re-review. Do not add report
    persistence, artifacts, released CLI output, another profile, arbitrary
    commands, scheduling, nested harnesses, automatic approval, providers,
    writes, or hosted expansion.
