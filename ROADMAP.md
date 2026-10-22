@@ -88,22 +88,27 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Make capability-source continuity Core-owned and durable for the accepted
-   GitHub read-only path.** Implement one private, local continuity boundary
-   that derives first-versus-prior observation from trusted Core state rather
-   than caller choice, binds the exact registered source and repository-query
-   identity, advances generation and watermark monotonically, and rejects
-   rollback, same-generation substitution, stale replay, or conflicting
-   concurrent observation before the adapter client can run. Compose that
-   boundary into the existing crate-private repository-metadata operation and
-   prove exact restart and concurrency behavior with injected clients. Begin
-   with a focused implementation contract and security review inside the same
-   governed milestone, then implement only the accepted boundary. Do not add a
+2. **Review the implemented Core-owned durable capability-source continuity
+   boundary.** The private local vertical slice now derives first-versus-prior
+   observation from the managed SQLite backend, binds source registration and
+   exact repository-query commitments, advances generation and watermark in an
+   immediate transaction, and rejects rollback, substitution, missing
+   generation, and conflicting concurrent observation before the injected
+   GitHub client can run. The production input no longer accepts caller-authored
+   continuity posture. Perform the focused maintainer/security review before
+   any executor-facing adoption or second provider operation. The selection,
+   contract, plan review, and implementation are recorded in the [Capability
+   Source Continuity Queue Selection
+   Report](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_QUEUE_SELECTION_REPORT.md),
+   [Capability Source Continuity
+   Plan](docs/implementation-plans/capability-source-continuity-plan.md),
+   [Capability Source Continuity Plan
+   Review](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_PLAN_REVIEW.md), and
+   [Capability Source Continuity
+   Report](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_REPORT.md). Do not add a
    second provider operation, provider mutation, public or executor-facing API,
-   workflow configuration, schema, CLI behavior, hosted identity, reusable
-   authority, or automatic capability grants. This selection is recorded in
-   the [Capability Source Continuity Queue Selection
-   Report](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_QUEUE_SELECTION_REPORT.md).
+   workflow configuration, CLI behavior, hosted identity, reusable authority,
+   or automatic capability grants.
 
 #### Recently Closed Queue Evidence
 

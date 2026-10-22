@@ -157,7 +157,7 @@ fn compatibility_requires_exact_protocol_and_older_writer_assertion() {
 
 #[test]
 fn migration_attempt_binds_plan_source_destination_schema_and_protocols() {
-    let plan = plan('a', 7);
+    let plan = plan('a', 8);
     let attempt = StateMigrationAttempt::new(
         &plan,
         &capability(),
@@ -177,7 +177,7 @@ fn migration_attempt_binds_plan_source_destination_schema_and_protocols() {
         attempt.destination_id(),
         plan.destination().destination_id()
     );
-    assert_eq!(attempt.adapter_schema_version(), 7);
+    assert_eq!(attempt.adapter_schema_version(), 8);
     assert_eq!(
         attempt.writer_protocol_version(),
         StateMigrationWriterProtocolVersion::V1
