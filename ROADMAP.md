@@ -138,8 +138,15 @@ phase` language does not supersede the active queue.
    source-snapshot and rollback fix is now implemented and recorded in the
    [Scoped Capability GitHub Read-Only Integration Blocker Fix
    Report](docs/concepts/SCOPED_CAPABILITY_GITHUB_READ_ONLY_INTEGRATION_BLOCKER_FIX_REPORT.md).
-   Proceed next to its focused blocker-fix review. Do not add another operation
-   or provider mutation first.
+   Its focused review is accepted with no remaining blocker for the private,
+   opt-in, read-only slice in the [Scoped Capability GitHub Read-Only
+   Integration Blocker Fix
+   Review](docs/concepts/SCOPED_CAPABILITY_GITHUB_READ_ONLY_INTEGRATION_BLOCKER_FIX_REVIEW.md).
+   Any future executor-facing or public adoption must make continuity
+   Core-owned and durable rather than caller-selectable. The repository-
+   metadata vertical slice is otherwise closed. Do not add another operation
+   or provider mutation by implication; reconcile the Active Delivery Queue
+   before selecting more capability work.
 
 The first-use CLI and integration-check item added during the prior queue
 reconciliation was stale: both defects were already fixed and accepted in PR
