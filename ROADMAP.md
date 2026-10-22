@@ -88,29 +88,35 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the implemented Core-owned durable capability-source continuity
-   boundary.** The private local vertical slice now derives first-versus-prior
-   observation from the managed SQLite backend, binds source registration and
-   exact repository-query commitments, advances generation and watermark in an
-   immediate transaction, and rejects rollback, substitution, missing
-   generation, and conflicting concurrent observation before the injected
-   GitHub client can run. The production input no longer accepts caller-authored
-   continuity posture. Perform the focused maintainer/security review before
-   any executor-facing adoption or second provider operation. The selection,
-   contract, plan review, and implementation are recorded in the [Capability
-   Source Continuity Queue Selection
-   Report](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_QUEUE_SELECTION_REPORT.md),
-   [Capability Source Continuity
-   Plan](docs/implementation-plans/capability-source-continuity-plan.md),
-   [Capability Source Continuity Plan
-   Review](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_PLAN_REVIEW.md), and
-   [Capability Source Continuity
-   Report](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_REPORT.md). Do not add a
-   second provider operation, provider mutation, public or executor-facing API,
-   workflow configuration, CLI behavior, hosted identity, reusable authority,
-   or automatic capability grants.
+2. **Reconcile the Active Delivery Queue before selecting another
+   implementation slice.** The Core-owned durable capability-source continuity
+   boundary is implemented and focused-review accepted. Its original
+   caller-selectable continuity limitation is closed for the private local
+   GitHub repository-metadata read. Select one executable runtime-composition
+   boundary from already accepted foundations; do not add a second provider
+   operation or provider mutation by implication. The completed phase is
+   recorded in the [Capability Source Continuity
+   Review](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Core-owned durable capability-source continuity accepted.** The private
+  local vertical slice derives first-versus-prior observation from managed
+  SQLite state, binds source registration and exact repository-query
+  commitments, advances generation and watermark atomically, and rejects
+  rollback, substitution, missing generation, and conflicting concurrent
+  observation before the injected GitHub client can run. The production-
+  compiled operation input no longer accepts caller-authored continuity. The
+  focused maintainer/security review accepts the boundary with non-blocking
+  process-contention and SQLite-sidecar privacy-test follow-ups. No public or
+  executor-facing adoption, second provider operation, provider mutation,
+  workflow configuration, CLI behavior, hosted identity, reusable authority,
+  or automatic capability grant is authorized. See the [queue selection
+  report](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_QUEUE_SELECTION_REPORT.md),
+  [plan](docs/implementation-plans/capability-source-continuity-plan.md),
+  [plan review](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_PLAN_REVIEW.md),
+  [implementation report](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_REPORT.md),
+  and [focused review](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_REVIEW.md).
 
 - **Scoped capability authority composed into one opt-in GitHub read-only
    adapter path.** Deliver one Core-owned, injected, no-write vertical slice
