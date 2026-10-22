@@ -88,7 +88,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Plan trusted-host Cargo format workflow composition.** The prior queue
+2. **Review the trusted-host Cargo format workflow composition plan.** The prior queue
    entry incorrectly pointed to a required-context review already accepted and
    merged in PR #374. The bounded two-step no-write trusted-host workflow is
    implemented and accepted after focused review fixed outcome-domain and
@@ -123,10 +123,15 @@ phase` language does not supersede the active queue.
    [Trusted-Host Cargo Format Check Profile Blocker Fix Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_PROFILE_BLOCKER_FIX_REVIEW.md).
    The accepted profile uses the already modeled `cargo fmt --all --check`
    command with complete formatter-chain identity and persistent-mutation
-   detection without claiming sandbox prevention. A composition plan must
-   preserve the existing closed profiles, ordered
-   result/report truth, and exact replay. It keeps clippy, tests, arbitrary
-   commands, providers,
+   detection without claiming sandbox prevention. The
+   [Trusted-Host Cargo Format Workflow Composition Plan](docs/implementation-plans/trusted-host-cargo-fmt-workflow-composition-plan.md)
+   now defines one additive exact three-step workflow that preserves the
+   accepted project-validation and docs-check prefix, appends Cargo format,
+   retains the existing two-step v3 path unchanged, and uses a distinct v4
+   report/artifact commitment. Focused plan review is required before any
+   implementation. The plan preserves closed profiles, ordered result/report
+   truth, and exact replay. It keeps clippy, tests, arbitrary commands,
+   providers,
    external writes, public surfaces, hosted expansion, and topology broadening
    out of scope.
 
