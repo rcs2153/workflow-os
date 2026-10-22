@@ -20,8 +20,9 @@ use crate::{
     validate_approval_presentation_for_request, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, ApprovalPresentationId, ApprovalPresentationRecord,
     ApprovalPresentationRecordStore, ApprovalPresentationValidationInput, ApprovalReferenceId,
-    ApprovalRequest, ApprovalStore, BackendHealthCheck, CollaborativeIdentityAuthorityQuery,
-    CollaborativeIdentityAuthorityRevisionActivation,
+    ApprovalRequest, ApprovalStore, BackendHealthCheck, CollaborativeApprovalAuthorityReceipt,
+    CollaborativeApprovalAuthorityReceiptId, CollaborativeApprovalAuthorityReceiptWriteOutcome,
+    CollaborativeIdentityAuthorityQuery, CollaborativeIdentityAuthorityRevisionActivation,
     CollaborativeIdentityAuthorityRevisionCandidate, CollaborativeIdentityAuthoritySourceRead,
     CollaborativeIdentityProviderRegistration, CollaborativePrincipalIdentityBinding,
     CollaborativePrincipalRecord, CollaborativeProjectGrant, CollaborativeProjectGrantRevocation,
@@ -35,21 +36,23 @@ use crate::{
     HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
     IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildResult,
     ImmutableRunBundleDefinitionRecord, ImmutableRunBundleId, ImmutableRunBundleManifest,
-    LockLease, LockStore, OrganizationId, PolicyAuditRecord, PolicyAuditStore,
-    ProjectApprovalAuthoritySnapshotCommitment, ProjectApprovalAuthorityViewCommitmentAlgorithm,
-    ProjectApprovalNotificationPosture, ProjectApprovalRouteCreateResult,
-    ProjectApprovalRouteLogicalSubjectId, ProjectApprovalRouteRecord,
-    ProjectApprovalRouteRecordVersion, ProjectApprovalRouteSourceCommitmentAlgorithm,
-    ProjectApprovalRouteStatus, ProjectApprovalRouteStore, ProjectApprovalRoutingReason, ProjectId,
-    ProjectStateRecord, ProjectStateStore, RunSnapshotStore, SideEffectId, SideEffectRecord,
-    SideEffectRecordStore, SpecContentHash, StateBackend, StoredImmutableRunBundle,
-    WorkReportArtifactRecord, WorkReportArtifactStore, WorkReportId, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
-    WorkflowRunStatus,
+    LockLease, LockStore, OrganizationId, PersistedCollaborativeApprovalAuthorityReceiptRecord,
+    PolicyAuditRecord, PolicyAuditStore, ProjectApprovalAuthoritySnapshotCommitment,
+    ProjectApprovalAuthorityViewCommitmentAlgorithm, ProjectApprovalNotificationPosture,
+    ProjectApprovalRouteCreateResult, ProjectApprovalRouteLogicalSubjectId,
+    ProjectApprovalRouteRecord, ProjectApprovalRouteRecordVersion,
+    ProjectApprovalRouteSourceCommitmentAlgorithm, ProjectApprovalRouteStatus,
+    ProjectApprovalRouteStore, ProjectApprovalRoutingReason, ProjectId, ProjectStateRecord,
+    ProjectStateStore, RunSnapshotStore, SideEffectId, SideEffectRecord, SideEffectRecordStore,
+    SpecContentHash, StateBackend, StoredImmutableRunBundle, WorkReportArtifactRecord,
+    WorkReportArtifactStore, WorkReportId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
+    WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot, WorkflowRunStatus,
 };
 
-const SCHEMA_VERSION: i32 = 3;
-const SCHEMA_CHECKSUM: &str = "workflow-os-postgresql-v3";
+const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_CHECKSUM: &str = "workflow-os-postgresql-v4";
+const SCHEMA_V3_VERSION: i32 = 3;
+const SCHEMA_V3_CHECKSUM: &str = "workflow-os-postgresql-v3";
 const SCHEMA_V2_VERSION: i32 = 2;
 const SCHEMA_V2_CHECKSUM: &str = "workflow-os-postgresql-v2";
 const SCHEMA_V1_VERSION: i32 = 1;
@@ -645,6 +648,7 @@ impl PostgresStateBackend {
     /// # Errors
     ///
     /// Fails closed for newer, checksum-mismatched, or recovery-required schemas.
+    #[allow(clippy::too_many_lines)]
     pub fn initialize_schema(&self) -> Result<PostgresStateHealthReport, WorkflowOsError> {
         let mut client = self.connections.connect()?;
         let mut tx = client
@@ -687,6 +691,8 @@ impl PostgresStateBackend {
                     .map_err(|error| database_error("schema_install_v2", &error))?;
                 tx.batch_execute(SCHEMA_V3_SQL)
                     .map_err(|error| database_error("schema_install_v3", &error))?;
+                tx.batch_execute(SCHEMA_V4_SQL)
+                    .map_err(|error| database_error("schema_install_v4", &error))?;
                 tx.execute(
                     "INSERT INTO workflow_os.schema_metadata
                        (singleton, schema_version, checksum, recovery_required)
@@ -710,6 +716,8 @@ impl PostgresStateBackend {
                         .map_err(|error| database_error("schema_migrate_v2", &error))?;
                     tx.batch_execute(SCHEMA_V3_SQL)
                         .map_err(|error| database_error("schema_migrate_v3", &error))?;
+                    tx.batch_execute(SCHEMA_V4_SQL)
+                        .map_err(|error| database_error("schema_migrate_v4", &error))?;
                     tx.execute(
                         "UPDATE workflow_os.schema_metadata
                             SET schema_version = $1, checksum = $2,
@@ -721,6 +729,8 @@ impl PostgresStateBackend {
                 } else if version == SCHEMA_V2_VERSION && checksum == SCHEMA_V2_CHECKSUM {
                     tx.batch_execute(SCHEMA_V3_SQL)
                         .map_err(|error| database_error("schema_migrate_v3", &error))?;
+                    tx.batch_execute(SCHEMA_V4_SQL)
+                        .map_err(|error| database_error("schema_migrate_v4", &error))?;
                     tx.execute(
                         "UPDATE workflow_os.schema_metadata
                             SET schema_version = $1, checksum = $2,
@@ -728,7 +738,18 @@ impl PostgresStateBackend {
                           WHERE singleton = TRUE",
                         &[&SCHEMA_VERSION, &SCHEMA_CHECKSUM],
                     )
-                    .map_err(|error| database_error("schema_advance_v3", &error))?;
+                    .map_err(|error| database_error("schema_advance_v4", &error))?;
+                } else if version == SCHEMA_V3_VERSION && checksum == SCHEMA_V3_CHECKSUM {
+                    tx.batch_execute(SCHEMA_V4_SQL)
+                        .map_err(|error| database_error("schema_migrate_v4", &error))?;
+                    tx.execute(
+                        "UPDATE workflow_os.schema_metadata
+                            SET schema_version = $1, checksum = $2,
+                                updated_at = clock_timestamp()
+                          WHERE singleton = TRUE",
+                        &[&SCHEMA_VERSION, &SCHEMA_CHECKSUM],
+                    )
+                    .map_err(|error| database_error("schema_advance_v4", &error))?;
                 } else if version != SCHEMA_VERSION || checksum != SCHEMA_CHECKSUM {
                     return Err(state_error(
                         "postgres_state.schema.incompatible",
@@ -960,6 +981,128 @@ impl PostgresStateBackend {
         let mut client = self.connections.connect()?;
         serializable(&mut client, |tx| {
             read_collaborative_identity_authority_tx(tx, query)
+        })
+    }
+
+    /// Creates one payload-free collaborative approval-authority receipt.
+    ///
+    /// Exact replay is accepted. Conflicting receipt identity, approval, or
+    /// decision-event bindings fail closed. The receipt remains evidence only.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable non-leaking errors for invalid receipts, conflicts,
+    /// corruption, or unavailable durable state.
+    pub fn write_collaborative_approval_authority_receipt(
+        &self,
+        receipt: &CollaborativeApprovalAuthorityReceipt,
+    ) -> Result<CollaborativeApprovalAuthorityReceiptWriteOutcome, WorkflowOsError> {
+        receipt
+            .validate()
+            .map_err(|_| collaborative_approval_receipt_invalid_error())?;
+        let payload =
+            encode(receipt).map_err(|_| collaborative_approval_receipt_invalid_error())?;
+        let payload_hash = SpecContentHash::from_text(&payload);
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let inserted = tx
+                .execute(
+                    "INSERT INTO workflow_os.collaborative_approval_authority_receipts
+                        (receipt_id, approval_reference_id, approval_decision_event_id,
+                         canonical_payload, canonical_payload_hash)
+                     VALUES ($1, $2, $3, $4, $5)
+                     ON CONFLICT DO NOTHING",
+                    &[
+                        &receipt.receipt_id().as_str(),
+                        &receipt.approval_reference_id().as_str(),
+                        &receipt.approval_decision_event_id().as_str(),
+                        &payload,
+                        &payload_hash.as_str(),
+                    ],
+                )
+                .map_err(|error| database_error("collaborative_approval_receipt_write", &error))?;
+            if inserted == 1 {
+                return Ok(CollaborativeApprovalAuthorityReceiptWriteOutcome::Written);
+            }
+            let existing_payload = tx
+                .query_opt(
+                    "SELECT canonical_payload
+                       FROM workflow_os.collaborative_approval_authority_receipts
+                      WHERE receipt_id = $1",
+                    &[&receipt.receipt_id().as_str()],
+                )
+                .map_err(|error| {
+                    database_error("collaborative_approval_receipt_replay_read", &error)
+                })?
+                .map(|row| row.get::<_, String>(0))
+                .ok_or_else(collaborative_approval_receipt_conflict_error)?;
+            if existing_payload != payload {
+                return Err(collaborative_approval_receipt_conflict_error());
+            }
+            let existing = read_collaborative_approval_authority_receipt_tx(
+                tx,
+                receipt.receipt_id().as_str(),
+            )?
+            .ok_or_else(collaborative_approval_receipt_conflict_error)?;
+            if existing.approval_reference_id() != receipt.approval_reference_id()
+                || existing.approval_decision_event_id() != receipt.approval_decision_event_id()
+                || existing.receipt_id() != receipt.receipt_id()
+                || existing.receipt_commitment() != receipt.receipt_commitment()
+            {
+                return Err(collaborative_approval_receipt_conflict_error());
+            }
+            Ok(CollaborativeApprovalAuthorityReceiptWriteOutcome::AlreadyExists)
+        })
+    }
+
+    /// Reads one exact persisted collaborative approval-authority receipt.
+    ///
+    /// The returned record is an explicitly unverified, non-authorizing claim.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error for corruption or unavailable durable state.
+    pub fn read_collaborative_approval_authority_receipt(
+        &self,
+        receipt_id: &CollaborativeApprovalAuthorityReceiptId,
+    ) -> Result<Option<PersistedCollaborativeApprovalAuthorityReceiptRecord>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            read_collaborative_approval_authority_receipt_tx(tx, receipt_id.as_str())
+        })
+    }
+
+    /// Recovers the exact receipt bound to one approval decision.
+    ///
+    /// The returned record remains unverified and non-authorizing.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error for corruption or unavailable durable state.
+    pub fn read_collaborative_approval_authority_receipt_for_decision(
+        &self,
+        approval_reference_id: &ApprovalReferenceId,
+        approval_decision_event_id: &crate::EventId,
+    ) -> Result<Option<PersistedCollaborativeApprovalAuthorityReceiptRecord>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let row = tx
+                .query_opt(
+                    "SELECT receipt_id, approval_reference_id, approval_decision_event_id,
+                            canonical_payload, canonical_payload_hash
+                       FROM workflow_os.collaborative_approval_authority_receipts
+                      WHERE approval_reference_id = $1 AND approval_decision_event_id = $2",
+                    &[
+                        &approval_reference_id.as_str(),
+                        &approval_decision_event_id.as_str(),
+                    ],
+                )
+                .map_err(|error| {
+                    database_error("collaborative_approval_receipt_recovery_read", &error)
+                })?;
+            row.as_ref()
+                .map(decode_collaborative_approval_receipt_row)
+                .transpose()
         })
     }
 
@@ -3743,6 +3886,66 @@ fn read_collaborative_identity_authority_tx(
     build_postgres_collaborative_identity_source_read(query, &candidate, evaluated_at)
 }
 
+fn read_collaborative_approval_authority_receipt_tx(
+    tx: &mut Transaction<'_>,
+    receipt_id: &str,
+) -> Result<Option<PersistedCollaborativeApprovalAuthorityReceiptRecord>, WorkflowOsError> {
+    tx.query_opt(
+        "SELECT receipt_id, approval_reference_id, approval_decision_event_id,
+                canonical_payload, canonical_payload_hash
+           FROM workflow_os.collaborative_approval_authority_receipts
+          WHERE receipt_id = $1",
+        &[&receipt_id],
+    )
+    .map_err(|error| database_error("collaborative_approval_receipt_read", &error))?
+    .as_ref()
+    .map(decode_collaborative_approval_receipt_row)
+    .transpose()
+}
+
+fn decode_collaborative_approval_receipt_row(
+    row: &Row,
+) -> Result<PersistedCollaborativeApprovalAuthorityReceiptRecord, WorkflowOsError> {
+    let receipt_id: String = row.get(0);
+    let approval_reference_id: String = row.get(1);
+    let approval_decision_event_id: String = row.get(2);
+    let payload: String = row.get(3);
+    let payload_hash: String = row.get(4);
+    if SpecContentHash::from_text(&payload).as_str() != payload_hash {
+        return Err(collaborative_approval_receipt_corruption_error());
+    }
+    let record: PersistedCollaborativeApprovalAuthorityReceiptRecord =
+        decode(&payload).map_err(|_| collaborative_approval_receipt_corruption_error())?;
+    if record.receipt_id().as_str() != receipt_id
+        || record.approval_reference_id().as_str() != approval_reference_id
+        || record.approval_decision_event_id().as_str() != approval_decision_event_id
+    {
+        return Err(collaborative_approval_receipt_corruption_error());
+    }
+    Ok(record)
+}
+
+fn collaborative_approval_receipt_invalid_error() -> WorkflowOsError {
+    state_error(
+        "postgres_state.collaborative_approval_receipt.invalid",
+        "collaborative approval authority receipt is invalid",
+    )
+}
+
+fn collaborative_approval_receipt_conflict_error() -> WorkflowOsError {
+    state_error(
+        "postgres_state.collaborative_approval_receipt.conflict",
+        "collaborative approval authority receipt conflicts with durable state",
+    )
+}
+
+fn collaborative_approval_receipt_corruption_error() -> WorkflowOsError {
+    state_error(
+        "postgres_state.collaborative_approval_receipt.corrupt",
+        "stored collaborative approval authority receipt is invalid",
+    )
+}
+
 fn authority_revision_to_i64(
     revision: crate::HostedAuthorityRegistryRevision,
 ) -> Result<i64, WorkflowOsError> {
@@ -6222,3 +6425,144 @@ CREATE TABLE workflow_os.collaborative_identity_authority_high_watermarks (
     accepted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 ";
+
+const SCHEMA_V4_SQL: &str = r"
+CREATE TABLE workflow_os.collaborative_approval_authority_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    approval_reference_id TEXT NOT NULL UNIQUE,
+    approval_decision_event_id TEXT NOT NULL UNIQUE,
+    canonical_payload TEXT NOT NULL,
+    canonical_payload_hash TEXT NOT NULL,
+    inserted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+";
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod collaborative_approval_receipt_tests {
+    use super::*;
+    use crate::collaborative_approval_authority_receipt::CollaborativeApprovalAuthorityReceiptProof;
+    use crate::{ApprovalDecisionKind, EventId};
+
+    fn receipt(snapshot: &str, nonce: &str) -> CollaborativeApprovalAuthorityReceipt {
+        CollaborativeApprovalAuthorityReceipt::from_decision_proof(
+            CollaborativeApprovalAuthorityReceiptProof {
+                approval_reference_id: ApprovalReferenceId::new(format!(
+                    "approval/postgres-collaborative-receipt-{nonce}"
+                ))
+                .expect("approval"),
+                approval_decision_event_id: EventId::new(format!(
+                    "event/postgres-collaborative-receipt-decision-{nonce}"
+                ))
+                .expect("event"),
+                source_id: crate::CurrentAuthoritySourceId::new(
+                    "core/postgres/collaborative-identity",
+                )
+                .expect("source"),
+                query_commitment: SpecContentHash::from_text("query"),
+                authority_revision: crate::HostedAuthorityRegistryRevision::new(9)
+                    .expect("revision"),
+                authority_revision_commitment: SpecContentHash::from_text("revision"),
+                source_snapshot_commitment: SpecContentHash::from_text(snapshot),
+                active_grant_commitment: SpecContentHash::from_text("grant"),
+                observed_at: crate::Timestamp::parse_rfc3339("2026-10-22T08:00:00Z")
+                    .expect("timestamp"),
+                decision_kind: ApprovalDecisionKind::Granted,
+            },
+        )
+        .expect("receipt")
+    }
+
+    #[test]
+    fn postgresql_collaborative_approval_receipt_is_create_only_and_recovers_exactly() {
+        let Ok(value) = std::env::var("WORKFLOW_OS_TEST_POSTGRES_URL") else {
+            return;
+        };
+        let config: Config = value.parse().expect("PostgreSQL URL parses");
+        let backend = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
+            config.clone(),
+        )));
+        backend.initialize_schema().expect("schema");
+        let nonce = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        );
+        let stored_receipt = receipt("snapshot-a", &nonce);
+        assert_eq!(
+            backend
+                .write_collaborative_approval_authority_receipt(&stored_receipt)
+                .expect("write"),
+            CollaborativeApprovalAuthorityReceiptWriteOutcome::Written
+        );
+        assert_eq!(
+            backend
+                .write_collaborative_approval_authority_receipt(&stored_receipt)
+                .expect("exact replay"),
+            CollaborativeApprovalAuthorityReceiptWriteOutcome::AlreadyExists
+        );
+        let stored = backend
+            .read_collaborative_approval_authority_receipt(stored_receipt.receipt_id())
+            .expect("read")
+            .expect("stored receipt");
+        assert_eq!(stored.receipt_id(), stored_receipt.receipt_id());
+        assert_eq!(
+            backend
+                .read_collaborative_approval_authority_receipt_for_decision(
+                    stored_receipt.approval_reference_id(),
+                    stored_receipt.approval_decision_event_id(),
+                )
+                .expect("recovery")
+                .expect("recovered receipt")
+                .receipt_id(),
+            stored_receipt.receipt_id()
+        );
+
+        let conflict = backend
+            .write_collaborative_approval_authority_receipt(&receipt("snapshot-b", &nonce))
+            .expect_err("approval/event rebinding rejected");
+        assert_eq!(
+            conflict.code(),
+            "postgres_state.collaborative_approval_receipt.conflict"
+        );
+
+        let mut client = config.connect(NoTls).expect("connect");
+        let canonical: String = client
+            .query_one(
+                "SELECT canonical_payload
+                   FROM workflow_os.collaborative_approval_authority_receipts
+                  WHERE receipt_id = $1",
+                &[&stored_receipt.receipt_id().as_str()],
+            )
+            .expect("read canonical payload")
+            .get(0);
+        let secret = "token=receipt-corruption-secret";
+        client
+            .execute(
+                "UPDATE workflow_os.collaborative_approval_authority_receipts
+                    SET canonical_payload = $2
+                  WHERE receipt_id = $1",
+                &[&stored_receipt.receipt_id().as_str(), &secret],
+            )
+            .expect("corrupt payload");
+        let error = backend
+            .read_collaborative_approval_authority_receipt(stored_receipt.receipt_id())
+            .expect_err("corruption rejected");
+        assert_eq!(
+            error.code(),
+            "postgres_state.collaborative_approval_receipt.corrupt"
+        );
+        assert!(!format!("{error:?} {error}").contains(secret));
+        client
+            .execute(
+                "UPDATE workflow_os.collaborative_approval_authority_receipts
+                    SET canonical_payload = $2
+                  WHERE receipt_id = $1",
+                &[&stored_receipt.receipt_id().as_str(), &canonical],
+            )
+            .expect("restore payload");
+    }
+}

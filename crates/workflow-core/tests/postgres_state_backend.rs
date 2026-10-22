@@ -136,7 +136,9 @@ fn postgresql_backend_proves_shared_state_milestone() {
         return;
     };
     reset_schema(&config);
-    prove_schema_v1_to_v3_migration(&config);
+    prove_schema_v1_to_v4_migration(&config);
+    reset_schema(&config);
+    prove_schema_v3_to_v4_migration(&config);
     reset_schema(&config);
     let backend = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
         config.clone(),
@@ -165,7 +167,7 @@ fn postgresql_backend_proves_shared_state_milestone() {
     assert!(!format!("{backend:?}").contains("postgres://"));
 }
 
-fn prove_schema_v1_to_v3_migration(config: &Config) {
+fn prove_schema_v1_to_v4_migration(config: &Config) {
     let mut client = config.connect(NoTls).expect("connect migration fixture");
     client
         .batch_execute(
@@ -202,7 +204,7 @@ fn prove_schema_v1_to_v3_migration(config: &Config) {
     let report = backend
         .initialize_schema()
         .expect("migrate schema v1 to v2");
-    assert_eq!(report.schema_version(), 3);
+    assert_eq!(report.schema_version(), 4);
 
     let mut client = config.connect(NoTls).expect("inspect migrated schema");
     let metadata = client
@@ -212,8 +214,8 @@ fn prove_schema_v1_to_v3_migration(config: &Config) {
             &[],
         )
         .expect("read v2 metadata");
-    assert_eq!(metadata.get::<_, i32>(0), 3);
-    assert_eq!(metadata.get::<_, String>(1), "workflow-os-postgresql-v3");
+    assert_eq!(metadata.get::<_, i32>(0), 4);
+    assert_eq!(metadata.get::<_, String>(1), "workflow-os-postgresql-v4");
     assert_eq!(
         client
             .query_one(
@@ -230,6 +232,7 @@ fn prove_schema_v1_to_v3_migration(config: &Config) {
         "hosted_authority_registry_high_watermarks",
         "collaborative_identity_authority_facts",
         "collaborative_identity_authority_high_watermarks",
+        "collaborative_approval_authority_receipts",
     ] {
         assert_eq!(
             client
@@ -243,6 +246,56 @@ fn prove_schema_v1_to_v3_migration(config: &Config) {
             1
         );
     }
+}
+
+fn prove_schema_v3_to_v4_migration(config: &Config) {
+    let mut client = config.connect(NoTls).expect("connect v3 migration fixture");
+    client
+        .batch_execute(
+            "CREATE SCHEMA workflow_os;
+             CREATE TABLE workflow_os.schema_metadata (
+                 singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+                 schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+                 checksum TEXT NOT NULL,
+                 recovery_required BOOLEAN NOT NULL DEFAULT FALSE,
+                 updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+             );
+             INSERT INTO workflow_os.schema_metadata
+                 (singleton, schema_version, checksum, recovery_required)
+             VALUES (TRUE, 3, 'workflow-os-postgresql-v3', FALSE);",
+        )
+        .expect("install exact v3 fixture");
+    drop(client);
+
+    let backend = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
+        config.clone(),
+    )));
+    let report = backend
+        .initialize_schema()
+        .expect("migrate schema v3 to v4");
+    assert_eq!(report.schema_version(), 4);
+    let mut client = config.connect(NoTls).expect("inspect v4 migration");
+    let metadata = client
+        .query_one(
+            "SELECT schema_version, checksum FROM workflow_os.schema_metadata
+              WHERE singleton = TRUE",
+            &[],
+        )
+        .expect("read v4 metadata");
+    assert_eq!(metadata.get::<_, i32>(0), 4);
+    assert_eq!(metadata.get::<_, String>(1), "workflow-os-postgresql-v4");
+    assert_eq!(
+        client
+            .query_one(
+                "SELECT count(*) FROM information_schema.tables
+                  WHERE table_schema = 'workflow_os'
+                    AND table_name = 'collaborative_approval_authority_receipts'",
+                &[],
+            )
+            .expect("read receipt table")
+            .get::<_, i64>(0),
+        1
+    );
 }
 
 fn prove_collaborative_identity_authority_source(backend: &PostgresStateBackend, config: &Config) {
@@ -2545,7 +2598,7 @@ fn prove_schema_fail_closed(config: &Config, backend: &PostgresStateBackend) {
     client
         .execute(
             "UPDATE workflow_os.schema_metadata
-                SET checksum = 'workflow-os-postgresql-v3',
+                SET checksum = 'workflow-os-postgresql-v4',
                     recovery_required = TRUE
               WHERE singleton = TRUE",
             &[],

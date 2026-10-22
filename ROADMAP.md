@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-10-21.
+Status date: 2026-10-22.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -28,7 +28,7 @@ implemented and reviewed. The collaborative identity lifecycle Core model and
 its blocker fix are implemented and reviewed. Caller-assembled identity facts
 now produce only an explicitly non-authorizing validated claim. Planning for a
 genuinely authorizing identity source is complete. The first persistent source
-slice is implemented: a Core-owned PostgreSQL V3 source stores complete
+slice is implemented: a Core-owned PostgreSQL source stores complete
 canonical identity revisions, activates them monotonically, rejects rollback
 and conflicting replay, reconstructs and validates the full revision at
 database time, and emits payload-free complete exact-query source evidence.
@@ -36,7 +36,11 @@ Its focused maintainer/security review is accepted after first-activation
 serialization, durable source-version verification, ambiguous-grant failure,
 query-minimized count disclosure, and recovery-rehearsal fixes. The source
 remains non-consuming: no approval decision accepts this evidence yet, and no
-hosted authentication cutover is implemented.
+hosted authentication cutover is implemented. A dedicated payload-free
+collaborative approval-authority receipt and PostgreSQL v4 create-only store
+are now implemented pending focused review. The receipt is point-in-time,
+serialize-only trusted evidence; persisted claims remain unverified and cannot
+authorize another action.
 
 The first provider-write sandbox is implemented and accepted for GitHub pull
 request comments only. The second bounded Core slice now implements an
@@ -72,7 +76,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Implement the collaborative approval-authority receipt core model and
+2. **Review the collaborative approval-authority receipt core model and
    persistence.** The
    source planning, implementation, and review are accepted in the
    [Authoritative Collaborative Identity Source Boundary
@@ -84,12 +88,14 @@ phase` language does not supersede the active queue.
    are accepted. Phase 1 is implemented and reviewed: a private source read now operates
    inside a caller-owned PostgreSQL transaction while the existing public
    non-authorizing read preserves its serializable behavior and payload-free
-   evidence posture. Implement Phase 2 only: add the minimal payload-free,
-   create-only collaborative approval-authority receipt model and PostgreSQL
-   persistence with replay, corruption, and recovery coverage. Before the
-   later Phase 3 consumer, move database-time observation to the outer decision
-   transaction and implement the reviewed advisory-lock and watermark-lock
-   order. Do not add the decision consumer in Phase 2, substitute another
+   evidence posture. Phase 2 is implemented pending review: the minimal
+   payload-free trusted receipt, explicitly unverified persisted claim, and
+   dedicated PostgreSQL v4 create-only store use unique approval/event
+   bindings, exact replay, exact recovery, and corruption checks. Review this
+   boundary before Phase 3. Before the later Phase 3 consumer, move
+   database-time observation to the outer decision transaction and implement
+   the reviewed advisory-lock and watermark-lock order. Do not add the decision
+   consumer during review, substitute another
    caller-assembled projection, or begin OIDC, SCIM,
    dynamic groups, enterprise administration, hosted authentication cutover,
    or provider writes.
