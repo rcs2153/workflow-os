@@ -48,6 +48,13 @@ registration and snapshot commitment machinery, preserving the V1 required-
 context request unchanged. No approval-decision consumer or hosted identity
 cutover is implemented.
 
+The first consumer is now specified, but not implemented, in the
+[Collaborative ApprovalDecide Consumer
+Plan](collaborative-approval-decide-consumer-plan.md). It extends the existing
+PostgreSQL approval-decision transaction so source resolution, watermark
+serialization, decision persistence, and a payload-free authority receipt form
+one atomic boundary.
+
 The phase-level review required and applied five integrity corrections before
 acceptance: organization-scoped activation locking for the first-revision race,
 durable source-model version verification, fail-closed ambiguous matching
