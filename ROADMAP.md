@@ -72,7 +72,8 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the transaction-scoped collaborative authority source refactor.** The
+2. **Implement the collaborative approval-authority receipt core model and
+   persistence.** The
    source planning, implementation, and review are accepted in the
    [Authoritative Collaborative Identity Source Boundary
    Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
@@ -80,12 +81,16 @@ phase` language does not supersede the active queue.
    The [Collaborative ApprovalDecide Consumer
    Plan](docs/implementation-plans/collaborative-approval-decide-consumer-plan.md)
    and [focused review](docs/concepts/COLLABORATIVE_APPROVAL_DECIDE_CONSUMER_PLAN_REVIEW.md)
-   are accepted. Phase 1 is implemented: a private source read now operates
+   are accepted. Phase 1 is implemented and reviewed: a private source read now operates
    inside a caller-owned PostgreSQL transaction while the existing public
    non-authorizing read preserves its serializable behavior and payload-free
-   evidence posture. Perform the focused maintainer/security review next. Do
-   not add the receipt table or decision consumer before review acceptance,
-   substitute another caller-assembled projection, or begin OIDC, SCIM,
+   evidence posture. Implement Phase 2 only: add the minimal payload-free,
+   create-only collaborative approval-authority receipt model and PostgreSQL
+   persistence with replay, corruption, and recovery coverage. Before the
+   later Phase 3 consumer, move database-time observation to the outer decision
+   transaction and implement the reviewed advisory-lock and watermark-lock
+   order. Do not add the decision consumer in Phase 2, substitute another
+   caller-assembled projection, or begin OIDC, SCIM,
    dynamic groups, enterprise administration, hosted authentication cutover,
    or provider writes.
 3. **Select the next runnable no-write trusted-host profile.** Generalize the

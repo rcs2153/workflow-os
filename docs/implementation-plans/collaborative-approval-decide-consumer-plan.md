@@ -1,8 +1,8 @@
 # Collaborative ApprovalDecide Consumer Plan
 
 Status: planning and focused maintainer/security review accepted; Phase 1
-transaction-scoped source-read refactor implemented, pending focused review;
-receipt persistence and the consequential consumer are not implemented
+transaction-scoped source-read refactor implemented and reviewed; receipt
+persistence and the consequential consumer are not implemented
 
 Related foundations:
 
