@@ -72,17 +72,19 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Plan one same-call collaborative `ApprovalDecide` consumer.** Planning,
-   source implementation, and source review are accepted in the
+2. **Review the same-call collaborative `ApprovalDecide` consumer plan.** The
+   source planning, implementation, and review are accepted in the
    [Authoritative Collaborative Identity Source Boundary
    Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
    and [implementation review](docs/concepts/AUTHORITATIVE_COLLABORATIVE_IDENTITY_SOURCE_IMPLEMENTATION_REVIEW.md).
-   Define one exact-project same-call decision boundary that resolves and
-   revalidates current source revision and revocation posture immediately before
-   decision persistence. Do not implement it before its plan is reviewed, do
-   not substitute another caller-assembled projection, and do not begin OIDC,
-   SCIM, dynamic groups, enterprise administration, hosted authentication
-   cutover, or provider writes.
+   The [Collaborative ApprovalDecide Consumer
+   Plan](docs/implementation-plans/collaborative-approval-decide-consumer-plan.md)
+   now defines one exact-project transaction boundary that resolves current
+   authority and atomically records a payload-free receipt with the approval
+   decision. Perform its focused maintainer/security review next. Do not
+   implement it before acceptance, substitute another caller-assembled
+   projection, or begin OIDC, SCIM, dynamic groups, enterprise administration,
+   hosted authentication cutover, or provider writes.
 3. **Select the next runnable no-write trusted-host profile.** Generalize the
    accepted private docs-check proof through one additional closed profile only
    after its authority, required-context, check, evidence, and terminal-report
