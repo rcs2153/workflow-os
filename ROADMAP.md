@@ -72,7 +72,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Implement the transaction-scoped collaborative authority source refactor.** The
+2. **Review the transaction-scoped collaborative authority source refactor.** The
    source planning, implementation, and review are accepted in the
    [Authoritative Collaborative Identity Source Boundary
    Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
@@ -80,10 +80,11 @@ phase` language does not supersede the active queue.
    The [Collaborative ApprovalDecide Consumer
    Plan](docs/implementation-plans/collaborative-approval-decide-consumer-plan.md)
    and [focused review](docs/concepts/COLLABORATIVE_APPROVAL_DECIDE_CONSUMER_PLAN_REVIEW.md)
-   are accepted. Implement Phase 1 only: extract a private source read that
-   operates inside a caller-owned PostgreSQL transaction while preserving the
-   existing public non-authorizing read and proving equivalent evidence and
-   non-leakage. Do not add the receipt table or decision consumer yet,
+   are accepted. Phase 1 is implemented: a private source read now operates
+   inside a caller-owned PostgreSQL transaction while the existing public
+   non-authorizing read preserves its serializable behavior and payload-free
+   evidence posture. Perform the focused maintainer/security review next. Do
+   not add the receipt table or decision consumer before review acceptance,
    substitute another caller-assembled projection, or begin OIDC, SCIM,
    dynamic groups, enterprise administration, hosted authentication cutover,
    or provider writes.

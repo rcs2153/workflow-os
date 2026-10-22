@@ -1,7 +1,8 @@
 # Collaborative ApprovalDecide Consumer Plan
 
-Status: planning and focused maintainer/security review accepted; implementation
-not started
+Status: planning and focused maintainer/security review accepted; Phase 1
+transaction-scoped source-read refactor implemented, pending focused review;
+receipt persistence and the consequential consumer are not implemented
 
 Related foundations:
 
@@ -34,7 +35,9 @@ An approval decision may commit only in the same serializable transaction that
 proves current exact-project ApprovalDecide authority.
 ```
 
-This plan does not implement the consumer. It does not change hosted
+Phase 1 now provides the private transaction-scoped source-read seam while
+preserving the existing public non-authorizing read. This plan does not yet
+implement the consumer. It does not change hosted
 authentication, create an identity administration surface, broaden approval
 APIs, or authorize any provider write.
 
