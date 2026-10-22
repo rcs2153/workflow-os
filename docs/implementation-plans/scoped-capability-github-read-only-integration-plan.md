@@ -63,13 +63,20 @@ The integration must require:
 - resource kind `adapter_resource`; and
 - canonical resource reference `github/<owner>/<repository>`.
 
-Owner and repository segments must be validated independently as bounded
-GitHub identifier segments before the canonical resource reference is formed.
-They must not contain separators, URL syntax, path traversal, credentials, or
-secret-like values. The same validated owner and repository values must be
-used for authority resolution, adapter request metadata, the adapter call, and
-the successful-operation commitment. The caller must not be able to authorize
-one repository and invoke another.
+Owner and repository segments must be validated independently before the
+canonical resource reference is formed. Owner is limited to 39 ASCII
+alphanumeric or hyphen characters and cannot begin or end with a hyphen.
+Repository is limited to 100 ASCII alphanumeric, dot, underscore, or hyphen
+characters. Empty segments, separators, URL syntax, traversal, control text,
+credentials, and secret-like values are rejected.
+
+GitHub resolves owner and repository names case-insensitively. Core must
+therefore normalize both validated segments to ASCII lowercase before creating
+`github/<owner>/<repository>`. The same canonical lowercase values must be
+used for the source query, authority resolution, adapter request metadata,
+adapter call, and successful-operation commitment. Original caller spelling
+must not be retained in errors, Debug, or receipt evidence. The caller must not
+be able to authorize one case alias and invoke another.
 
 Default-branch, file-content, pull-request, comment, diff, changed-file, and
 check-status reads remain out of scope. Their different payload and sensitivity
@@ -87,19 +94,25 @@ not a governed-context requirement. The implementation must not fabricate a
 required-context contract or `GovernedContextReference` to reuse that request
 shape.
 
-Instead, add the smallest private capability-use source request and assessment
-boundary. It should reuse existing source registration, read-window,
-freshness, completeness, consistency, snapshot, fact-set, and capability
-resolution primitives while querying exactly:
+Instead, add dedicated crate-private `CapabilityUseCurrentAuthorityQuery`,
+`CapabilityUseCurrentAuthorityQuerySet`, and
+`CapabilityUseCurrentAuthorityFactSet` types plus the smallest private source
+request and assessment boundary. These types support exactly one
+capability/resource query and are not a new public general-query framework.
+They should reuse existing source registration, read-window, freshness,
+completeness, consistency, snapshot commitment, and capability-resolution
+primitives while querying exactly:
 
 - capability grants matching the exact execution identity and `github.read`;
 - capability availability for `github.read`; and
 - the canonical GitHub repository resource.
 
-No governed-context reference family is required for this operation. The
-source must still prove that the returned grant and availability inventories
-are complete for the exact query. An empty complete inventory is authoritative
-absence and must fail closed.
+No governed-context reference family is requested or copied into this fact
+set. Existing context-derived `CurrentAuthorityQuerySet`,
+`CurrentAuthorityFactSet`, and `CurrentAuthoritySourceRequest` must not be
+reused. The source must still prove that the returned grant and availability
+inventories are complete for the exact query. An empty complete inventory is
+authoritative absence and must fail closed.
 
 ## 5. Candidate Internal API
 
@@ -119,20 +132,25 @@ The input should contain only explicit values:
 - maximum/requested sensitivity;
 - evaluation timestamp supplied by a trusted caller;
 - adapter request fields required by the existing adapter contract;
+- one already-evaluated adapter policy precheck;
 - correlation ID and redaction metadata; and
 - the injected adapter/client boundary.
 
 The helper must not read environment variables, discover credentials, invent
 runtime configuration, or select a repository from ambient Git state.
 
-The successful outcome should return:
+The helper must return an explicit outcome enum with these semantic postures:
 
-- the existing bounded `GitHubReadOutcome`;
-- the exact step-scoped capability projection used for the call; and
-- a trusted local unsigned authority receipt for that one successful use.
+- `Succeeded { outcome, projection, receipt }`;
+- `ReadSucceededReceiptFailed { outcome, projection, error }`;
+- `BlockedBeforeRead { error }`; and
+- `ReadFailed { error }`.
 
-Blocked and failed outcomes must be structured, stable, non-leaking, and must
-not contain a projection or receipt.
+Names may be adjusted to existing conventions, but the domains must remain
+distinct. A pre-read block contains no projection or receipt. An adapter
+failure contains no receipt. A receipt failure after provider success retains
+the bounded read outcome and projection so callers cannot mistake the call for
+not attempted and retry it blindly.
 
 ## 6. Exact Authority Resolution
 
@@ -152,9 +170,13 @@ the exact call context. Authorization requires all of the following:
 - requested sensitivity within the grant and source ceilings; and
 - one unambiguous authorizing grant.
 
-Workflow-wide or run-wide grants must not silently broaden into a different
-step when the selected integration requires exact step-scoped authority. A
-future phase may explicitly review broader grant inheritance.
+Existing generic resolution remains unchanged. After it selects the most
+specific matching grant, this integration must inspect that grant from the
+fresh fact set and require its stored scope to contain the exact run and step
+used by the call plus the exact harness posture. Workflow-wide or run-wide
+grants remain valid model vocabulary but are insufficient for this first
+adapter-use proof. A future integration may separately review broader grant
+inheritance.
 
 Any grant carrying independent policy, approval, evidence, or check
 requirements remains non-authorizing in this slice. The helper must return the
@@ -186,24 +208,24 @@ receipt cannot be supplied to skip this same-call source read.
 The implementation must preserve this order:
 
 1. validate explicit input and exact execution identity;
-2. validate and canonicalize owner/repository resource scope;
-3. validate source registration and construct the exact capability-use query;
-4. read and validate a complete fresh source snapshot;
-5. construct and validate the exact fact set;
-6. resolve capability authority;
-7. reject independent-prerequisite posture;
-8. derive the step-scoped projection from the fresh authorized resolution;
-9. construct and validate the existing adapter request;
-10. call `read_repository_metadata` exactly once;
-11. validate and commit the bounded successful outcome; and
-12. issue the evidence-only receipt.
+2. validate operation mode and policy-precheck provenance;
+3. validate and canonicalize owner/repository resource scope;
+4. validate source registration and construct the exact capability-use query;
+5. read and validate a complete fresh source snapshot;
+6. construct and validate the exact capability-use fact set;
+7. resolve capability authority and verify exact selected-grant scope;
+8. reject independent-prerequisite posture;
+9. derive the step-scoped projection from the fresh authorized resolution;
+10. construct and validate the existing adapter request;
+11. call `read_repository_metadata` exactly once;
+12. validate and commit the bounded successful outcome; and
+13. issue the evidence-only receipt.
 
-Failure at steps 1 through 9 must prove that the adapter client was not called.
-Adapter failure at step 10 must return the classified adapter failure without a
-receipt. Receipt-construction failure after a successful read must surface as
-an evidence-generation failure; it must not relabel the provider read as
-failed or authorize a retry. The outcome must make the completed-read/failed-
-receipt distinction explicit so callers do not accidentally duplicate a read.
+Failure at steps 1 through 10 must prove that the adapter client was not
+called. Adapter failure at step 11 must return `ReadFailed` with the classified
+adapter failure and no receipt. Receipt-construction failure after a successful
+read must return `ReadSucceededReceiptFailed`; it must not relabel the provider
+read as failed or authorize a retry.
 
 ## 9. Adapter Request And Telemetry
 
@@ -211,12 +233,24 @@ The helper must use the existing `AdapterRequest` and
 `GitHubReadOnlyAdapter::read_repository_metadata` APIs. It must not bypass
 adapter precondition validation or call the injected client directly.
 
-The request's actor, run scope, capability, action, owner, repository,
-correlation ID, operation mode, and policy-precheck posture must agree with the
-governed integration input. Because this slice proves capability authority but
-does not independently evaluate policy, the request must use an existing
-policy-precheck posture that truthfully communicates the no-policy-evaluation
-boundary. It must not claim a policy grant that was not produced.
+The request's actor, run scope, capability, action, canonical owner and
+repository, correlation ID, operation mode, and policy precheck must agree with
+the governed integration input.
+
+Capability authority does not replace policy. This slice requires one
+already-evaluated `AdapterPolicyPrecheck` and passes it unchanged into the
+adapter request:
+
+- `Fixture` accepts only `Allowed` with `FixtureTest` provenance;
+- `LiveReadOnly` accepts only `Allowed` with `RuntimePolicy` provenance; and
+- `ApprovalGranted`, `Missing`, `Denied`, `Mock`, `Local`, and
+  `LiveWriteCapable` are rejected before source access.
+
+The helper must not synthesize `runtime_allowed` from a capability grant. The
+source authenticity of an allowed policy precheck remains the existing adapter
+contract boundary and is not a new guarantee of this phase. A grant that
+declares an independent policy prerequisite remains non-authorizing because
+this slice does not bind the supplied precheck to that prerequisite.
 
 Existing adapter invocation and observability records remain the telemetry
 source of truth. The integration must not synthesize successful telemetry on
@@ -229,19 +263,19 @@ The existing `AuthorityReceipt` V1 wire model is bound to a required-context
 requirement, governed-context target kind, and access level. Those fields are
 not truthful for a GitHub adapter capability use.
 
-Implementation must therefore use an additive operation-specific receipt
-shape. The preferred approach is a new versioned receipt record or envelope
-variant for capability use that:
+Implementation must therefore add a separate versioned
+`CapabilityUseAuthorityReceipt` V1 type rather than modifying or wrapping the
+existing required-context receipt. The new type must:
 
 - preserves all existing V1 serialized bytes and validation behavior;
 - does not add fake required-context fields;
 - binds the exact execution identity, capability, resource commitment, grant,
   source snapshot, fact set, assessment, operation kind, outcome commitment,
   issuance time, validity, signature posture, effect, and redaction posture;
-- uses a dedicated operation kind such as
+- use a dedicated operation kind such as
   `github_repository_metadata_read_v1`;
-- is produced only from a private successful-use proof; and
-- remains serialize-only as trusted evidence, with deserialized data explicitly
+- be produced only from a private successful-use proof; and
+- remain serialize-only as trusted evidence, with deserialized data explicitly
   treated as an unverified claim.
 
 The receipt is point-in-time evidence. It cannot authorize another adapter
@@ -250,10 +284,11 @@ not contain owner/repository plaintext if a bounded commitment is sufficient,
 and it must never contain credentials, request headers, raw responses, or
 provider payloads.
 
-The focused review must choose between a new `AuthorityReceipt` envelope
-variant and a separate capability-use receipt type. It must reject any design
-that changes V1 bytes, overloads V1 context semantics, or lets a deserialized
-claim become trusted authority.
+Trusted receipt construction remains crate-private. Deserialization must target
+an explicitly named unverified-claim type and cannot recover the trusted
+receipt. Existing `AuthorityReceipt` V1 APIs, known bytes, required-context
+semantics, and validation remain unchanged. A generalized envelope is deferred
+until at least two truthful operation-specific receipt models justify it.
 
 ## 11. Error And Privacy Boundary
 
@@ -305,14 +340,14 @@ Do not add:
 
 ## 14. Implementation Sequence
 
-1. Add the private exact capability-use source request and source-backed
-   assessment for `github.read` repository metadata.
+1. Add the private exact capability-use query, fact set, source request, and
+   source-backed assessment for `github.read` repository metadata.
 2. Add focused source tests proving freshness, completeness, ambiguity, and
    no-invocation failure behavior.
 3. Add the internal GitHub repository-read composition helper using the
    existing adapter request and injected client.
-4. Add the private successful-use proof and additive capability-use receipt
-   shape without changing V1 bytes.
+4. Add the private successful-use proof and separate
+   `CapabilityUseAuthorityReceipt` V1 without changing existing receipt bytes.
 5. Add operation and privacy tests, then run existing authority, receipt,
    adapter, telemetry, and workspace regressions.
 6. Complete a focused maintainer/security review before considering another
@@ -353,25 +388,34 @@ Future tests must prove:
 19. existing capability, projection, context, receipt, GitHub adapter,
    telemetry, and workspace tests pass.
 
+Additional required regressions are:
+
+- fixture/live policy-precheck provenance mismatch fails before source access;
+- mixed-case repository aliases resolve to one lowercase authority identity;
+- invalid or oversized owner/repository segments fail without source or client
+  use;
+- a selected workflow-wide or run-wide grant is insufficient;
+- no context-derived query or fake context requirement is constructed;
+- existing `AuthorityReceipt` V1 known bytes remain unchanged; and
+- read success followed by receipt failure returns the explicit non-retry
+  posture with no receipt.
+
 ## 16. Review Questions
 
-The focused maintainer/security review must answer:
+The focused review decisions are now incorporated:
 
-- Is `github/<owner>/<repository>` sufficiently canonical and unambiguous for
-  this first operation?
-- Should the capability-use source query be a private specialization or the
-  first general non-context query model?
-- Does exact step scope intentionally reject broader workflow/run grants, or
-  should existing grant-matching semantics apply without weakening identity?
-- Which truthful existing adapter policy-precheck posture applies when this
-  slice evaluates capability authority but not policy?
-- Should the receipt be a new envelope variant or a separate versioned type?
-- How must post-read receipt failure be represented to prevent unsafe retry?
-- Which adapter response fields are safe to commit into the operation outcome
-  without copying provider payloads?
+- canonical resource: lowercase `github/<owner>/<repository>` from separately
+  validated segments;
+- source model: crate-private single-query capability-use types;
+- selected grant: exact run and step required for this first integration;
+- policy: explicit already-evaluated precheck with operation-mode provenance;
+- receipt: separate `CapabilityUseAuthorityReceipt` V1;
+- post-read evidence failure: explicit `ReadSucceededReceiptFailed` posture;
+  and
+- operation outcome proof: commitment over the existing bounded normalized
+  response/invocation fields, never the raw provider body.
 
-No implementation should begin until these questions have explicit review
-answers.
+The blocker-fix review should verify these decisions are internally consistent.
 
 ## 17. Governed Planning Record
 
