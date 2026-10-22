@@ -96,7 +96,11 @@ phase` language does not supersede the active queue.
    Core-owned explicit-zero authority decision, same-call validation truth,
    unchanged lifecycle and replay semantics, and explicit disclosure that the
    unpublished host still creates no WorkReport artifact. Perform focused
-   maintainer/security review before implementation. Do not jump to arbitrary
+   maintainer/security review before implementation. Focused review found two
+   planning blockers: non-passing local checks currently become successful
+   trusted-host skill outputs, and the proposed explicit profile selector does
+   not yet define how existing docs-check invocations remain compatible.
+   Correct and re-review those boundaries before implementation. Do not jump to arbitrary
    commands, another check family, default activation, scheduling, nested
    harnesses, automatic approval, providers, writes, or hosted expansion.
 

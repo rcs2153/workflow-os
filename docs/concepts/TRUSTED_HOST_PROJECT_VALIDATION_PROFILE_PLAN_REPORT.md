@@ -81,6 +81,7 @@ separate future composition phase before released or broader trusted-host use.
 
 ## 9. Recommended Next Phase
 
-Perform a focused maintainer/security review of the plan. If accepted,
-implement one complete unpublished foreground-binary project-validation
-vertical slice before another profile or broader scheduler work.
+Perform the focused documentation-only blocker fix required by the plan
+review: define truthful non-passing local-check adaptation for trusted-host
+execution and one exact profile-selection compatibility rule. Re-review the
+corrected plan before implementation.
