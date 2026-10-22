@@ -88,7 +88,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Implement the private trusted-host terminal WorkReport artifact path.**
+2. **Review the private trusted-host terminal WorkReport artifact path.**
    The second closed no-write profile is implemented and focused-review
    accepted. The next executable composition slice is now implemented from the
    [Trusted-Host Terminal WorkReport Composition
@@ -118,9 +118,18 @@ phase` language does not supersede the active queue.
    implementation prerequisite. Focused maintainer/security review accepts the
    plan in [Trusted-Host Terminal WorkReport Artifact Plan
    Review](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_ARTIFACT_PLAN_REVIEW.md).
-   Implement the private v2 report correction, existing-gate composition,
-   create-only SQLite write with exact duplicate reconciliation, fixed host
-   posture, and required corruption/recovery tests next.
+   The private artifact path is now implemented. Core composes the accepted v2
+   report, constructs a validated artifact, invokes the existing no-provider
+   integrity gate, writes through the existing SQLite store, and reconciles
+   only fully equal duplicates. The unpublished host emits fixed persistence
+   posture without report contents or identifiers. Focused entry-point tests
+   prove passing and failed terminal artifacts, process-free exact replay,
+   recovery after terminal commit with no artifact, event-history immutability,
+   and fail-closed rejection of contradictory result, invocation, run,
+   cancellation, and event-order histories before any replacement artifact is
+   written. The implementation is documented in [Trusted-Host Terminal
+   WorkReport Artifact Implementation Report](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_ARTIFACT_IMPLEMENTATION_REPORT.md).
+   Perform focused maintainer/security review next.
    Do not add released CLI output, another profile, arbitrary commands,
    scheduling, nested harnesses, automatic approval, providers, external
    writes, schemas, examples, or hosted expansion.

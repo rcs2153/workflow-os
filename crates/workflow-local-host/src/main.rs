@@ -7,13 +7,14 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use workflow_core::{
-    admit_trusted_host_local_application_operation, compose_trusted_host_terminal_work_report,
-    ActorId, CorrelationId, ExplicitLocalCheckProfileSelection, ImmutableRunBundleId,
-    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
-    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
-    LocalExecutionRequest, LocalExecutionWithImmutableRunBundleRequest, SqliteStateBackend, StepId,
-    Timestamp, TrustedHostLocalApplicationAdmissionOutcome,
-    TrustedHostLocalApplicationAdmissionRequest, WorkflowId, WorkflowRunId,
+    admit_trusted_host_local_application_operation,
+    persist_trusted_host_terminal_work_report_artifact, ActorId, CorrelationId,
+    ExplicitLocalCheckProfileSelection, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
+    ImmutableRunBundleVersion, LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
+    LocalExecutionWithImmutableRunBundleRequest, SqliteStateBackend, StepId, Timestamp,
+    TrustedHostLocalApplicationAdmissionOutcome, TrustedHostLocalApplicationAdmissionRequest,
+    TrustedHostTerminalWorkReportArtifactPosture, WorkflowId, WorkflowRunId,
 };
 use workflow_local_host::LocalHostPreparedOperation;
 
@@ -112,7 +113,7 @@ fn run() -> Result<&'static str, &'static str> {
         TrustedHostLocalApplicationAdmissionOutcome::Prepared(prepared) => {
             let outcome = run_prepared(prepared)?;
             if matches!(outcome, "operation.terminal" | "continuation.terminal") {
-                Ok(report_posture(&backend, &profile, &request, false))
+                Ok(artifact_posture(&backend, &profile, &request, false))
             } else {
                 Ok(outcome)
             }
@@ -126,7 +127,7 @@ fn run() -> Result<&'static str, &'static str> {
             }
         }),
         TrustedHostLocalApplicationAdmissionOutcome::TerminalReplay => {
-            Ok(report_posture(&backend, &profile, &request, true))
+            Ok(artifact_posture(&backend, &profile, &request, true))
         }
         TrustedHostLocalApplicationAdmissionOutcome::Blocked(reason) => Ok(match reason {
             workflow_core::TrustedHostLocalApplicationBlockReason::UnsupportedWorkflow => {
@@ -140,20 +141,40 @@ fn run() -> Result<&'static str, &'static str> {
     }
 }
 
-fn report_posture(
+fn artifact_posture(
     backend: &SqliteStateBackend,
     profile: &workflow_core::ResolvedExplicitLocalCheckProfile,
     request: &TrustedHostLocalApplicationAdmissionRequest,
     replay: bool,
 ) -> &'static str {
     match (
-        compose_trusted_host_terminal_work_report(backend, profile, request),
+        persist_trusted_host_terminal_work_report_artifact(backend, profile, request).posture(),
         replay,
     ) {
-        (Ok(_), false) => "operation.terminal_report_generated",
-        (Err(_), false) => "operation.terminal_report_generation_failed",
-        (Ok(_), true) => "admission.terminal_replay_report_generated",
-        (Err(_), true) => "admission.terminal_replay_report_generation_failed",
+        (TrustedHostTerminalWorkReportArtifactPosture::Persisted, false) => {
+            "operation.terminal_report_artifact_persisted"
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::AlreadyPersisted, false) => {
+            "operation.terminal_report_artifact_already_persisted"
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::GenerationFailed, false) => {
+            "operation.terminal_report_generation_failed"
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed, false) => {
+            "operation.terminal_report_artifact_persistence_failed"
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::Persisted, true) => {
+            "admission.terminal_replay_report_artifact_persisted"
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::AlreadyPersisted, true) => {
+            "admission.terminal_replay_report_artifact_already_persisted"
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::GenerationFailed, true) => {
+            "admission.terminal_replay_report_generation_failed"
+        }
+        (TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed, true) => {
+            "admission.terminal_replay_report_artifact_persistence_failed"
+        }
     }
 }
 

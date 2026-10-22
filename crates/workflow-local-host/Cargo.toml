@@ -16,6 +16,8 @@ path = "src/lib.rs"
 workflow-core = { path = "../workflow-core", features = ["trusted-host-application-spi"] }
 
 [dev-dependencies]
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+serde_json = "1.0"
 time = "0.3"
 
 [lints]

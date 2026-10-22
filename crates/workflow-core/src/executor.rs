@@ -433,6 +433,79 @@ pub enum TrustedHostLocalApplicationAdmissionOutcome<'a> {
     Denied,
 }
 
+/// Closed persistence posture for the private trusted-host terminal report artifact path.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrustedHostTerminalWorkReportArtifactPosture {
+    /// A new validated artifact was persisted.
+    Persisted,
+    /// An exactly equal validated artifact was already present.
+    AlreadyPersisted,
+    /// Terminal report composition failed before artifact construction or writing.
+    GenerationFailed,
+    /// Artifact construction, governance gates, persistence, or reconciliation failed.
+    PersistenceFailed,
+}
+
+/// Bounded result for the private trusted-host terminal report artifact path.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+#[derive(Clone, Eq, PartialEq)]
+pub struct TrustedHostTerminalWorkReportArtifactResult {
+    posture: TrustedHostTerminalWorkReportArtifactPosture,
+    artifact: Option<WorkReportArtifactRecord>,
+    error: Option<WorkflowOsError>,
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+impl TrustedHostTerminalWorkReportArtifactResult {
+    fn new(
+        posture: TrustedHostTerminalWorkReportArtifactPosture,
+        artifact: Option<WorkReportArtifactRecord>,
+        error: Option<WorkflowOsError>,
+    ) -> Self {
+        Self {
+            posture,
+            artifact,
+            error,
+        }
+    }
+
+    /// Returns the closed artifact persistence posture.
+    #[must_use]
+    pub const fn posture(&self) -> TrustedHostTerminalWorkReportArtifactPosture {
+        self.posture
+    }
+
+    /// Returns the validated artifact for persisted or exact-replay success.
+    #[must_use]
+    pub const fn artifact(&self) -> Option<&WorkReportArtifactRecord> {
+        self.artifact.as_ref()
+    }
+
+    /// Returns the stable non-leaking failure, when present.
+    #[must_use]
+    pub const fn error(&self) -> Option<&WorkflowOsError> {
+        self.error.as_ref()
+    }
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+impl fmt::Debug for TrustedHostTerminalWorkReportArtifactResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedHostTerminalWorkReportArtifactResult")
+            .field("posture", &self.posture)
+            .field("has_artifact", &self.artifact.is_some())
+            .field(
+                "error_code",
+                &self.error.as_ref().map(WorkflowOsError::code),
+            )
+            .finish()
+    }
+}
+
 /// Composes one private in-memory terminal report from the exact durable trusted-host run.
 ///
 /// The caller supplies only the already-admitted request and closed profile. Report identity,
@@ -460,7 +533,7 @@ pub fn compose_trusted_host_terminal_work_report(
     let bindings = trusted_host_terminal_report_bindings(&run, profile, request)?;
 
     let report_material = format!(
-        "workflow-os/trusted-host-terminal-report/v1\n{}\n{}\n{}\n{}\n{}\n{}",
+        "workflow-os/trusted-host-terminal-report/v2\n{}\n{}\n{}\n{}\n{}\n{}",
         run.snapshot.identity.run_id.as_str(),
         bindings.durable_bundle.root_hash().as_str(),
         match profile.profile_id() {
@@ -480,7 +553,7 @@ pub fn compose_trusted_host_terminal_work_report(
             &report_digest.as_str()[..24]
         ))?,
         report_contract_id: WorkReportContractId::new("trusted-host-terminal-no-write")?,
-        report_contract_version: WorkReportContractVersion::new("v1")?,
+        report_contract_version: WorkReportContractVersion::new("v2")?,
         run: &run,
         generated_at: bindings.terminal_event.timestamp,
         generated_by: ActorId::new("system/trusted-host-report-composer")?,
@@ -516,7 +589,7 @@ pub fn compose_trusted_host_terminal_work_report(
         github_pr_comment_provider_disclosures: Vec::new(),
         incomplete_work: Vec::new(),
         known_limitations: vec![
-            "Report remains in memory and is not persisted or written as an artifact.".to_owned(),
+            "Report contents are available only through private trusted-host composition; no released inspection or export surface exists.".to_owned(),
             "Trusted-host execution remains local, closed-profile, and no-write.".to_owned(),
         ],
         risks: Vec::new(),
@@ -524,6 +597,117 @@ pub fn compose_trusted_host_terminal_work_report(
             "Inspect durable workflow events for the authoritative terminal history.".to_owned(),
         ],
     })
+}
+
+/// Composes, governs, and persists one private trusted-host terminal report artifact.
+///
+/// The run must already be terminally committed. This helper does not execute a process, append
+/// events, mutate the run snapshot, call a provider, execute a side effect, or expose report
+/// contents. Exact duplicate artifacts are accepted only after a full validated equality check.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+#[must_use]
+pub fn persist_trusted_host_terminal_work_report_artifact(
+    backend: &crate::SqliteStateBackend,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    request: &TrustedHostLocalApplicationAdmissionRequest,
+) -> TrustedHostTerminalWorkReportArtifactResult {
+    let Ok(report) = compose_trusted_host_terminal_work_report(backend, profile, request) else {
+        return trusted_host_terminal_artifact_failure(
+            TrustedHostTerminalWorkReportArtifactPosture::GenerationFailed,
+            "generation_failed",
+        );
+    };
+    let Some(run_id) = request.execution.execution.run_id.as_ref() else {
+        return trusted_host_terminal_artifact_failure(
+            TrustedHostTerminalWorkReportArtifactPosture::GenerationFailed,
+            "generation_failed",
+        );
+    };
+    let Ok(run) = backend.rehydrate_run(run_id) else {
+        return trusted_host_terminal_artifact_failure(
+            TrustedHostTerminalWorkReportArtifactPosture::GenerationFailed,
+            "generation_failed",
+        );
+    };
+    let artifact = match WorkReportArtifactRecord::new(report) {
+        Ok(artifact) if artifact.run_id() == &run.snapshot.identity.run_id => artifact,
+        Ok(_) | Err(_) => {
+            return trusted_host_terminal_artifact_failure(
+                TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed,
+                "artifact_invalid",
+            );
+        }
+    };
+
+    let write_result = write_report_artifact_with_explicit_integrations(
+        backend,
+        backend,
+        ReportArtifactWriteIntegrationInput {
+            run: &run,
+            artifact: &artifact,
+            require_all_side_effect_citations: true,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+            high_assurance_disclosure_policy:
+                WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(),
+            provider_integration: ReportArtifactWriteProviderIntegration::None,
+        },
+    );
+    match write_result {
+        Ok(_) => TrustedHostTerminalWorkReportArtifactResult::new(
+            TrustedHostTerminalWorkReportArtifactPosture::Persisted,
+            Some(artifact),
+            None,
+        ),
+        Err(error) if error.code() == "work_report_artifact.write.duplicate" => {
+            reconcile_trusted_host_terminal_artifact_duplicate(backend, &artifact)
+        }
+        Err(_) => trusted_host_terminal_artifact_failure(
+            TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed,
+            "write_failed",
+        ),
+    }
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn reconcile_trusted_host_terminal_artifact_duplicate(
+    artifact_store: &impl WorkReportArtifactStore,
+    artifact: &WorkReportArtifactRecord,
+) -> TrustedHostTerminalWorkReportArtifactResult {
+    match artifact_store.read_work_report_artifact(artifact.run_id(), artifact.report_id()) {
+        Ok(Some(existing)) if &existing == artifact => {
+            TrustedHostTerminalWorkReportArtifactResult::new(
+                TrustedHostTerminalWorkReportArtifactPosture::AlreadyPersisted,
+                Some(existing),
+                None,
+            )
+        }
+        Ok(Some(_)) => trusted_host_terminal_artifact_failure(
+            TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed,
+            "duplicate_conflict",
+        ),
+        Ok(None) | Err(_) => trusted_host_terminal_artifact_failure(
+            TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed,
+            "duplicate_unreadable",
+        ),
+    }
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_terminal_artifact_failure(
+    posture: TrustedHostTerminalWorkReportArtifactPosture,
+    code: &'static str,
+) -> TrustedHostTerminalWorkReportArtifactResult {
+    TrustedHostTerminalWorkReportArtifactResult::new(
+        posture,
+        None,
+        Some(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            format!("trusted_host_terminal_artifact.{code}"),
+            "trusted-host terminal report artifact operation failed closed",
+        )),
+    )
 }
 
 #[cfg(feature = "trusted-host-application-spi")]
@@ -781,6 +965,19 @@ mod trusted_host_terminal_report_integrity_tests {
                 "trusted_host_terminal_report.terminal_event_order_mismatch"
             );
         }
+    }
+
+    #[test]
+    fn terminal_artifact_result_debug_exposes_only_closed_posture_and_error_code() {
+        let result = trusted_host_terminal_artifact_failure(
+            TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed,
+            "write_failed",
+        );
+
+        assert_eq!(
+            format!("{result:?}"),
+            "TrustedHostTerminalWorkReportArtifactResult { posture: PersistenceFailed, has_artifact: false, error_code: Some(\"trusted_host_terminal_artifact.write_failed\") }"
+        );
     }
 }
 

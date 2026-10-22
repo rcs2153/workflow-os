@@ -1,7 +1,7 @@
 # Trusted-Host Terminal WorkReport Artifact Plan
 
-Status: planning complete; focused maintainer/security review is required
-before implementation.
+Status: implementation complete; focused maintainer/security review is
+required before acceptance.
 
 Related foundations:
 
