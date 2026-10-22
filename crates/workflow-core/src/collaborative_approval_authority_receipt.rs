@@ -345,6 +345,13 @@ impl UnverifiedCollaborativeApprovalAuthorityReceipt {
         &self.record.query_commitment
     }
 
+    /// Returns the original database-time authority observation for trusted
+    /// in-process replay verification.
+    #[must_use]
+    pub(crate) const fn observed_at(&self) -> Timestamp {
+        self.record.observed_at
+    }
+
     /// Returns the complete receipt commitment.
     #[must_use]
     pub const fn receipt_commitment(&self) -> &SpecContentHash {

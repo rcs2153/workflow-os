@@ -2327,28 +2327,19 @@ impl PostgresStateBackend {
                         true,
                     )?;
                     require_collaborative_authority_watermark_unchanged_tx(tx, &query, &authority)?;
-                    let receipt = CollaborativeApprovalAuthorityReceipt::from_decision_proof(
-                        crate::collaborative_approval_authority_receipt::CollaborativeApprovalAuthorityReceiptProof {
-                            approval_reference_id: ApprovalReferenceId::new(
-                                request.approval.approval_id.clone(),
-                            )?,
-                            approval_decision_event_id: request.event.event_id.clone(),
-                            source_id: CurrentAuthoritySourceId::new(
-                                "core/postgres/collaborative-identity",
-                            )?,
-                            query_commitment: query.query_commitment().clone(),
-                            authority_revision: authority.source_read.authority_revision(),
-                            authority_revision_commitment: authority
-                                .authority_revision_commitment,
-                            source_snapshot_commitment: authority
-                                .source_read
-                                .source_snapshot()
-                                .snapshot_commitment()
-                                .clone(),
-                            active_grant_commitment: authority.active_grant_commitment,
-                            observed_at: authority.observed_at,
-                            decision_kind: decision.decision,
-                        },
+                    let existing_receipt =
+                        read_collaborative_approval_authority_receipt_for_decision_tx(
+                            tx,
+                            &ApprovalReferenceId::new(request.approval.approval_id.clone())?,
+                            &request.event.event_id,
+                        )?;
+                    let receipt = build_collaborative_approval_authority_receipt(
+                        &query,
+                        authority,
+                        existing_receipt.as_ref(),
+                        ApprovalReferenceId::new(request.approval.approval_id.clone())?,
+                        request.event.event_id.clone(),
+                        decision.decision,
                     )?;
                     let payload = encode(&receipt)
                         .map_err(|_| collaborative_approval_receipt_invalid_error())?;
@@ -4016,6 +4007,48 @@ struct CollaborativeApprovalAuthorizingView {
     observed_at: crate::Timestamp,
 }
 
+fn build_collaborative_approval_authority_receipt(
+    query: &CollaborativeIdentityAuthorityQuery,
+    authority: CollaborativeApprovalAuthorizingView,
+    existing: Option<&PersistedCollaborativeApprovalAuthorityReceiptRecord>,
+    approval_reference_id: ApprovalReferenceId,
+    approval_decision_event_id: crate::EventId,
+    decision_kind: crate::ApprovalDecisionKind,
+) -> Result<CollaborativeApprovalAuthorityReceipt, WorkflowOsError> {
+    if existing.is_some_and(|receipt| receipt.query_commitment() != query.query_commitment()) {
+        return Err(collaborative_approval_receipt_conflict_error());
+    }
+    let observed_at = existing.map_or(
+        authority.observed_at,
+        PersistedCollaborativeApprovalAuthorityReceiptRecord::observed_at,
+    );
+    let receipt = CollaborativeApprovalAuthorityReceipt::from_decision_proof(
+        crate::collaborative_approval_authority_receipt::CollaborativeApprovalAuthorityReceiptProof {
+            approval_reference_id,
+            approval_decision_event_id,
+            source_id: CurrentAuthoritySourceId::new("core/postgres/collaborative-identity")?,
+            query_commitment: query.query_commitment().clone(),
+            authority_revision: authority.source_read.authority_revision(),
+            authority_revision_commitment: authority.authority_revision_commitment,
+            source_snapshot_commitment: authority
+                .source_read
+                .source_snapshot()
+                .snapshot_commitment()
+                .clone(),
+            active_grant_commitment: authority.active_grant_commitment,
+            observed_at,
+            decision_kind,
+        },
+    )?;
+    if existing.is_some_and(|existing| {
+        existing.receipt_id() != receipt.receipt_id()
+            || existing.receipt_commitment() != receipt.receipt_commitment()
+    }) {
+        return Err(collaborative_approval_receipt_conflict_error());
+    }
+    Ok(receipt)
+}
+
 fn read_collaborative_approval_authorizing_view_tx(
     tx: &mut Transaction<'_>,
     query: &CollaborativeIdentityAuthorityQuery,
@@ -4150,6 +4183,27 @@ fn read_collaborative_approval_authority_receipt_tx(
         &[&receipt_id],
     )
     .map_err(|error| database_error("collaborative_approval_receipt_read", &error))?
+    .as_ref()
+    .map(decode_collaborative_approval_receipt_row)
+    .transpose()
+}
+
+fn read_collaborative_approval_authority_receipt_for_decision_tx(
+    tx: &mut Transaction<'_>,
+    approval_reference_id: &ApprovalReferenceId,
+    approval_decision_event_id: &crate::EventId,
+) -> Result<Option<PersistedCollaborativeApprovalAuthorityReceiptRecord>, WorkflowOsError> {
+    tx.query_opt(
+        "SELECT receipt_id, approval_reference_id, approval_decision_event_id,
+                canonical_payload, canonical_payload_hash
+           FROM workflow_os.collaborative_approval_authority_receipts
+          WHERE approval_reference_id = $1 AND approval_decision_event_id = $2",
+        &[
+            &approval_reference_id.as_str(),
+            &approval_decision_event_id.as_str(),
+        ],
+    )
+    .map_err(|error| database_error("collaborative_approval_receipt_recovery_read", &error))?
     .as_ref()
     .map(decode_collaborative_approval_receipt_row)
     .transpose()

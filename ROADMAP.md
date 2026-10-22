@@ -119,7 +119,11 @@ phase` language does not supersede the active queue.
    The narrow blocker fix now uses the locking exact run-binding read and adds
    direct public executor-consumer tests for success, exact replay/restart,
    post-commit recovery, and revoked-authority non-invocation. Run the proof in
-   required Shared PostgreSQL State CI and repeat focused review. Do
+   required Shared PostgreSQL State CI and repeat focused review. The first
+   required run exposed a time-varying exact-replay receipt collision; the
+   bounded fix preserves the original database observation only after
+   re-deriving the same query and re-proving current authority. Rerun the live
+   proof before acceptance. Do
    not add another
    identity consumer during review, substitute another caller-assembled
    projection, or begin OIDC, SCIM,

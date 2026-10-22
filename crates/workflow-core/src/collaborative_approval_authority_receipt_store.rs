@@ -59,6 +59,13 @@ impl PersistedCollaborativeApprovalAuthorityReceiptRecord {
         self.claim.query_commitment()
     }
 
+    /// Returns the original database-time authority observation for trusted
+    /// in-process replay verification.
+    #[must_use]
+    pub(crate) const fn observed_at(&self) -> crate::Timestamp {
+        self.claim.observed_at()
+    }
+
     /// Returns the complete deterministic receipt commitment.
     #[must_use]
     pub const fn receipt_commitment(&self) -> &crate::SpecContentHash {
