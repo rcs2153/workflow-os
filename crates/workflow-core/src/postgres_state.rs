@@ -959,36 +959,7 @@ impl PostgresStateBackend {
     ) -> Result<CollaborativeIdentityAuthoritySourceRead, WorkflowOsError> {
         let mut client = self.connections.connect()?;
         serializable(&mut client, |tx| {
-            let evaluated_at = database_timestamp_tx(tx)?;
-            let row = tx
-                .query_opt(
-                    "SELECT authority_revision, revision_commitment, source_model_version
-                       FROM workflow_os.collaborative_identity_authority_high_watermarks
-                      WHERE organization_id = $1",
-                    &[&query.organization_id().as_str()],
-                )
-                .map_err(|error| database_error("collaborative_authority_watermark_read", &error))?
-                .ok_or_else(|| {
-                    state_error(
-                        "postgres_state.collaborative_authority.missing",
-                        "collaborative authority source is not initialized",
-                    )
-                })?;
-            let revision: i64 = row.get(0);
-            let commitment: String = row.get(1);
-            let source_model_version: String = row.get(2);
-            if source_model_version != POSTGRES_SOURCE_VERSION {
-                return Err(collaborative_authority_corruption_error());
-            }
-            let candidate = read_collaborative_identity_candidate_tx(
-                tx,
-                query.organization_id().as_str(),
-                revision,
-            )?;
-            if candidate.commitment().as_str() != commitment {
-                return Err(collaborative_authority_corruption_error());
-            }
-            build_postgres_collaborative_identity_source_read(query, &candidate, evaluated_at)
+            read_collaborative_identity_authority_tx(tx, query)
         })
     }
 
@@ -3730,6 +3701,46 @@ fn serializable<T>(
             "PostgreSQL transaction retry budget was exhausted",
         )
     }))
+}
+
+/// Reads collaborative authority inside a transaction owned by the caller.
+///
+/// This helper returns payload-free source evidence only. It does not lock the
+/// organization authority watermark for a consequential consumer and does not
+/// authorize or persist an action. A later reviewed consumer must establish
+/// its required lock order before calling this helper in its decision
+/// transaction.
+fn read_collaborative_identity_authority_tx(
+    tx: &mut Transaction<'_>,
+    query: &CollaborativeIdentityAuthorityQuery,
+) -> Result<CollaborativeIdentityAuthoritySourceRead, WorkflowOsError> {
+    let evaluated_at = database_timestamp_tx(tx)?;
+    let row = tx
+        .query_opt(
+            "SELECT authority_revision, revision_commitment, source_model_version
+               FROM workflow_os.collaborative_identity_authority_high_watermarks
+              WHERE organization_id = $1",
+            &[&query.organization_id().as_str()],
+        )
+        .map_err(|error| database_error("collaborative_authority_watermark_read", &error))?
+        .ok_or_else(|| {
+            state_error(
+                "postgres_state.collaborative_authority.missing",
+                "collaborative authority source is not initialized",
+            )
+        })?;
+    let revision: i64 = row.get(0);
+    let commitment: String = row.get(1);
+    let source_model_version: String = row.get(2);
+    if source_model_version != POSTGRES_SOURCE_VERSION {
+        return Err(collaborative_authority_corruption_error());
+    }
+    let candidate =
+        read_collaborative_identity_candidate_tx(tx, query.organization_id().as_str(), revision)?;
+    if candidate.commitment().as_str() != commitment {
+        return Err(collaborative_authority_corruption_error());
+    }
+    build_postgres_collaborative_identity_source_read(query, &candidate, evaluated_at)
 }
 
 fn authority_revision_to_i64(

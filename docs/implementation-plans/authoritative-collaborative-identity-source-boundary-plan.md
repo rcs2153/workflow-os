@@ -53,7 +53,10 @@ The first consumer is now specified, but not implemented, in the
 Plan](collaborative-approval-decide-consumer-plan.md). It extends the existing
 PostgreSQL approval-decision transaction so source resolution, watermark
 serialization, decision persistence, and a payload-free authority receipt form
-one atomic boundary.
+one atomic boundary. The first implementation phase has extracted a private
+transaction-scoped source read while preserving the public non-authorizing
+read. That internal seam is pending focused review and does not yet lock the
+authority watermark, persist a receipt, or authorize an approval decision.
 
 The phase-level review required and applied five integrity corrections before
 acceptance: organization-scoped activation locking for the first-revision race,

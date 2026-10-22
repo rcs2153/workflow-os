@@ -300,6 +300,33 @@ fn prove_collaborative_identity_authority_source(backend: &PostgresStateBackend,
         CollaborativeIdentityAuthorityMatchPosture::MatchingGrantPresent
     );
     assert_eq!(read.matching_active_grant_count(), 1);
+    let repeat_read = backend
+        .read_collaborative_identity_authority(&query)
+        .expect("repeat authority read");
+    assert_eq!(repeat_read.query_commitment(), read.query_commitment());
+    assert_eq!(repeat_read.authority_revision(), read.authority_revision());
+    assert_eq!(repeat_read.match_posture(), read.match_posture());
+    assert_eq!(
+        repeat_read.matching_active_grant_count(),
+        read.matching_active_grant_count()
+    );
+
+    let debug = format!("{read:?}");
+    let serialized = serde_json::to_string(&read).expect("serialize authority read");
+    for forbidden in [
+        "org/collaborative-source",
+        "project/collaborative-source",
+        "user/collaborative-source",
+        "provider/collaborative-source",
+        "binding/collaborative-source",
+        "grant/collaborative-source",
+        "collaborative issuer",
+        "collaborative audience",
+        "collaborative subject",
+    ] {
+        assert!(!debug.contains(forbidden));
+        assert!(!serialized.contains(forbidden));
+    }
 
     let restarted = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
         config.clone(),
