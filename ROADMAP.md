@@ -97,8 +97,13 @@ phase` language does not supersede the active queue.
    workflow state, rehydrate the exact run and immutable bundle, and only then
    construct a validated report with deterministic private identity. Report
    failure cannot rewrite workflow pass/fail semantics, and exact replay cannot
-   rerun the process or append events. Implement this in-memory private path,
-   then perform focused maintainer/security review. Do not add report
+   rerun the process or append events. Focused review found one planning
+   blocker: concrete check-result truth had no selected durable replay source.
+   The blocker fix now requires one Core-authored payload-free result event
+   committed atomically with invocation and run terminalization. Focused
+   re-review accepts that correction with no remaining blocker. Implement this
+   in-memory private path, then perform focused maintainer/security review. Do
+   not add report
    persistence, artifacts, released CLI output, another profile, arbitrary
    commands, scheduling, nested harnesses, automatic approval, providers,
    writes, or hosted expansion.

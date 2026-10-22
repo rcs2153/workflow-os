@@ -1,6 +1,7 @@
 # Trusted-Host Terminal WorkReport Composition Plan
 
-Status: planning blocker fixed; focused re-review required before implementation.
+Status: planning accepted after focused blocker fix and re-review;
+implementation not started.
 
 Related foundations:
 
