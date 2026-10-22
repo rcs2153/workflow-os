@@ -134,9 +134,12 @@ phase` language does not supersede the active queue.
    It accepted the call, policy, scope, failure, receipt, and privacy
    boundaries but found that the operation builds an ad hoc selected-record
    hash instead of a validated exact-query source snapshot and cannot detect
-   rollback without a prior trusted generation or watermark. Proceed next to
-   the bounded source-snapshot and rollback blocker fix. Do not add another
-   operation or provider mutation first.
+   rollback without a prior trusted generation or watermark. The bounded
+   source-snapshot and rollback fix is now implemented and recorded in the
+   [Scoped Capability GitHub Read-Only Integration Blocker Fix
+   Report](docs/concepts/SCOPED_CAPABILITY_GITHUB_READ_ONLY_INTEGRATION_BLOCKER_FIX_REPORT.md).
+   Proceed next to its focused blocker-fix review. Do not add another operation
+   or provider mutation first.
 
 The first-use CLI and integration-check item added during the prior queue
 reconciliation was stale: both defects were already fixed and accepted in PR

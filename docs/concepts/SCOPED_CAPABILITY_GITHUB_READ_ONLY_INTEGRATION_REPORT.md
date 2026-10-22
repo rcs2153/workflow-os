@@ -62,7 +62,16 @@ source query, capability resource, adapter request metadata, and adapter call.
 
 The authority input comes from the registered Core-owned source. Callers
 cannot supply grants, availability records, fact sets, projections, receipts,
-or a serialized snapshot as authority.
+or a serialized snapshot as authority. The operation now constructs a
+validated exact-query `CurrentAuthoritySourceSnapshot` for capability grants
+and availability, binds its watermark to the complete registered inventory,
+and uses that snapshot commitment in the fact set and receipt.
+
+Source continuity is explicit. `FirstObservation` records that no prior
+trusted source state is available. `PriorObservation` supplies the prior
+trusted generation and watermark; lower generations and same-generation
+watermark substitutions fail before the adapter call. The helper does not
+persist continuity state itself.
 
 ## 6. Receipt And Failure Semantics
 
@@ -96,6 +105,10 @@ Focused tests prove:
 - workflow-wide authority is insufficient for this exact-scope slice;
 - stale source data, unavailable capability, unmet independent policy
   prerequisites, and excess sensitivity block before the adapter;
+- incomplete exact-query snapshots, generation rollback, and same-generation
+  watermark substitution block before the adapter;
+- exact run, step, and harness mismatches make zero adapter calls;
+- invalid owner and repository segment boundaries make zero adapter calls;
 - adapter failure produces no receipt;
 - receipt failure after a successful read has its own non-retry posture;
 - secret-like repository input is rejected without leakage; and
@@ -125,6 +138,8 @@ modified.
 
 - The integration is crate-private and has no executor or workflow-schema
   wiring.
+- A trusted caller must carry prior generation and watermark state between
+  observations; this helper validates continuity but does not persist it.
 - Required validation is fixture-backed; live network behavior is not an
   acceptance dependency.
 - Independent grant prerequisites are rejected rather than evaluated.
