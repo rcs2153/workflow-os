@@ -88,17 +88,30 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Reconcile the Active Delivery Queue before selecting another
-   implementation slice.** The Core-owned durable capability-source continuity
-   boundary is implemented and focused-review accepted. Its original
-   caller-selectable continuity limitation is closed for the private local
-   GitHub repository-metadata read. Select one executable runtime-composition
-   boundary from already accepted foundations; do not add a second provider
-   operation or provider mutation by implication. The completed phase is
-   recorded in the [Capability Source Continuity
-   Review](docs/concepts/CAPABILITY_SOURCE_CONTINUITY_REVIEW.md).
+2. **Review the selected executor capability-gated GitHub read-only
+   composition.** Queue reconciliation selects one crate-private, opt-in
+   executor operation for the already accepted GitHub repository-metadata read.
+   The operation must rehydrate the current run and immutable bundle, prove the
+   exact step and cursor, resolve current authority, reconcile durable source
+   continuity, consume one cursor-bound continuation claim, invoke the existing
+   injected adapter once, and project bounded telemetry, receipt, and evidence
+   posture. Focused plan review must resolve event-vocabulary,
+   operation-selection, evidence-projection, and transaction-boundary questions
+   before implementation. Do not add a second provider operation, provider
+   mutation, public/default behavior, CLI/schema exposure, runtime config,
+   hosted identity, OpenShell, or nested harness execution. See the [queue
+   reconciliation report](docs/concepts/EXECUTOR_CAPABILITY_GITHUB_READ_ONLY_QUEUE_RECONCILIATION_REPORT.md)
+   and [implementation plan](docs/implementation-plans/executor-capability-github-read-only-composition-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Post-continuity queue reconciliation complete.** The next runtime slice is
+  one private executor composition of the existing capability-gated GitHub
+  repository-metadata read. The generic `SkillHandler` was not selected as the
+  authority boundary because mapped string input cannot prove the complete
+  run, bundle, step, cursor, harness, source, and capability context. No code or
+  runtime behavior changed during selection. See the [queue reconciliation
+  report](docs/concepts/EXECUTOR_CAPABILITY_GITHUB_READ_ONLY_QUEUE_RECONCILIATION_REPORT.md).
 
 - **Core-owned durable capability-source continuity accepted.** The private
   local vertical slice derives first-versus-prior observation from managed
