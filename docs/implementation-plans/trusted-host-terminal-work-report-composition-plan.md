@@ -1,6 +1,6 @@
 # Trusted-Host Terminal WorkReport Composition Plan
 
-Status: planning complete; implementation not started.
+Status: planning blocker fixed; focused re-review required before implementation.
 
 Related foundations:
 
@@ -108,8 +108,8 @@ The composition sequence must be:
 1. invoke the exact closed profile once;
 2. derive a bounded `LocalCheckResultReference` from that same-call result when
    a concrete result exists;
-3. append and commit invocation and terminal workflow events atomically under
-   the existing lifecycle boundary;
+3. append one payload-free `LocalCheckResultRecorded` event in the same atomic
+   lifecycle batch as invocation and run terminal events;
 4. rehydrate the exact terminal run and immutable bundle;
 5. verify that the result reference and terminal events bind to the same run,
    workflow, step, profile, command, and bundle;
@@ -139,6 +139,41 @@ bounded known limitation. It must not synthesize a passing, failed, or timed-out
 result.
 
 The implementation must never rerun the command to produce report evidence.
+
+### Durable Result Binding
+
+Every concrete `Passed`, `Failed`, or `TimedOut` result must produce exactly one
+Core-authored `LocalCheckResultRecorded` workflow event. This event is the
+authoritative replay source for report composition. It is not a WorkReport,
+report artifact, or raw check-result record.
+
+The event must bind:
+
+- validated local-check result ID and status;
+- run ID, workflow ID and version, step ID, and invocation attempt ID;
+- selected trusted-host profile ID and canonical command ID;
+- immutable run-bundle root commitment;
+- bounded stable output reference when one exists;
+- exact invocation terminal event relationship; and
+- Core-provided result timestamp.
+
+The event must not contain stdout, stderr, summaries, command transcripts,
+paths, executable fingerprints, environment values, source content, or
+payloads. Its stable reference representation must be derivable through the
+existing validated `LocalCheckResultReference` boundary.
+
+The event is appended in the same state-backend compare-and-append operation as
+the matching `SkillInvocationSucceeded` or `SkillInvocationFailed` event and
+the terminal `RunCompleted` or `RunFailed` event. A concrete result cannot
+terminalize the trusted-host run unless all three durable facts commit
+together. Internal handler errors that produce no concrete result append no
+`LocalCheckResultRecorded` event and retain the explicit unavailable posture.
+
+Existing-run reconciliation must require exactly one matching event for a
+concrete result. Missing, duplicate, mismatched, or conflicting result ID,
+status, binding, or terminal-event relationship fails closed with a stable
+non-leaking error. Exact replay rehydrates this event and never trusts a
+caller-provided reference or output-ref string.
 
 ## 7. Report Identity And Contract
 
@@ -232,11 +267,11 @@ Exact terminal replay must:
 - append no workflow or invocation events; and
 - return the same generated or generation-failed posture deterministically.
 
-If the concrete bounded check-result reference is not durably reconstructible
-from accepted state, implementation must not infer it from output-ref text.
-That condition is an implementation blocker for replay and requires a narrow
-payload-free durable reference record or an explicit report limitation. It
-does not authorize storing raw `LocalCheckResult` output.
+The concrete bounded check-result reference must be reconstructed from the
+atomic `LocalCheckResultRecorded` event. Implementation must not infer it from
+output-ref text. Missing or conflicting durable result binding fails closed;
+it cannot be downgraded to a known limitation for a concrete result. This does
+not authorize storing raw `LocalCheckResult` output.
 
 Crash after terminal commit but before report composition must reconcile from
 terminal state. Because this phase is in-memory only, it does not claim durable
@@ -281,6 +316,14 @@ Focused implementation tests must prove:
 - all required v1 sections are present;
 - report identity is deterministic and bound to the exact immutable operation;
 - exact replay performs no process invocation and appends no events;
+- the result-binding event commits atomically with invocation and run terminal
+  events;
+- crash recovery after terminal commit and before report composition
+  reconstructs the same result reference;
+- missing, duplicate, result-ID-conflicting, status-conflicting, or
+  binding-conflicting events fail closed;
+- passing, failed, and timed-out result events contain no output, summaries,
+  paths, or payloads;
 - run, workflow, step, profile, command, result, bundle, and actor substitution
   fail closed;
 - report failure preserves workflow pass/fail status;
@@ -308,21 +351,22 @@ Implement in one bounded vertical slice:
 8. perform focused maintainer/security review before any artifact or released
    surface is considered.
 
-## 16. Blockers To Resolve During Implementation
+## 16. Resolved Blocker And Remaining Design Obligations
 
-Before implementation can be accepted, the code must resolve these questions
-without widening scope:
+The replay-source blocker is resolved by mandating the atomic payload-free
+`LocalCheckResultRecorded` event above. A limitation-only replay is not
+permitted for a concrete check result.
 
-- how a bounded check-result reference survives terminal commit for exact
-  replay without persisting raw output;
+Implementation must still select these bounded details without widening scope:
+
 - which exact terminal event timestamp is the report generation timestamp;
 - which existing approval reference can be cited without reconstructing
   approval reason text; and
 - how a report-generation error is returned through the opaque operation
   result without weakening fixed host output.
 
-These are implementation design obligations, not authorization for a new
-general persistence model.
+These are non-blocking implementation details, not authorization for a general
+persistence model.
 
 ## 17. Final Recommendation
 

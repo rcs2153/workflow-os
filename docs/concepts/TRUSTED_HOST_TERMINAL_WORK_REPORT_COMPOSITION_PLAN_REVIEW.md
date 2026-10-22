@@ -163,6 +163,12 @@ Remove the option to treat missing replay evidence as a mere known limitation.
 Define minimum fields, ownership, atomicity, conflict behavior, and recovery
 tests without authorizing raw result persistence or a WorkReport artifact.
 
+Fix-forward status: addressed in
+[Trusted-Host Terminal WorkReport Composition Plan Blocker Fix
+Report](TRUSTED_HOST_TERMINAL_WORK_REPORT_COMPOSITION_PLAN_BLOCKER_FIX_REPORT.md).
+The original finding remains part of the review record pending focused
+re-review.
+
 ## 12. Non-Blocking Follow-Ups
 
 - Select the exact existing domain-separated digest helper during
