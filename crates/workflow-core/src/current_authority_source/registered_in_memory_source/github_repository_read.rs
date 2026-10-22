@@ -281,14 +281,28 @@ impl RegisteredInMemoryCurrentAuthoritySource {
         input: &CurrentAuthorityGitHubRepositoryReadInput<'_, C>,
     ) -> CurrentAuthorityGitHubRepositoryReadOutcome {
         let prepared = match self
-            .prepare_github_repository_read(input, &CapabilityUseSourceContinuity::First)
+            .prepare_github_repository_read_with_durable_continuity(state, input)
         {
             Ok(prepared) => prepared,
             Err(error) => {
                 return CurrentAuthorityGitHubRepositoryReadOutcome::BlockedBeforeRead { error };
             }
         };
-        let prior = match state.compare_and_advance_capability_source_continuity(
+        Self::execute_prepared_github_repository_read(input, prepared, |proof| {
+            CapabilityUseAuthorityReceipt::from_successful_use(&proof)
+        })
+    }
+
+    pub(crate) fn prepare_github_repository_read_with_durable_continuity<
+        C: GitHubReadOnlyClient,
+    >(
+        &self,
+        state: &SqliteStateBackend,
+        input: &CurrentAuthorityGitHubRepositoryReadInput<'_, C>,
+    ) -> Result<PreparedGitHubRepositoryRead, WorkflowOsError> {
+        let prepared =
+            self.prepare_github_repository_read(input, &CapabilityUseSourceContinuity::First)?;
+        let prior = state.compare_and_advance_capability_source_continuity(
             &CapabilitySourceContinuityObservation {
                 continuity_key: &prepared.continuity_key,
                 source_registration_commitment: &prepared.source_registration_commitment,
@@ -296,12 +310,7 @@ impl RegisteredInMemoryCurrentAuthoritySource {
                 generation: prepared.source_generation,
                 watermark: &prepared.source_watermark,
             },
-        ) {
-            Ok(prior) => prior,
-            Err(error) => {
-                return CurrentAuthorityGitHubRepositoryReadOutcome::BlockedBeforeRead { error };
-            }
-        };
+        )?;
         let continuity = match prior {
             CapabilitySourceContinuityPrior::First => CapabilityUseSourceContinuity::First,
             CapabilitySourceContinuityPrior::PriorUnversioned { watermark } => {
@@ -315,16 +324,12 @@ impl RegisteredInMemoryCurrentAuthoritySource {
                 watermark,
             },
         };
-        if let Err(error) = validate_source_continuity(
+        validate_source_continuity(
             &continuity,
             prepared.source_generation,
             &prepared.source_watermark,
-        ) {
-            return CurrentAuthorityGitHubRepositoryReadOutcome::BlockedBeforeRead { error };
-        }
-        Self::execute_prepared_github_repository_read(input, prepared, |proof| {
-            CapabilityUseAuthorityReceipt::from_successful_use(&proof)
-        })
+        )?;
+        Ok(prepared)
     }
 
     #[cfg(test)]
@@ -372,7 +377,7 @@ impl RegisteredInMemoryCurrentAuthoritySource {
         Self::execute_prepared_github_repository_read(input, prepared, receipt_producer)
     }
 
-    fn execute_prepared_github_repository_read<C, F>(
+    pub(crate) fn execute_prepared_github_repository_read<C, F>(
         input: &CurrentAuthorityGitHubRepositoryReadInput<'_, C>,
         prepared: PreparedGitHubRepositoryRead,
         receipt_producer: F,
@@ -734,7 +739,7 @@ impl RegisteredInMemoryCurrentAuthoritySource {
     }
 }
 
-struct PreparedGitHubRepositoryRead {
+pub(crate) struct PreparedGitHubRepositoryRead {
     owner: String,
     repository: String,
     request: crate::AdapterRequest,

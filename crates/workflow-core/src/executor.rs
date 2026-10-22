@@ -8,6 +8,9 @@ use std::time::Duration;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+#[allow(dead_code)]
+mod github_repository_read_composition;
+
 #[cfg(feature = "trusted-host-application-spi")]
 use crate::local_check::ExplicitLocalCheckProfileId;
 use crate::local_check::{
@@ -9515,12 +9518,27 @@ where
         plan: &ExecutionPlan,
         telemetry: &[AdapterTelemetryRecord],
     ) -> Result<(), WorkflowOsError> {
+        self.emit_adapter_telemetry_for_context(
+            &plan.step.id,
+            &plan.skill_id,
+            &plan.skill_version,
+            telemetry,
+        )
+    }
+
+    fn emit_adapter_telemetry_for_context(
+        &self,
+        step_id: &StepId,
+        skill_id: &SkillId,
+        skill_version: &SkillVersion,
+        telemetry: &[AdapterTelemetryRecord],
+    ) -> Result<(), WorkflowOsError> {
         for record in telemetry {
             let audit_record = AdapterRuntimeAuditRecord::from_invocation(
                 &record.invocation,
-                Some(plan.step.id.clone()),
-                Some(plan.skill_id.clone()),
-                Some(plan.skill_version.clone()),
+                Some(step_id.clone()),
+                Some(skill_id.clone()),
+                Some(skill_version.clone()),
                 "workflow-core.local-executor",
             );
             self.backend.append_adapter_audit_record(&audit_record)?;
@@ -9529,9 +9547,9 @@ where
             let observability_record = AdapterRuntimeObservabilityRecord::from_records(
                 &record.invocation,
                 &record.observability,
-                Some(plan.step.id.clone()),
-                Some(plan.skill_id.clone()),
-                Some(plan.skill_version.clone()),
+                Some(step_id.clone()),
+                Some(skill_id.clone()),
+                Some(skill_version.clone()),
                 "workflow-core.local-executor",
             );
             self.backend

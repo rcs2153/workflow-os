@@ -1,9 +1,10 @@
 # Executor Capability-Gated GitHub Read-Only Composition Plan
 
-Status: Planning complete. This plan selects the first executor-facing
+Status: Implementation complete. This plan selected the first executor-facing
 composition of the accepted, crate-private capability-gated GitHub repository
-metadata read. Implementation and focused review remain separate governed
-phases.
+metadata read. The implementation is recorded in the
+[Executor Capability-Gated GitHub Read-Only Composition Report](../concepts/EXECUTOR_CAPABILITY_GITHUB_READ_ONLY_COMPOSITION_REPORT.md).
+Focused maintainer/security review remains a separate governed phase.
 
 Related foundations:
 
@@ -344,4 +345,3 @@ accepts the event, operation-selection, evidence, and transaction boundaries,
 implement this one crate-private executor composition. Continue to defer a
 second provider operation, every provider mutation, public/default behavior,
 CLI/schema exposure, hosted identity, OpenShell, and nested harness execution.
-
