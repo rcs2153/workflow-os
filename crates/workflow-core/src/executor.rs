@@ -649,6 +649,7 @@ pub fn compose_trusted_host_terminal_work_report(
                 "workflow_os_project_validation"
             }
             ExplicitLocalCheckProfileId::DocsCheck => "docs_check",
+            ExplicitLocalCheckProfileId::CargoFmtCheck => "cargo_fmt_check",
         },
         bindings.result_binding.step_id().as_str(),
         bindings.result_binding.command_id().as_str(),
@@ -918,6 +919,7 @@ pub fn compose_trusted_host_two_step_terminal_work_report(
                     "workflow_os_project_validation"
                 }
                 ExplicitLocalCheckProfileId::DocsCheck => "docs_check",
+                ExplicitLocalCheckProfileId::CargoFmtCheck => "cargo_fmt_check",
             },
             result.command_id().as_str(),
             result.result_id().as_str(),
@@ -12312,6 +12314,10 @@ fn trusted_host_profile_authority_identities(
         ExplicitLocalCheckProfileId::DocsCheck => Ok((
             crate::HarnessContractId::new("harness/docs-check")?,
             crate::CurrentAuthoritySourceId::new("source/trusted-host-docs-check")?,
+        )),
+        ExplicitLocalCheckProfileId::CargoFmtCheck => Ok((
+            crate::HarnessContractId::new("harness/cargo-fmt-check")?,
+            crate::CurrentAuthoritySourceId::new("source/trusted-host-cargo-fmt-check")?,
         )),
     }
 }

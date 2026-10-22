@@ -19,7 +19,7 @@ use workflow_core::{
 };
 use workflow_local_host::LocalHostPreparedOperation;
 
-const ALLOWED_ARGUMENTS: [&str; 16] = [
+const ALLOWED_ARGUMENTS: [&str; 20] = [
     "mode",
     "profile",
     "governance-project-root",
@@ -36,6 +36,10 @@ const ALLOWED_ARGUMENTS: [&str; 16] = [
     "actor",
     "correlation-id",
     "npm-cache-directory",
+    "cargo-executable",
+    "cargo-fmt-executable",
+    "rustfmt-executable",
+    "toolchain-root",
 ];
 const REQUIRED_ARGUMENTS: [&str; 9] = [
     "governance-project-root",
@@ -157,7 +161,13 @@ fn run_one_step(arguments: &BTreeMap<String, String>) -> Result<&'static str, &'
 
 #[allow(clippy::too_many_lines)]
 fn run_two_step(arguments: &BTreeMap<String, String>) -> Result<&'static str, &'static str> {
-    if arguments.contains_key("profile") || arguments.contains_key("step-id") {
+    if arguments.contains_key("profile")
+        || arguments.contains_key("step-id")
+        || arguments.contains_key("cargo-executable")
+        || arguments.contains_key("cargo-fmt-executable")
+        || arguments.contains_key("rustfmt-executable")
+        || arguments.contains_key("toolchain-root")
+    {
         return Err("input.invalid");
     }
     let governance_project_root = path_argument(arguments, "governance-project-root")?;
@@ -346,7 +356,12 @@ fn resolve_profile(
 ) -> Result<workflow_core::ResolvedExplicitLocalCheckProfile, &'static str> {
     match arguments.get("profile").map(String::as_str) {
         None | Some("docs-check") => {
-            if arguments.contains_key("workflow-os-executable") {
+            if arguments.contains_key("workflow-os-executable")
+                || arguments.contains_key("cargo-executable")
+                || arguments.contains_key("cargo-fmt-executable")
+                || arguments.contains_key("rustfmt-executable")
+                || arguments.contains_key("toolchain-root")
+            {
                 return Err("input.invalid");
             }
             let repository_root = path_argument(arguments, "repository-root")?;
@@ -360,12 +375,38 @@ fn resolve_profile(
             if arguments.contains_key("repository-root")
                 || arguments.contains_key("npm-executable")
                 || arguments.contains_key("npm-cache-directory")
+                || arguments.contains_key("cargo-executable")
+                || arguments.contains_key("cargo-fmt-executable")
+                || arguments.contains_key("rustfmt-executable")
+                || arguments.contains_key("toolchain-root")
             {
                 return Err("input.invalid");
             }
             let executable = path_argument(arguments, "workflow-os-executable")?;
             ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
                 .resolve(executable, governance_project_root.to_path_buf())
+                .map_err(|_| "profile.invalid")
+        }
+        Some("cargo-fmt-check") => {
+            if arguments.contains_key("npm-executable")
+                || arguments.contains_key("npm-cache-directory")
+                || arguments.contains_key("workflow-os-executable")
+            {
+                return Err("input.invalid");
+            }
+            let cargo = path_argument(arguments, "cargo-executable")?;
+            let cargo_fmt = path_argument(arguments, "cargo-fmt-executable")?;
+            let rustfmt = path_argument(arguments, "rustfmt-executable")?;
+            let toolchain_root = path_argument(arguments, "toolchain-root")?;
+            let repository_root = path_argument(arguments, "repository-root")?;
+            ExplicitLocalCheckProfileSelection::cargo_fmt_check()
+                .resolve_cargo_fmt_check(
+                    &cargo,
+                    &cargo_fmt,
+                    &rustfmt,
+                    &toolchain_root,
+                    &repository_root,
+                )
                 .map_err(|_| "profile.invalid")
         }
         Some(_) => Err("profile.invalid"),

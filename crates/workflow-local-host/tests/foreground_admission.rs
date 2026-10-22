@@ -30,6 +30,10 @@ struct Fixture {
     database: PathBuf,
     npm: PathBuf,
     workflow_os: PathBuf,
+    cargo: PathBuf,
+    cargo_fmt: PathBuf,
+    rustfmt: PathBuf,
+    toolchain: PathBuf,
 }
 
 impl Fixture {
@@ -56,11 +60,30 @@ impl Fixture {
             .permissions();
         permissions.set_mode(0o700);
         fs::set_permissions(&workflow_os, permissions).expect("fake workflow-os executable");
+        let toolchain = root.join("toolchain");
+        let toolchain_bin = toolchain.join("bin");
+        fs::create_dir_all(&toolchain_bin).expect("fake toolchain bin");
+        let cargo = toolchain_bin.join("cargo");
+        let cargo_fmt = toolchain_bin.join("cargo-fmt");
+        let rustfmt = toolchain_bin.join("rustfmt");
+        for executable in [&cargo, &cargo_fmt, &rustfmt] {
+            fs::write(executable, "#!/bin/sh\nexit 0\n").expect("fake formatter executable");
+            let mut permissions = fs::metadata(executable)
+                .expect("fake formatter metadata")
+                .permissions();
+            permissions.set_mode(0o700);
+            fs::set_permissions(executable, permissions)
+                .expect("fake formatter executable permissions");
+        }
         Self {
             id,
             database: root.join("state.sqlite3"),
             npm,
             workflow_os,
+            cargo,
+            cargo_fmt,
+            rustfmt,
+            toolchain,
             root,
         }
     }
@@ -73,6 +96,83 @@ impl Fixture {
         ImmutableRunBundleId::new(format!("bundle/local-host-{label}-{}", self.id))
             .expect("bundle id")
     }
+}
+
+#[test]
+fn foreground_binary_executes_exact_cargo_fmt_profile_and_replays_terminal_state() {
+    let fixture = Fixture::new();
+    let governance_root = fixture.root.join("cargo-fmt-governance");
+    let repository_root = fixture.root.join("cargo-repository");
+    write_cargo_fmt_project(&governance_root);
+    fs::create_dir_all(repository_root.join("src")).expect("Cargo source directory");
+    fs::write(
+        repository_root.join("Cargo.toml"),
+        "[package]\nname = \"fixture\"\nversion = \"0.0.0\"\n",
+    )
+    .expect("Cargo manifest");
+    fs::write(
+        repository_root.join("src/lib.rs"),
+        "pub fn value() -> u8 { 1 }\n",
+    )
+    .expect("Cargo source");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("cargo-fmt");
+    let bundle_id = fixture.bundle_id("cargo-fmt");
+
+    let output = invoke_cargo_fmt(
+        &fixture,
+        &governance_root,
+        &repository_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+
+    assert!(
+        output.status.success(),
+        "foreground stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("bounded stdout"),
+        "trusted_host_local_application: operation.terminal_report_artifact_persisted\n"
+    );
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let run = backend
+        .rehydrate_run(&run_id)
+        .expect("durable Cargo format run");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_terminal_result_binding(&run, workflow_core::LocalCheckResultStatus::Passed);
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("persisted Cargo format report artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(local_check_citation_count(artifacts[0].work_report()), 1);
+    let event_count = run.events.len();
+
+    let replay = invoke_cargo_fmt(
+        &fixture,
+        &governance_root,
+        &repository_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(replay.status.success());
+    assert_eq!(
+        String::from_utf8(replay.stdout).expect("bounded replay stdout"),
+        "trusted_host_local_application: admission.terminal_replay_report_artifact_already_persisted\n"
+    );
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("replayed Cargo format run")
+            .events
+            .len(),
+        event_count
+    );
 }
 
 #[test]
@@ -1930,6 +2030,33 @@ fn write_two_step_project(project_root: &Path) {
     .expect("policy");
 }
 
+fn write_cargo_fmt_project(project_root: &Path) {
+    fs::create_dir_all(project_root.join("workflows")).expect("workflow directory");
+    fs::create_dir_all(project_root.join("skills")).expect("skill directory");
+    fs::create_dir_all(project_root.join("policies")).expect("policy directory");
+    fs::create_dir_all(project_root.join("tests")).expect("tests directory");
+    fs::write(
+        project_root.join("workflow-os.yml"),
+        PROJECT_VALIDATION_MANIFEST,
+    )
+    .expect("manifest");
+    fs::write(
+        project_root.join("workflows/cargo-fmt.workflow.yml"),
+        CARGO_FMT_WORKFLOW,
+    )
+    .expect("Cargo format workflow");
+    fs::write(
+        project_root.join("skills/cargo-fmt.skill.yml"),
+        CARGO_FMT_SKILL,
+    )
+    .expect("Cargo format skill");
+    fs::write(
+        project_root.join("policies/local.policy.yml"),
+        "schema_version: workflowos.dev/v0\nid: local/d\nname: Local\ndescription: Bounded local policy.\nrules:\n  - id: allow-local\n    effect: allow_local\n",
+    )
+    .expect("policy");
+}
+
 const PROJECT_VALIDATION_MANIFEST: &str = r"schema_version: workflowos.dev/v0
 project:
   id: test/trusted-host-project-validation
@@ -2075,6 +2202,97 @@ audit_requirements:
   store_references_only: true
 observability_requirements:
   metrics: [skill_latency]
+  tracing: true
+  latency_tracking: true
+";
+
+const CARGO_FMT_SKILL: &str = r"schema_version: workflowos.dev/v0
+id: local/check-cargo-fmt
+version: v0
+display_name: Check Cargo Formatting
+description: Explicit trusted-host Cargo formatting check.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+input_contract:
+  fields:
+    - name: request
+      field_type: string
+      description: Non-secret Cargo formatting request marker.
+  required: [request]
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+      description: Bounded local check summary.
+    - name: local_check_status
+      field_type: string
+      description: Bounded local check status.
+  required: [summary, local_check_status]
+allowed_capabilities:
+  - name: local.read
+failure_modes:
+  - code: cargo_fmt_failed
+    description: Cargo formatting check failed.
+    retryable: false
+evaluation_criteria:
+  - name: explicit_handler_only
+    description: Execute only through the selected closed handler.
+retry_compatibility: requires_policy
+approval_sensitivity: low
+audit_requirements:
+  required: true
+  events: [SkillInvocationRequested, SkillInvocationSucceeded]
+  store_references_only: true
+observability_requirements:
+  metrics: [skill_latency]
+  tracing: true
+  latency_tracking: true
+";
+
+const CARGO_FMT_WORKFLOW: &str = r"schema_version: workflowos.dev/v0
+id: test/trusted-host-cargo-fmt
+version: v0
+display_name: Trusted Host Cargo Format
+description: Exact one-step trusted-host Cargo format fixture.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_1
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states: [requested, checked]
+steps:
+  - id: cargo-fmt
+    skill_ref:
+      id: local/check-cargo-fmt
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: trusted-host-cargo-fmt
+        to: request
+    policy_requirements:
+      - id: local/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events: [RunCreated, SkillInvocationRequested, SkillInvocationSucceeded, RunCompleted]
+  store_references_only: true
+observability_requirements:
+  metrics: [workflow_latency]
   tracing: true
   latency_tracking: true
 ";
@@ -2295,6 +2513,50 @@ fn invoke_project_validation(
         "system/local-host-project-validation-test",
         "--correlation-id",
         "correlation-local-host-project-validation-test",
+    ])
+    .output()
+    .expect("foreground binary")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn invoke_cargo_fmt(
+    fixture: &Fixture,
+    governance_root: &Path,
+    repository_root: &Path,
+    run_id: &WorkflowRunId,
+    bundle_id: &ImmutableRunBundleId,
+    observed_at: &str,
+    expires_at: &str,
+) -> Output {
+    base_foreground_command(
+        fixture,
+        governance_root,
+        run_id,
+        bundle_id,
+        observed_at,
+        expires_at,
+    )
+    .args([
+        "--profile",
+        "cargo-fmt-check",
+        "--repository-root",
+        repository_root.to_str().expect("repository root"),
+        "--cargo-executable",
+        fixture.cargo.to_str().expect("Cargo path"),
+        "--cargo-fmt-executable",
+        fixture.cargo_fmt.to_str().expect("cargo-fmt path"),
+        "--rustfmt-executable",
+        fixture.rustfmt.to_str().expect("rustfmt path"),
+        "--toolchain-root",
+        fixture.toolchain.to_str().expect("toolchain root"),
+        "--workflow-id",
+        "test/trusted-host-cargo-fmt",
+        "--step-id",
+        "cargo-fmt",
+        "--actor",
+        "system/local-host-cargo-fmt-test",
+        "--correlation-id",
+        "correlation-local-host-cargo-fmt-test",
     ])
     .output()
     .expect("foreground binary")

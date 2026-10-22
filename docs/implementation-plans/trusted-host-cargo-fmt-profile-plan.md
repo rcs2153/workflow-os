@@ -1,8 +1,10 @@
 # Trusted-Host Cargo Format Check Profile Plan
 
-Status: planning complete. This plan defines the next closed no-write
-trusted-host runtime profile after the accepted two-step project-validation and
-docs-check workflow. It does not implement the profile.
+Status: implementation complete; focused implementation/security review is
+next. The closed no-write trusted-host Cargo format profile is implemented with
+exact formatter-chain binding, protected final-state commitments, one-step
+terminal report/artifact composition, and restart-safe replay. It remains
+unpublished and does not authorize broader Cargo commands or topology.
 
 Related foundations:
 
@@ -346,12 +348,11 @@ workspace validation required by the engineering standard.
 
 ## 16. Final Recommendation
 
-Proceed next with a focused maintainer/security review of this plan.
-
-If accepted, implement the one-step `CargoFmtCheck` trusted-host profile only.
-Do not add clippy, tests, arbitrary commands, provider access, external writes,
-public CLI behavior, schemas, examples, hosted expansion, another workflow
-topology, or release changes.
+Perform focused maintainer/security review of the implemented one-step
+`CargoFmtCheck` trusted-host profile. Do not add the profile to a larger
+sequential workflow until that review accepts its toolchain identity,
+final-state integrity, result/report behavior, replay, and explicit transient-
+write limitation.
 
 ## 17. Governed Planning Record
 
