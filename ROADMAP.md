@@ -88,22 +88,19 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Compose an in-memory terminal WorkReport for the trusted-host path.** The
-   second closed no-write profile is implemented and focused-review accepted.
-   Planning for the next executable composition slice is complete in the
+2. **Review the implemented in-memory terminal WorkReport composition path.**
+   The second closed no-write profile is implemented and focused-review
+   accepted. The next executable composition slice is now implemented from the
    [Trusted-Host Terminal WorkReport Composition
    Plan](docs/implementation-plans/trusted-host-terminal-work-report-composition-plan.md).
-   Core must preserve the actual same-call local-check result, commit terminal
-   workflow state, rehydrate the exact run and immutable bundle, and only then
-   construct a validated report with deterministic private identity. Report
-   failure cannot rewrite workflow pass/fail semantics, and exact replay cannot
-   rerun the process or append events. Focused review found one planning
-   blocker: concrete check-result truth had no selected durable replay source.
-   The blocker fix now requires one Core-authored payload-free result event
-   committed atomically with invocation and run terminalization. Focused
-   re-review accepts that correction with no remaining blocker. Implement this
-   in-memory private path, then perform focused maintainer/security review. Do
-   not add report
+   Core preserves the actual same-call local-check result in one payload-free
+   event committed atomically with invocation and run terminalization,
+   rehydrates the exact run and immutable bundle, and only then constructs a
+   validated report with deterministic private identity. Report failure does
+   not rewrite workflow pass/fail semantics, and exact replay neither reruns
+   the process nor appends events. The implementation report is recorded in
+   [Trusted-Host Terminal WorkReport Composition Report](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_COMPOSITION_REPORT.md).
+   Perform focused maintainer/security review next. Do not add report
    persistence, artifacts, released CLI output, another profile, arbitrary
    commands, scheduling, nested harnesses, automatic approval, providers,
    writes, or hosted expansion.

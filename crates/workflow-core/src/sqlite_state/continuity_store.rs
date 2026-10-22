@@ -144,6 +144,7 @@ impl SqliteContinuityStore {
         workflow_lifecycle: Option<(
             &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
             &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
+            Option<&crate::LocalCheckResultRecordedEvent>,
         )>,
         mutation: F,
     ) -> Result<(CommittedOperationDisposition, bool), WorkflowOsError>
@@ -219,20 +220,21 @@ impl SqliteContinuityStore {
         } else {
             expected_cursor.clone()
         };
-        let lifecycle_terminal_cursor = if let Some((lifecycle, _)) = workflow_lifecycle {
-            ContinuityCursor {
-                sequence_number: crate::EventSequenceNumber::new(
-                    projection_cursor
-                        .sequence_number
-                        .get()
-                        .checked_add(2)
-                        .ok_or_else(corrupt)?,
-                )?,
-                event_id: lifecycle.event_id("run-terminal", operation_id.as_str())?,
-            }
-        } else {
-            projection_cursor.clone()
-        };
+        let lifecycle_terminal_cursor =
+            if let Some((lifecycle, _, local_check_event)) = workflow_lifecycle {
+                ContinuityCursor {
+                    sequence_number: crate::EventSequenceNumber::new(
+                        projection_cursor
+                            .sequence_number
+                            .get()
+                            .checked_add(if local_check_event.is_some() { 3 } else { 2 })
+                            .ok_or_else(corrupt)?,
+                    )?,
+                    event_id: lifecycle.event_id("run-terminal", operation_id.as_str())?,
+                }
+            } else {
+                projection_cursor.clone()
+            };
         let window_expires_at = window.expires_at;
         let mut preflight = state.clone();
         mutation(
@@ -1272,13 +1274,17 @@ fn record_attempt_outcome_inner(
     workflow_lifecycle: Option<(
         &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
         &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
+        Option<&crate::LocalCheckResultRecordedEvent>,
     )>,
 ) -> Result<MutationResult, WorkflowOsError> {
     let expected_commitment = workflow_lifecycle.map_or_else(
         || expected_attempt_outcome_commitment(request),
-        |(lifecycle, outcome)| {
-            lifecycle
-                .outcome_request_commitment(&expected_attempt_outcome_commitment(request), outcome)
+        |(lifecycle, outcome, local_check_event)| {
+            lifecycle.outcome_projection_request_commitment(
+                &expected_attempt_outcome_commitment(request),
+                outcome,
+                local_check_event,
+            )
         },
     );
     if expected_commitment != request.request_commitment
@@ -1498,12 +1504,17 @@ impl SqliteStateBackend {
         request: &RecordAttemptOutcomeRequest<'_>,
         lifecycle: &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
         outcome: &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
+        local_check_event: Option<&crate::LocalCheckResultRecordedEvent>,
     ) -> Result<ProjectedContinuityResult<MutationResult>, WorkflowOsError> {
         if request.outcome != outcome.continuity_outcome() {
             return Err(input_invalid());
         }
         let store = SqliteContinuityStore::projected(self);
-        let result = record_attempt_outcome_inner(&store, request, Some((lifecycle, outcome)))?;
+        let result = record_attempt_outcome_inner(
+            &store,
+            request,
+            Some((lifecycle, outcome, local_check_event)),
+        )?;
         Ok(ProjectedContinuityResult {
             result,
             binding: store.take_projection()?,
@@ -1716,6 +1727,7 @@ fn persist_runtime_projection(
     workflow_lifecycle: Option<(
         &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
         &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
+        Option<&crate::LocalCheckResultRecordedEvent>,
     )>,
 ) -> Result<ContinuityProjectionBinding, WorkflowOsError> {
     let RuntimeProjectionCursors {
@@ -1875,8 +1887,39 @@ fn persist_runtime_projection(
         )),
     };
     let mut snapshot = append_event_and_project_snapshot(transaction, &event)?;
-    if let Some((lifecycle, outcome)) = workflow_lifecycle {
+    if let Some((lifecycle, outcome, local_check_event)) = workflow_lifecycle {
         let [invocation_terminal, run_terminal] = lifecycle.terminal_events(outcome);
+        let invocation_offset = if let Some(local_check_event) = local_check_event {
+            append_event_and_project_snapshot(
+                transaction,
+                &WorkflowRunEvent {
+                    sequence_number: crate::EventSequenceNumber::new(
+                        projection_cursor
+                            .sequence_number
+                            .get()
+                            .checked_add(1)
+                            .ok_or_else(corrupt)?,
+                    )?,
+                    event_id: lifecycle
+                        .event_id("local-check-result", record.operation_id.as_str())?,
+                    timestamp: record.receipt.committed_at,
+                    run_id: window.run_id.clone(),
+                    workflow_id: window.workflow_id.clone(),
+                    schema_version: first.schema_version.clone(),
+                    workflow_version: first.workflow_version.clone(),
+                    spec_content_hash: first.spec_content_hash.clone(),
+                    correlation_id: None,
+                    actor: None,
+                    idempotency_key: Some(lifecycle.idempotency_key("local-check-result")?),
+                    kind: WorkflowRunEventKind::LocalCheckResultRecorded(Box::new(
+                        local_check_event.clone(),
+                    )),
+                },
+            )?;
+            2
+        } else {
+            1
+        };
         append_event_and_project_snapshot(
             transaction,
             &WorkflowRunEvent {
@@ -1884,7 +1927,7 @@ fn persist_runtime_projection(
                     projection_cursor
                         .sequence_number
                         .get()
-                        .checked_add(1)
+                        .checked_add(invocation_offset)
                         .ok_or_else(corrupt)?,
                 )?,
                 event_id: lifecycle
@@ -5782,7 +5825,7 @@ mod conformance_backend {
                 record_attempt_outcome_inner(
                     &fixture.backend.store,
                     &request,
-                    Some((&lifecycle, &outcome)),
+                    Some((&lifecycle, &outcome, None)),
                 ),
                 Ok(MutationResult::SecurityRejected(_))
             ));
@@ -5817,7 +5860,7 @@ mod conformance_backend {
             let Err(replay_error) = record_attempt_outcome_inner(
                 &fixture.backend.store,
                 &request,
-                Some((&lifecycle, &changed_outcome)),
+                Some((&lifecycle, &changed_outcome, None)),
             ) else {
                 panic!("terminal outcome substitution must fail closed");
             };

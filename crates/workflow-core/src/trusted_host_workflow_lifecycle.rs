@@ -90,6 +90,24 @@ impl TrustedHostWorkflowLifecycleContext {
         SpecContentHash::from_bytes(hasher.finalize())
     }
 
+    pub(crate) fn outcome_projection_request_commitment(
+        &self,
+        base: &SpecContentHash,
+        outcome: &TrustedHostWorkflowTerminalOutcome,
+        local_check_event: Option<&crate::LocalCheckResultRecordedEvent>,
+    ) -> SpecContentHash {
+        let base = self.outcome_request_commitment(base, outcome);
+        let Some(local_check_event) = local_check_event else {
+            return base;
+        };
+        let mut hasher = Sha256::new();
+        hasher.update(b"workflow-os/trusted-host-workflow-lifecycle/result-projection/v1\0");
+        hasher.update(base.as_str().as_bytes());
+        hasher.update(b"\0");
+        hasher.update(local_check_event.commitment().as_str().as_bytes());
+        SpecContentHash::from_bytes(hasher.finalize())
+    }
+
     pub(crate) fn request_event(&self) -> WorkflowRunEventKind {
         WorkflowRunEventKind::SkillInvocationRequested(SkillInvocation {
             invocation_id: self.invocation_id.clone(),
@@ -159,6 +177,14 @@ impl TrustedHostWorkflowLifecycleContext {
                 WorkflowRunEventKind::RunFailed(failure.clone()),
             ],
         }
+    }
+
+    pub(crate) const fn invocation_id(&self) -> &SkillInvocationId {
+        &self.invocation_id
+    }
+
+    pub(crate) const fn step_id(&self) -> &StepId {
+        &self.step_id
     }
 
     pub(crate) fn event_id(

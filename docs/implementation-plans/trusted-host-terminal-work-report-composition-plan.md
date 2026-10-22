@@ -1,7 +1,6 @@
 # Trusted-Host Terminal WorkReport Composition Plan
 
-Status: planning accepted after focused blocker fix and re-review;
-implementation not started.
+Status: implementation complete; focused maintainer/security review pending.
 
 Related foundations:
 
@@ -13,11 +12,12 @@ Related foundations:
 
 ## 1. Executive Summary
 
-The unpublished trusted-host application now executes two closed no-write
-profiles and reconciles their terminal workflow state. It does not yet compose
-a terminal `WorkReport`. This leaves the project-validation path with durable
-workflow and invocation events but without the final governed handoff model
-that the broader architecture expects.
+The unpublished trusted-host application executes two closed no-write profiles,
+reconciles their terminal workflow state, and now composes one validated
+in-memory terminal `WorkReport`. Core records one payload-free local-check result
+binding atomically with invocation and run terminalization, then composes the
+report only from the rehydrated terminal run. Exact replay reuses that durable
+binding without rerunning the process or appending events.
 
 The next implementation should add one private, in-memory terminal
 `WorkReport` composition path for trusted-host operations. Core must compose
@@ -25,9 +25,9 @@ the report only after terminal events are durably committed and the exact run
 is rehydrated. The report must cite the actual same-call local-check result,
 not a caller assertion, reconstructed command output, or fabricated evidence.
 
-This plan does not implement reports, artifacts, persistence, released CLI
-behavior, provider access, writes, scheduling, arbitrary commands, nested
-harnesses, or hosted expansion.
+This implementation does not persist reports, write artifacts, expose report
+contents through a released CLI, add provider access or writes, schedule work,
+allow arbitrary commands, execute nested harnesses, or expand hosted behavior.
 
 ## 2. Goals
 

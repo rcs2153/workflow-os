@@ -13,8 +13,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    EventId, HarnessContractId, HarnessContractVersion, RedactionMetadata,
-    RequiredContextContractBinding, SkillHandler, SkillInput, SkillOutput, WorkReportCitationKind,
+    AuthorizedExecutionAttemptId, EventId, HarnessContractId, HarnessContractVersion,
+    ImmutableRunBundleBinding, RedactionMetadata, RequiredContextContractBinding, SkillHandler,
+    SkillInput, SkillInvocationId, SkillOutput, SpecContentHash, StepId, WorkReportCitationKind,
     WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId,
 };
 
@@ -678,6 +679,208 @@ pub enum LocalCheckResultStatus {
     PolicyDenied,
     /// Redaction failed.
     RedactionFailed,
+}
+
+/// Payload-free binding from one concrete trusted-host check result to its run lifecycle.
+///
+/// The binding intentionally excludes stdout, stderr, summaries, paths, environment values,
+/// and process payloads. Its containing workflow event is the authoritative source used by
+/// trusted-host terminal report composition and exact replay.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct LocalCheckResultRecordedEvent {
+    result_id: LocalCheckResultId,
+    command_id: LocalCheckCommandId,
+    command_kind: LocalCheckCommandKind,
+    status: LocalCheckResultStatus,
+    step_id: StepId,
+    invocation_id: SkillInvocationId,
+    attempt_id: AuthorizedExecutionAttemptId,
+    profile_id: ExplicitLocalCheckProfileId,
+    immutable_run_bundle: ImmutableRunBundleBinding,
+    invocation_terminal_event_id: EventId,
+}
+
+#[derive(Deserialize)]
+struct LocalCheckResultRecordedEventWire {
+    result_id: LocalCheckResultId,
+    command_id: LocalCheckCommandId,
+    command_kind: LocalCheckCommandKind,
+    status: LocalCheckResultStatus,
+    step_id: StepId,
+    invocation_id: SkillInvocationId,
+    attempt_id: AuthorizedExecutionAttemptId,
+    profile_id: ExplicitLocalCheckProfileId,
+    immutable_run_bundle: ImmutableRunBundleBinding,
+    invocation_terminal_event_id: EventId,
+}
+
+/// Inputs for one validated payload-free local-check result event.
+pub struct LocalCheckResultRecordedEventDefinition {
+    /// Deterministic result identity.
+    pub result_id: LocalCheckResultId,
+    /// Bound command contract identity.
+    pub command_id: LocalCheckCommandId,
+    /// Bound allowlisted command kind.
+    pub command_kind: LocalCheckCommandKind,
+    /// Concrete terminal check status.
+    pub status: LocalCheckResultStatus,
+    /// Selected workflow step.
+    pub step_id: StepId,
+    /// Bound skill invocation.
+    pub invocation_id: SkillInvocationId,
+    /// Bound authorized execution attempt.
+    pub attempt_id: AuthorizedExecutionAttemptId,
+    /// Closed trusted-host profile identity.
+    pub profile_id: ExplicitLocalCheckProfileId,
+    /// Exact immutable run bundle binding.
+    pub immutable_run_bundle: ImmutableRunBundleBinding,
+    /// Deterministic invocation-terminal event relationship.
+    pub invocation_terminal_event_id: EventId,
+}
+
+impl LocalCheckResultRecordedEvent {
+    /// Creates one validated payload-free result binding.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable error when a non-concrete result status is supplied.
+    pub fn new(
+        definition: LocalCheckResultRecordedEventDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        if !matches!(
+            definition.status,
+            LocalCheckResultStatus::Passed
+                | LocalCheckResultStatus::Failed
+                | LocalCheckResultStatus::TimedOut
+        ) {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.result_event.status_invalid",
+                "local check result event requires a concrete terminal status",
+            ));
+        }
+        Ok(Self {
+            result_id: definition.result_id,
+            command_id: definition.command_id,
+            command_kind: definition.command_kind,
+            status: definition.status,
+            step_id: definition.step_id,
+            invocation_id: definition.invocation_id,
+            attempt_id: definition.attempt_id,
+            profile_id: definition.profile_id,
+            immutable_run_bundle: definition.immutable_run_bundle,
+            invocation_terminal_event_id: definition.invocation_terminal_event_id,
+        })
+    }
+
+    /// Returns the deterministic result identity.
+    #[must_use]
+    pub const fn result_id(&self) -> &LocalCheckResultId {
+        &self.result_id
+    }
+    /// Returns the command identity.
+    #[must_use]
+    pub const fn command_id(&self) -> &LocalCheckCommandId {
+        &self.command_id
+    }
+    /// Returns the command kind.
+    #[must_use]
+    pub const fn command_kind(&self) -> LocalCheckCommandKind {
+        self.command_kind
+    }
+    /// Returns the concrete result status.
+    #[must_use]
+    pub const fn status(&self) -> LocalCheckResultStatus {
+        self.status
+    }
+    /// Returns the bound step.
+    #[must_use]
+    pub const fn step_id(&self) -> &StepId {
+        &self.step_id
+    }
+    /// Returns the bound invocation.
+    #[must_use]
+    pub const fn invocation_id(&self) -> &SkillInvocationId {
+        &self.invocation_id
+    }
+    /// Returns the bound attempt.
+    #[must_use]
+    pub const fn attempt_id(&self) -> &AuthorizedExecutionAttemptId {
+        &self.attempt_id
+    }
+    /// Returns the closed profile identity.
+    #[must_use]
+    pub const fn profile_id(&self) -> ExplicitLocalCheckProfileId {
+        self.profile_id
+    }
+    /// Returns the immutable bundle binding.
+    #[must_use]
+    pub const fn immutable_run_bundle(&self) -> &ImmutableRunBundleBinding {
+        &self.immutable_run_bundle
+    }
+    /// Returns the related invocation-terminal event identity.
+    #[must_use]
+    pub const fn invocation_terminal_event_id(&self) -> &EventId {
+        &self.invocation_terminal_event_id
+    }
+
+    pub(crate) fn commitment(&self) -> SpecContentHash {
+        let mut hasher = Sha256::new();
+        hasher.update(b"workflow-os/local-check-result-recorded/v1\0");
+        for field in [
+            self.result_id.as_str(),
+            self.command_id.as_str(),
+            self.step_id.as_str(),
+            self.invocation_id.as_str(),
+            self.attempt_id.as_str(),
+            self.immutable_run_bundle.bundle_id().as_str(),
+            self.immutable_run_bundle.bundle_version().as_str(),
+            self.immutable_run_bundle.root_hash().as_str(),
+            self.invocation_terminal_event_id.as_str(),
+        ] {
+            hasher.update(field.as_bytes());
+            hasher.update(b"\0");
+        }
+        hasher.update(format!("{:?}", self.command_kind).as_bytes());
+        hasher.update(b"\0");
+        hasher.update(format!("{:?}", self.status).as_bytes());
+        hasher.update(b"\0");
+        hasher.update(format!("{:?}", self.profile_id).as_bytes());
+        SpecContentHash::from_bytes(hasher.finalize())
+    }
+}
+
+impl fmt::Debug for LocalCheckResultRecordedEvent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCheckResultRecordedEvent")
+            .field("status", &self.status)
+            .field("profile_id", &self.profile_id)
+            .field("binding", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'de> Deserialize<'de> for LocalCheckResultRecordedEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = LocalCheckResultRecordedEventWire::deserialize(deserializer)?;
+        Self::new(LocalCheckResultRecordedEventDefinition {
+            result_id: wire.result_id,
+            command_id: wire.command_id,
+            command_kind: wire.command_kind,
+            status: wire.status,
+            step_id: wire.step_id,
+            invocation_id: wire.invocation_id,
+            attempt_id: wire.attempt_id,
+            profile_id: wire.profile_id,
+            immutable_run_bundle: wire.immutable_run_bundle,
+            invocation_terminal_event_id: wire.invocation_terminal_event_id,
+        })
+        .map_err(serde::de::Error::custom)
+    }
 }
 
 impl fmt::Display for LocalCheckResultStatus {
@@ -3275,6 +3478,8 @@ mod explicit_zero_required_context_tests {
 
     use std::fs;
 
+    use serde_json::json;
+
     use super::*;
 
     #[derive(Debug)]
@@ -3287,6 +3492,33 @@ mod explicit_zero_required_context_tests {
         ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
             panic!("profile resolution must not execute the check")
         }
+    }
+
+    #[test]
+    fn recorded_result_event_deserialization_rejects_non_concrete_status_without_leaking() {
+        let injected_status = "skipped";
+        let error = serde_json::from_value::<LocalCheckResultRecordedEvent>(json!({
+            "result_id": "local-check-result/test",
+            "command_id": "local-check-command/test",
+            "command_kind": "docs_check",
+            "status": injected_status,
+            "step_id": "step-test",
+            "invocation_id": "skill-invocation-test",
+            "attempt_id": "attempt/run-test/step-test/1",
+            "profile_id": "docs_check",
+            "immutable_run_bundle": {
+                "bundle_id": "bundle/test",
+                "bundle_version": "v1",
+                "root_hash": SpecContentHash::from_text("bundle root").as_str(),
+            },
+            "invocation_terminal_event_id": "event-invocation-terminal-test",
+        }))
+        .expect_err("non-concrete status must fail closed");
+
+        assert!(error
+            .to_string()
+            .contains("local_check.result_event.status_invalid"));
+        assert!(!error.to_string().contains(injected_status));
     }
 
     #[test]

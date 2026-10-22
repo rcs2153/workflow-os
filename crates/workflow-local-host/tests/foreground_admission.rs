@@ -90,7 +90,7 @@ fn foreground_binary_executes_explicit_project_validation_profile() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).expect("bounded stdout"),
-        "trusted_host_local_application: operation.terminal\n"
+        "trusted_host_local_application: operation.terminal_report_generated\n"
     );
     let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
     let run = backend.rehydrate_run(&run_id).expect("durable run");
@@ -128,6 +128,7 @@ fn foreground_binary_terminalizes_nonpassing_checks_as_failure() {
         event.kind,
         WorkflowRunEventKind::SkillInvocationFailed { .. }
     )));
+    assert_terminal_result_binding(&run, workflow_core::LocalCheckResultStatus::Failed);
     assert!(!run.events.iter().any(|event| matches!(
         event.kind,
         WorkflowRunEventKind::SkillInvocationSucceeded { .. } | WorkflowRunEventKind::RunCompleted
@@ -146,7 +147,7 @@ fn foreground_binary_terminalizes_nonpassing_checks_as_failure() {
     assert!(replay.status.success());
     assert_eq!(
         String::from_utf8(replay.stdout).expect("bounded replay stdout"),
-        "trusted_host_local_application: admission.terminal_replay\n"
+        "trusted_host_local_application: admission.terminal_replay_report_generated\n"
     );
     assert_eq!(
         backend
@@ -390,7 +391,7 @@ fn foreground_binary_admits_executes_and_persists_one_docs_check() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).expect("bounded stdout"),
-        "trusted_host_local_application: operation.terminal\n"
+        "trusted_host_local_application: operation.terminal_report_generated\n"
     );
     assert_eq!(output.stderr, Vec::<u8>::new());
 
@@ -409,9 +410,11 @@ fn foreground_binary_admits_executes_and_persists_one_docs_check() {
         WorkflowRunEventKindName::AuthorizedExecutionAttemptDispatchAdmitted,
         WorkflowRunEventKindName::SkillInvocationStarted,
         WorkflowRunEventKindName::AuthorizedExecutionContinuityProjected,
+        WorkflowRunEventKindName::LocalCheckResultRecorded,
         WorkflowRunEventKindName::SkillInvocationSucceeded,
         WorkflowRunEventKindName::RunCompleted,
     ]));
+    assert_terminal_result_binding(&run, workflow_core::LocalCheckResultStatus::Passed);
     let stored = backend
         .read_exact_bundle(&run_id, &bundle_id)
         .expect("durable immutable bundle");
@@ -431,7 +434,7 @@ fn foreground_binary_admits_executes_and_persists_one_docs_check() {
     assert!(replay.status.success());
     assert_eq!(
         String::from_utf8(replay.stdout).expect("bounded replay stdout"),
-        "trusted_host_local_application: admission.terminal_replay\n"
+        "trusted_host_local_application: admission.terminal_replay_report_generated\n"
     );
     assert_eq!(
         backend
@@ -441,6 +444,30 @@ fn foreground_binary_admits_executes_and_persists_one_docs_check() {
             .len(),
         event_count,
         "terminal operational replay must not duplicate events"
+    );
+}
+
+fn assert_terminal_result_binding(
+    run: &workflow_core::WorkflowRun,
+    expected_status: workflow_core::LocalCheckResultStatus,
+) {
+    let result_bindings: Vec<_> = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::LocalCheckResultRecorded(binding) => Some(binding.as_ref()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(result_bindings.len(), 1);
+    assert_eq!(result_bindings[0].status(), expected_status);
+    assert_eq!(
+        result_bindings[0].immutable_run_bundle(),
+        run.snapshot
+            .identity
+            .immutable_run_bundle
+            .as_ref()
+            .expect("bundle binding")
     );
 }
 

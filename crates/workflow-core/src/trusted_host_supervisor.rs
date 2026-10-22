@@ -28,6 +28,10 @@ use crate::{
     SkillOutput, SpecContentHash, SqliteStateBackend, Timestamp, WorkflowOsError,
     WorkflowOsErrorKind,
 };
+use crate::{
+    ImmutableRunBundleBinding, LocalCheckResult, LocalCheckResultId, LocalCheckResultRecordedEvent,
+    LocalCheckResultRecordedEventDefinition,
+};
 #[cfg(feature = "trusted-host-application-spi")]
 use crate::{LocalCheckResultStatus, ResolvedExplicitLocalCheckProfile};
 
@@ -96,6 +100,7 @@ impl TrustedHostAttemptExecutor for LocalSkillAttemptExecutor<'_> {
 #[cfg(feature = "trusted-host-application-spi")]
 pub(crate) struct TrustedHostLocalCheckAttemptExecutor<'a> {
     profile: &'a ResolvedExplicitLocalCheckProfile,
+    immutable_run_bundle: Option<ImmutableRunBundleBinding>,
     binding_commitment: SpecContentHash,
     workflow_lifecycle:
         Option<crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext>,
@@ -109,9 +114,18 @@ impl<'a> TrustedHostLocalCheckAttemptExecutor<'a> {
     ) -> Self {
         Self {
             profile,
+            immutable_run_bundle: None,
             binding_commitment,
             workflow_lifecycle: None,
         }
+    }
+
+    pub(crate) fn with_immutable_run_bundle(
+        mut self,
+        immutable_run_bundle: ImmutableRunBundleBinding,
+    ) -> Self {
+        self.immutable_run_bundle = Some(immutable_run_bundle);
+        self
     }
 
     pub(crate) fn with_workflow_lifecycle(
@@ -141,9 +155,32 @@ impl TrustedHostAttemptExecutor for TrustedHostLocalCheckAttemptExecutor<'_> {
     ) -> TrustedHostAttemptExecutionResult {
         match self.profile.execute() {
             Ok(result) if result.status() == LocalCheckResultStatus::Passed => {
-                TrustedHostAttemptExecutionResult::Succeeded(result.to_skill_output())
+                let Some(immutable_run_bundle) = &self.immutable_run_bundle else {
+                    return TrustedHostAttemptExecutionResult::TerminalFailure;
+                };
+                let output = result.to_skill_output();
+                TrustedHostAttemptExecutionResult::SucceededWithLocalCheck(
+                    output,
+                    TrustedHostLocalCheckExecutionResult {
+                        result,
+                        profile_id: self.profile.profile_id(),
+                        immutable_run_bundle: immutable_run_bundle.clone(),
+                    },
+                )
             }
-            Ok(_) | Err(_) => TrustedHostAttemptExecutionResult::TerminalFailure,
+            Ok(result) => match &self.immutable_run_bundle {
+                Some(immutable_run_bundle) => {
+                    TrustedHostAttemptExecutionResult::TerminalFailureWithLocalCheck(
+                        TrustedHostLocalCheckExecutionResult {
+                            result,
+                            profile_id: self.profile.profile_id(),
+                            immutable_run_bundle: immutable_run_bundle.clone(),
+                        },
+                    )
+                }
+                None => TrustedHostAttemptExecutionResult::TerminalFailure,
+            },
+            Err(_) => TrustedHostAttemptExecutionResult::TerminalFailure,
         }
     }
 }
@@ -163,10 +200,18 @@ impl fmt::Debug for TrustedHostAttemptExecutionContext<'_> {
 
 pub(crate) enum TrustedHostAttemptExecutionResult {
     Succeeded(SkillOutput),
+    SucceededWithLocalCheck(SkillOutput, TrustedHostLocalCheckExecutionResult),
     RetryableFailure,
     TerminalFailure,
+    TerminalFailureWithLocalCheck(TrustedHostLocalCheckExecutionResult),
     Yielded(TrustedHostYieldRequest),
     AmbiguousMayHaveStarted,
+}
+
+pub(crate) struct TrustedHostLocalCheckExecutionResult {
+    result: LocalCheckResult,
+    profile_id: crate::ExplicitLocalCheckProfileId,
+    immutable_run_bundle: ImmutableRunBundleBinding,
 }
 
 pub(crate) struct TrustedHostYieldRequest {
@@ -349,6 +394,7 @@ pub(crate) fn supervise_one_local_skill_attempt(
         &input.persistence,
         &capability,
         input.executor,
+        &input.skill_input,
         execution,
     )?;
 
@@ -419,6 +465,7 @@ fn persist_execution_result(
     persistence: &TrustedHostSupervisorPersistenceInput,
     capability: &SupervisorCapability,
     executor: &dyn TrustedHostAttemptExecutor,
+    skill_input: &SkillInput,
     execution: TrustedHostAttemptExecutionResult,
 ) -> Result<Option<SkillOutput>, WorkflowOsError> {
     let mut skill_output = None;
@@ -431,7 +478,7 @@ fn persist_execution_result(
                     persistence,
                     capability,
                     workflow_outcome.continuity_outcome(),
-                    Some((lifecycle, &workflow_outcome)),
+                    Some((lifecycle, &workflow_outcome, None)),
                 )?;
                 if matches!(
                     workflow_outcome,
@@ -450,6 +497,17 @@ fn persist_execution_result(
                 skill_output = Some(output);
             }
         }
+        TrustedHostAttemptExecutionResult::SucceededWithLocalCheck(output, local_check) => {
+            skill_output = persist_local_check_success(
+                backend,
+                persistence,
+                capability,
+                executor,
+                skill_input,
+                output,
+                &local_check,
+            )?;
+        }
         TrustedHostAttemptExecutionResult::RetryableFailure => persist_outcome(
             backend,
             persistence,
@@ -465,7 +523,7 @@ fn persist_execution_result(
                     persistence,
                     capability,
                     workflow_outcome.continuity_outcome(),
-                    Some((lifecycle, &workflow_outcome)),
+                    Some((lifecycle, &workflow_outcome, None)),
                 )?;
             } else {
                 persist_outcome(
@@ -477,6 +535,16 @@ fn persist_execution_result(
                 )?;
             }
         }
+        TrustedHostAttemptExecutionResult::TerminalFailureWithLocalCheck(local_check) => {
+            persist_local_check_failure(
+                backend,
+                persistence,
+                capability,
+                executor,
+                skill_input,
+                &local_check,
+            )?;
+        }
         TrustedHostAttemptExecutionResult::Yielded(request) => {
             persist_yield(backend, persistence, capability, request)?;
         }
@@ -485,6 +553,79 @@ fn persist_execution_result(
         }
     }
     Ok(skill_output)
+}
+
+fn required_local_check_lifecycle(
+    executor: &dyn TrustedHostAttemptExecutor,
+) -> Result<
+    &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+    WorkflowOsError,
+> {
+    executor.workflow_lifecycle_context().ok_or_else(|| {
+        supervisor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "local_check_lifecycle_missing",
+            "trusted-host local check lifecycle is unavailable",
+        )
+    })
+}
+
+fn persist_local_check_success(
+    backend: &SqliteStateBackend,
+    persistence: &TrustedHostSupervisorPersistenceInput,
+    capability: &SupervisorCapability,
+    executor: &dyn TrustedHostAttemptExecutor,
+    skill_input: &SkillInput,
+    output: SkillOutput,
+    local_check: &TrustedHostLocalCheckExecutionResult,
+) -> Result<Option<SkillOutput>, WorkflowOsError> {
+    let lifecycle = required_local_check_lifecycle(executor)?;
+    let workflow_outcome = lifecycle.normalize_success(&output);
+    let local_check_event = local_check_result_event(
+        local_check,
+        skill_input,
+        &capability.capability.attempt_id,
+        lifecycle,
+        &persistence.operation,
+    )?;
+    persist_outcome(
+        backend,
+        persistence,
+        capability,
+        workflow_outcome.continuity_outcome(),
+        Some((lifecycle, &workflow_outcome, Some(&local_check_event))),
+    )?;
+    Ok(matches!(
+        workflow_outcome,
+        crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome::Succeeded { .. }
+    )
+    .then_some(output))
+}
+
+fn persist_local_check_failure(
+    backend: &SqliteStateBackend,
+    persistence: &TrustedHostSupervisorPersistenceInput,
+    capability: &SupervisorCapability,
+    executor: &dyn TrustedHostAttemptExecutor,
+    skill_input: &SkillInput,
+    local_check: &TrustedHostLocalCheckExecutionResult,
+) -> Result<(), WorkflowOsError> {
+    let lifecycle = required_local_check_lifecycle(executor)?;
+    let workflow_outcome = crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome::terminal_failure();
+    let local_check_event = local_check_result_event(
+        local_check,
+        skill_input,
+        &capability.capability.attempt_id,
+        lifecycle,
+        &persistence.operation,
+    )?;
+    persist_outcome(
+        backend,
+        persistence,
+        capability,
+        workflow_outcome.continuity_outcome(),
+        Some((lifecycle, &workflow_outcome, Some(&local_check_event))),
+    )
 }
 
 fn normalize_capability(
@@ -629,6 +770,7 @@ fn persist_outcome(
     workflow_lifecycle: Option<(
         &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
         &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
+        Option<&LocalCheckResultRecordedEvent>,
     )>,
 ) -> Result<(), WorkflowOsError> {
     let mut request = RecordAttemptOutcomeRequest {
@@ -644,9 +786,12 @@ fn persist_outcome(
         outcome,
     };
     request.request_commitment = expected_attempt_outcome_commitment(&request);
-    if let Some((lifecycle, workflow_outcome)) = workflow_lifecycle {
-        request.request_commitment =
-            lifecycle.outcome_request_commitment(&request.request_commitment, workflow_outcome);
+    if let Some((lifecycle, workflow_outcome, local_check_event)) = workflow_lifecycle {
+        request.request_commitment = lifecycle.outcome_projection_request_commitment(
+            &request.request_commitment,
+            workflow_outcome,
+            local_check_event,
+        );
     }
     let reconciliation = ReconcileOperationRequest {
         operation_id: request.operation_id.clone(),
@@ -662,11 +807,17 @@ fn persist_outcome(
     ) {
         return reconcile_persistence(backend, &reconciliation, "outcome");
     }
-    let persisted = if let Some((lifecycle, workflow_outcome)) = workflow_lifecycle {
-        backend.record_trusted_host_attempt_outcome_projected(&request, lifecycle, workflow_outcome)
-    } else {
-        backend.record_attempt_outcome_projected(request)
-    };
+    let persisted =
+        if let Some((lifecycle, workflow_outcome, local_check_event)) = workflow_lifecycle {
+            backend.record_trusted_host_attempt_outcome_projected(
+                &request,
+                lifecycle,
+                workflow_outcome,
+                local_check_event,
+            )
+        } else {
+            backend.record_attempt_outcome_projected(request)
+        };
     let result = match persisted {
         Ok(result) => result.result,
         Err(_) => return reconcile_persistence(backend, &reconciliation, "outcome"),
@@ -686,6 +837,43 @@ fn persist_outcome(
             "trusted-host attempt outcome was rejected by current authority",
         )),
     }
+}
+
+fn local_check_result_event(
+    material: &TrustedHostLocalCheckExecutionResult,
+    skill_input: &SkillInput,
+    attempt_id: &crate::AuthorizedExecutionAttemptId,
+    lifecycle: &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+    operation_id: &ContinuityOperationId,
+) -> Result<LocalCheckResultRecordedEvent, WorkflowOsError> {
+    let invocation_terminal_event_id =
+        lifecycle.event_id("invocation-terminal", operation_id.as_str())?;
+    let identity_material = format!(
+        "workflow-os/trusted-host-local-check-result/v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        skill_input.run_id.as_str(),
+        skill_input.workflow_id.as_str(),
+        skill_input.workflow_version.as_str(),
+        lifecycle.step_id().as_str(),
+        material.result.command_id().as_str(),
+        attempt_id.as_str(),
+        material.immutable_run_bundle.root_hash().as_str(),
+    );
+    let digest = SpecContentHash::from_text(&identity_material);
+    LocalCheckResultRecordedEvent::new(LocalCheckResultRecordedEventDefinition {
+        result_id: LocalCheckResultId::new(format!(
+            "local-check-result/{}",
+            &digest.as_str()[..24]
+        ))?,
+        command_id: material.result.command_id().clone(),
+        command_kind: material.result.command_kind(),
+        status: material.result.status(),
+        step_id: lifecycle.step_id().clone(),
+        invocation_id: lifecycle.invocation_id().clone(),
+        attempt_id: attempt_id.clone(),
+        profile_id: material.profile_id,
+        immutable_run_bundle: material.immutable_run_bundle.clone(),
+        invocation_terminal_event_id,
+    })
 }
 
 fn persist_ambiguous(
