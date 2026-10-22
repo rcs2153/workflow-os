@@ -141,7 +141,12 @@ phase` language does not supersede the active queue.
    prove valid conflicting and unreadable duplicates fail closed without
    overwrite, repair, event mutation, or identifier disclosure. Perform one
    focused maintainer/security review of this correction before accepting the
-   private artifact path.
+   private artifact path. That review now accepts the correction in
+   [Trusted-Host Terminal WorkReport Artifact Blocker Fix
+   Review](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_ARTIFACT_BLOCKER_FIX_REVIEW.md):
+   both failure postures exit nonzero, durable terminal truth remains
+   unchanged, conflicting and unreadable duplicates remain untouched, and all
+   focused and workspace validation passes.
    Do not add released CLI output, another profile, arbitrary commands,
    scheduling, nested harnesses, automatic approval, providers, external
    writes, schemas, examples, or hosted expansion.
