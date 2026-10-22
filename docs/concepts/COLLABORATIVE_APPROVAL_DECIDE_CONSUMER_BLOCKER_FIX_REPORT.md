@@ -93,8 +93,9 @@ provider, or skill payloads.
 - `cargo test --workspace`: passed.
 - `npm run check:docs`: passed.
 - `git diff --check`: passed.
-- Live PostgreSQL execution: deferred to required Shared PostgreSQL State CI
-  because `WORKFLOW_OS_TEST_POSTGRES_URL` is not configured locally.
+- Required Shared PostgreSQL State CI: passed the complete live public-consumer
+  proof and corrected backup/restore rehearsal.
+- All other required repository checks: passed.
 
 ## 9. Remaining Known Limitations
 
@@ -112,8 +113,7 @@ deterministic decision binding collided with a different receipt identity. The
 bounded fix reconstructs the historical point-in-time receipt only after the
 same authority query, authority revision, revision commitment, active-grant
 commitment, and decision kind are re-proven against current state. Query or
-authority drift still fails closed. Required CI must rerun the live proof before
-this phase is accepted.
+authority drift still fails closed. Required CI reran and passed the live proof.
 
 The next required run passed the complete live consumer milestone and exposed
 a stale recovery-rehearsal expectation: the new consumer proof advances the
@@ -123,9 +123,10 @@ exact replay of restored revision 12 and rejects revision 11 as rollback.
 
 ## 10. Recommended Next Phase
 
-Perform a **focused blocker-fix maintainer/security review** after required
-Shared PostgreSQL State CI executes the live public-consumer proof. Do not add
-another collaborative capability before acceptance.
+Proceed to the **next runnable no-write trusted-host profile**. Keep the
+dedicated draft-pull-request live sandbox proof dependency-tracked until its
+least-privilege credential is available, and do not broaden collaborative
+capabilities or provider mutations through this phase.
 
 ## 11. Governed Fix Evidence
 

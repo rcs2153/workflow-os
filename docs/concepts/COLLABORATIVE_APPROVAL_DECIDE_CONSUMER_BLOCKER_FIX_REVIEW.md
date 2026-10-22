@@ -1,17 +1,17 @@
 # Collaborative ApprovalDecide Consumer Blocker Fix Review
 
-Status: required Shared PostgreSQL State CI pending
+Status: accepted
 
 ## 1. Executive Verdict
 
-**Review in progress; required live PostgreSQL evidence is pending.**
+**Blocker fixed; same-call collaborative `ApprovalDecide` consumer accepted.**
 
 The original run-binding lock and executor-boundary test blockers are fixed.
 Focused re-review also identified and fixed a project-scope substitution gap in
 restart recovery. The first two required live CI runs then exposed and the
-branch fixed both time-varying fields in exact receipt replay. Local validation
-is green. Final acceptance is intentionally withheld until required Shared
-PostgreSQL State CI reruns the complete live consumer path.
+branch fixed both time-varying fields in exact receipt replay. Required Shared
+PostgreSQL State CI now passes the complete live consumer path and the corrected
+backup/restore rehearsal. All repository-required checks are green.
 
 ## 2. Scope Verification
 
@@ -112,23 +112,23 @@ Local validation after the complete fix:
   rehearsal correctly restored the newer state but had a stale pre-consumer
   watermark expectation, now updated to exact revision 12 replay and revision
   11 rollback rejection; and
-- corrected live PostgreSQL consumer proof: pending required Shared PostgreSQL
-  State CI rerun.
+- corrected live PostgreSQL consumer proof and backup/restore rehearsal: passed
+  in required Shared PostgreSQL State CI; and
+- all other required repository checks (`Rust`, `TypeScript And Docs`, `Schema
+  SDK And Example Contracts`, `Phase 2 Read-Only Integration Contracts`,
+  `Hosted Alpha Recovery`, and `Dependency And Security`): passed.
 
 ## 10. Remaining Blockers
 
-1. Required Shared PostgreSQL State CI must execute the live public-consumer
-   proof successfully on the review commit.
-
-No additional code blocker is currently identified.
+None.
 
 ## 11. Recommended Completion
 
-Push the bounded phase branch, require all repository checks, and update this
-review with the exact Shared PostgreSQL State result. If the live job passes,
-accept the same-call collaborative `ApprovalDecide` consumer and proceed to
-the next roadmap item. If it fails, treat the failure as a blocker fix rather
-than weakening the test.
+Proceed to the next runnable no-write trusted-host profile. The dedicated
+draft-pull-request live sandbox proof remains dependency-tracked until its
+least-privilege sandbox credential is available. Do not add another
+collaborative capability or broaden provider mutations as part of this
+acceptance.
 
 ## 12. Governed Review Evidence
 

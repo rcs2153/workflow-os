@@ -84,8 +84,8 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Re-review the fixed same-call collaborative `ApprovalDecide`
-   consumer runtime boundary.** The
+2. **Accepted: fixed same-call collaborative `ApprovalDecide` consumer runtime
+   boundary.** The
    source planning, implementation, and review are accepted in the
    [Authoritative Collaborative Identity Source Boundary
    Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
@@ -114,9 +114,9 @@ phase` language does not supersede the active queue.
    receipt, then rehydrates before continuation. Focused review found that
    backend tests do not invoke this public executor path, leaving restart
    continuation, post-commit recovery, and failed-authority non-invocation
-   unproven at the claimed consumer boundary. The transaction also uses a
+   unproven at the claimed consumer boundary. The transaction also used a
    non-locking exact run-binding read despite the accepted locking requirement.
-   The narrow blocker fix now uses the locking exact run-binding read and adds
+   The accepted narrow blocker fix uses the locking exact run-binding read and adds
    direct public executor-consumer tests for success, exact replay/restart,
    post-commit recovery, and revoked-authority non-invocation. Run the proof in
    required Shared PostgreSQL State CI and repeat focused review. The first
@@ -125,9 +125,9 @@ phase` language does not supersede the active queue.
    reconstructs the historical receipt only after re-deriving the same query
    and re-proving current authority commitments. The corrected consumer proof
    passes; its new revision-12 state exposed and fixed a stale revision-8
-   expectation in the backup/restore rehearsal. Rerun the complete required
-   lane before acceptance. Do
-   not add another
+   expectation in the backup/restore rehearsal. The complete required Shared
+   PostgreSQL State lane and every other required repository check now pass.
+   Do not add another
    identity consumer during review, substitute another caller-assembled
    projection, or begin OIDC, SCIM,
    dynamic groups, enterprise administration, hosted authentication cutover,
