@@ -88,17 +88,19 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the required-context immutable execution-binding model.** The
-   bounded two-step no-write trusted-host workflow is implemented and accepted
-   after focused review fixed outcome-domain and causal-history validation
-   blockers in
+2. **Review the trusted-host Cargo format-check profile plan.** The prior queue
+   entry incorrectly pointed to a required-context review already accepted and
+   merged in PR #374. The bounded two-step no-write trusted-host workflow is
+   implemented and accepted after focused review fixed outcome-domain and
+   causal-history validation blockers in
    [Trusted-Host Two-Step No-Write Workflow Review](docs/concepts/TRUSTED_HOST_TWO_STEP_NO_WRITE_WORKFLOW_REVIEW.md).
-   The next executable phase is the focused maintainer review already awaited
-   by the
-   [Required Context Immutable Execution Binding Report](docs/concepts/REQUIRED_CONTEXT_IMMUTABLE_EXECUTION_BINDING_REPORT.md).
-   Keep the review model-only: do not add target dereference, runtime
-   consumption, provider access, writes, schemas, SDK or CLI behavior, hosted
-   expansion, or enterprise identity integration.
+   The next executable phase is the focused maintainer/security review of the
+   [Trusted-Host Cargo Format Check Profile Plan](docs/implementation-plans/trusted-host-cargo-fmt-profile-plan.md).
+   The plan selects the already modeled `cargo fmt --all --check` command as a
+   third closed profile, requires explicit toolchain identity and source-tree
+   mutation detection, and keeps clippy, tests, arbitrary commands, providers,
+   external writes, public surfaces, hosted expansion, and topology broadening
+   out of scope.
 
    Historical accepted evidence:
 
