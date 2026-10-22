@@ -12,6 +12,8 @@ mod authorized_execution_continuity;
 mod authorized_execution_continuity_state;
 mod capability_authority;
 mod ci;
+mod collaborative_approval_authority_receipt;
+mod collaborative_approval_authority_receipt_store;
 mod collaborative_identity;
 mod collaborative_identity_authority_source;
 mod current_authority_fact_set;
@@ -145,6 +147,18 @@ pub use capability_authority::{
     CapabilityResolutionReason, CapabilityResourceKind, CapabilityResourceScope,
     StepScopedCapabilityProjection, StepScopedCapabilityProjectionEntry,
     StepScopedCapabilityProjectionInput,
+};
+pub use collaborative_approval_authority_receipt::{
+    CollaborativeApprovalAuthorityReceipt, CollaborativeApprovalAuthorityReceiptCapability,
+    CollaborativeApprovalAuthorityReceiptClaimVerificationPosture,
+    CollaborativeApprovalAuthorityReceiptEffect, CollaborativeApprovalAuthorityReceiptId,
+    CollaborativeApprovalAuthorityReceiptValidity, CollaborativeApprovalAuthorityReceiptVersion,
+    CollaborativeApprovalAuthoritySourceModelVersion,
+    UnverifiedCollaborativeApprovalAuthorityReceipt,
+};
+pub use collaborative_approval_authority_receipt_store::{
+    CollaborativeApprovalAuthorityReceiptWriteOutcome,
+    PersistedCollaborativeApprovalAuthorityReceiptRecord,
 };
 pub use collaborative_identity::{
     reconcile_collaborative_project_grant_revocation,

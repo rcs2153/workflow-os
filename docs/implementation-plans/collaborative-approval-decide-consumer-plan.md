@@ -1,8 +1,9 @@
 # Collaborative ApprovalDecide Consumer Plan
 
 Status: planning and focused maintainer/security review accepted; Phase 1
-transaction-scoped source-read refactor implemented and reviewed; receipt
-persistence and the consequential consumer are not implemented
+transaction-scoped source-read refactor implemented and reviewed; Phase 2
+payload-free receipt model and dedicated create-only PostgreSQL persistence
+implemented pending focused review; the consequential consumer is not implemented
 
 Related foundations:
 
@@ -371,9 +372,12 @@ Timing-only sleeps are not sufficient evidence.
 
 ### Phase 2: Receipt Core Model And Persistence
 
-- Add the minimal payload-free receipt model.
-- Add additive PostgreSQL persistence and corruption/replay checks.
-- Keep the receipt non-authorizing.
+- Implemented: the minimal payload-free receipt model.
+- Implemented: additive PostgreSQL v4 persistence with unique approval and
+  decision-event bindings, exact replay, exact recovery, and corruption checks.
+- Preserved: the trusted receipt is serialize-only, deserialization yields an
+  explicitly unverified claim, and the receipt remains non-authorizing.
+- Pending: focused maintainer/security review before Phase 3.
 
 ### Phase 3: Same-Call ApprovalDecide Consumer
 
