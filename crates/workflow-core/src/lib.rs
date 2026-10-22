@@ -11,6 +11,7 @@ mod authority_receipt;
 mod authorized_execution_continuity;
 mod authorized_execution_continuity_state;
 mod capability_authority;
+mod capability_use_authority_receipt;
 mod ci;
 mod collaborative_approval_authority_receipt;
 mod collaborative_approval_authority_receipt_store;
@@ -147,6 +148,11 @@ pub use capability_authority::{
     CapabilityResolutionReason, CapabilityResourceKind, CapabilityResourceScope,
     StepScopedCapabilityProjection, StepScopedCapabilityProjectionEntry,
     StepScopedCapabilityProjectionInput,
+};
+pub use capability_use_authority_receipt::{
+    CapabilityUseAuthorityReceipt, CapabilityUseAuthorityReceiptClaimVerificationPosture,
+    CapabilityUseAuthorityReceiptId, CapabilityUseAuthorityReceiptOperationKind,
+    CapabilityUseAuthorityReceiptVersion, UnverifiedCapabilityUseAuthorityReceipt,
 };
 pub use collaborative_approval_authority_receipt::{
     CollaborativeApprovalAuthorityReceipt, CollaborativeApprovalAuthorityReceiptCapability,

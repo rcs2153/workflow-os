@@ -18,7 +18,7 @@ pub(crate) use registered_in_memory_source::RegisteredExplicitZeroLocalCheckSour
 pub(crate) use registered_in_memory_source::{
     RegisteredCurrentAuthorityConsumerResult, RegisteredCurrentAuthorityUseInput,
     RegisteredCurrentAuthorityUsePosture, RegisteredInMemoryCurrentAuthoritySource,
-    SuccessfulWorkReportMetadataReadProof,
+    SuccessfulCapabilityUseProof, SuccessfulWorkReportMetadataReadProof,
 };
 
 #[cfg(all(test, feature = "trusted-host-application-spi"))]
