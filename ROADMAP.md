@@ -103,7 +103,9 @@ phase` language does not supersede the active queue.
    The focused blocker fix now defines a private Core-owned result adapter that
    accepts only passing checks as trusted-host success and an exact selector
    rule with a temporary docs-check-only compatibility alias. Focused
-   maintainer/security re-review is next. Do not jump to arbitrary commands,
+   maintainer/security [re-review](docs/concepts/TRUSTED_HOST_PROJECT_VALIDATION_PROFILE_PLAN_BLOCKER_FIX_REVIEW.md)
+   accepts both corrections with no remaining planning blocker. One bounded
+   implementation vertical slice is next. Do not jump to arbitrary commands,
    another check family, default activation, scheduling, nested
    harnesses, automatic approval, providers, writes, or hosted expansion.
 

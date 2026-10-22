@@ -81,8 +81,10 @@ separate future composition phase before released or broader trusted-host use.
 
 ## 9. Recommended Next Phase
 
-Perform focused maintainer/security re-review of the corrected plan before
-implementation.
+The focused maintainer/security
+[re-review](TRUSTED_HOST_PROJECT_VALIDATION_PROFILE_PLAN_BLOCKER_FIX_REVIEW.md)
+accepts both corrections. Implement one bounded foreground-binary vertical
+slice next.
 
 ## 10. Blocker-Fix Status
 
