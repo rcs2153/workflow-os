@@ -88,7 +88,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the trusted-host Cargo format-check profile blocker fix.** The prior queue
+2. **Plan trusted-host Cargo format workflow composition.** The prior queue
    entry incorrectly pointed to a required-context review already accepted and
    merged in PR #374. The bounded two-step no-write trusted-host workflow is
    implemented and accepted after focused review fixed outcome-domain and
@@ -112,15 +112,21 @@ phase` language does not supersede the active queue.
    matrix is incomplete. The narrow blocker fix now commits an exact
    Core-owned toolchain input inventory and protected-tree exclusion policy,
    rejects repository/toolchain overlap in either direction, and completes the
-   required Core and foreground failure/privacy regressions. Conduct a focused
-   blocker-fix review next. See
+   required Core and foreground failure/privacy regressions. Focused review
+   accepts the blocker fix with no remaining blocker. The profile may now move
+   to a separately scoped composition plan; it is not automatically part of
+   the accepted two-step workflow. See
    [Trusted-Host Cargo Format Check Profile Implementation Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_PROFILE_IMPLEMENTATION_REVIEW.md).
    The fix record is in
    [Trusted-Host Cargo Format Check Profile Blocker Fix Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_PROFILE_BLOCKER_FIX_REPORT.md).
-   The plan selects the already modeled `cargo fmt --all --check` command as a
-   third closed profile, requires complete formatter-chain identity and
-   persistent-mutation detection without claiming sandbox prevention, and
-   keeps clippy, tests, arbitrary commands, providers,
+   The acceptance record is in
+   [Trusted-Host Cargo Format Check Profile Blocker Fix Review](docs/concepts/TRUSTED_HOST_CARGO_FMT_PROFILE_BLOCKER_FIX_REVIEW.md).
+   The accepted profile uses the already modeled `cargo fmt --all --check`
+   command with complete formatter-chain identity and persistent-mutation
+   detection without claiming sandbox prevention. A composition plan must
+   preserve the existing closed profiles, ordered
+   result/report truth, and exact replay. It keeps clippy, tests, arbitrary
+   commands, providers,
    external writes, public surfaces, hosted expansion, and topology broadening
    out of scope.
 
