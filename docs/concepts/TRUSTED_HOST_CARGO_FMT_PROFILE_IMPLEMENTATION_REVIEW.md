@@ -256,3 +256,5 @@ narrow fix recorded in [Trusted-Host Cargo Format Check Profile Blocker Fix
 Report](TRUSTED_HOST_CARGO_FMT_PROFILE_BLOCKER_FIX_REPORT.md). This note does
 not erase or revise the original verdict. A separate focused blocker-fix
 review remains required before acceptance or workflow composition.
+That review is now recorded in [Trusted-Host Cargo Format Check Profile
+Blocker Fix Review](TRUSTED_HOST_CARGO_FMT_PROFILE_BLOCKER_FIX_REVIEW.md).

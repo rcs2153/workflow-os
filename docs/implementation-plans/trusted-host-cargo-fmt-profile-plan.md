@@ -1,12 +1,13 @@
 # Trusted-Host Cargo Format Check Profile Plan
 
-Status: the narrow implementation blocker fix is complete; focused review is next.
+Status: implementation and focused blocker fix are accepted after review.
 The closed no-write trusted-host Cargo format profile is implemented with exact
 three-executable binding, protected repository final-state commitments,
 one-step terminal report/artifact composition, and restart-safe replay. The
 blocker fix commits the complete bounded toolchain input and exclusion
 policy boundary and completes the required focused regression matrix. It
 remains unpublished and does not authorize broader Cargo commands or topology.
+Any workflow composition requires a separate accepted plan.
 
 Related foundations:
 
