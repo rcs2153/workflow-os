@@ -4,6 +4,9 @@ use std::fmt;
 use serde::Serialize;
 
 use super::RegisteredInMemoryCurrentAuthoritySource;
+use crate::sqlite_state::capability_source_continuity_store::{
+    CapabilitySourceContinuityObservation, CapabilitySourceContinuityPrior,
+};
 use crate::{
     github_actions, github_read_request, project_step_scoped_capabilities,
     resolve_capability_authority, ActorId, AdapterError, AdapterOperationMode,
@@ -17,9 +20,9 @@ use crate::{
     CurrentAuthoritySourceReadWindow, CurrentAuthoritySourceSnapshot,
     CurrentAuthoritySourceSnapshotId, CurrentAuthoritySourceWatermark, GitHubReadOnlyAdapter,
     GitHubReadOnlyClient, GitHubReadOutcome, HarnessContractId, HarnessContractVersion,
-    RedactionMetadata, SchemaVersion, SpecContentHash, StepId, StepScopedCapabilityProjection,
-    StepScopedCapabilityProjectionInput, Timestamp, WorkReportSensitivity, WorkflowId,
-    WorkflowOsError, WorkflowRunId, WorkflowVersion,
+    RedactionMetadata, SchemaVersion, SpecContentHash, SqliteStateBackend, StepId,
+    StepScopedCapabilityProjection, StepScopedCapabilityProjectionInput, Timestamp,
+    WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowRunId, WorkflowVersion,
 };
 
 const GITHUB_READ_CAPABILITY: &str = "github.read";
@@ -118,7 +121,6 @@ pub(crate) struct CurrentAuthorityGitHubRepositoryReadInput<'a, C> {
     pub(crate) repository: &'a str,
     pub(crate) requested_sensitivity: WorkReportSensitivity,
     pub(crate) evaluated_at: Timestamp,
-    pub(crate) source_continuity: CapabilityUseSourceContinuity,
     pub(crate) correlation_id: &'a CorrelationId,
     pub(crate) redaction: &'a RedactionMetadata,
     pub(crate) policy_precheck: &'a AdapterPolicyPrecheck,
@@ -127,8 +129,11 @@ pub(crate) struct CurrentAuthorityGitHubRepositoryReadInput<'a, C> {
 
 #[derive(Clone, Eq, PartialEq)]
 pub(crate) enum CapabilityUseSourceContinuity {
-    FirstObservation,
-    PriorObservation {
+    First,
+    PriorUnversioned {
+        watermark: CurrentAuthoritySourceWatermark,
+    },
+    PriorVersioned {
         generation: CurrentAuthoritySourceGeneration,
         watermark: CurrentAuthoritySourceWatermark,
     },
@@ -137,8 +142,12 @@ pub(crate) enum CapabilityUseSourceContinuity {
 impl fmt::Debug for CapabilityUseSourceContinuity {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::FirstObservation => formatter.write_str("FirstObservation"),
-            Self::PriorObservation { generation, .. } => formatter
+            Self::First => formatter.write_str("FirstObservation"),
+            Self::PriorUnversioned { .. } => formatter
+                .debug_struct("PriorUnversionedObservation")
+                .field("watermark", &"[REDACTED]")
+                .finish(),
+            Self::PriorVersioned { generation, .. } => formatter
                 .debug_struct("PriorObservation")
                 .field("generation", generation)
                 .field("watermark", &"[REDACTED]")
@@ -264,18 +273,87 @@ impl SuccessfulCapabilityUseProof {
 }
 
 impl RegisteredInMemoryCurrentAuthoritySource {
-    pub(crate) fn read_github_repository_metadata<C: GitHubReadOnlyClient>(
+    pub(crate) fn read_github_repository_metadata_with_durable_continuity<
+        C: GitHubReadOnlyClient,
+    >(
         &self,
+        state: &SqliteStateBackend,
         input: &CurrentAuthorityGitHubRepositoryReadInput<'_, C>,
     ) -> CurrentAuthorityGitHubRepositoryReadOutcome {
-        self.read_github_repository_metadata_with_receipt(input, |proof| {
+        let prepared = match self
+            .prepare_github_repository_read(input, &CapabilityUseSourceContinuity::First)
+        {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return CurrentAuthorityGitHubRepositoryReadOutcome::BlockedBeforeRead { error };
+            }
+        };
+        let prior = match state.compare_and_advance_capability_source_continuity(
+            &CapabilitySourceContinuityObservation {
+                continuity_key: &prepared.continuity_key,
+                source_registration_commitment: &prepared.source_registration_commitment,
+                query_commitment: &prepared.continuity_query_commitment,
+                generation: prepared.source_generation,
+                watermark: &prepared.source_watermark,
+            },
+        ) {
+            Ok(prior) => prior,
+            Err(error) => {
+                return CurrentAuthorityGitHubRepositoryReadOutcome::BlockedBeforeRead { error };
+            }
+        };
+        let continuity = match prior {
+            CapabilitySourceContinuityPrior::First => CapabilityUseSourceContinuity::First,
+            CapabilitySourceContinuityPrior::PriorUnversioned { watermark } => {
+                CapabilityUseSourceContinuity::PriorUnversioned { watermark }
+            }
+            CapabilitySourceContinuityPrior::PriorVersioned {
+                generation,
+                watermark,
+            } => CapabilityUseSourceContinuity::PriorVersioned {
+                generation,
+                watermark,
+            },
+        };
+        if let Err(error) = validate_source_continuity(
+            &continuity,
+            prepared.source_generation,
+            &prepared.source_watermark,
+        ) {
+            return CurrentAuthorityGitHubRepositoryReadOutcome::BlockedBeforeRead { error };
+        }
+        Self::execute_prepared_github_repository_read(input, prepared, |proof| {
             CapabilityUseAuthorityReceipt::from_successful_use(&proof)
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn read_github_repository_metadata<C: GitHubReadOnlyClient>(
+        &self,
+        input: &CurrentAuthorityGitHubRepositoryReadInput<'_, C>,
+    ) -> CurrentAuthorityGitHubRepositoryReadOutcome {
+        self.read_github_repository_metadata_with_source_continuity(
+            input,
+            &CapabilityUseSourceContinuity::First,
+        )
+    }
+
+    #[cfg(test)]
+    fn read_github_repository_metadata_with_source_continuity<C: GitHubReadOnlyClient>(
+        &self,
+        input: &CurrentAuthorityGitHubRepositoryReadInput<'_, C>,
+        continuity: &CapabilityUseSourceContinuity,
+    ) -> CurrentAuthorityGitHubRepositoryReadOutcome {
+        self.read_github_repository_metadata_with_receipt(input, continuity, |proof| {
+            CapabilityUseAuthorityReceipt::from_successful_use(&proof)
+        })
+    }
+
+    #[cfg(test)]
     fn read_github_repository_metadata_with_receipt<C, F>(
         &self,
         input: &CurrentAuthorityGitHubRepositoryReadInput<'_, C>,
+        continuity: &CapabilityUseSourceContinuity,
         receipt_producer: F,
     ) -> CurrentAuthorityGitHubRepositoryReadOutcome
     where
@@ -284,13 +362,27 @@ impl RegisteredInMemoryCurrentAuthoritySource {
             SuccessfulCapabilityUseProof,
         ) -> Result<CapabilityUseAuthorityReceipt, WorkflowOsError>,
     {
-        let prepared = match self.prepare_github_repository_read(input) {
+        let prepared = match self.prepare_github_repository_read(input, continuity) {
             Ok(prepared) => prepared,
             Err(error) => {
                 return CurrentAuthorityGitHubRepositoryReadOutcome::BlockedBeforeRead { error };
             }
         };
 
+        Self::execute_prepared_github_repository_read(input, prepared, receipt_producer)
+    }
+
+    fn execute_prepared_github_repository_read<C, F>(
+        input: &CurrentAuthorityGitHubRepositoryReadInput<'_, C>,
+        prepared: PreparedGitHubRepositoryRead,
+        receipt_producer: F,
+    ) -> CurrentAuthorityGitHubRepositoryReadOutcome
+    where
+        C: GitHubReadOnlyClient,
+        F: FnOnce(
+            SuccessfulCapabilityUseProof,
+        ) -> Result<CapabilityUseAuthorityReceipt, WorkflowOsError>,
+    {
         let outcome = match input.adapter.read_repository_metadata(
             &prepared.request,
             &prepared.owner,
@@ -351,6 +443,7 @@ impl RegisteredInMemoryCurrentAuthoritySource {
     fn prepare_github_repository_read<C: GitHubReadOnlyClient>(
         &self,
         input: &CurrentAuthorityGitHubRepositoryReadInput<'_, C>,
+        continuity: &CapabilityUseSourceContinuity,
     ) -> Result<PreparedGitHubRepositoryRead, WorkflowOsError> {
         validate_policy_precheck(input.adapter.operation_mode(), input.policy_precheck)?;
         let owner = canonical_owner(input.owner)?;
@@ -382,6 +475,17 @@ impl RegisteredInMemoryCurrentAuthoritySource {
                 resource: resource.clone(),
             },
         };
+        let continuity_query_commitment = super::super::hash_serializable(
+            "github-repository-metadata-continuity-query-v1",
+            &query_set,
+        )?;
+        let continuity_key = super::super::hash_serializable(
+            "github-repository-metadata-continuity-key-v1",
+            &(
+                self.registration.registration_commitment(),
+                &continuity_query_commitment,
+            ),
+        )?;
         let grants = self
             .grants
             .iter()
@@ -410,7 +514,7 @@ impl RegisteredInMemoryCurrentAuthoritySource {
             &grants,
             &availability_records,
             input.evaluated_at,
-            &input.source_continuity,
+            continuity,
         )?;
         let fact_set = CapabilityUseCurrentAuthorityFactSet::new(
             query_set,
@@ -527,6 +631,10 @@ impl RegisteredInMemoryCurrentAuthoritySource {
         request
             .validate_preconditions()
             .map_err(WorkflowOsError::from)?;
+        let source_watermark = CurrentAuthoritySourceWatermark::new(format!(
+            "watermark/{}",
+            self.inventory_commitment.as_str()
+        ))?;
         Ok(PreparedGitHubRepositoryRead {
             owner,
             repository,
@@ -539,6 +647,11 @@ impl RegisteredInMemoryCurrentAuthoritySource {
             source_snapshot_commitment: fact_set.source_snapshot_commitment,
             fact_set_commitment: fact_set.fact_set_commitment,
             assessment_commitment,
+            continuity_key,
+            source_registration_commitment: self.registration.registration_commitment().clone(),
+            continuity_query_commitment,
+            source_generation: self.generation,
+            source_watermark,
         })
     }
 
@@ -633,6 +746,11 @@ struct PreparedGitHubRepositoryRead {
     source_snapshot_commitment: SpecContentHash,
     fact_set_commitment: SpecContentHash,
     assessment_commitment: SpecContentHash,
+    continuity_key: SpecContentHash,
+    source_registration_commitment: SpecContentHash,
+    continuity_query_commitment: SpecContentHash,
+    source_generation: Option<CurrentAuthoritySourceGeneration>,
+    source_watermark: CurrentAuthoritySourceWatermark,
 }
 
 fn validate_policy_precheck(
@@ -669,7 +787,19 @@ fn validate_source_continuity(
     current_generation: Option<CurrentAuthoritySourceGeneration>,
     current_watermark: &CurrentAuthoritySourceWatermark,
 ) -> Result<(), WorkflowOsError> {
-    let CapabilityUseSourceContinuity::PriorObservation {
+    if let CapabilityUseSourceContinuity::PriorUnversioned {
+        watermark: prior_watermark,
+    } = expected
+    {
+        if current_generation.is_none() && current_watermark != prior_watermark {
+            return Err(integration_error(
+                "source.watermark_changed_without_generation",
+                "registered capability-use authority source changed without a new generation",
+            ));
+        }
+        return Ok(());
+    }
+    let CapabilityUseSourceContinuity::PriorVersioned {
         generation: prior_generation,
         watermark: prior_watermark,
     } = expected
@@ -763,6 +893,8 @@ fn integration_error(suffix: &str, message: &'static str) -> WorkflowOsError {
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::fs;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -815,6 +947,33 @@ mod tests {
         correlation_id: CorrelationId,
         redaction: RedactionMetadata,
         precheck: AdapterPolicyPrecheck,
+    }
+
+    struct DurableFixture {
+        backend: SqliteStateBackend,
+        root: PathBuf,
+    }
+
+    impl DurableFixture {
+        fn new() -> Self {
+            static NEXT_DATABASE: AtomicUsize = AtomicUsize::new(1);
+            let root = std::env::temp_dir().join(format!(
+                "workflow-os-capability-source-continuity-{}-{}",
+                std::process::id(),
+                NEXT_DATABASE.fetch_add(1, Ordering::SeqCst)
+            ));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir_all(&root).expect("continuity fixture root");
+            let backend = SqliteStateBackend::open(root.join("state.sqlite3"))
+                .expect("continuity fixture database");
+            Self { backend, root }
+        }
+    }
+
+    impl Drop for DurableFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
     }
 
     impl Fixture {
@@ -913,6 +1072,24 @@ mod tests {
             )
         }
 
+        fn set_source_generation(&mut self, generation: Option<u64>) {
+            self.source.generation = generation.map(|value| {
+                CurrentAuthoritySourceGeneration::new(value).expect("source generation")
+            });
+            self.source.inventory_commitment = super::super::hash_serializable(
+                "registered-in-memory-inventory",
+                &(
+                    self.source.observed_at,
+                    self.source.source_valid_through,
+                    self.source.generation,
+                    &self.source.grants,
+                    &self.source.availability_records,
+                    &self.source.context_references,
+                ),
+            )
+            .expect("inventory commitment");
+        }
+
         fn input<'a, C>(
             &'a self,
             adapter: &'a GitHubReadOnlyAdapter<C>,
@@ -933,7 +1110,6 @@ mod tests {
                 repository,
                 requested_sensitivity: WorkReportSensitivity::Internal,
                 evaluated_at: timestamp("2026-10-22T10:15:00Z"),
-                source_continuity: CapabilityUseSourceContinuity::FirstObservation,
                 correlation_id: &self.correlation_id,
                 redaction: &self.redaction,
                 policy_precheck: &self.precheck,
@@ -983,6 +1159,201 @@ mod tests {
         let claim: UnverifiedCapabilityUseAuthorityReceipt =
             serde_json::from_str(&serialized).expect("unverified claim");
         claim.validate_claim().expect("claim");
+    }
+
+    #[test]
+    fn durable_continuity_reconstructs_first_observation_after_restart() {
+        let fixture = Fixture::exact();
+        let state = DurableFixture::new();
+        let client = CountingGitHubClient::default();
+        let calls = Arc::clone(&client.calls);
+        let adapter = adapter(client);
+
+        let first = fixture
+            .source
+            .read_github_repository_metadata_with_durable_continuity(
+                &state.backend,
+                &fixture.input(&adapter, "acme", "widgets"),
+            );
+        assert!(matches!(
+            first,
+            CurrentAuthorityGitHubRepositoryReadOutcome::Succeeded { .. }
+        ));
+
+        let reopened = SqliteStateBackend::open(state.root.join("state.sqlite3"))
+            .expect("reopen continuity database");
+        let replay = fixture
+            .source
+            .read_github_repository_metadata_with_durable_continuity(
+                &reopened,
+                &fixture.input(&adapter, "acme", "widgets"),
+            );
+        assert!(matches!(
+            replay,
+            CurrentAuthorityGitHubRepositoryReadOutcome::Succeeded { .. }
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn durable_continuity_advances_monotonically_and_rejects_rollback() {
+        let mut first = Fixture::exact();
+        first.set_source_generation(Some(1));
+        let mut advanced = Fixture::exact();
+        advanced.set_source_generation(Some(2));
+        let state = DurableFixture::new();
+        let client = CountingGitHubClient::default();
+        let calls = Arc::clone(&client.calls);
+        let adapter = adapter(client);
+
+        for fixture in [&first, &advanced] {
+            assert!(matches!(
+                fixture
+                    .source
+                    .read_github_repository_metadata_with_durable_continuity(
+                        &state.backend,
+                        &fixture.input(&adapter, "acme", "widgets"),
+                    ),
+                CurrentAuthorityGitHubRepositoryReadOutcome::Succeeded { .. }
+            ));
+        }
+        let rollback = first
+            .source
+            .read_github_repository_metadata_with_durable_continuity(
+                &state.backend,
+                &first.input(&adapter, "acme", "widgets"),
+            );
+        assert!(matches!(
+            rollback,
+            CurrentAuthorityGitHubRepositoryReadOutcome::BlockedBeforeRead { ref error }
+                if error.code()
+                    == "current_authority.github_repository_read.source_continuity.generation_rollback"
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn durable_continuity_rejects_missing_generation_and_same_generation_substitution() {
+        let fixture = Fixture::exact();
+        let state = DurableFixture::new();
+        let client = CountingGitHubClient::default();
+        let calls = Arc::clone(&client.calls);
+        let adapter = adapter(client);
+        assert!(matches!(
+            fixture
+                .source
+                .read_github_repository_metadata_with_durable_continuity(
+                    &state.backend,
+                    &fixture.input(&adapter, "acme", "widgets"),
+                ),
+            CurrentAuthorityGitHubRepositoryReadOutcome::Succeeded { .. }
+        ));
+
+        let mut missing = Fixture::exact();
+        missing.set_source_generation(None);
+        let missing_outcome = missing
+            .source
+            .read_github_repository_metadata_with_durable_continuity(
+                &state.backend,
+                &missing.input(&adapter, "acme", "widgets"),
+            );
+        assert!(matches!(
+            missing_outcome,
+            CurrentAuthorityGitHubRepositoryReadOutcome::BlockedBeforeRead { ref error }
+                if error.code()
+                    == "current_authority.github_repository_read.source_continuity.generation_missing"
+        ));
+
+        let mut substituted = Fixture::exact();
+        substituted.source.inventory_commitment = SpecContentHash::from_text("substituted");
+        let substituted_outcome = substituted
+            .source
+            .read_github_repository_metadata_with_durable_continuity(
+                &state.backend,
+                &substituted.input(&adapter, "acme", "widgets"),
+            );
+        assert!(matches!(
+            substituted_outcome,
+            CurrentAuthorityGitHubRepositoryReadOutcome::BlockedBeforeRead { ref error }
+                if error.code()
+                    == "current_authority.github_repository_read.source_continuity.watermark_substitution"
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn invalid_preparation_does_not_advance_durable_continuity() {
+        let mut invalid = Fixture::exact();
+        invalid.set_source_generation(Some(2));
+        invalid.precheck =
+            AdapterPolicyPrecheck::runtime_allowed(vec!["policy.github.read".to_owned()]);
+        let valid = Fixture::exact();
+        let state = DurableFixture::new();
+        let client = CountingGitHubClient::default();
+        let calls = Arc::clone(&client.calls);
+        let adapter = adapter(client);
+
+        assert!(matches!(
+            invalid
+                .source
+                .read_github_repository_metadata_with_durable_continuity(
+                    &state.backend,
+                    &invalid.input(&adapter, "acme", "widgets"),
+                ),
+            CurrentAuthorityGitHubRepositoryReadOutcome::BlockedBeforeRead { .. }
+        ));
+        assert!(matches!(
+            valid
+                .source
+                .read_github_repository_metadata_with_durable_continuity(
+                    &state.backend,
+                    &valid.input(&adapter, "acme", "widgets"),
+                ),
+            CurrentAuthorityGitHubRepositoryReadOutcome::Succeeded { .. }
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn provider_failure_keeps_the_accepted_durable_observation() {
+        let mut advanced = Fixture::exact();
+        advanced.set_source_generation(Some(2));
+        let rollback = Fixture::exact();
+        let state = DurableFixture::new();
+        let failing_client = CountingGitHubClient {
+            fail: true,
+            ..CountingGitHubClient::default()
+        };
+        let failing_calls = Arc::clone(&failing_client.calls);
+        let failing_adapter = adapter(failing_client);
+
+        assert!(matches!(
+            advanced
+                .source
+                .read_github_repository_metadata_with_durable_continuity(
+                    &state.backend,
+                    &advanced.input(&failing_adapter, "acme", "widgets"),
+                ),
+            CurrentAuthorityGitHubRepositoryReadOutcome::ReadFailed { .. }
+        ));
+        assert_eq!(failing_calls.load(Ordering::SeqCst), 1);
+
+        let succeeding_client = CountingGitHubClient::default();
+        let succeeding_calls = Arc::clone(&succeeding_client.calls);
+        let succeeding_adapter = adapter(succeeding_client);
+        let outcome = rollback
+            .source
+            .read_github_repository_metadata_with_durable_continuity(
+                &state.backend,
+                &rollback.input(&succeeding_adapter, "acme", "widgets"),
+            );
+        assert!(matches!(
+            outcome,
+            CurrentAuthorityGitHubRepositoryReadOutcome::BlockedBeforeRead { ref error }
+                if error.code()
+                    == "current_authority.github_repository_read.source_continuity.generation_rollback"
+        ));
+        assert_eq!(succeeding_calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]
@@ -1100,8 +1471,8 @@ mod tests {
         let client = CountingGitHubClient::default();
         let calls = Arc::clone(&client.calls);
         let adapter = adapter(client);
-        let mut input = fixture.input(&adapter, "acme", "widgets");
-        input.source_continuity = CapabilityUseSourceContinuity::PriorObservation {
+        let input = fixture.input(&adapter, "acme", "widgets");
+        let continuity = CapabilityUseSourceContinuity::PriorVersioned {
             generation: CurrentAuthoritySourceGeneration::new(1).expect("generation"),
             watermark: CurrentAuthoritySourceWatermark::new(format!(
                 "watermark/{}",
@@ -1110,7 +1481,9 @@ mod tests {
             .expect("watermark"),
         };
 
-        let outcome = fixture.source.read_github_repository_metadata(&input);
+        let outcome = fixture
+            .source
+            .read_github_repository_metadata_with_source_continuity(&input, &continuity);
 
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(matches!(
@@ -1125,13 +1498,15 @@ mod tests {
         let client = CountingGitHubClient::default();
         let calls = Arc::clone(&client.calls);
         let adapter = adapter(client);
-        let mut input = fixture.input(&adapter, "acme", "widgets");
-        input.source_continuity = CapabilityUseSourceContinuity::PriorObservation {
+        let input = fixture.input(&adapter, "acme", "widgets");
+        let continuity = CapabilityUseSourceContinuity::PriorVersioned {
             generation: CurrentAuthoritySourceGeneration::new(2).expect("generation"),
             watermark: CurrentAuthoritySourceWatermark::new("watermark/prior").expect("watermark"),
         };
 
-        let outcome = fixture.source.read_github_repository_metadata(&input);
+        let outcome = fixture
+            .source
+            .read_github_repository_metadata_with_source_continuity(&input, &continuity);
 
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(matches!(
@@ -1148,14 +1523,16 @@ mod tests {
         let client = CountingGitHubClient::default();
         let calls = Arc::clone(&client.calls);
         let adapter = adapter(client);
-        let mut input = fixture.input(&adapter, "acme", "widgets");
-        input.source_continuity = CapabilityUseSourceContinuity::PriorObservation {
+        let input = fixture.input(&adapter, "acme", "widgets");
+        let continuity = CapabilityUseSourceContinuity::PriorVersioned {
             generation: CurrentAuthoritySourceGeneration::new(1).expect("generation"),
             watermark: CurrentAuthoritySourceWatermark::new("watermark/substituted")
                 .expect("watermark"),
         };
 
-        let outcome = fixture.source.read_github_repository_metadata(&input);
+        let outcome = fixture
+            .source
+            .read_github_repository_metadata_with_source_continuity(&input, &continuity);
 
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(matches!(
@@ -1312,14 +1689,16 @@ mod tests {
         let adapter = adapter(client);
         let input = fixture.input(&adapter, "acme", "widgets");
 
-        let outcome = fixture
-            .source
-            .read_github_repository_metadata_with_receipt(&input, |_| {
+        let outcome = fixture.source.read_github_repository_metadata_with_receipt(
+            &input,
+            &CapabilityUseSourceContinuity::First,
+            |_| {
                 Err(integration_error(
                     "receipt.test_failure",
                     "receipt construction failed",
                 ))
-            });
+            },
+        );
 
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(matches!(
