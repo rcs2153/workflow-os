@@ -47,8 +47,12 @@ fixed and accepted. The receipt remains point-in-time trusted evidence and
 cannot authorize another action. Focused maintainer/security review found a
 narrow runtime-boundary evidence blocker: backend conformance is present, but
 the public executor-facing consumer is not invoked by tests, and the exact
-run-binding read does not use the accepted locking helper. A focused blocker
-fix is required before another identity consumer is selected.
+run-binding read did not use the accepted locking helper. The focused blocker
+fix is implemented and accepted: the exact binding is locked, public-consumer
+tests prove success, replay, post-commit recovery, project-scope substitution
+rejection, and revoked-authority non-invocation, and required PostgreSQL CI
+proves the corrected receipt replay and backup/restore behavior. No additional
+identity consumer is authorized by that acceptance.
 
 The first provider-write sandbox is implemented and accepted for GitHub pull
 request comments only. The second bounded Core slice now implements an
@@ -84,60 +88,17 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Accepted: fixed same-call collaborative `ApprovalDecide` consumer runtime
-   boundary.** The
-   source planning, implementation, and review are accepted in the
-   [Authoritative Collaborative Identity Source Boundary
-   Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
-   and [implementation review](docs/concepts/AUTHORITATIVE_COLLABORATIVE_IDENTITY_SOURCE_IMPLEMENTATION_REVIEW.md).
-   The [Collaborative ApprovalDecide Consumer
-   Plan](docs/implementation-plans/collaborative-approval-decide-consumer-plan.md)
-   and [focused review](docs/concepts/COLLABORATIVE_APPROVAL_DECIDE_CONSUMER_PLAN_REVIEW.md)
-   are accepted. Phase 1 is implemented and reviewed: a private source read now operates
-   inside a caller-owned PostgreSQL transaction while the existing public
-   non-authorizing read preserves its serializable behavior and payload-free
-   evidence posture. Phase 2 is implemented: the minimal
-   payload-free trusted receipt, explicitly unverified persisted claim, and
-   dedicated PostgreSQL v4 create-only store use unique approval/event
-   bindings, exact replay, exact recovery, and corruption checks. Focused
-   review found that required CI exercised migration but not those store
-   operations, and backup/restore did not prove receipt preservation. The
-   narrow PostgreSQL verification blocker fix is implemented and accepted:
-   required CI
-   invokes the exact receipt conformance test, absence of required database
-   configuration fails closed, restart recovery uses a reopened backend,
-   corrupted replay retains the corruption error, and the established logical
-   backup/restore rehearsal recovers the receipt by its decision bindings.
-   Phase 3 is implemented. The explicit executor-facing path derives a fixed
-   exact-project query, resolves database-time authority under the shared
-   advisory-lock and watermark-lock order, atomically records the decision and
-   receipt, then rehydrates before continuation. Focused review found that
-   backend tests do not invoke this public executor path, leaving restart
-   continuation, post-commit recovery, and failed-authority non-invocation
-   unproven at the claimed consumer boundary. The transaction also used a
-   non-locking exact run-binding read despite the accepted locking requirement.
-   The accepted narrow blocker fix uses the locking exact run-binding read and adds
-   direct public executor-consumer tests for success, exact replay/restart,
-   post-commit recovery, and revoked-authority non-invocation. Run the proof in
-   required Shared PostgreSQL State CI and repeat focused review. The first
-   first two required runs exposed time-varying exact-replay receipt collisions
-   in the observation time and source-snapshot commitment; the bounded fix
-   reconstructs the historical receipt only after re-deriving the same query
-   and re-proving current authority commitments. The corrected consumer proof
-   passes; its new revision-12 state exposed and fixed a stale revision-8
-   expectation in the backup/restore rehearsal. The complete required Shared
-   PostgreSQL State lane and every other required repository check now pass.
-   Do not add another
-   identity consumer during review, substitute another caller-assembled
-   projection, or begin OIDC, SCIM,
-   dynamic groups, enterprise administration, hosted authentication cutover,
-   or provider writes.
-3. **Select the next runnable no-write trusted-host profile.** Generalize the
-   accepted private docs-check proof through one additional closed profile only
-   after its authority, required-context, check, evidence, and terminal-report
-   obligations are explicit. Do not jump from the one-step proof to general
-   scheduling, nested harnesses, automatic approval, or broad command
-   execution.
+2. **Add one second closed no-write trusted-host profile.** Planning selects
+   the existing `WorkflowOsProjectValidation` profile in the
+   [Trusted-Host Project-Validation Profile
+   Plan](docs/implementation-plans/trusted-host-project-validation-profile-plan.md).
+   The plan requires exact governed-root and executable binding, a separate
+   Core-owned explicit-zero authority decision, same-call validation truth,
+   unchanged lifecycle and replay semantics, and explicit disclosure that the
+   unpublished host still creates no WorkReport artifact. Perform focused
+   maintainer/security review before implementation. Do not jump to arbitrary
+   commands, another check family, default activation, scheduling, nested
+   harnesses, automatic approval, providers, writes, or hosted expansion.
 
 Queue maintenance rule: every merged roadmap phase must update this list and
 the status date in the same PR. Completed work moves into the lane evidence or
