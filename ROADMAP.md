@@ -104,9 +104,14 @@ phase` language does not supersede the active queue.
    accepts only passing checks as trusted-host success and an exact selector
    rule with a temporary docs-check-only compatibility alias. Focused
    maintainer/security [re-review](docs/concepts/TRUSTED_HOST_PROJECT_VALIDATION_PROFILE_PLAN_BLOCKER_FIX_REVIEW.md)
-   accepts both corrections with no remaining planning blocker. One bounded
-   implementation vertical slice is next. Do not jump to arbitrary commands,
-   another check family, default activation, scheduling, nested
+   accepts both corrections with no remaining planning blocker. The bounded
+   implementation vertical slice is now complete: the unpublished host accepts
+   the explicit project-validation profile, preserves the temporary docs-check
+   compatibility alias, binds validation to the exact governed root, uses
+   profile-specific explicit-zero source identities, and terminalizes failed
+   or timed-out checks instead of converting them to successful skill output.
+   Focused maintainer/security implementation review is next. Do not jump to
+   arbitrary commands, another check family, default activation, scheduling, nested
    harnesses, automatic approval, providers, writes, or hosted expansion.
 
 Queue maintenance rule: every merged roadmap phase must update this list and

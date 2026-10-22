@@ -1,6 +1,6 @@
 # Trusted-Host Project-Validation Profile Plan
 
-Status: planning blockers corrected; focused maintainer/security re-review is
+Status: implemented; focused maintainer/security implementation review is
 next.
 
 Related foundations:
@@ -402,7 +402,10 @@ The implementation is acceptable only when:
 
 ## 19. Recommended Next Phase
 
-Perform a focused maintainer/security re-review of the corrected plan. If
-accepted, implement the trusted-host project-validation profile and shared
-trusted-host result adapter as one complete foreground-binary vertical slice.
-Do not begin another profile or broader trusted-host scheduler work first.
+Perform a focused maintainer/security review of the implemented trusted-host
+project-validation profile and shared trusted-host result adapter. The review
+must verify selector compatibility, governed-root binding, profile-specific
+explicit-zero authority, non-passing result terminalization, exact replay,
+bounded output, and the continued absence of WorkReport or provider/write
+behavior. Do not begin another profile or broader trusted-host scheduler work
+first.

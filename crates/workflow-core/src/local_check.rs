@@ -1701,14 +1701,6 @@ impl ResolvedExplicitLocalCheckHandler {
             Self::DocsCheck(handler) => Box::new(handler),
         }
     }
-
-    #[cfg(feature = "trusted-host-application-spi")]
-    fn skill_handler(&self) -> &dyn SkillHandler {
-        match self {
-            Self::WorkflowOsProjectValidation(handler) => handler,
-            Self::DocsCheck(handler) => handler,
-        }
-    }
 }
 
 impl ResolvedExplicitLocalCheckProfile {
@@ -1722,9 +1714,15 @@ impl ResolvedExplicitLocalCheckProfile {
     pub(crate) fn explicit_zero_required_context_authorization(
         &self,
     ) -> Result<ExplicitZeroRequiredContextProfileAuthorization, WorkflowOsError> {
-        if self.profile_id != ExplicitLocalCheckProfileId::DocsCheck
-            || self.command_contract() != &LocalCheckCommandContract::docs_check_model_only()?
-        {
+        let canonical = match self.profile_id {
+            ExplicitLocalCheckProfileId::WorkflowOsProjectValidation => {
+                LocalCheckCommandContract::workflow_os_project_validation_model_only()?
+            }
+            ExplicitLocalCheckProfileId::DocsCheck => {
+                LocalCheckCommandContract::docs_check_model_only()?
+            }
+        };
+        if self.command_contract() != &canonical {
             return Err(local_check_error(
                 WorkflowOsErrorKind::Security,
                 "local_check.profile.required_context_not_explicit_zero",
@@ -1848,13 +1846,41 @@ impl ResolvedExplicitLocalCheckProfile {
         LocalCheckResult::from_process_output(handler.contract(), &output)
     }
 
-    pub(crate) fn handler(&self) -> &dyn AuthoritativeLocalCheckHandler {
-        self.handler.authoritative()
+    #[cfg(feature = "trusted-host-application-spi")]
+    pub(crate) fn validate_governed_project_root(
+        &self,
+        governed_project_root: &Path,
+    ) -> Result<(), WorkflowOsError> {
+        if self.profile_id != ExplicitLocalCheckProfileId::WorkflowOsProjectValidation {
+            return Ok(());
+        }
+        let request = self.handler.authoritative().build_process_request()?;
+        let resolved_root = request.working_directory().canonicalize().map_err(|_| {
+            local_check_error(
+                WorkflowOsErrorKind::Security,
+                "local_check.profile.governed_root_unavailable",
+                "local check governed project root is unavailable",
+            )
+        })?;
+        let governed_root = governed_project_root.canonicalize().map_err(|_| {
+            local_check_error(
+                WorkflowOsErrorKind::Security,
+                "local_check.profile.governed_root_unavailable",
+                "local check governed project root is unavailable",
+            )
+        })?;
+        if resolved_root != governed_root {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Security,
+                "local_check.profile.governed_root_mismatch",
+                "local check governed project root does not match",
+            ));
+        }
+        Ok(())
     }
 
-    #[cfg(feature = "trusted-host-application-spi")]
-    pub(crate) fn skill_handler(&self) -> &dyn SkillHandler {
-        self.handler.skill_handler()
+    pub(crate) fn handler(&self) -> &dyn AuthoritativeLocalCheckHandler {
+        self.handler.authoritative()
     }
 
     pub(crate) fn into_handler(self) -> Box<dyn SkillHandler> {
@@ -2194,7 +2220,7 @@ impl LocalCheckResult {
         self.error_code.as_deref()
     }
 
-    fn to_skill_output(&self) -> SkillOutput {
+    pub(crate) fn to_skill_output(&self) -> SkillOutput {
         let mut values = BTreeMap::new();
         values.insert("summary".to_owned(), "local check completed".to_owned());
         values.insert("local_check_status".to_owned(), self.status.to_string());
@@ -3247,6 +3273,8 @@ fn validation_error(code: &'static str, message: impl Into<String>) -> WorkflowO
 mod explicit_zero_required_context_tests {
     #![allow(clippy::assert_is_empty, clippy::expect_used, clippy::panic)]
 
+    use std::fs;
+
     use super::*;
 
     #[derive(Debug)]
@@ -3262,7 +3290,7 @@ mod explicit_zero_required_context_tests {
     }
 
     #[test]
-    fn canonical_docs_check_profile_is_the_only_explicit_zero_issuer() {
+    fn canonical_closed_profiles_issue_explicit_zero_contracts() {
         let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .and_then(Path::parent)
@@ -3285,6 +3313,74 @@ mod explicit_zero_required_context_tests {
 
         assert!(contract.is_explicit_none());
         assert!(contract.requirements().is_empty());
+
+        let project_root = std::env::temp_dir().join(format!(
+            "workflow-os-explicit-zero-project-validation-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&project_root).expect("project root");
+        fs::write(
+            project_root.join("workflow-os.yml"),
+            "schema_version: workflowos.dev/v0\n",
+        )
+        .expect("project manifest");
+        let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+            .resolve_with_process_runner(
+                std::env::current_exe().expect("test binary"),
+                project_root.clone(),
+                Arc::new(NeverRun),
+            )
+            .expect("project-validation profile");
+        let contract = profile
+            .explicit_zero_required_context_contract(
+                HarnessContractId::new("harness/workflow-os-project-validation").expect("contract"),
+                HarnessContractVersion::new("v1").expect("version"),
+            )
+            .expect("explicit zero contract");
+
+        assert!(contract.is_explicit_none());
+        assert!(contract.requirements().is_empty());
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    #[test]
+    fn project_validation_rejects_governed_root_substitution_without_leakage() {
+        let fixture_root = std::env::temp_dir().join(format!(
+            "workflow-os-governed-root-substitution-{}",
+            std::process::id()
+        ));
+        let resolved_root = fixture_root.join("resolved");
+        let substituted_root = fixture_root.join("substituted");
+        fs::create_dir_all(&resolved_root).expect("resolved root");
+        fs::create_dir_all(&substituted_root).expect("substituted root");
+        fs::write(
+            resolved_root.join("workflow-os.yml"),
+            "schema_version: workflowos.dev/v0\n",
+        )
+        .expect("resolved manifest");
+        fs::write(
+            substituted_root.join("workflow-os.yml"),
+            "schema_version: workflowos.dev/v0\n",
+        )
+        .expect("substituted manifest");
+        let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+            .resolve_with_process_runner(
+                std::env::current_exe().expect("test binary"),
+                resolved_root.clone(),
+                Arc::new(NeverRun),
+            )
+            .expect("project-validation profile");
+
+        let error = profile
+            .validate_governed_project_root(&substituted_root)
+            .expect_err("governed-root substitution must fail closed");
+
+        assert_eq!(error.code(), "local_check.profile.governed_root_mismatch");
+        let rendered = error.to_string();
+        assert!(!rendered.contains(&resolved_root.to_string_lossy().into_owned()));
+        assert!(!rendered.contains(&substituted_root.to_string_lossy().into_owned()));
+        let _ = fs::remove_dir_all(fixture_root);
     }
 
     #[cfg(unix)]

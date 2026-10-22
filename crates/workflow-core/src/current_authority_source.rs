@@ -14,7 +14,7 @@ use crate::{
 mod registered_in_memory_source;
 
 #[cfg(feature = "trusted-host-application-spi")]
-pub(crate) use registered_in_memory_source::RegisteredExplicitZeroDocsCheckSourceInput;
+pub(crate) use registered_in_memory_source::RegisteredExplicitZeroLocalCheckSourceInput;
 pub(crate) use registered_in_memory_source::{
     RegisteredCurrentAuthorityConsumerResult, RegisteredCurrentAuthorityUseInput,
     RegisteredCurrentAuthorityUsePosture, RegisteredInMemoryCurrentAuthoritySource,

@@ -6,6 +6,8 @@ use std::time::Duration;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+#[cfg(feature = "trusted-host-application-spi")]
+use crate::local_check::ExplicitLocalCheckProfileId;
 use crate::local_check::{
     AuthoritativeLocalCheckHandler, DocsCheckLocalHandler, LocalCheckRegistrationMode,
     LocalCheckRegistrationProfile, ResolvedExplicitLocalCheckProfile,
@@ -10463,7 +10465,12 @@ fn admit_trusted_host_local_application_operation_internal<'a>(
     let executor = LocalExecutor::new(backend, &registry);
     let mut plan =
         LocalExecutor::<crate::SqliteStateBackend>::prepare_execution(execution, run_id.clone())?;
-    validate_trusted_host_admission_plan(&plan, profile, &request.selected_step_id)?;
+    validate_trusted_host_admission_plan(
+        &plan,
+        profile,
+        &request.selected_step_id,
+        &execution.project_root,
+    )?;
     executor.evaluate_pre_run_policy(&plan, &execution.actor, &execution.correlation_id)?;
 
     let project = load_validated_project_bundle(
@@ -10522,6 +10529,7 @@ fn validate_trusted_host_admission_plan(
     plan: &ExecutionPlan,
     profile: &ResolvedExplicitLocalCheckProfile,
     selected_step_id: &StepId,
+    governed_project_root: &Path,
 ) -> Result<(), WorkflowOsError> {
     if plan.steps.len() != 1
         || &plan.step.id != selected_step_id
@@ -10535,10 +10543,11 @@ fn validate_trusted_host_admission_plan(
         return Err(executor_error(
             WorkflowOsErrorKind::Unsupported,
             "trusted_host_local_application.admission.workflow_unsupported",
-            "trusted-host local application supports one canonical no-write docs-check step",
+            "trusted-host local application supports one canonical no-write local-check step",
         ));
     }
     profile.explicit_zero_required_context_authorization()?;
+    profile.validate_governed_project_root(governed_project_root)?;
     Ok(())
 }
 
@@ -10554,13 +10563,14 @@ fn prepare_fresh_trusted_host_local_application_operation<'a>(
         trusted_time_observation, ContinuityOperationId, ContinuityReceiptId,
         ContinuityTrustedTimeEpochId, TrustedTimeSourceKind,
     };
-    use crate::current_authority_source::RegisteredExplicitZeroDocsCheckSourceInput;
+    use crate::current_authority_source::RegisteredExplicitZeroLocalCheckSourceInput;
     use crate::trusted_host_supervisor::{
-        LocalSkillAttemptExecutor, TrustedHostSupervisorPersistenceInput,
+        TrustedHostLocalCheckAttemptExecutor, TrustedHostSupervisorPersistenceInput,
     };
 
+    let (contract_id, source_id) = trusted_host_profile_authority_identities(profile)?;
     let contract = profile.explicit_zero_required_context_contract(
-        crate::HarnessContractId::new("harness/docs-check")?,
+        contract_id,
         crate::HarnessContractVersion::new("v1")?,
     )?;
     let execution_binding =
@@ -10572,9 +10582,9 @@ fn prepare_fresh_trusted_host_local_application_operation<'a>(
             maximum_sensitivity: WorkReportSensitivity::Internal,
             bound_at: request.observed_at,
         })?;
-    let source = crate::current_authority_source::RegisteredInMemoryCurrentAuthoritySource::register_explicit_zero_docs_check(
-        RegisteredExplicitZeroDocsCheckSourceInput {
-            source_id: crate::CurrentAuthoritySourceId::new("source/trusted-host-docs-check")?,
+    let source = crate::current_authority_source::RegisteredInMemoryCurrentAuthoritySource::register_explicit_zero_local_check(
+        RegisteredExplicitZeroLocalCheckSourceInput {
+            source_id,
             contract_version: crate::CurrentAuthoritySourceContractVersion::new("v1")?,
             profile,
             execution_binding: &execution_binding,
@@ -10598,7 +10608,7 @@ fn prepare_fresh_trusted_host_local_application_operation<'a>(
             &plan.skill,
         );
     let executor = Box::new(
-        LocalSkillAttemptExecutor::new(profile.skill_handler(), executor_commitment)
+        TrustedHostLocalCheckAttemptExecutor::new(profile, executor_commitment)
             .with_workflow_lifecycle(workflow_lifecycle),
     );
     let fresh = crate::sqlite_state::TrustedHostLocalApplicationOwnedFreshPreparation {
@@ -10659,7 +10669,7 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
     request: &TrustedHostLocalApplicationAdmissionRequest,
     run_id: &WorkflowRunId,
 ) -> Result<TrustedHostLocalApplicationAdmissionOutcome<'a>, WorkflowOsError> {
-    use crate::trusted_host_supervisor::LocalSkillAttemptExecutor;
+    use crate::trusted_host_supervisor::TrustedHostLocalCheckAttemptExecutor;
 
     let run = backend.rehydrate_run(run_id)?;
     let terminal_replay = run.snapshot.status.is_terminal();
@@ -10834,7 +10844,7 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
             skill,
         );
     let executor = Box::new(
-        LocalSkillAttemptExecutor::new(profile.skill_handler(), executor_commitment)
+        TrustedHostLocalCheckAttemptExecutor::new(profile, executor_commitment)
             .with_workflow_lifecycle(workflow_lifecycle),
     );
     let prepared = crate::sqlite_state::prepare_owned_trusted_host_local_application_session(
@@ -10903,6 +10913,24 @@ fn trusted_host_executor_commitment_from_identity(
         resolved_execution_fingerprint.as_str()
     );
     Ok(SpecContentHash::from_text(&material))
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_profile_authority_identities(
+    profile: &ResolvedExplicitLocalCheckProfile,
+) -> Result<(crate::HarnessContractId, crate::CurrentAuthoritySourceId), WorkflowOsError> {
+    match profile.profile_id() {
+        ExplicitLocalCheckProfileId::WorkflowOsProjectValidation => Ok((
+            crate::HarnessContractId::new("harness/workflow-os-project-validation")?,
+            crate::CurrentAuthoritySourceId::new(
+                "source/trusted-host-workflow-os-project-validation",
+            )?,
+        )),
+        ExplicitLocalCheckProfileId::DocsCheck => Ok((
+            crate::HarnessContractId::new("harness/docs-check")?,
+            crate::CurrentAuthoritySourceId::new("source/trusted-host-docs-check")?,
+        )),
+    }
 }
 
 #[cfg(feature = "trusted-host-application-spi")]
