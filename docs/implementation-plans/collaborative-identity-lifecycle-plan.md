@@ -544,4 +544,11 @@ The implementation remains model-only. It does not validate external identity
 protocols, persist identity or grant state, change hosted authentication,
 expose a principal inbox, add directory synchronization or groups, execute
 provider writes, change workflow schemas, add CLI behavior, or claim production
-identity readiness. Focused blocker-fix review is the next phase.
+identity readiness. The blocker fix and focused review are complete.
+
+Authoritative source-boundary planning is now documented in
+[Authoritative Collaborative Identity Source Boundary Plan](authoritative-collaborative-identity-source-boundary-plan.md).
+It reuses the existing generic current-authority source contracts and recommends
+a PostgreSQL persistent fact-store and Core-owned exact-query source as the
+first implementation. No authoritative source or runtime identity consumer is
+implemented yet.
