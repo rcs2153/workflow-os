@@ -129,14 +129,22 @@ phase` language does not supersede the active queue.
    accepted project-validation and docs-check prefix, appends Cargo format,
    retains the existing two-step v3 path unchanged, and uses a distinct v4
    report/artifact commitment. Focused plan review accepts the plan after
-   correcting two blockers: every attempted step must bind and reproduce its
-   durable trusted-host dispatch executor commitment, and pre-result integrity
-   failure must be reported from the exact failed-invocation history without a
-   fabricated local-check result or unpersisted cause. Implementation is now
-   the next phase. The reviewed plan preserves closed profiles, ordered
-   result/report truth, and exact replay. It keeps clippy, tests, arbitrary
-   commands, providers, external writes, public surfaces, hosted expansion,
-   and topology broadening out of scope.
+   correcting two blockers: every attempted step must bind its durable
+   trusted-host dispatch executor commitment, and pre-result integrity failure
+   must be reported from the exact failed-invocation history without a
+   fabricated local-check result or unpersisted cause. The implementation is
+   complete. It adds the exact closed three-profile registry, immutable
+   three-contract bundle, Core-derived three-step progression, bounded
+   three-operation host loop, causal-history validation, restart-safe exact
+   replay, and a distinct create-only v4 terminal report artifact. The report
+   verifies each durable dispatch commitment against immutable step input;
+   pre-result identity failure records no fake local-check result and discloses
+   later checks as not attempted. Full workspace validation and the opt-in real
+   bundled-toolchain Cargo format smoke pass. Focused implementation/security
+   review is the next phase. Clippy, tests, arbitrary commands, providers,
+   external writes, public surfaces, hosted expansion, and topology broadening
+   remain out of scope. See
+   [Trusted-Host Cargo Format Workflow Composition Implementation Report](docs/concepts/TRUSTED_HOST_CARGO_FMT_WORKFLOW_COMPOSITION_IMPLEMENTATION_REPORT.md).
 
    Historical accepted evidence:
 

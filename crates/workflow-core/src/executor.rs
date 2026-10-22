@@ -470,6 +470,99 @@ impl fmt::Debug for TrustedHostTwoStepNoWriteProfileRegistry {
     }
 }
 
+/// Closed three-profile registry for the exact trusted-host Cargo format workflow proof.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct TrustedHostThreeStepNoWriteProfileRegistry {
+    project_validation: ResolvedExplicitLocalCheckProfile,
+    docs_check: ResolvedExplicitLocalCheckProfile,
+    cargo_fmt_check: ResolvedExplicitLocalCheckProfile,
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+impl TrustedHostThreeStepNoWriteProfileRegistry {
+    /// Creates the exact three-profile registry and rejects substituted identities.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error unless all three canonical profiles are supplied once.
+    pub fn new(
+        project_validation: ResolvedExplicitLocalCheckProfile,
+        docs_check: ResolvedExplicitLocalCheckProfile,
+        cargo_fmt_check: ResolvedExplicitLocalCheckProfile,
+    ) -> Result<Self, WorkflowOsError> {
+        if project_validation.profile_id()
+            != ExplicitLocalCheckProfileId::WorkflowOsProjectValidation
+            || docs_check.profile_id() != ExplicitLocalCheckProfileId::DocsCheck
+            || cargo_fmt_check.profile_id() != ExplicitLocalCheckProfileId::CargoFmtCheck
+        {
+            return Err(executor_error(
+                WorkflowOsErrorKind::Security,
+                "trusted_host_three_step.registry.invalid",
+                "trusted-host three-step profile registry is invalid",
+            ));
+        }
+        project_validation.explicit_zero_required_context_authorization()?;
+        docs_check.explicit_zero_required_context_authorization()?;
+        cargo_fmt_check.explicit_zero_required_context_authorization()?;
+        Ok(Self {
+            project_validation,
+            docs_check,
+            cargo_fmt_check,
+        })
+    }
+
+    fn profile_for_skill(
+        &self,
+        skill_id: &SkillId,
+        skill_version: &SkillVersion,
+    ) -> Result<&ResolvedExplicitLocalCheckProfile, WorkflowOsError> {
+        if skill_id.as_str() == self.project_validation.skill_id()
+            && skill_version.as_str() == self.project_validation.skill_version()
+        {
+            Ok(&self.project_validation)
+        } else if skill_id.as_str() == self.docs_check.skill_id()
+            && skill_version.as_str() == self.docs_check.skill_version()
+        {
+            Ok(&self.docs_check)
+        } else if skill_id.as_str() == self.cargo_fmt_check.skill_id()
+            && skill_version.as_str() == self.cargo_fmt_check.skill_version()
+        {
+            Ok(&self.cargo_fmt_check)
+        } else {
+            Err(executor_error(
+                WorkflowOsErrorKind::Unsupported,
+                "trusted_host_three_step.registry.skill_unsupported",
+                "trusted-host three-step workflow uses an unsupported skill",
+            ))
+        }
+    }
+
+    fn inventory(
+        &self,
+    ) -> Result<
+        crate::local_check_declaration_set::LocalCheckCommandContractInventory,
+        WorkflowOsError,
+    > {
+        crate::local_check_declaration_set::LocalCheckCommandContractInventory::new(vec![
+            self.project_validation.command_contract().clone(),
+            self.docs_check.command_contract().clone(),
+            self.cargo_fmt_check.command_contract().clone(),
+        ])
+    }
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+impl fmt::Debug for TrustedHostThreeStepNoWriteProfileRegistry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedHostThreeStepNoWriteProfileRegistry")
+            .field("profile_count", &3)
+            .finish()
+    }
+}
+
 /// Explicit request for the exact trusted-host two-step no-write proof.
 #[cfg(feature = "trusted-host-application-spi")]
 #[doc(hidden)]
@@ -488,6 +581,29 @@ impl fmt::Debug for TrustedHostTwoStepNoWriteAdmissionRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("TrustedHostTwoStepNoWriteAdmissionRequest")
+            .field("binding", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Explicit request for the exact trusted-host three-step no-write proof.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+#[derive(Clone, Eq, PartialEq)]
+pub struct TrustedHostThreeStepNoWriteAdmissionRequest {
+    /// Existing immutable-bundle execution request. Step and profile are Core-owned.
+    pub execution: LocalExecutionWithImmutableRunBundleRequest,
+    /// Core-injected trusted observation time supplied by the foreground owner.
+    pub observed_at: Timestamp,
+    /// Bounded execution-window expiry.
+    pub expires_at: Timestamp,
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+impl fmt::Debug for TrustedHostThreeStepNoWriteAdmissionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedHostThreeStepNoWriteAdmissionRequest")
             .field("binding", &"[REDACTED]")
             .finish_non_exhaustive()
     }
@@ -1059,6 +1175,408 @@ pub fn persist_trusted_host_two_step_terminal_work_report_artifact(
             "write_failed",
         ),
     }
+}
+
+/// Composes the private v4 report for the exact three-step trusted-host proof.
+///
+/// The report binds every attempted step to the durable dispatch event and resolved executor
+/// commitment. A pre-result integrity failure is reported from its dispatch and failed invocation;
+/// no local-check result is fabricated.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error unless terminal history matches the immutable three-step
+/// workflow and every attempted step has exactly one matching dispatch commitment.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+#[allow(clippy::too_many_lines)]
+pub fn compose_trusted_host_three_step_terminal_work_report(
+    backend: &crate::SqliteStateBackend,
+    registry: &TrustedHostThreeStepNoWriteProfileRegistry,
+    request: &TrustedHostThreeStepNoWriteAdmissionRequest,
+) -> Result<WorkReport, WorkflowOsError> {
+    let run_id = request
+        .execution
+        .execution
+        .run_id
+        .as_ref()
+        .ok_or_else(|| trusted_host_three_step_report_error("run_id_missing"))?;
+    let run = backend.rehydrate_run(run_id)?;
+    if !run.snapshot.status.is_terminal() {
+        return Err(trusted_host_three_step_report_error("run_not_terminal"));
+    }
+    let binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| trusted_host_three_step_report_error("bundle_missing"))?;
+    let stored =
+        crate::ImmutableRunBundleStore::read_exact_bundle(backend, run_id, binding.bundle_id())?;
+    if stored.manifest().run_binding() != *binding
+        || !existing_immutable_run_bundle_request_matches(
+            stored.manifest(),
+            &request.execution.execution,
+            &request.execution.bundle,
+            None,
+        )?
+        || !trusted_host_three_step_workflow_is_exact(immutable_continuation_workflow(&stored)?)
+    {
+        return Err(trusted_host_three_step_report_error("bundle_mismatch"));
+    }
+    validate_trusted_host_three_step_history(&run)?;
+
+    let terminal_event = run
+        .events
+        .last()
+        .filter(|event| {
+            matches!(
+                event.kind,
+                WorkflowRunEventKind::RunCompleted | WorkflowRunEventKind::RunFailed(_)
+            )
+        })
+        .ok_or_else(|| trusted_host_three_step_report_error("terminal_event_missing"))?;
+    let workflow = immutable_continuation_workflow(&stored)?;
+    let scheduled = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { step_id } => Some((event, step_id)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if scheduled.is_empty() || scheduled.len() > 3 {
+        return Err(trusted_host_three_step_report_error(
+            "schedule_count_invalid",
+        ));
+    }
+
+    let mut report_material = format!(
+        "workflow-os/trusted-host-terminal-report/v4\n{}\n{}",
+        run.snapshot.identity.run_id.as_str(),
+        binding.root_hash().as_str(),
+    );
+    let mut local_check_references = Vec::new();
+    let mut workflow_event_ids = Vec::new();
+    let mut pre_result_failure = false;
+    let mut final_attempt_failed = false;
+
+    for (index, (schedule_event, scheduled_step_id)) in scheduled.iter().enumerate() {
+        let step = workflow
+            .steps
+            .get(index)
+            .filter(|step| &step.id == *scheduled_step_id)
+            .ok_or_else(|| trusted_host_three_step_report_error("schedule_binding_mismatch"))?;
+        let skill = immutable_continuation_skill(&stored, step)?;
+        let profile = registry.profile_for_skill(&skill.id, &skill.version)?;
+        let skill_input = SkillInput {
+            run_id: run_id.clone(),
+            workflow_id: workflow.id.clone(),
+            workflow_version: workflow.version.clone(),
+            schema_version: workflow.schema_version.clone(),
+            spec_hash: stored.manifest().workflow_content_hash().clone(),
+            step_id: step.id.clone(),
+            skill_id: skill.id.clone(),
+            skill_version: skill.version.clone(),
+            correlation_id: request.execution.execution.correlation_id.clone(),
+            values: build_input_values(&step.input_mapping)?,
+        };
+        let dispatches = run
+            .events
+            .iter()
+            .filter_map(|event| {
+                let WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(dispatch) =
+                    &event.kind
+                else {
+                    return None;
+                };
+                let expected_invocation_commitment =
+                    crate::operational_execution_window_opening::trusted_host_invocation_commitment(
+                        &skill_input,
+                        dispatch.executor_commitment(),
+                    );
+                (dispatch.invocation_commitment() == &expected_invocation_commitment
+                    && schedule_event.sequence_number < event.sequence_number
+                    && event.sequence_number < terminal_event.sequence_number)
+                    .then_some((event, dispatch.as_ref()))
+            })
+            .collect::<Vec<_>>();
+        let [(dispatch_event, dispatch)] = dispatches.as_slice() else {
+            return Err(trusted_host_three_step_report_error(
+                "dispatch_binding_invalid",
+            ));
+        };
+        if schedule_event.sequence_number >= dispatch_event.sequence_number {
+            return Err(trusted_host_three_step_report_error(
+                "dispatch_order_invalid",
+            ));
+        }
+        let executor_commitment = dispatch.executor_commitment();
+
+        let step_results = run
+            .events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                WorkflowRunEventKind::LocalCheckResultRecorded(result)
+                    if result.step_id() == &step.id =>
+                {
+                    Some((event, result.as_ref()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let (result_id, result_event_id, invocation_event) = match step_results.as_slice() {
+            [(result_event, result)] => {
+                if result.profile_id() != profile.profile_id()
+                    || result.command_id() != profile.command_contract().command_id()
+                    || result.command_kind() != profile.command_contract().command_kind()
+                    || result.immutable_run_bundle() != binding
+                    || result.attempt_id() != dispatch.attempt_id()
+                {
+                    return Err(trusted_host_three_step_report_error(
+                        "result_binding_mismatch",
+                    ));
+                }
+                let invocation_events = run
+                    .events
+                    .iter()
+                    .filter(|event| {
+                        event.event_id == *result.invocation_terminal_event_id()
+                            && matches!(
+                                &event.kind,
+                                WorkflowRunEventKind::SkillInvocationSucceeded { invocation_id, step_id, .. }
+                                    | WorkflowRunEventKind::SkillInvocationFailed { invocation_id, step_id, .. }
+                                    if invocation_id == result.invocation_id() && step_id == result.step_id()
+                            )
+                    })
+                    .collect::<Vec<_>>();
+                let [invocation_event] = invocation_events.as_slice() else {
+                    return Err(trusted_host_three_step_report_error(
+                        "invocation_binding_invalid",
+                    ));
+                };
+                let passed = result.status() == crate::LocalCheckResultStatus::Passed;
+                if passed
+                    != matches!(
+                        invocation_event.kind,
+                        WorkflowRunEventKind::SkillInvocationSucceeded { .. }
+                    )
+                    || (!passed
+                        && !matches!(
+                            result.status(),
+                            crate::LocalCheckResultStatus::Failed
+                                | crate::LocalCheckResultStatus::TimedOut
+                        ))
+                    || !(dispatch_event.sequence_number < result_event.sequence_number
+                        && result_event.sequence_number < invocation_event.sequence_number
+                        && invocation_event.sequence_number < terminal_event.sequence_number)
+                    || (index + 1 < scheduled.len() && !passed)
+                {
+                    return Err(trusted_host_three_step_report_error(
+                        "terminal_status_mismatch",
+                    ));
+                }
+                local_check_references.push(WorkReportStableReference::new(
+                    result.result_id().as_str().to_owned(),
+                )?);
+                final_attempt_failed = !passed;
+                (
+                    Some(result.result_id().as_str()),
+                    Some(result_event.event_id.clone()),
+                    *invocation_event,
+                )
+            }
+            [] if index + 1 == scheduled.len()
+                && matches!(terminal_event.kind, WorkflowRunEventKind::RunFailed(_)) =>
+            {
+                let failed_invocations = run
+                    .events
+                    .iter()
+                    .filter(|event| {
+                        matches!(
+                            &event.kind,
+                            WorkflowRunEventKind::SkillInvocationFailed { step_id, .. }
+                                if step_id == &step.id
+                        ) && dispatch_event.sequence_number < event.sequence_number
+                            && event.sequence_number < terminal_event.sequence_number
+                    })
+                    .collect::<Vec<_>>();
+                let [invocation_event] = failed_invocations.as_slice() else {
+                    return Err(trusted_host_three_step_report_error(
+                        "pre_result_failure_invalid",
+                    ));
+                };
+                pre_result_failure = true;
+                final_attempt_failed = true;
+                (None, None, *invocation_event)
+            }
+            _ => return Err(trusted_host_three_step_report_error("result_count_invalid")),
+        };
+
+        let _ = write!(
+            report_material,
+            "\n{}\n{}\n{}\n{}\n{}\n{}",
+            step.id.as_str(),
+            match profile.profile_id() {
+                ExplicitLocalCheckProfileId::WorkflowOsProjectValidation => {
+                    "workflow_os_project_validation"
+                }
+                ExplicitLocalCheckProfileId::DocsCheck => "docs_check",
+                ExplicitLocalCheckProfileId::CargoFmtCheck => "cargo_fmt_check",
+            },
+            profile.command_contract().command_id().as_str(),
+            dispatch_event.event_id.as_str(),
+            executor_commitment.as_str(),
+            result_id.unwrap_or("no-result"),
+        );
+        workflow_event_ids.push(dispatch_event.event_id.clone());
+        if let Some(result_event_id) = result_event_id {
+            workflow_event_ids.push(result_event_id);
+        }
+        workflow_event_ids.push(invocation_event.event_id.clone());
+    }
+
+    if matches!(terminal_event.kind, WorkflowRunEventKind::RunCompleted)
+        && (scheduled.len() != 3 || pre_result_failure)
+        || matches!(terminal_event.kind, WorkflowRunEventKind::RunFailed(_))
+            && !final_attempt_failed
+    {
+        return Err(trusted_host_three_step_report_error(
+            "terminal_status_mismatch",
+        ));
+    }
+    let _ = write!(report_material, "\n{}", terminal_event.event_id.as_str());
+    workflow_event_ids.push(terminal_event.event_id.clone());
+    let report_digest = SpecContentHash::from_text(&report_material);
+    let mut incomplete_work = Vec::new();
+    if pre_result_failure {
+        incomplete_work.push(
+            "No bounded local-check result was accepted for the final attempted step.".to_owned(),
+        );
+    }
+    if scheduled.len() < 3 {
+        incomplete_work.push(
+            "Later trusted-host checks were not attempted because an earlier step terminated the workflow."
+                .to_owned(),
+        );
+    }
+    crate::generate_terminal_local_work_report(TerminalLocalWorkReportInput {
+        report_id: WorkReportId::new(format!(
+            "report/trusted-host-three-step-{}",
+            &report_digest.as_str()[..24]
+        ))?,
+        report_contract_id: WorkReportContractId::new(
+            "trusted-host-three-step-terminal-no-write",
+        )?,
+        report_contract_version: WorkReportContractVersion::new("v4")?,
+        run: &run,
+        generated_at: terminal_event.timestamp,
+        generated_by: ActorId::new("system/trusted-host-report-composer")?,
+        correlation_id: run.events.first().and_then(|event| event.correlation_id.clone()),
+        sensitivity: WorkReportSensitivity::Internal,
+        redaction: RedactionMetadata::empty(),
+        evidence_reference_ids: Vec::new(),
+        validation_reference_ids: Vec::new(),
+        local_check_result_references: local_check_references,
+        workflow_event_ids,
+        audit_event_ids: Vec::new(),
+        adapter_telemetry_references: Vec::new(),
+        policy_event_ids: Vec::new(),
+        approval_reference_ids: Vec::new(),
+        approval_proof_marker_citation_policy: None,
+        high_assurance_approval: None,
+        typed_handoff_ids: Vec::new(),
+        agent_harness_hook_invocation_ids: Vec::new(),
+        agent_harness_hook_disclosure_ids: Vec::new(),
+        side_effect_ids: Vec::new(),
+        github_pr_comment_provider_disclosures: Vec::new(),
+        incomplete_work,
+        known_limitations: vec![
+            "Report contents are available only through private trusted-host composition; no released inspection or export surface exists.".to_owned(),
+            "Trusted-host execution remains local, closed-profile, and no-write.".to_owned(),
+        ],
+        risks: Vec::new(),
+        handoff_notes: vec![
+            "Inspect durable workflow events for the authoritative terminal history and dispatch commitments.".to_owned(),
+        ],
+    })
+}
+
+/// Persists one private v4 artifact for the exact three-step trusted-host proof.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+#[must_use]
+pub fn persist_trusted_host_three_step_terminal_work_report_artifact(
+    backend: &crate::SqliteStateBackend,
+    registry: &TrustedHostThreeStepNoWriteProfileRegistry,
+    request: &TrustedHostThreeStepNoWriteAdmissionRequest,
+) -> TrustedHostTerminalWorkReportArtifactResult {
+    let Ok(report) =
+        compose_trusted_host_three_step_terminal_work_report(backend, registry, request)
+    else {
+        return trusted_host_terminal_artifact_failure(
+            TrustedHostTerminalWorkReportArtifactPosture::GenerationFailed,
+            "generation_failed",
+        );
+    };
+    let Some(run_id) = request.execution.execution.run_id.as_ref() else {
+        return trusted_host_terminal_artifact_failure(
+            TrustedHostTerminalWorkReportArtifactPosture::GenerationFailed,
+            "generation_failed",
+        );
+    };
+    let Ok(run) = backend.rehydrate_run(run_id) else {
+        return trusted_host_terminal_artifact_failure(
+            TrustedHostTerminalWorkReportArtifactPosture::GenerationFailed,
+            "generation_failed",
+        );
+    };
+    let artifact = match WorkReportArtifactRecord::new(report) {
+        Ok(artifact) if artifact.run_id() == &run.snapshot.identity.run_id => artifact,
+        Ok(_) | Err(_) => {
+            return trusted_host_terminal_artifact_failure(
+                TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed,
+                "artifact_invalid",
+            );
+        }
+    };
+    let write_result = write_report_artifact_with_explicit_integrations(
+        backend,
+        backend,
+        ReportArtifactWriteIntegrationInput {
+            run: &run,
+            artifact: &artifact,
+            require_all_side_effect_citations: true,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+            high_assurance_disclosure_policy:
+                WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(),
+            provider_integration: ReportArtifactWriteProviderIntegration::None,
+        },
+    );
+    match write_result {
+        Ok(_) => TrustedHostTerminalWorkReportArtifactResult::new(
+            TrustedHostTerminalWorkReportArtifactPosture::Persisted,
+            Some(artifact),
+            None,
+        ),
+        Err(error) if error.code() == "work_report_artifact.write.duplicate" => {
+            reconcile_trusted_host_terminal_artifact_duplicate(backend, &artifact)
+        }
+        Err(_) => trusted_host_terminal_artifact_failure(
+            TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed,
+            "write_failed",
+        ),
+    }
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_three_step_report_error(code: &'static str) -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        format!("trusted_host_three_step_report.{code}"),
+        "trusted-host three-step terminal report composition failed closed",
+    )
 }
 
 #[cfg(feature = "trusted-host-application-spi")]
@@ -11423,6 +11941,164 @@ pub fn admit_trusted_host_two_step_no_write_operation<'a>(
     }
 }
 
+/// Admits the current Core-derived step of the exact trusted-host three-step no-write workflow.
+///
+/// The caller supplies the closed project-validation, docs-check, and Cargo-format registry but
+/// cannot select a step. Core derives the current step and profile from the immutable workflow and
+/// durable history and prepares at most one opaque operation.
+///
+/// # Errors
+///
+/// Returns only the fixed payload-free local-application failure vocabulary.
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+pub fn admit_trusted_host_three_step_no_write_operation<'a>(
+    backend: &'a crate::SqliteStateBackend,
+    registry: &'a TrustedHostThreeStepNoWriteProfileRegistry,
+    request: &TrustedHostThreeStepNoWriteAdmissionRequest,
+) -> Result<
+    TrustedHostLocalApplicationAdmissionOutcome<'a>,
+    crate::TrustedHostLocalApplicationFailure,
+> {
+    match admit_trusted_host_three_step_no_write_operation_internal(backend, registry, request) {
+        Ok(outcome) => Ok(outcome),
+        Err(error) if error.kind() == WorkflowOsErrorKind::PolicyDenied => {
+            Ok(TrustedHostLocalApplicationAdmissionOutcome::Denied)
+        }
+        Err(error) => Err(crate::TrustedHostLocalApplicationFailure::from_core_error(
+            &error,
+        )),
+    }
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+#[allow(clippy::too_many_lines)]
+fn admit_trusted_host_three_step_no_write_operation_internal<'a>(
+    backend: &'a crate::SqliteStateBackend,
+    registry: &'a TrustedHostThreeStepNoWriteProfileRegistry,
+    request: &TrustedHostThreeStepNoWriteAdmissionRequest,
+) -> Result<TrustedHostLocalApplicationAdmissionOutcome<'a>, WorkflowOsError> {
+    let execution = &request.execution.execution;
+    let run_id = execution
+        .run_id
+        .clone()
+        .unwrap_or_else(WorkflowRunId::generate);
+    if !backend.read_events(&run_id)?.is_empty() {
+        let run = backend.rehydrate_run(&run_id)?;
+        let binding = run
+            .snapshot
+            .identity
+            .immutable_run_bundle
+            .as_ref()
+            .ok_or_else(immutable_run_bundle_binding_error)?;
+        let stored = crate::ImmutableRunBundleStore::read_exact_bundle(
+            backend,
+            &run_id,
+            binding.bundle_id(),
+        )?;
+        if stored.manifest().run_binding() != *binding
+            || !existing_immutable_run_bundle_request_matches(
+                stored.manifest(),
+                execution,
+                &request.execution.bundle,
+                None,
+            )?
+        {
+            return Err(immutable_run_bundle_binding_error());
+        }
+        let workflow = immutable_continuation_workflow(&stored)?;
+        if !trusted_host_three_step_workflow_is_exact(workflow) {
+            return Ok(TrustedHostLocalApplicationAdmissionOutcome::Blocked(
+                TrustedHostLocalApplicationBlockReason::UnsupportedWorkflow,
+            ));
+        }
+        validate_trusted_host_three_step_history(&run)?;
+        let selected_step_id = latest_scheduled_step_id(&run)?;
+        let step = workflow
+            .steps
+            .iter()
+            .find(|step| step.id == selected_step_id)
+            .ok_or_else(|| trusted_host_three_step_error("history_step_unresolved"))?;
+        let skill = immutable_continuation_skill(&stored, step)?;
+        let profile = registry.profile_for_skill(&skill.id, &skill.version)?;
+        let selected = trusted_host_three_step_selected_request(request, selected_step_id);
+        return admit_existing_trusted_host_local_application_operation(
+            backend, profile, &selected, &run_id, 3,
+        );
+    }
+
+    let registry_for_execution = LocalSkillRegistry::new();
+    let executor = LocalExecutor::new(backend, &registry_for_execution);
+    let mut plan =
+        LocalExecutor::<crate::SqliteStateBackend>::prepare_execution(execution, run_id.clone())?;
+    validate_trusted_host_three_step_plan(&plan, registry, &execution.project_root)?;
+    executor.evaluate_pre_run_policy(&plan, &execution.actor, &execution.correlation_id)?;
+
+    let project = load_validated_project_bundle(
+        &execution.project_root,
+        ProjectValidationCapability::Default,
+    )?;
+    let inventory = registry.inventory()?;
+    let execution_posture = immutable_run_bundle_execution_posture(execution, None)?;
+    let handlers = plan
+        .steps
+        .iter()
+        .map(|step| crate::ImmutableRunBundleHandlerReference {
+            skill_id: step.skill_id.clone(),
+            skill_version: step.skill_version.clone(),
+            posture: crate::ImmutableRunBundleHandlerPosture::RegisteredUnattested,
+        })
+        .collect();
+    let bundle = crate::immutable_run_bundle_builder::build_immutable_run_bundle_with_local_check_declarations_and_capability(
+        crate::ImmutableRunBundleBuildRequest {
+            project: &project,
+            workflow_id: &execution.workflow_id,
+            bundle_id: request.execution.bundle.bundle_id.clone(),
+            bundle_version: request.execution.bundle.bundle_version.clone(),
+            run_id: run_id.clone(),
+            resolved_execution_context_hash: plan.resolved_execution_context_hash.clone(),
+            execution_posture,
+            handlers,
+            created_at: request.execution.bundle.created_at,
+            created_by: execution.actor.clone(),
+            sensitivity: request.execution.bundle.sensitivity,
+            redaction_required: request.execution.bundle.redaction_required,
+        },
+        &inventory,
+        ProjectValidationCapability::Default,
+    )?;
+    validate_immutable_run_bundle_matches_plan(bundle.manifest(), &plan)?;
+    persist_or_validate_immutable_run_bundle(backend, &bundle)?;
+    let stored = crate::ImmutableRunBundleStore::read_exact_bundle(
+        backend,
+        &run_id,
+        bundle.manifest().bundle_id(),
+    )?;
+
+    plan.immutable_run_bundle = Some(stored.manifest().run_binding());
+    executor.append_run_start(&mut plan)?;
+    executor.append_step_scheduled(&mut plan)?;
+    plan.step_scheduled = true;
+    if plan.policy_effects.requires_approval() {
+        executor.pause_for_approval(plan)?;
+        return Ok(TrustedHostLocalApplicationAdmissionOutcome::Waiting(
+            TrustedHostLocalApplicationWaitReason::Approval,
+        ));
+    }
+
+    let profile = registry.profile_for_skill(&plan.skill_id, &plan.skill_version)?;
+    let selected = trusted_host_three_step_selected_request(request, plan.step.id.clone());
+    let next_step_id = plan.steps.get(1).map(|step| step.step.id.clone());
+    prepare_fresh_trusted_host_local_application_operation(
+        backend,
+        profile,
+        &selected,
+        &stored,
+        plan,
+        next_step_id,
+    )
+}
+
 #[cfg(feature = "trusted-host-application-spi")]
 #[allow(clippy::too_many_lines)]
 fn admit_trusted_host_two_step_no_write_operation_internal<'a>(
@@ -11475,7 +12151,7 @@ fn admit_trusted_host_two_step_no_write_operation_internal<'a>(
         let profile = registry.profile_for_skill(&skill.id, &skill.version)?;
         let selected = trusted_host_two_step_selected_request(request, selected_step_id);
         return admit_existing_trusted_host_local_application_operation(
-            backend, profile, &selected, &run_id, true,
+            backend, profile, &selected, &run_id, 2,
         );
     }
 
@@ -11561,6 +12237,221 @@ fn trusted_host_two_step_selected_request(
         selected_step_id,
         observed_at: request.observed_at,
         expires_at: request.expires_at,
+    }
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_three_step_selected_request(
+    request: &TrustedHostThreeStepNoWriteAdmissionRequest,
+    selected_step_id: StepId,
+) -> TrustedHostLocalApplicationAdmissionRequest {
+    TrustedHostLocalApplicationAdmissionRequest {
+        execution: request.execution.clone(),
+        selected_step_id,
+        observed_at: request.observed_at,
+        expires_at: request.expires_at,
+    }
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn validate_trusted_host_three_step_plan(
+    plan: &ExecutionPlan,
+    registry: &TrustedHostThreeStepNoWriteProfileRegistry,
+    governed_project_root: &Path,
+) -> Result<(), WorkflowOsError> {
+    if plan.steps.len() != 3
+        || plan.steps[0].step.id.as_str() != "project-validation"
+        || plan.steps[1].step.id.as_str() != "docs-check"
+        || plan.steps[2].step.id.as_str() != "cargo-format-check"
+        || !matches!(
+            plan.steps[0].step.terminal_behavior,
+            Some(TerminalBehavior::Continue)
+        )
+        || !matches!(
+            plan.steps[1].step.terminal_behavior,
+            Some(TerminalBehavior::Continue)
+        )
+        || matches!(
+            plan.steps[2].step.terminal_behavior,
+            Some(TerminalBehavior::Continue)
+        )
+        || plan.steps.iter().any(|step| step.adapter_id.is_some())
+        || plan
+            .steps
+            .iter()
+            .any(|step| step.policy_effects.requires_approval())
+        || !plan.side_effect_events.is_empty()
+        || !plan.side_effect_lifecycle_events.is_empty()
+        || plan.before_skill_invocation_hook.is_some()
+    {
+        return Err(trusted_host_three_step_error("workflow_unsupported"));
+    }
+    let first =
+        registry.profile_for_skill(&plan.steps[0].skill_id, &plan.steps[0].skill_version)?;
+    let second =
+        registry.profile_for_skill(&plan.steps[1].skill_id, &plan.steps[1].skill_version)?;
+    let third =
+        registry.profile_for_skill(&plan.steps[2].skill_id, &plan.steps[2].skill_version)?;
+    if first.profile_id() != ExplicitLocalCheckProfileId::WorkflowOsProjectValidation
+        || second.profile_id() != ExplicitLocalCheckProfileId::DocsCheck
+        || third.profile_id() != ExplicitLocalCheckProfileId::CargoFmtCheck
+    {
+        return Err(trusted_host_three_step_error("workflow_unsupported"));
+    }
+    first.validate_governed_project_root(governed_project_root)?;
+    second.validate_governed_project_root(governed_project_root)?;
+    third.validate_governed_project_root(governed_project_root)?;
+    Ok(())
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_three_step_workflow_is_exact(workflow: &WorkflowDefinition) -> bool {
+    workflow.steps.len() == 3
+        && workflow.steps[0].id.as_str() == "project-validation"
+        && workflow.steps[0].skill_ref.id.as_str() == "local/workflow-os-validate"
+        && workflow.steps[0]
+            .skill_ref
+            .version
+            .as_ref()
+            .is_some_and(|version| version.as_str() == "v0")
+        && matches!(
+            workflow.steps[0].terminal_behavior,
+            Some(TerminalBehavior::Continue)
+        )
+        && workflow.steps[1].id.as_str() == "docs-check"
+        && workflow.steps[1].skill_ref.id.as_str() == "local/check-docs"
+        && workflow.steps[1]
+            .skill_ref
+            .version
+            .as_ref()
+            .is_some_and(|version| version.as_str() == "v0")
+        && matches!(
+            workflow.steps[1].terminal_behavior,
+            Some(TerminalBehavior::Continue)
+        )
+        && workflow.steps[2].id.as_str() == "cargo-format-check"
+        && workflow.steps[2].skill_ref.id.as_str() == "local/check-cargo-fmt"
+        && workflow.steps[2]
+            .skill_ref
+            .version
+            .as_ref()
+            .is_some_and(|version| version.as_str() == "v0")
+        && !matches!(
+            workflow.steps[2].terminal_behavior,
+            Some(TerminalBehavior::Continue)
+        )
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn validate_trusted_host_three_step_history(run: &WorkflowRun) -> Result<(), WorkflowOsError> {
+    let scheduled = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { step_id } => {
+                Some((step_id.as_str(), event.sequence_number))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let scheduled_ids = scheduled
+        .iter()
+        .map(|(step_id, _)| *step_id)
+        .collect::<Vec<_>>();
+    if !matches!(
+        scheduled_ids.as_slice(),
+        ["project-validation"]
+            | ["project-validation", "docs-check"]
+            | ["project-validation", "docs-check", "cargo-format-check"]
+    ) {
+        return Err(trusted_host_three_step_error("history_schedule_invalid"));
+    }
+    let results = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::LocalCheckResultRecorded(result) => {
+                Some((event.sequence_number, result.as_ref()))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let result_ids = results
+        .iter()
+        .map(|(_, result)| result.step_id().as_str())
+        .collect::<Vec<_>>();
+    if !matches!(
+        result_ids.as_slice(),
+        [] | ["project-validation"]
+            | ["project-validation", "docs-check"]
+            | ["project-validation", "docs-check", "cargo-format-check"]
+    ) || results.len() > scheduled.len()
+    {
+        return Err(trusted_host_three_step_error("history_result_invalid"));
+    }
+    if !run.snapshot.status.is_terminal() && results.len() + 1 != scheduled.len() {
+        return Err(trusted_host_three_step_error("history_progression_invalid"));
+    }
+    if run.snapshot.status == WorkflowRunStatus::Completed && results.len() != 3 {
+        return Err(trusted_host_three_step_error("history_terminal_invalid"));
+    }
+    for (index, (result_sequence, result)) in results.iter().enumerate() {
+        let Some((_, schedule_sequence)) = scheduled.get(index) else {
+            return Err(trusted_host_three_step_error("history_result_invalid"));
+        };
+        let invocation_events = run
+            .events
+            .iter()
+            .filter(|event| {
+                event.event_id == *result.invocation_terminal_event_id()
+                    && matches!(
+                        &event.kind,
+                        WorkflowRunEventKind::SkillInvocationSucceeded { invocation_id, step_id, .. }
+                            | WorkflowRunEventKind::SkillInvocationFailed { invocation_id, step_id, .. }
+                            if invocation_id == result.invocation_id() && step_id == result.step_id()
+                    )
+            })
+            .collect::<Vec<_>>();
+        let [invocation_event] = invocation_events.as_slice() else {
+            return Err(trusted_host_three_step_error("history_invocation_invalid"));
+        };
+        let succeeded = result.status() == crate::LocalCheckResultStatus::Passed;
+        if succeeded
+            != matches!(
+                invocation_event.kind,
+                WorkflowRunEventKind::SkillInvocationSucceeded { .. }
+            )
+            || schedule_sequence >= result_sequence
+            || result_sequence >= &invocation_event.sequence_number
+        {
+            return Err(trusted_host_three_step_error("history_result_invalid"));
+        }
+        if let Some((_, next_schedule_sequence)) = scheduled.get(index + 1) {
+            if !succeeded || invocation_event.sequence_number >= *next_schedule_sequence {
+                return Err(trusted_host_three_step_error("history_progression_invalid"));
+            }
+        } else if !succeeded && !run.snapshot.status.is_terminal() {
+            return Err(trusted_host_three_step_error("history_progression_invalid"));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_three_step_error(code: &'static str) -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::Unsupported,
+        format!("trusted_host_three_step.{code}"),
+        "trusted-host three-step operation failed closed",
+    )
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_multi_step_error(step_count: u8, code: &'static str) -> WorkflowOsError {
+    if step_count == 3 {
+        trusted_host_three_step_error(code)
+    } else {
+        trusted_host_two_step_error(code)
     }
 }
 
@@ -11763,7 +12654,7 @@ fn admit_trusted_host_local_application_operation_internal<'a>(
         .unwrap_or_else(WorkflowRunId::generate);
     if !backend.read_events(&run_id)?.is_empty() {
         return admit_existing_trusted_host_local_application_operation(
-            backend, profile, request, &run_id, false,
+            backend, profile, request, &run_id, 1,
         );
     }
 
@@ -11982,7 +12873,7 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
     profile: &'a ResolvedExplicitLocalCheckProfile,
     request: &TrustedHostLocalApplicationAdmissionRequest,
     run_id: &WorkflowRunId,
-    two_step: bool,
+    workflow_step_count: u8,
 ) -> Result<TrustedHostLocalApplicationAdmissionOutcome<'a>, WorkflowOsError> {
     use crate::trusted_host_supervisor::TrustedHostLocalCheckAttemptExecutor;
 
@@ -12027,20 +12918,24 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
         return Err(immutable_run_bundle_binding_error());
     }
     let workflow = immutable_continuation_workflow(&stored)?;
-    if (!two_step && workflow.steps.len() != 1)
-        || (two_step && !trusted_host_two_step_workflow_is_exact(workflow))
+    if (workflow_step_count == 1 && workflow.steps.len() != 1)
+        || (workflow_step_count == 2 && !trusted_host_two_step_workflow_is_exact(workflow))
+        || (workflow_step_count == 3 && !trusted_host_three_step_workflow_is_exact(workflow))
+        || !(1..=3).contains(&workflow_step_count)
     {
         return Ok(TrustedHostLocalApplicationAdmissionOutcome::Blocked(
             TrustedHostLocalApplicationBlockReason::UnsupportedWorkflow,
         ));
     }
-    let step = if two_step {
+    let step = if workflow_step_count > 1 {
         let step_id = latest_scheduled_step_id(&run)?;
         workflow
             .steps
             .iter()
             .find(|step| step.id == step_id)
-            .ok_or_else(|| trusted_host_two_step_error("history_step_unresolved"))?
+            .ok_or_else(|| {
+                trusted_host_multi_step_error(workflow_step_count, "history_step_unresolved")
+            })?
     } else {
         &workflow.steps[0]
     };
@@ -12066,7 +12961,7 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
             )
         })
         .count();
-    if two_step && matching_invocation_count == 0 && !terminal_replay {
+    if workflow_step_count > 1 && matching_invocation_count == 0 && !terminal_replay {
         let registry = LocalSkillRegistry::new();
         let executor = LocalExecutor::new(backend, &registry);
         let mut plan = LocalExecutor::<crate::SqliteStateBackend>::prepare_execution(
@@ -12077,17 +12972,15 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
             .steps
             .iter()
             .position(|candidate| candidate.step.id == step.id)
-            .ok_or_else(|| trusted_host_two_step_error("history_step_unresolved"))?;
+            .ok_or_else(|| {
+                trusted_host_multi_step_error(workflow_step_count, "history_step_unresolved")
+            })?;
         plan.set_current_step(step_index)?;
         plan.immutable_run_bundle = Some(binding.clone());
         plan.event_builder.next_sequence_number = if let Some(event) = run.events.last() {
-            EventSequenceNumber::new(
-                event
-                    .sequence_number
-                    .get()
-                    .checked_add(1)
-                    .ok_or_else(|| trusted_host_two_step_error("history_cursor_invalid"))?,
-            )?
+            EventSequenceNumber::new(event.sequence_number.get().checked_add(1).ok_or_else(
+                || trusted_host_multi_step_error(workflow_step_count, "history_cursor_invalid"),
+            )?)?
         } else {
             EventSequenceNumber::first()
         };
@@ -12110,7 +13003,10 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
         );
     }
     if matching_invocation_count > 1 {
-        return Err(trusted_host_two_step_error("history_invocation_duplicate"));
+        return Err(trusted_host_multi_step_error(
+            workflow_step_count,
+            "history_invocation_duplicate",
+        ));
     }
     let opening = run
         .snapshot
