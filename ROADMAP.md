@@ -79,8 +79,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Fix and review collaborative approval-authority receipt PostgreSQL
-   verification.** The
+2. **Implement the same-call collaborative `ApprovalDecide` consumer.** The
    source planning, implementation, and review are accepted in the
    [Authoritative Collaborative Identity Source Boundary
    Plan](docs/implementation-plans/authoritative-collaborative-identity-source-boundary-plan.md)
@@ -95,10 +94,15 @@ phase` language does not supersede the active queue.
    payload-free trusted receipt, explicitly unverified persisted claim, and
    dedicated PostgreSQL v4 create-only store use unique approval/event
    bindings, exact replay, exact recovery, and corruption checks. Focused
-   review found that required CI exercises migration but not those store
-   operations, and backup/restore does not yet prove receipt preservation.
-   Add only that live conformance/restart/recovery evidence and review it before
-   Phase 3. Before the later Phase 3 consumer, move
+   review found that required CI exercised migration but not those store
+   operations, and backup/restore did not prove receipt preservation. The
+   narrow PostgreSQL verification blocker fix is implemented and accepted:
+   required CI
+   invokes the exact receipt conformance test, absence of required database
+   configuration fails closed, restart recovery uses a reopened backend,
+   corrupted replay retains the corruption error, and the established logical
+   backup/restore rehearsal recovers the receipt by its decision bindings.
+   Phase 3 is now unblocked. Move
    database-time observation to the outer decision transaction and implement
    the reviewed advisory-lock and watermark-lock order. Do not add the decision
    consumer during review, substitute another

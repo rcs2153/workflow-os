@@ -160,3 +160,13 @@ perform a focused blocker-fix review. Do not begin the Phase 3 same-call
 - Out-of-kernel work: repository inspection, CI evidence review, review
   writing, validation, git, and PR actions are performed by the delegated
   maintainer; Workflow OS governs phase scope and records the phase trail.
+
+## 15. Fix-Forward Status
+
+The narrow PostgreSQL verification blocker fix is implemented on a later
+branch without erasing this review finding. It adds the exact receipt behavior
+test to the required Shared PostgreSQL State job, makes required database
+configuration absence fail closed, proves recovery through a reopened backend,
+preserves and recovers a receipt through the existing logical backup/restore
+rehearsal, and classifies corrupted exact replay as corruption. Phase 3 remains
+blocked until that fix receives focused review and required CI passes.
