@@ -108,6 +108,10 @@ Local validation after the complete fix:
 - first two live PostgreSQL consumer proofs: failed on the observation-time and
   source-snapshot layers of time-varying exact receipt replay and produced the
   bounded fix described above; and
+- third live PostgreSQL consumer proof: passed; the subsequent backup/restore
+  rehearsal correctly restored the newer state but had a stale pre-consumer
+  watermark expectation, now updated to exact revision 12 replay and revision
+  11 rollback rejection; and
 - corrected live PostgreSQL consumer proof: pending required Shared PostgreSQL
   State CI rerun.
 

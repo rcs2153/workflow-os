@@ -1345,7 +1345,7 @@ fn restored_postgresql_database_passes_integrity_rehearsal() {
         routes[0].source_commitment().authority_registry_revision(),
         HostedAuthorityRegistryRevision::new(2).expect("restored authority revision")
     );
-    let restored_collaborative_authority = collaborative_authority_candidate(8, true);
+    let restored_collaborative_authority = collaborative_authority_candidate(12, true);
     assert_eq!(
         backend
             .activate_collaborative_identity_authority_revision(&restored_collaborative_authority,)
@@ -1362,7 +1362,7 @@ fn restored_postgresql_database_passes_integrity_rehearsal() {
     assert_eq!(
         backend
             .activate_collaborative_identity_authority_revision(&collaborative_authority_candidate(
-                7, false
+                11, false
             ),)
             .expect_err("restored collaborative authority rollback rejected")
             .code(),

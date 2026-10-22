@@ -123,8 +123,10 @@ phase` language does not supersede the active queue.
    first two required runs exposed time-varying exact-replay receipt collisions
    in the observation time and source-snapshot commitment; the bounded fix
    reconstructs the historical receipt only after re-deriving the same query
-   and re-proving current authority commitments. Rerun the live proof before
-   acceptance. Do
+   and re-proving current authority commitments. The corrected consumer proof
+   passes; its new revision-12 state exposed and fixed a stale revision-8
+   expectation in the backup/restore rehearsal. Rerun the complete required
+   lane before acceptance. Do
    not add another
    identity consumer during review, substitute another caller-assembled
    projection, or begin OIDC, SCIM,

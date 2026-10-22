@@ -115,6 +115,12 @@ commitment, and decision kind are re-proven against current state. Query or
 authority drift still fails closed. Required CI must rerun the live proof before
 this phase is accepted.
 
+The next required run passed the complete live consumer milestone and exposed
+a stale recovery-rehearsal expectation: the new consumer proof advances the
+backed-up collaborative authority watermark to revision 12, while the restore
+test still expected the historical revision 8. The rehearsal now requires
+exact replay of restored revision 12 and rejects revision 11 as rollback.
+
 ## 10. Recommended Next Phase
 
 Perform a **focused blocker-fix maintainer/security review** after required
