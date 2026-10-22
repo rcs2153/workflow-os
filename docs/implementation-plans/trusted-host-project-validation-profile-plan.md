@@ -1,7 +1,6 @@
 # Trusted-Host Project-Validation Profile Plan
 
-Status: implemented; focused maintainer/security implementation review is
-next.
+Status: implemented and focused-review accepted with non-blocking follow-ups.
 
 Related foundations:
 

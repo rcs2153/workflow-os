@@ -110,8 +110,10 @@ phase` language does not supersede the active queue.
    compatibility alias, binds validation to the exact governed root, uses
    profile-specific explicit-zero source identities, and terminalizes failed
    or timed-out checks instead of converting them to successful skill output.
-   Focused maintainer/security implementation review is next. Do not jump to
-   arbitrary commands, another check family, default activation, scheduling, nested
+   Focused maintainer/security implementation review is accepted with one
+   non-blocking test-depth follow-up: timeout is proven at the private adapter
+   boundary rather than through a 120-second foreground-binary timeout run.
+   Do not jump to arbitrary commands, another check family, default activation, scheduling, nested
    harnesses, automatic approval, providers, writes, or hosted expansion.
 
 Queue maintenance rule: every merged roadmap phase must update this list and
