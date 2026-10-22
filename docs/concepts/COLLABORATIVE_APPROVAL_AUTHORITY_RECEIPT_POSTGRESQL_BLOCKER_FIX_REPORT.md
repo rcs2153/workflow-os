@@ -9,7 +9,7 @@ backend, and the existing logical backup/restore rehearsal proves that a
 receipt remains recoverable by its approval-decision bindings.
 
 The trusted receipt model, approval semantics, and runtime consumer boundary
-are unchanged. Phase 3 remains blocked pending focused review of this fix.
+are unchanged. Focused review accepted this fix and unblocked Phase 3.
 
 ## 2. Blocker Fixed
 
@@ -81,9 +81,9 @@ The required PostgreSQL lane now covers:
 - `npm run check:docs`: passed.
 - `git diff --check`: passed.
 
-Required live PostgreSQL behavior and logical backup/restore are executed by
-the Shared PostgreSQL State PR check; its result is recorded in the focused
-blocker-fix review.
+Required live PostgreSQL behavior and logical backup/restore passed in the
+Shared PostgreSQL State check for PR #593. The focused blocker-fix review
+records that evidence and the final acceptance verdict.
 
 ## 8. Remaining Known Limitations
 

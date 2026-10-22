@@ -379,12 +379,12 @@ Timing-only sleeps are not sufficient evidence.
 - Preserved: the trusted receipt is serialize-only, deserialization yields an
   explicitly unverified claim, and the receipt remains non-authorizing.
 - Review result: model boundary accepted; the required-CI and recovery evidence
-  blockers are addressed by the narrow PostgreSQL verification fix. Required
+  blockers are addressed and accepted in the narrow PostgreSQL verification
+  fix review. Required
   CI now executes receipt write/replay/recovery/conflict/corruption behavior,
   restart recovery reopens the backend, and the logical backup/restore
   rehearsal recovers the receipt by its exact decision bindings.
-- Blocked: Phase 3 until the PostgreSQL verification fix is reviewed and
-  accepted.
+- Unblocked: Phase 3 may proceed within its existing same-call consumer scope.
 
 ### Phase 3: Same-Call ApprovalDecide Consumer
 
