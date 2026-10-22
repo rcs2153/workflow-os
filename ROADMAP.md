@@ -88,7 +88,7 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Plan the private trusted-host terminal WorkReport artifact boundary.**
+2. **Review the private trusted-host terminal WorkReport artifact blocker fix.**
    The second closed no-write profile is implemented and focused-review
    accepted. The next executable composition slice is now implemented from the
    [Trusted-Host Terminal WorkReport Composition
@@ -109,12 +109,47 @@ phase` language does not supersede the active queue.
    Focused blocker-fix review now accepts the integrity correction in
    [Trusted-Host Terminal WorkReport Composition Blocker Fix
    Review](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_COMPOSITION_BLOCKER_FIX_REVIEW.md).
-   The next executable phase is planning only for the smallest private report
-   artifact boundary. It must preserve terminal truth, deterministic report
-   identity, payload-free references, replay safety, and corrupt-history
-   rejection before authorizing any artifact write. Do not add released CLI
-   output, another profile, arbitrary commands, scheduling, nested harnesses,
-   automatic approval, providers, external writes, or hosted expansion.
+   Planning is complete in the [Trusted-Host Terminal WorkReport Artifact
+   Plan](docs/implementation-plans/trusted-host-terminal-work-report-artifact-plan.md).
+   The plan reuses existing artifact models, gates, and SQLite storage; requires
+   a storage-neutral v2 private report before persistence; preserves terminal
+   truth across artifact failure; reconciles only exact duplicate artifacts;
+   and promotes full corrupt-history entry-point fixtures from follow-up to
+   implementation prerequisite. Focused maintainer/security review accepts the
+   plan in [Trusted-Host Terminal WorkReport Artifact Plan
+   Review](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_ARTIFACT_PLAN_REVIEW.md).
+   The private artifact path is now implemented. Core composes the accepted v2
+   report, constructs a validated artifact, invokes the existing no-provider
+   integrity gate, writes through the existing SQLite store, and reconciles
+   only fully equal duplicates. The unpublished host emits fixed persistence
+   posture without report contents or identifiers. Focused entry-point tests
+   prove passing and failed terminal artifacts, process-free exact replay,
+   recovery after terminal commit with no artifact, event-history immutability,
+   and fail-closed rejection of contradictory result, invocation, run,
+   cancellation, and event-order histories before any replacement artifact is
+   written. The implementation is documented in [Trusted-Host Terminal
+   WorkReport Artifact Implementation Report](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_ARTIFACT_IMPLEMENTATION_REPORT.md).
+   Focused maintainer/security review found one blocker in [Trusted-Host
+   Terminal WorkReport Artifact Implementation Review](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_ARTIFACT_IMPLEMENTATION_REVIEW.md):
+   generation and persistence failure postures were rendered as fixed failure
+   text but still returned through the host success path, and the corruption
+   fixtures permitted that zero-exit behavior. The narrow blocker fix is now
+   implemented in [Trusted-Host Terminal WorkReport Artifact Blocker Fix
+   Report](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_ARTIFACT_BLOCKER_FIX_REPORT.md).
+   Both artifact failure postures now return bounded non-success host results;
+   corrupt-history fixtures require non-success; and focused real-SQLite tests
+   prove valid conflicting and unreadable duplicates fail closed without
+   overwrite, repair, event mutation, or identifier disclosure. Perform one
+   focused maintainer/security review of this correction before accepting the
+   private artifact path. That review now accepts the correction in
+   [Trusted-Host Terminal WorkReport Artifact Blocker Fix
+   Review](docs/concepts/TRUSTED_HOST_TERMINAL_WORK_REPORT_ARTIFACT_BLOCKER_FIX_REVIEW.md):
+   both failure postures exit nonzero, durable terminal truth remains
+   unchanged, conflicting and unreadable duplicates remain untouched, and all
+   focused and workspace validation passes.
+   Do not add released CLI output, another profile, arbitrary commands,
+   scheduling, nested harnesses, automatic approval, providers, external
+   writes, schemas, examples, or hosted expansion.
 
 Queue maintenance rule: every merged roadmap phase must update this list and
 the status date in the same PR. Completed work moves into the lane evidence or

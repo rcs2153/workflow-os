@@ -1845,6 +1845,8 @@ dependencies = [
 name = "workflow-local-host"
 version = "0.2.0-preview.1"
 dependencies = [
+ "rusqlite",
+ "serde_json",
  "time",
  "workflow-core",
 ]

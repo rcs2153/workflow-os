@@ -237,8 +237,10 @@ pub use evidence::{
 #[doc(hidden)]
 pub use executor::{
     admit_trusted_host_local_application_operation, compose_trusted_host_terminal_work_report,
+    persist_trusted_host_terminal_work_report_artifact,
     TrustedHostLocalApplicationAdmissionOutcome, TrustedHostLocalApplicationAdmissionRequest,
     TrustedHostLocalApplicationBlockReason, TrustedHostLocalApplicationWaitReason,
+    TrustedHostTerminalWorkReportArtifactPosture, TrustedHostTerminalWorkReportArtifactResult,
 };
 pub use executor::{
     compose_github_pr_comment_live_sandbox_event_proof,

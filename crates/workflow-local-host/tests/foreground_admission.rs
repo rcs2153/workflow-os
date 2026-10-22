@@ -4,12 +4,15 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use rusqlite::{params, Connection};
+use serde_json::{json, Value};
 use workflow_core::{
     EventLogStore, ImmutableRunBundleId, ImmutableRunBundleStore, SqliteStateBackend, StateBackend,
-    Timestamp, WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
+    Timestamp, WorkReportArtifactStore, WorkflowRunEventKind, WorkflowRunEventKindName,
+    WorkflowRunId, WorkflowRunStatus,
 };
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
@@ -90,7 +93,7 @@ fn foreground_binary_executes_explicit_project_validation_profile() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).expect("bounded stdout"),
-        "trusted_host_local_application: operation.terminal_report_generated\n"
+        "trusted_host_local_application: operation.terminal_report_artifact_persisted\n"
     );
     let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
     let run = backend.rehydrate_run(&run_id).expect("durable run");
@@ -99,6 +102,275 @@ fn foreground_binary_executes_explicit_project_validation_profile() {
         event.kind,
         WorkflowRunEventKind::SkillInvocationSucceeded { .. }
     )));
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("persisted report artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(
+        artifacts[0]
+            .work_report()
+            .report_contract_version()
+            .as_str(),
+        "v2"
+    );
+    let limitations = artifacts[0]
+        .work_report()
+        .known_limitations()
+        .iter()
+        .map(workflow_core::WorkReportKnownLimitation::summary)
+        .collect::<Vec<_>>();
+    assert!(!limitations
+        .iter()
+        .any(|summary| summary.contains("remains in memory and is not persisted")));
+    assert!(limitations
+        .iter()
+        .any(|summary| summary.contains("no released inspection or export surface exists")));
+}
+
+#[test]
+fn terminal_replay_recovers_one_missing_artifact_without_mutating_run_history() {
+    let fixture = Fixture::new();
+    let repository_root = repository_root();
+    let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("artifact-recovery");
+    let bundle_id = fixture.bundle_id("artifact-recovery");
+    let initial = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(
+        initial.status.success(),
+        "foreground stderr: {}",
+        String::from_utf8_lossy(&initial.stderr)
+    );
+
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let event_count = backend
+        .rehydrate_run(&run_id)
+        .expect("terminal run before recovery")
+        .events
+        .len();
+    clear_artifacts(&fixture.database, &run_id);
+
+    let replay = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(
+        replay.status.success(),
+        "recovery stderr: {}",
+        String::from_utf8_lossy(&replay.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(replay.stdout).expect("bounded recovery stdout"),
+        "trusted_host_local_application: admission.terminal_replay_report_artifact_persisted\n"
+    );
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("terminal run after recovery")
+            .events
+            .len(),
+        event_count,
+        "artifact recovery must not append workflow events"
+    );
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("recovered report artifact")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn concurrent_terminal_replays_converge_on_one_equal_artifact() {
+    let fixture = Fixture::new();
+    let repository_root = repository_root();
+    let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("artifact-concurrency");
+    let bundle_id = fixture.bundle_id("artifact-concurrency");
+    let invocation = ForegroundInvocation {
+        fixture: &fixture,
+        repository_root: &repository_root,
+        governance_root: &governance_root,
+        workflow_id: "dg/trusted-host-docs-check",
+        step_id: "docs-check",
+        run_id: &run_id,
+        bundle_id: &bundle_id,
+        observed_at: &observed_at,
+        expires_at: &expires_at,
+        actor: "system/local-host-admission-test",
+        correlation_id: "correlation-local-host-admission-test",
+        npm_executable: &fixture.npm,
+    };
+    let initial = invoke_foreground_with(invocation);
+    assert!(initial.status.success());
+
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let event_count = backend
+        .rehydrate_run(&run_id)
+        .expect("terminal run before concurrent recovery")
+        .events
+        .len();
+    clear_artifacts(&fixture.database, &run_id);
+
+    let mut first_command = foreground_command_with(invocation);
+    first_command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let first = first_command.spawn().expect("first concurrent replay");
+    let mut second_command = foreground_command_with(invocation);
+    second_command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let second = second_command.spawn().expect("second concurrent replay");
+    let outputs = [
+        first.wait_with_output().expect("first replay output"),
+        second.wait_with_output().expect("second replay output"),
+    ];
+    assert!(outputs.iter().all(|output| output.status.success()));
+    let mut postures = outputs
+        .into_iter()
+        .map(|output| String::from_utf8(output.stdout).expect("bounded concurrent stdout"))
+        .collect::<Vec<_>>();
+    postures.sort();
+    assert_eq!(
+        postures,
+        vec![
+            "trusted_host_local_application: admission.terminal_replay_report_artifact_already_persisted\n",
+            "trusted_host_local_application: admission.terminal_replay_report_artifact_persisted\n",
+        ]
+    );
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("terminal run after concurrent recovery")
+            .events
+            .len(),
+        event_count
+    );
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("one converged artifact")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn terminal_replay_rejects_valid_conflicting_artifact_without_overwrite() {
+    let fixture = Fixture::new();
+    let repository_root = repository_root();
+    let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("artifact-conflict");
+    let bundle_id = fixture.bundle_id("artifact-conflict");
+    let initial = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let event_count = backend
+        .rehydrate_run(&run_id)
+        .expect("terminal run before conflicting replay")
+        .events
+        .len();
+    let conflicting_payload = mutate_artifact_payload(&fixture.database, &run_id, |value| {
+        value["work_report"]["known_limitations"][0]["summary"] =
+            json!("A different valid limitation remains bounded and local.");
+    });
+
+    let replay = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert_artifact_persistence_failure(&replay);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("terminal run after conflicting replay")
+            .events
+            .len(),
+        event_count
+    );
+    assert_eq!(
+        read_artifact_payload(&fixture.database, &run_id),
+        conflicting_payload
+    );
+}
+
+#[test]
+fn terminal_replay_rejects_unreadable_artifact_without_repair() {
+    let fixture = Fixture::new();
+    let repository_root = repository_root();
+    let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("artifact-unreadable");
+    let bundle_id = fixture.bundle_id("artifact-unreadable");
+    let initial = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let event_count = backend
+        .rehydrate_run(&run_id)
+        .expect("terminal run before unreadable replay")
+        .events
+        .len();
+    let unreadable_payload = "not-json";
+    write_artifact_payload(&fixture.database, &run_id, unreadable_payload);
+
+    let replay = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert_artifact_persistence_failure(&replay);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("terminal run after unreadable replay")
+            .events
+            .len(),
+        event_count
+    );
+    assert_eq!(
+        read_artifact_payload(&fixture.database, &run_id),
+        unreadable_payload
+    );
 }
 
 #[test]
@@ -129,6 +401,14 @@ fn foreground_binary_terminalizes_nonpassing_checks_as_failure() {
         WorkflowRunEventKind::SkillInvocationFailed { .. }
     )));
     assert_terminal_result_binding(&run, workflow_core::LocalCheckResultStatus::Failed);
+    let artifacts = backend
+        .list_work_report_artifacts(&run_id)
+        .expect("failed terminal report artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(
+        artifacts[0].metadata().terminal_run_status(),
+        workflow_core::WorkReportStatus::Failed
+    );
     assert!(!run.events.iter().any(|event| matches!(
         event.kind,
         WorkflowRunEventKind::SkillInvocationSucceeded { .. } | WorkflowRunEventKind::RunCompleted
@@ -144,10 +424,14 @@ fn foreground_binary_terminalizes_nonpassing_checks_as_failure() {
         &observed_at,
         &expires_at,
     );
-    assert!(replay.status.success());
+    assert!(
+        replay.status.success(),
+        "corrupt replay stderr: {}",
+        String::from_utf8_lossy(&replay.stderr)
+    );
     assert_eq!(
         String::from_utf8(replay.stdout).expect("bounded replay stdout"),
-        "trusted_host_local_application: admission.terminal_replay_report_generated\n"
+        "trusted_host_local_application: admission.terminal_replay_report_artifact_already_persisted\n"
     );
     assert_eq!(
         backend
@@ -156,6 +440,165 @@ fn foreground_binary_terminalizes_nonpassing_checks_as_failure() {
             .events
             .len(),
         event_count
+    );
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("replayed report artifacts")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn terminal_artifact_entry_rejects_passed_run_with_failed_result_history() {
+    let fixture = Fixture::new();
+    let repository_root = repository_root();
+    let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("tampered-failed-result");
+    let bundle_id = fixture.bundle_id("tampered-failed-result");
+    let initial = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_mutate_event(
+        &fixture.database,
+        &run_id,
+        "LocalCheckResultRecorded",
+        |kind| {
+            kind["status"] = json!("failed");
+        },
+    );
+
+    assert_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+}
+
+#[test]
+fn terminal_artifact_entry_rejects_failed_run_with_passed_result_history() {
+    let fixture = Fixture::new();
+    fs::write(&fixture.npm, "#!/bin/sh\nexit 7\n").expect("failing npm");
+    let repository_root = repository_root();
+    let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("tampered-passed-result");
+    let bundle_id = fixture.bundle_id("tampered-passed-result");
+    let initial = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_mutate_event(
+        &fixture.database,
+        &run_id,
+        "LocalCheckResultRecorded",
+        |kind| {
+            kind["status"] = json!("passed");
+        },
+    );
+
+    assert_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+}
+
+#[test]
+fn terminal_artifact_entry_rejects_concrete_result_with_cancellation_history() {
+    let fixture = Fixture::new();
+    let repository_root = repository_root();
+    let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("tampered-cancellation");
+    let bundle_id = fixture.bundle_id("tampered-cancellation");
+    let initial = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_mutate_event(&fixture.database, &run_id, "RunCompleted", |kind| {
+        *kind = json!({
+            "kind": "RunCanceled",
+            "reason": "tampered cancellation",
+            "actor": "system/history-integrity-test",
+            "canceled_at": observed_at,
+            "correlation_id": "correlation-history-integrity-test"
+        });
+    });
+
+    assert_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+}
+
+#[test]
+fn terminal_artifact_entry_rejects_invocation_before_result_history() {
+    let fixture = Fixture::new();
+    let repository_root = repository_root();
+    let governance_root = repository_root.join("dogfood/workflow-os-self-governance");
+    let (observed_at, expires_at) = window_times();
+    let run_id = fixture.run_id("tampered-order");
+    let bundle_id = fixture.bundle_id("tampered-order");
+    let initial = invoke_foreground(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
+    );
+    assert!(initial.status.success());
+    clear_artifacts_and_swap_event_order(
+        &fixture.database,
+        &run_id,
+        "LocalCheckResultRecorded",
+        "SkillInvocationSucceeded",
+    );
+
+    assert_corrupt_replay_fails_before_artifact(
+        &fixture,
+        &repository_root,
+        &governance_root,
+        &run_id,
+        &bundle_id,
+        &observed_at,
+        &expires_at,
     );
 }
 
@@ -391,7 +834,7 @@ fn foreground_binary_admits_executes_and_persists_one_docs_check() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).expect("bounded stdout"),
-        "trusted_host_local_application: operation.terminal_report_generated\n"
+        "trusted_host_local_application: operation.terminal_report_artifact_persisted\n"
     );
     assert_eq!(output.stderr, Vec::<u8>::new());
 
@@ -434,7 +877,7 @@ fn foreground_binary_admits_executes_and_persists_one_docs_check() {
     assert!(replay.status.success());
     assert_eq!(
         String::from_utf8(replay.stdout).expect("bounded replay stdout"),
-        "trusted_host_local_application: admission.terminal_replay_report_generated\n"
+        "trusted_host_local_application: admission.terminal_replay_report_artifact_already_persisted\n"
     );
     assert_eq!(
         backend
@@ -444,6 +887,14 @@ fn foreground_binary_admits_executes_and_persists_one_docs_check() {
             .len(),
         event_count,
         "terminal operational replay must not duplicate events"
+    );
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("replayed report artifacts")
+            .len(),
+        1,
+        "terminal operational replay must not duplicate artifacts"
     );
 }
 
@@ -471,6 +922,200 @@ fn assert_terminal_result_binding(
     );
 }
 
+fn clear_artifacts_and_mutate_event(
+    database: &Path,
+    run_id: &WorkflowRunId,
+    target_kind: &str,
+    mutate: impl FnOnce(&mut Value),
+) {
+    let connection = Connection::open(database).expect("open fixture database for corruption test");
+    clear_artifacts_with_connection(&connection, run_id);
+    let (event_id, payload) = find_event_payload(&connection, run_id, target_kind);
+    let mut value: Value = serde_json::from_str(&payload).expect("event payload JSON");
+    mutate(&mut value["kind"]);
+    connection
+        .execute(
+            "UPDATE events SET payload = ?1 WHERE event_id = ?2",
+            params![value.to_string(), event_id],
+        )
+        .expect("write corrupt event payload");
+}
+
+fn clear_artifacts(database: &Path, run_id: &WorkflowRunId) {
+    let connection = Connection::open(database).expect("open fixture database for artifact reset");
+    clear_artifacts_with_connection(&connection, run_id);
+}
+
+fn clear_artifacts_with_connection(connection: &Connection, run_id: &WorkflowRunId) {
+    connection
+        .execute(
+            "DELETE FROM work_report_artifacts WHERE run_id = ?1",
+            params![run_id.as_str()],
+        )
+        .expect("clear prior artifact");
+}
+
+fn mutate_artifact_payload(
+    database: &Path,
+    run_id: &WorkflowRunId,
+    mutate: impl FnOnce(&mut Value),
+) -> String {
+    let payload = read_artifact_payload(database, run_id);
+    let mut value: Value = serde_json::from_str(&payload).expect("artifact payload JSON");
+    mutate(&mut value);
+    let payload = value.to_string();
+    write_artifact_payload(database, run_id, &payload);
+    payload
+}
+
+fn read_artifact_payload(database: &Path, run_id: &WorkflowRunId) -> String {
+    Connection::open(database)
+        .expect("open fixture database for artifact read")
+        .query_row(
+            "SELECT payload FROM work_report_artifacts WHERE run_id = ?1",
+            params![run_id.as_str()],
+            |row| row.get(0),
+        )
+        .expect("artifact payload")
+}
+
+fn write_artifact_payload(database: &Path, run_id: &WorkflowRunId, payload: &str) {
+    Connection::open(database)
+        .expect("open fixture database for artifact mutation")
+        .execute(
+            "UPDATE work_report_artifacts SET payload = ?1 WHERE run_id = ?2",
+            params![payload, run_id.as_str()],
+        )
+        .expect("mutate artifact payload");
+}
+
+fn assert_artifact_persistence_failure(output: &Output) {
+    assert!(!output.status.success());
+    assert_eq!(output.stdout, Vec::<u8>::new());
+    assert_eq!(
+        String::from_utf8(output.stderr.clone()).expect("bounded artifact failure stderr"),
+        "trusted_host_local_application: admission.terminal_replay_report_artifact_persistence_failed\n"
+    );
+}
+
+fn clear_artifacts_and_swap_event_order(
+    database: &Path,
+    run_id: &WorkflowRunId,
+    first_kind: &str,
+    second_kind: &str,
+) {
+    let mut connection = Connection::open(database).expect("open fixture database for order test");
+    clear_artifacts_with_connection(&connection, run_id);
+    let (first_id, first_payload) = find_event_payload(&connection, run_id, first_kind);
+    let (second_id, second_payload) = find_event_payload(&connection, run_id, second_kind);
+    let mut first_value: Value =
+        serde_json::from_str(&first_payload).expect("first event payload JSON");
+    let mut second_value: Value =
+        serde_json::from_str(&second_payload).expect("second event payload JSON");
+    let first_sequence = i64::try_from(
+        first_value["sequence_number"]
+            .as_u64()
+            .expect("first event sequence"),
+    )
+    .expect("first sequence fits SQLite");
+    let second_sequence = i64::try_from(
+        second_value["sequence_number"]
+            .as_u64()
+            .expect("second event sequence"),
+    )
+    .expect("second sequence fits SQLite");
+    assert!(first_sequence < second_sequence);
+    first_value["sequence_number"] = json!(second_sequence);
+    second_value["sequence_number"] = json!(first_sequence);
+    let temporary_sequence: i64 = connection
+        .query_row(
+            "SELECT MAX(sequence_number) + 100 FROM events WHERE run_id = ?1",
+            params![run_id.as_str()],
+            |row| row.get(0),
+        )
+        .expect("temporary sequence");
+    let transaction = connection.transaction().expect("corruption transaction");
+    transaction
+        .execute(
+            "UPDATE events SET sequence_number = ?1 WHERE event_id = ?2",
+            params![temporary_sequence, first_id],
+        )
+        .expect("move first event temporarily");
+    transaction
+        .execute(
+            "UPDATE events SET sequence_number = ?1, payload = ?2 WHERE event_id = ?3",
+            params![first_sequence, second_value.to_string(), second_id],
+        )
+        .expect("move second event first");
+    transaction
+        .execute(
+            "UPDATE events SET sequence_number = ?1, payload = ?2 WHERE event_id = ?3",
+            params![second_sequence, first_value.to_string(), first_id],
+        )
+        .expect("move first event second");
+    transaction.commit().expect("commit corrupt event order");
+}
+
+fn find_event_payload(
+    connection: &Connection,
+    run_id: &WorkflowRunId,
+    target_kind: &str,
+) -> (String, String) {
+    let mut statement = connection
+        .prepare("SELECT event_id, payload FROM events WHERE run_id = ?1 ORDER BY sequence_number")
+        .expect("prepare event lookup");
+    let found = statement
+        .query_map(params![run_id.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .expect("query event payloads")
+        .map(|row| row.expect("event payload row"))
+        .find(|(_, payload)| {
+            serde_json::from_str::<Value>(payload)
+                .ok()
+                .and_then(|value| value["kind"]["kind"].as_str().map(str::to_owned))
+                .as_deref()
+                == Some(target_kind)
+        });
+    found.expect("target event kind")
+}
+
+fn assert_corrupt_replay_fails_before_artifact(
+    fixture: &Fixture,
+    repository_root: &Path,
+    governance_root: &Path,
+    run_id: &WorkflowRunId,
+    bundle_id: &ImmutableRunBundleId,
+    observed_at: &str,
+    expires_at: &str,
+) {
+    let replay = invoke_foreground(
+        fixture,
+        repository_root,
+        governance_root,
+        run_id,
+        bundle_id,
+        observed_at,
+        expires_at,
+    );
+    assert!(!replay.status.success());
+    assert_eq!(replay.stdout, Vec::<u8>::new());
+    let stderr = String::from_utf8(replay.stderr).expect("bounded corrupt replay stderr");
+    assert!(matches!(
+        stderr.as_str(),
+        "trusted_host_local_application: admission.terminal_replay_report_generation_failed\n"
+            | "trusted_host_local_application: trusted_host_local_application.failure.invalid_state\n"
+    ));
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(run_id)
+            .expect("artifact list remains readable")
+            .len(),
+        0
+    );
+}
+
 #[test]
 fn foreground_binary_fails_closed_when_required_output_is_missing() {
     let fixture = Fixture::new();
@@ -491,15 +1136,14 @@ fn foreground_binary_fails_closed_when_required_output_is_missing() {
         &expires_at,
     );
 
-    assert!(
-        output.status.success(),
-        "foreground stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+    assert!(!output.status.success());
+    assert_eq!(output.stdout, Vec::<u8>::new());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("bounded generation failure stderr"),
+        "trusted_host_local_application: operation.terminal_report_generation_failed\n"
     );
-    let run = SqliteStateBackend::open(&fixture.database)
-        .expect("reopen SQLite")
-        .rehydrate_run(&run_id)
-        .expect("durable failed run");
+    let backend = SqliteStateBackend::open(&fixture.database).expect("reopen SQLite");
+    let run = backend.rehydrate_run(&run_id).expect("durable failed run");
     assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
     let failure = run
         .events
@@ -510,6 +1154,13 @@ fn foreground_binary_fails_closed_when_required_output_is_missing() {
         })
         .expect("durable invocation failure");
     assert_eq!(failure.code, "executor.output.required_missing");
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("artifact list remains readable")
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -1064,15 +1715,21 @@ struct ForegroundInvocation<'a> {
 }
 
 fn invoke_foreground_with(input: ForegroundInvocation<'_>) -> Output {
-    base_foreground_command(
+    foreground_command_with(input)
+        .output()
+        .expect("foreground binary")
+}
+
+fn foreground_command_with(input: ForegroundInvocation<'_>) -> Command {
+    let mut command = base_foreground_command(
         input.fixture,
         input.governance_root,
         input.run_id,
         input.bundle_id,
         input.observed_at,
         input.expires_at,
-    )
-    .args([
+    );
+    command.args([
         "--repository-root",
         input.repository_root.to_str().expect("repository root"),
         "--npm-executable",
@@ -1085,9 +1742,8 @@ fn invoke_foreground_with(input: ForegroundInvocation<'_>) -> Output {
         input.actor,
         "--correlation-id",
         input.correlation_id,
-    ])
-    .output()
-    .expect("foreground binary")
+    ]);
+    command
 }
 
 fn invoke_project_validation(
