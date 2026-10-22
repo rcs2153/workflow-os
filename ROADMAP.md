@@ -106,6 +106,13 @@ phase` language does not supersede the active queue.
    family. The selection and acceptance boundary are recorded in the [Scoped
    Capability Read-Only Integration Queue Selection
    Report](docs/concepts/SCOPED_CAPABILITY_READ_ONLY_INTEGRATION_QUEUE_SELECTION_REPORT.md).
+   The exact repository-metadata operation, authoritative source-query
+   boundary, deterministic failure ordering, and additive receipt-compatibility
+   posture are now defined in the [Scoped Capability GitHub Read-Only
+   Integration
+   Plan](docs/implementation-plans/scoped-capability-github-read-only-integration-plan.md).
+   The plan awaits focused maintainer and security review; no adapter runtime
+   composition is implemented yet.
 
 The first-use CLI and integration-check item added during the prior queue
 reconciliation was stale: both defects were already fixed and accepted in PR
