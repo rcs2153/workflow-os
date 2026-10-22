@@ -188,8 +188,8 @@ The order must be fixed:
    - all SideEffect citations required when any exist;
    - approval references required for any approval-gated SideEffect;
    - decisions required for approved or denied SideEffects; and
-   - the fixed no-high-assurance private posture appropriate to these closed
-     no-write profiles.
+   - `WorkReportArtifactHighAssuranceDisclosurePolicy::disabled()` for these
+     closed no-write profiles.
 8. Write through `WorkReportArtifactStore`.
 9. Reconcile a duplicate by reading the exact run/report key and requiring
    full validated artifact equality.
