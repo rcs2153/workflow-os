@@ -88,20 +88,18 @@ phase` language does not supersede the active queue.
    another mutation family, default writes, merge behavior, or automatic
    cleanup. Until the credential exists, this item remains dependency-tracked
    and must not block unrelated no-write work.
-2. **Review the executor capability-gated GitHub read-only composition.** The
-   reviewed implementation plan is now realized as one crate-private, opt-in
-   executor operation for the accepted GitHub repository-metadata read. The
-   next phase is a focused maintainer/security review of immutable operation
-   selection, post-claim cursor validation, authority and source continuity,
-   at-most-once provider entry, event ordering, telemetry, receipt truthfulness,
-   restart limitations, and privacy. Do not add a second provider operation,
-   provider mutation, public/default behavior, CLI/schema exposure, runtime
-   config, hosted identity, OpenShell, or nested harness execution. See the
-   [implementation plan](docs/implementation-plans/executor-capability-github-read-only-composition-plan.md),
-   [focused plan review](docs/concepts/EXECUTOR_CAPABILITY_GITHUB_READ_ONLY_COMPOSITION_PLAN_REVIEW.md),
-   and [implementation report](docs/concepts/EXECUTOR_CAPABILITY_GITHUB_READ_ONLY_COMPOSITION_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Executor capability-gated GitHub read-only composition accepted.** The
+  focused maintainer/security review found no blocker in the crate-private
+  SQLite-backed operation. Immutable operation selection, policy and approval
+  ordering, current authority, durable source continuity, one-time claim and
+  post-claim cursor enforcement, write-ahead events, at-most-once provider
+  entry, telemetry, payload-free receipt posture, and privacy match the
+  accepted plan. Crash ambiguity and process-level contention remain explicit
+  non-blocking limits; no public adoption or second provider operation is
+  authorized by this acceptance. See the [focused review](docs/concepts/EXECUTOR_CAPABILITY_GITHUB_READ_ONLY_COMPOSITION_REVIEW.md).
 
 - **Executor capability-gated GitHub read-only composition implemented.** One
   crate-private SQLite-backed executor operation now derives the exact
