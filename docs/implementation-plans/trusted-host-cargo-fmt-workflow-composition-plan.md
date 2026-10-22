@@ -1,6 +1,8 @@
 # Trusted-Host Cargo Format Workflow Composition Plan
 
-Status: planning complete; focused maintainer/security plan review required.
+Status: focused maintainer/security plan review accepted after incorporated
+dispatch-identity and pre-result failure-truth corrections; implementation is
+the next phase.
 
 Related foundations:
 
@@ -61,7 +63,9 @@ the accepted two-step compatibility surface.
 - Preserve the existing project-validation then docs-check prefix.
 - Append the accepted Cargo format profile as the terminal check.
 - Keep Core authoritative for topology, current-step, and profile selection.
-- Bind all three exact command contracts into the immutable run bundle.
+- Bind all three exact command contracts into the immutable run bundle and
+  bind each resolved trusted-host execution identity through its durable
+  dispatch executor commitment.
 - Commit each result, invocation terminal, and successor schedule atomically.
 - Re-admit from durable state before each later step.
 - Fail honestly at any step without scheduling later work.
@@ -168,12 +172,22 @@ Fresh admission must:
 1. validate the project and exact three-step topology;
 2. prepare the complete execution plan;
 3. validate all three profiles and roots;
-4. build one immutable run bundle containing all three handler and command
-   contracts;
+4. build one immutable run bundle containing the exact workflow, handler
+   posture, and all three command contracts;
 5. persist or validate that exact bundle;
 6. append run start and the first schedule;
 7. derive policy and approval posture without broadening authority; and
 8. prepare only the first opaque operation.
+
+The immutable bundle root is not, by itself, the resolved Cargo toolchain and
+protected-source identity. Each admitted operation must also durably record the
+existing trusted-host executor commitment in its dispatch event. That
+commitment includes the command-contract fingerprint and private resolved
+execution fingerprint; for Cargo format, the latter includes the accepted
+formatter-chain inventory and protected-source commitment. Re-admission and
+terminal report composition must reproduce and verify the exact dispatch
+commitment for every attempted step. A command-contract match without the
+matching dispatch executor commitment is insufficient.
 
 Re-admission must load the exact stored bundle, validate request identity,
 validate the complete causal history, derive the latest scheduled step, derive
@@ -223,9 +237,30 @@ step scheduled
 Each result must bind the expected step, profile, command, immutable bundle,
 invocation, and terminal event. A non-passing result may not have a successor.
 A completed run requires exactly three passing results. A failed run requires
-the last attempted result to be non-passing or an accepted fixed integrity
-failure path. Duplicate, skipped, reordered, contradictory, or substituted
-history fails closed.
+the last attempted result to be non-passing or the exact pre-result failure
+shape defined below. Each attempted step must also have exactly one matching
+authorized dispatch whose executor commitment reproduces from the closed
+profile and immutable step identity. Duplicate, skipped, reordered,
+contradictory, or substituted history fails closed.
+
+The accepted pre-result failure shape is deliberately narrow:
+
+```text
+step scheduled
+  < matching authorized dispatch admitted
+  < matching skill invocation failed
+  < run failed
+```
+
+It contains no `LocalCheckResultRecorded` event for the failed step and no
+successor schedule. This is the existing fail-closed shape when handler
+identity, protected-source, or another pre-result execution check returns an
+error. Because the current supervisor intentionally normalizes raw handler
+errors, the report may disclose only that execution failed before a bounded
+check result was accepted. It must not infer or claim a more specific cause
+that durable history does not prove. Tests may induce a known Cargo integrity
+failure to prove this shape, but report text remains bounded to persisted
+truth.
 
 ## 12. Bounded Host Loop
 
@@ -250,17 +285,29 @@ The report commitment must bind:
 - run and immutable bundle identity;
 - exact three-step topology and order;
 - exact closed profile and command identity for each attempted step;
+- the matching authorized dispatch event and resolved executor commitment for
+  each attempted step;
 - each concrete local-check result;
 - each matching invocation terminal event; and
 - the terminal run event.
 
-Completed reports require three passing result citations. Failed reports cite
-only attempted checks and disclose later work explicitly:
+Completed reports require three passing result citations and three matching
+dispatch bindings. Failed reports cite only accepted results, bind every
+attempted step's dispatch and invocation-terminal events, and disclose later
+work explicitly:
 
 - project-validation failure: docs and Cargo format were not attempted;
 - docs-check failure: Cargo format was not attempted;
 - Cargo-format failure: all three checks were attempted and the final check
   did not pass.
+
+When a step fails before result acceptance, the report must not fabricate a
+local-check result citation. It binds the scheduled step, matching dispatch,
+failed invocation, and terminal run event; states that no bounded result was
+accepted; and discloses every later step as not attempted. The v4 report
+commitment includes the durable executor commitment so Cargo's private
+toolchain/source execution identity is covered without serializing paths,
+inventory entries, or source material.
 
 The artifact path remains create-only and uses the accepted report artifact
 gate. Exact duplicate reconciliation may return already persisted; conflicting
@@ -312,20 +359,25 @@ Focused implementation tests must prove:
 6. third-step failure records all three results and fails honestly;
 7. non-zero and timeout Cargo outcomes remain bounded result truth;
 8. Cargo source or toolchain integrity failure cannot become success;
-9. restart after first commit runs only steps two and three;
-10. restart after second commit runs only step three;
-11. terminal replay runs no process and appends no event;
-12. causal-history corruption at either successor boundary fails closed;
-13. profile, result, command, bundle, or invocation substitution fails closed;
-14. completed v4 report cites all three stable results in order;
-15. each failure report cites only attempted results and discloses skipped work;
-16. missing artifact recovery is create-only and exact;
-17. conflicting artifact posture fails closed;
-18. Debug, errors, output, events, report, artifact, and serialization do not
+9. a Cargo pre-result integrity failure produces no check result, binds the
+   exact dispatch and failed invocation, and yields an honest v4 report;
+10. dispatch executor-commitment substitution fails closed during admission,
+    history validation, and report composition;
+11. restart after first commit runs only steps two and three;
+12. restart after second commit runs only step three;
+13. terminal replay runs no process and appends no event;
+14. causal-history corruption at either successor boundary fails closed;
+15. profile, result, command, bundle, or invocation substitution fails closed;
+16. completed v4 report cites all three stable results in order;
+17. each failure report cites only accepted results, binds attempted work, and
+    discloses skipped work;
+18. missing artifact recovery is create-only and exact;
+19. conflicting artifact posture fails closed;
+20. Debug, errors, output, events, report, artifact, and serialization do not
     leak paths or raw process output;
-19. existing one-step Cargo behavior is unchanged;
-20. existing one-step project-validation/docs behavior is unchanged; and
-21. existing two-step v3 workflow, report, artifact, and replay behavior is
+21. existing one-step Cargo behavior is unchanged;
+22. existing one-step project-validation/docs behavior is unchanged; and
+23. existing two-step v3 workflow, report, artifact, and replay behavior is
     unchanged.
 
 Before acceptance, run focused Core and foreground tests plus the complete
