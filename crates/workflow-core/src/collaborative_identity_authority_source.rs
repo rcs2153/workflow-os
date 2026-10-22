@@ -27,10 +27,10 @@ pub(crate) const POSTGRES_SOURCE_VERSION: &str = "v1";
 /// Fact families required for one complete collaborative identity authority read.
 pub const COLLABORATIVE_IDENTITY_AUTHORITY_FACT_FAMILIES: [CurrentAuthorityFactFamily; 5] = [
     CurrentAuthorityFactFamily::CapabilityGrants,
-    CurrentAuthorityFactFamily::CapabilityGrantRevocations,
     CurrentAuthorityFactFamily::IdentityProviderRegistrations,
     CurrentAuthorityFactFamily::PrincipalIdentityBindings,
     CurrentAuthorityFactFamily::PrincipalLifecycle,
+    CurrentAuthorityFactFamily::CapabilityGrantRevocations,
 ];
 
 /// Version of the collaborative exact-query request commitment.
@@ -414,10 +414,6 @@ impl CollaborativeIdentityAuthorityRevisionCandidate {
             .collect::<BTreeSet<_>>();
         [
             grants.len() as u64,
-            self.revocations
-                .iter()
-                .filter(|revocation| grant_ids.contains(revocation.grant_id().as_str()))
-                .count() as u64,
             self.providers
                 .iter()
                 .filter(|provider| provider_ids.contains(provider.provider_id().as_str()))
@@ -426,6 +422,10 @@ impl CollaborativeIdentityAuthorityRevisionCandidate {
             self.principals
                 .iter()
                 .filter(|principal| principal.principal_id() == query.principal_id())
+                .count() as u64,
+            self.revocations
+                .iter()
+                .filter(|revocation| grant_ids.contains(revocation.grant_id().as_str()))
                 .count() as u64,
         ]
     }
@@ -662,19 +662,19 @@ pub(crate) fn build_postgres_collaborative_identity_source_read(
                     exact_fact_counts[0],
                 ),
                 CurrentAuthoritySourceFactCount::new(
-                    CurrentAuthorityFactFamily::CapabilityGrantRevocations,
+                    CurrentAuthorityFactFamily::IdentityProviderRegistrations,
                     exact_fact_counts[1],
                 ),
                 CurrentAuthoritySourceFactCount::new(
-                    CurrentAuthorityFactFamily::IdentityProviderRegistrations,
+                    CurrentAuthorityFactFamily::PrincipalIdentityBindings,
                     exact_fact_counts[2],
                 ),
                 CurrentAuthoritySourceFactCount::new(
-                    CurrentAuthorityFactFamily::PrincipalIdentityBindings,
+                    CurrentAuthorityFactFamily::PrincipalLifecycle,
                     exact_fact_counts[3],
                 ),
                 CurrentAuthoritySourceFactCount::new(
-                    CurrentAuthorityFactFamily::PrincipalLifecycle,
+                    CurrentAuthorityFactFamily::CapabilityGrantRevocations,
                     exact_fact_counts[4],
                 ),
             ],
@@ -785,7 +785,20 @@ fn concat_code(code: &'static str) -> &'static str {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use super::{match_posture_for_count, CollaborativeIdentityAuthorityMatchPosture};
+    use super::{
+        match_posture_for_count, postgres_collaborative_identity_source_registration,
+        CollaborativeIdentityAuthorityMatchPosture, COLLABORATIVE_IDENTITY_AUTHORITY_FACT_FAMILIES,
+    };
+
+    #[test]
+    fn postgres_registration_matches_canonical_collaborative_family_contract() {
+        let registration =
+            postgres_collaborative_identity_source_registration().expect("valid registration");
+        assert_eq!(
+            registration.supported_fact_families(),
+            COLLABORATIVE_IDENTITY_AUTHORITY_FACT_FAMILIES
+        );
+    }
 
     #[test]
     fn multiple_active_matching_grants_fail_closed() {

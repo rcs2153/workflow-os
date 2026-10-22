@@ -6,7 +6,7 @@
 same-call collaborative `ApprovalDecide` consumer.**
 
 The implementation now provides a credible persistent source boundary. Review
-found four blocking integrity gaps; all four were corrected and covered before
+found five blocking integrity gaps; all five were corrected and covered before
 acceptance. No runtime decision consumer or hosted identity cutover was added.
 
 ## 2. Scope Verification
@@ -98,6 +98,11 @@ That could hide duplicate active authority. The fixed boundary accepts exactly
 zero as a complete negative, exactly one as present, and fails closed for more
 than one active matching grant.
 
+The live PostgreSQL check also exposed that the closed fact-family constant was
+not in canonical enum order even though source registration canonicalizes its
+input. The constant, exact-query counts, and snapshot counts now share one
+canonical order, with an always-on registration contract test.
+
 ## 10. Privacy And Disclosure Blocker And Fix
 
 Canonical payloads remain inside the source. Read evidence contains
@@ -146,8 +151,8 @@ configured. This is disclosed rather than treated as live database evidence.
 
 ## 14. Blockers
 
-None after the concurrency, source-version, ambiguity, and count-disclosure
-fixes.
+None after the concurrency, source-version, ambiguity, canonical-family, and
+count-disclosure fixes.
 
 ## 15. Non-Blocking Follow-Ups
 

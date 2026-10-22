@@ -48,11 +48,12 @@ registration and snapshot commitment machinery, preserving the V1 required-
 context request unchanged. No approval-decision consumer or hosted identity
 cutover is implemented.
 
-The phase-level review required and applied four integrity corrections before
+The phase-level review required and applied five integrity corrections before
 acceptance: organization-scoped activation locking for the first-revision race,
 durable source-model version verification, fail-closed ambiguous matching
-grants, and query-minimized emitted fact counts. Restored-state rehearsal now
-also checks exact replay, negative read posture, and rollback rejection.
+grants, canonical closed fact-family ordering, and query-minimized emitted fact
+counts. Restored-state rehearsal now also checks exact replay, negative read
+posture, and rollback rejection.
 
 ## 2. Why This Phase Is Next
 

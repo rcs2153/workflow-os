@@ -30,6 +30,8 @@ after focused maintainer/security review.
 - Added durable source-model version binding and verification.
 - Added fail-closed handling for multiple active grants matching one exact
   query and query-minimized emitted family counts.
+- Added canonical closed fact-family ordering with an always-on registration
+  contract test.
 - Added payload-free complete source snapshots and match posture.
 - Added always-on model tests, PostgreSQL conformance coverage, and restored-
   state rehearsal for collaborative authority.
@@ -101,7 +103,7 @@ candidate commitment; dangling identity rejection; closed vocabulary; Debug
 and serialization posture; schema V1-to-V3 migration; activation, replay,
 same-revision conflict, higher-revision revocation, rollback rejection, restart
 read, concurrent first activation, source-version corruption, restored-state
-equivalence, and payload-free match evidence.
+equivalence, canonical registration ordering, and payload-free match evidence.
 
 The PostgreSQL conformance test is environment-gated. It compiles locally and
 runs when `WORKFLOW_OS_TEST_POSTGRES_URL` is supplied; the current local run
