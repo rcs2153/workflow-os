@@ -578,21 +578,20 @@ fn trusted_host_terminal_report_bindings<'a>(
             "result_binding_mismatch",
         ));
     }
-    let invocation_matches = run
-        .events
-        .iter()
-        .filter(|event| {
-            event.event_id == *result_binding.invocation_terminal_event_id()
-                && matches!(
-                    &event.kind,
-                    WorkflowRunEventKind::SkillInvocationSucceeded { invocation_id, step_id, .. }
-                        | WorkflowRunEventKind::SkillInvocationFailed { invocation_id, step_id, .. }
-                        if invocation_id == result_binding.invocation_id()
-                            && step_id == result_binding.step_id()
-                )
-        })
-        .count();
-    if invocation_matches != 1 {
+    let mut invocation_events = run.events.iter().filter(|event| {
+        event.event_id == *result_binding.invocation_terminal_event_id()
+            && matches!(
+                &event.kind,
+                WorkflowRunEventKind::SkillInvocationSucceeded { invocation_id, step_id, .. }
+                    | WorkflowRunEventKind::SkillInvocationFailed { invocation_id, step_id, .. }
+                    if invocation_id == result_binding.invocation_id()
+                        && step_id == result_binding.step_id()
+            )
+    });
+    let invocation_event = invocation_events
+        .next()
+        .ok_or_else(|| trusted_host_terminal_report_error("invocation_binding_mismatch"))?;
+    if invocation_events.next().is_some() {
         return Err(trusted_host_terminal_report_error(
             "invocation_binding_mismatch",
         ));
@@ -601,17 +600,28 @@ fn trusted_host_terminal_report_bindings<'a>(
         .events
         .last()
         .ok_or_else(|| trusted_host_terminal_report_error("terminal_event_missing"))?;
-    if !matches!(
-        terminal_event.kind,
-        WorkflowRunEventKind::RunCompleted
-            | WorkflowRunEventKind::RunFailed(_)
-            | WorkflowRunEventKind::RunCanceled(_)
-    ) || terminal_event.sequence_number <= result_event.sequence_number
-    {
-        return Err(trusted_host_terminal_report_error(
-            "terminal_event_mismatch",
-        ));
-    }
+    let invocation_succeeded = matches!(
+        invocation_event.kind,
+        WorkflowRunEventKind::SkillInvocationSucceeded { .. }
+    );
+    let terminal_status = match terminal_event.kind {
+        WorkflowRunEventKind::RunCompleted => WorkflowRunStatus::Completed,
+        WorkflowRunEventKind::RunFailed(_) => WorkflowRunStatus::Failed,
+        WorkflowRunEventKind::RunCanceled(_) => WorkflowRunStatus::Canceled,
+        _ => {
+            return Err(trusted_host_terminal_report_error(
+                "terminal_event_mismatch",
+            ))
+        }
+    };
+    validate_trusted_host_terminal_result_shape(
+        result_binding.status(),
+        invocation_succeeded,
+        terminal_status,
+        result_event.sequence_number,
+        invocation_event.sequence_number,
+        terminal_event.sequence_number,
+    )?;
     Ok(TrustedHostTerminalReportBindings {
         durable_bundle,
         result_event,
@@ -621,12 +631,157 @@ fn trusted_host_terminal_report_bindings<'a>(
 }
 
 #[cfg(feature = "trusted-host-application-spi")]
+fn validate_trusted_host_terminal_result_shape(
+    result_status: crate::LocalCheckResultStatus,
+    invocation_succeeded: bool,
+    terminal_status: WorkflowRunStatus,
+    result_sequence: EventSequenceNumber,
+    invocation_sequence: EventSequenceNumber,
+    terminal_sequence: EventSequenceNumber,
+) -> Result<(), WorkflowOsError> {
+    let status_matches = match result_status {
+        crate::LocalCheckResultStatus::Passed => {
+            invocation_succeeded && terminal_status == WorkflowRunStatus::Completed
+        }
+        crate::LocalCheckResultStatus::Failed | crate::LocalCheckResultStatus::TimedOut => {
+            !invocation_succeeded && terminal_status == WorkflowRunStatus::Failed
+        }
+        _ => false,
+    };
+    if !status_matches {
+        return Err(trusted_host_terminal_report_error(
+            "terminal_status_mismatch",
+        ));
+    }
+    if !(result_sequence < invocation_sequence && invocation_sequence < terminal_sequence) {
+        return Err(trusted_host_terminal_report_error(
+            "terminal_event_order_mismatch",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
 fn trusted_host_terminal_report_error(code: &str) -> WorkflowOsError {
     executor_error(
         WorkflowOsErrorKind::InvalidState,
         format!("trusted_host_terminal_report.{code}"),
         "trusted-host terminal report composition failed closed",
     )
+}
+
+#[cfg(all(test, feature = "trusted-host-application-spi"))]
+mod trusted_host_terminal_report_integrity_tests {
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+    use crate::LocalCheckResultStatus;
+
+    fn sequence(value: u64) -> EventSequenceNumber {
+        EventSequenceNumber::new(value).expect("positive sequence")
+    }
+
+    #[test]
+    fn terminal_result_shape_accepts_only_matching_success_and_failure_truth() {
+        for (result_status, invocation_succeeded, terminal_status) in [
+            (
+                LocalCheckResultStatus::Passed,
+                true,
+                WorkflowRunStatus::Completed,
+            ),
+            (
+                LocalCheckResultStatus::Failed,
+                false,
+                WorkflowRunStatus::Failed,
+            ),
+            (
+                LocalCheckResultStatus::TimedOut,
+                false,
+                WorkflowRunStatus::Failed,
+            ),
+        ] {
+            validate_trusted_host_terminal_result_shape(
+                result_status,
+                invocation_succeeded,
+                terminal_status,
+                sequence(10),
+                sequence(11),
+                sequence(12),
+            )
+            .expect("matching terminal truth");
+        }
+    }
+
+    #[test]
+    fn terminal_result_shape_rejects_status_conflicts_and_cancellation() {
+        for (result_status, invocation_succeeded, terminal_status) in [
+            (
+                LocalCheckResultStatus::Passed,
+                false,
+                WorkflowRunStatus::Failed,
+            ),
+            (
+                LocalCheckResultStatus::Passed,
+                true,
+                WorkflowRunStatus::Failed,
+            ),
+            (
+                LocalCheckResultStatus::Failed,
+                true,
+                WorkflowRunStatus::Completed,
+            ),
+            (
+                LocalCheckResultStatus::Failed,
+                false,
+                WorkflowRunStatus::Completed,
+            ),
+            (
+                LocalCheckResultStatus::TimedOut,
+                true,
+                WorkflowRunStatus::Completed,
+            ),
+            (
+                LocalCheckResultStatus::TimedOut,
+                false,
+                WorkflowRunStatus::Canceled,
+            ),
+        ] {
+            let error = validate_trusted_host_terminal_result_shape(
+                result_status,
+                invocation_succeeded,
+                terminal_status,
+                sequence(10),
+                sequence(11),
+                sequence(12),
+            )
+            .expect_err("conflicting terminal truth must fail closed");
+            assert_eq!(
+                error.code(),
+                "trusted_host_terminal_report.terminal_status_mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_result_shape_rejects_non_monotonic_event_order() {
+        for (result_sequence, invocation_sequence, terminal_sequence) in
+            [(11, 10, 12), (10, 10, 12), (10, 12, 11), (10, 12, 12)]
+        {
+            let error = validate_trusted_host_terminal_result_shape(
+                LocalCheckResultStatus::Passed,
+                true,
+                WorkflowRunStatus::Completed,
+                sequence(result_sequence),
+                sequence(invocation_sequence),
+                sequence(terminal_sequence),
+            )
+            .expect_err("non-monotonic terminal history must fail closed");
+            assert_eq!(
+                error.code(),
+                "trusted_host_terminal_report.terminal_event_order_mismatch"
+            );
+        }
+    }
 }
 
 #[cfg(feature = "trusted-host-application-spi")]

@@ -185,3 +185,10 @@ then perform focused blocker-fix review.
 Do not add report artifacts, persistence, released CLI rendering, another
 profile, arbitrary commands, scheduling, providers, writes, hosted expansion,
 or nested harness execution.
+
+## 14. Fix-Forward Status
+
+The narrow blocker fix has been implemented in a later governed phase. It adds
+status compatibility and strict ordering validation plus focused mismatch
+tests. This note does not erase or revise the original `Needs blocker fixes`
+verdict; the fix requires its own focused review before phase acceptance.

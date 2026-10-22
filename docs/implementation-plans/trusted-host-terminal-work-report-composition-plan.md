@@ -1,7 +1,7 @@
 # Trusted-Host Terminal WorkReport Composition Plan
 
 Status: implementation complete; focused maintainer/security review found one
-blocker requiring a narrow fix-forward phase.
+blocker, and the narrow fix-forward implementation is complete pending review.
 
 Related foundations:
 
