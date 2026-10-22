@@ -3,7 +3,8 @@
 Status: planning and focused maintainer/security review accepted; Phase 1
 transaction-scoped source-read refactor implemented and reviewed; Phase 2
 payload-free receipt model and dedicated create-only PostgreSQL persistence
-implemented pending focused review; the consequential consumer is not implemented
+implemented; focused review found a live PostgreSQL conformance and recovery
+evidence blocker; the consequential consumer is not implemented
 
 Related foundations:
 
@@ -377,7 +378,10 @@ Timing-only sleeps are not sufficient evidence.
   decision-event bindings, exact replay, exact recovery, and corruption checks.
 - Preserved: the trusted receipt is serialize-only, deserialization yields an
   explicitly unverified claim, and the receipt remains non-authorizing.
-- Pending: focused maintainer/security review before Phase 3.
+- Review result: model boundary accepted, but required CI does not execute the
+  receipt store behavior and backup/restore does not preserve a receipt yet.
+- Blocked: Phase 3 until the narrow PostgreSQL verification fix is implemented
+  and reviewed.
 
 ### Phase 3: Same-Call ApprovalDecide Consumer
 
