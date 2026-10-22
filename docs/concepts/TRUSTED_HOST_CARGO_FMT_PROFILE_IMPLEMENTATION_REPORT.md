@@ -165,3 +165,12 @@ simulated for this phase.
 Perform a focused maintainer/security review of this implementation. Do not add
 clippy, tests, generic command execution, provider access, external writes,
 public surfaces, hosted expansion, or another topology before that review.
+
+## 14. Subsequent Blocker Fix
+
+The implementation review found bounded toolchain-inventory,
+protected-exclusion-policy, and focused-regression blockers. Those issues were
+addressed in the separate
+[Trusted-Host Cargo Format Check Profile Blocker Fix Report](TRUSTED_HOST_CARGO_FMT_PROFILE_BLOCKER_FIX_REPORT.md).
+The original implementation record remains unchanged; focused review of the
+fix is still required before acceptance.

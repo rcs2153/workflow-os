@@ -1567,7 +1567,7 @@ struct CargoFmtCheckLocalHandler {
     cargo_executable: PathBuf,
     cargo_fmt_executable: PathBuf,
     rustfmt_executable: PathBuf,
-    formatter_chain_identity_hash: crate::SpecContentHash,
+    toolchain_input_inventory_hash: crate::SpecContentHash,
     execution_identity_hash: crate::SpecContentHash,
     repository_root: PathBuf,
     toolchain_root: PathBuf,
@@ -1617,7 +1617,9 @@ impl CargoFmtCheckLocalHandler {
             "local_check.profile.handler.toolchain_root_invalid",
             "Cargo format handler requires a valid toolchain root",
         )?;
-        if toolchain_root.starts_with(&repository_root) {
+        if toolchain_root.starts_with(&repository_root)
+            || repository_root.starts_with(&toolchain_root)
+        {
             return Err(local_check_error(
                 WorkflowOsErrorKind::Security,
                 "local_check.profile.handler.toolchain_root_overlaps_repository",
@@ -1630,14 +1632,15 @@ impl CargoFmtCheckLocalHandler {
             canonical_executable_in_root(cargo_fmt_executable, &toolchain_root, "cargo-fmt")?;
         let rustfmt_executable =
             canonical_executable_in_root(rustfmt_executable, &toolchain_root, "rustfmt")?;
-        let formatter_chain_identity_hash = formatter_chain_identity_hash(
+        let toolchain_input_inventory_hash = cargo_fmt_toolchain_input_inventory_hash(
+            &toolchain_root,
             &cargo_executable,
             &cargo_fmt_executable,
             &rustfmt_executable,
         )?;
         let protected_source_commitment = protected_tree_commitment(&repository_root)?;
         let execution_identity_hash = cargo_fmt_execution_identity_hash(
-            &formatter_chain_identity_hash,
+            &toolchain_input_inventory_hash,
             &protected_source_commitment,
         );
 
@@ -1646,7 +1649,7 @@ impl CargoFmtCheckLocalHandler {
             cargo_executable,
             cargo_fmt_executable,
             rustfmt_executable,
-            formatter_chain_identity_hash,
+            toolchain_input_inventory_hash,
             execution_identity_hash,
             repository_root,
             toolchain_root,
@@ -1700,12 +1703,13 @@ impl CargoFmtCheckLocalHandler {
                 return Err(formatter_identity_changed_error());
             }
         }
-        let current = formatter_chain_identity_hash(
+        let current = cargo_fmt_toolchain_input_inventory_hash(
+            &self.toolchain_root,
             &self.cargo_executable,
             &self.cargo_fmt_executable,
             &self.rustfmt_executable,
         )?;
-        if current != self.formatter_chain_identity_hash {
+        if current != self.toolchain_input_inventory_hash {
             return Err(formatter_identity_changed_error());
         }
         let protected_source = protected_tree_commitment(&self.repository_root)?;
@@ -1729,11 +1733,12 @@ impl fmt::Debug for CargoFmtCheckLocalHandler {
             .field("cargo_executable", &"[REDACTED]")
             .field("cargo_fmt_executable", &"[REDACTED]")
             .field("rustfmt_executable", &"[REDACTED]")
-            .field("formatter_chain_identity_hash", &"[REDACTED]")
+            .field("toolchain_input_inventory_hash", &"[REDACTED]")
             .field("execution_identity_hash", &"[REDACTED]")
             .field("repository_root", &"[REDACTED]")
             .field("toolchain_root", &"[REDACTED]")
             .field("protected_source_commitment", &"[REDACTED]")
+            .field("protected_inventory_policy_hash", &"[REDACTED]")
             .field("process_runner", &"[REDACTED]")
             .finish()
     }
@@ -3472,7 +3477,8 @@ fn canonical_executable_in_root(
     Ok(canonical)
 }
 
-fn formatter_chain_identity_hash(
+fn cargo_fmt_toolchain_input_inventory_hash(
+    toolchain_root: &Path,
     cargo_executable: &Path,
     cargo_fmt_executable: &Path,
     rustfmt_executable: &Path,
@@ -3481,13 +3487,32 @@ fn formatter_chain_identity_hash(
     hash_private_commitment_field(
         &mut hasher,
         b"domain",
-        b"workflow-os/cargo-format-executable-chain/v1",
+        b"workflow-os/cargo-format-toolchain-input-inventory/v1",
+    );
+    hash_private_commitment_field(
+        &mut hasher,
+        b"inventory_policy",
+        b"exact-final-executables-and-canonical-root/v1",
+    );
+    hash_private_commitment_field(
+        &mut hasher,
+        b"canonical_toolchain_root",
+        toolchain_root.as_os_str().as_encoded_bytes(),
     );
     for (name, path) in [
         (b"cargo".as_slice(), cargo_executable),
         (b"cargo_fmt".as_slice(), cargo_fmt_executable),
         (b"rustfmt".as_slice(), rustfmt_executable),
     ] {
+        let relative = path
+            .strip_prefix(toolchain_root)
+            .map_err(|_| formatter_identity_changed_error())?;
+        hash_private_commitment_field(&mut hasher, b"selector", name);
+        hash_private_commitment_field(
+            &mut hasher,
+            b"relative_path",
+            relative.as_os_str().as_encoded_bytes(),
+        );
         let digest = executable_content_hash(path)?;
         hash_private_commitment_field(&mut hasher, name, digest.as_str().as_bytes());
     }
@@ -3523,6 +3548,12 @@ fn protected_tree_commitment(root: &Path) -> Result<crate::SpecContentHash, Work
         &mut hasher,
         b"domain",
         b"workflow-os/protected-source-final-state/v1",
+    );
+    let policy_hash = protected_inventory_policy_hash();
+    hash_private_commitment_field(
+        &mut hasher,
+        b"exclusion_policy",
+        policy_hash.as_str().as_bytes(),
     );
     commit_protected_directory(root, root, &mut hasher)?;
     Ok(crate::SpecContentHash::from_bytes(hasher.finalize()))
@@ -3582,14 +3613,26 @@ fn commit_protected_directory(
 }
 
 fn protected_inventory_excluded(relative: &Path) -> bool {
-    [
-        Path::new(".git"),
-        Path::new(".workflow-os"),
-        Path::new("dogfood/.workflow-os"),
-        Path::new("target"),
-    ]
-    .iter()
-    .any(|excluded| relative == *excluded || relative.starts_with(excluded))
+    PROTECTED_INVENTORY_EXCLUSIONS
+        .iter()
+        .map(Path::new)
+        .any(|excluded| relative == excluded || relative.starts_with(excluded))
+}
+
+const PROTECTED_INVENTORY_EXCLUSIONS: [&str; 4] =
+    [".git", ".workflow-os", "dogfood/.workflow-os", "target"];
+
+fn protected_inventory_policy_hash() -> crate::SpecContentHash {
+    let mut hasher = Sha256::new();
+    hash_private_commitment_field(
+        &mut hasher,
+        b"domain",
+        b"workflow-os/protected-source-exclusion-policy/v1",
+    );
+    for exclusion in PROTECTED_INVENTORY_EXCLUSIONS {
+        hash_private_commitment_field(&mut hasher, b"excluded_path", exclusion.as_bytes());
+    }
+    crate::SpecContentHash::from_bytes(hasher.finalize())
 }
 
 fn formatter_identity_unavailable_error() -> WorkflowOsError {

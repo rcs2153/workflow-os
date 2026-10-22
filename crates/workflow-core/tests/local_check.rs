@@ -703,6 +703,150 @@ fn explicit_cargo_fmt_profile_binds_exact_chain_and_executes_only_when_called() 
 }
 
 #[test]
+fn cargo_fmt_profile_maps_non_zero_and_timeout_without_copying_output() {
+    for (output, expected_status) in [
+        (
+            LocalCheckProcessOutput::completed(Some(7), false, 9, Vec::new(), Vec::new()),
+            LocalCheckResultStatus::Failed,
+        ),
+        (
+            LocalCheckProcessOutput::timed_out(120_000, Vec::new(), Vec::new()),
+            LocalCheckResultStatus::TimedOut,
+        ),
+    ] {
+        let fixture = CargoFmtFixture::new();
+        let profile = fixture
+            .resolve(Arc::new(FakeRunner::with_output(output)))
+            .expect("Cargo format profile resolves");
+
+        let result = profile.execute().expect("closed result is returned");
+        let serialized = serde_json::to_string(&result).expect("result serializes");
+
+        assert_eq!(result.status(), expected_status);
+        assert!(!serialized.contains(&fixture.root.to_string_lossy().into_owned()));
+    }
+}
+
+#[test]
+fn cargo_fmt_profile_rejects_missing_component_without_process_or_install() {
+    let fixture = CargoFmtFixture::new();
+    fs::remove_file(&fixture.cargo_fmt).expect("remove component fixture");
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        1,
+        Vec::new(),
+        Vec::new(),
+    )));
+
+    let error = fixture
+        .resolve(Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>)
+        .expect_err("missing component must fail closed");
+
+    assert_eq!(
+        error.code(),
+        "local_check.profile.handler.formatter_identity_unavailable"
+    );
+    assert!(runner.last_request.lock().expect("request lock").is_none());
+    assert!(!error
+        .to_string()
+        .contains(&fixture.cargo_fmt.to_string_lossy().into_owned()));
+}
+
+#[test]
+fn cargo_fmt_profile_rejects_repository_toolchain_overlap_in_both_directions() {
+    let fixture = CargoFmtFixture::new();
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        1,
+        Vec::new(),
+        Vec::new(),
+    )));
+    let broad_root_error = ExplicitLocalCheckProfileSelection::cargo_fmt_check()
+        .resolve_cargo_fmt_check_with_process_runner(
+            &fixture.cargo,
+            &fixture.cargo_fmt,
+            &fixture.rustfmt,
+            &fixture.root,
+            &fixture.repository,
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect_err("toolchain root containing repository must fail closed");
+    assert_eq!(
+        broad_root_error.code(),
+        "local_check.profile.handler.toolchain_root_overlaps_repository"
+    );
+
+    let nested_toolchain = fixture.repository.join("nested-toolchain");
+    let nested_bin = nested_toolchain.join("bin");
+    fs::create_dir_all(&nested_bin).expect("nested toolchain fixture");
+    let nested_cargo = nested_bin.join("cargo");
+    let nested_cargo_fmt = nested_bin.join("cargo-fmt");
+    let nested_rustfmt = nested_bin.join("rustfmt");
+    for executable in [&nested_cargo, &nested_cargo_fmt, &nested_rustfmt] {
+        write_test_executable(executable);
+    }
+    let nested_root_error = ExplicitLocalCheckProfileSelection::cargo_fmt_check()
+        .resolve_cargo_fmt_check_with_process_runner(
+            &nested_cargo,
+            &nested_cargo_fmt,
+            &nested_rustfmt,
+            &nested_toolchain,
+            &fixture.repository,
+            runner as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect_err("toolchain root inside repository must fail closed");
+    assert_eq!(
+        nested_root_error.code(),
+        "local_check.profile.handler.toolchain_root_overlaps_repository"
+    );
+}
+
+#[test]
+fn cargo_fmt_profile_rejects_toolchain_inventory_mutation_during_execution() {
+    let fixture = CargoFmtFixture::new();
+    let profile = fixture
+        .resolve(Arc::new(MutatingRunner {
+            path: fixture.rustfmt.clone(),
+            mutation: FilesystemMutation::Write,
+        }))
+        .expect("Cargo format profile resolves");
+
+    let error = profile
+        .execute()
+        .expect_err("toolchain input mutation must fail closed");
+
+    assert_eq!(
+        error.code(),
+        "local_check.profile.handler.formatter_identity_changed"
+    );
+    assert!(!error
+        .to_string()
+        .contains(&fixture.rustfmt.to_string_lossy().into_owned()));
+}
+
+#[test]
+fn cargo_fmt_profile_commits_core_owned_exclusion_policy_without_caller_override() {
+    let fixture = CargoFmtFixture::new();
+    fs::create_dir_all(fixture.repository.join("target")).expect("target fixture");
+    let profile = fixture
+        .resolve(Arc::new(MutatingRunner {
+            path: fixture.repository.join("target/formatter-state"),
+            mutation: FilesystemMutation::Create,
+        }))
+        .expect("Cargo format profile resolves");
+
+    let result = profile
+        .execute()
+        .expect("Core-owned target exclusion applies");
+    let debug = format!("{profile:?}");
+
+    assert_eq!(result.status(), LocalCheckResultStatus::Passed);
+    assert!(!debug.contains("target/formatter-state"));
+}
+
+#[test]
 fn cargo_fmt_profile_rejects_formatter_replacement_before_process_entry() {
     let fixture = CargoFmtFixture::new();
     let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
