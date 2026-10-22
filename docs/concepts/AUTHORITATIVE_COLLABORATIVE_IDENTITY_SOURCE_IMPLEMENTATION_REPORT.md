@@ -25,8 +25,14 @@ after focused maintainer/security review.
 - Added full durable-row hash checking and canonical candidate reconstruction.
 - Added database-time exact matching for active provider, binding, principal,
   grant activation/expiry, and effective revocation.
+- Added organization-scoped activation locking so concurrent first activation
+  reconciles instead of racing on absent watermark state.
+- Added durable source-model version binding and verification.
+- Added fail-closed handling for multiple active grants matching one exact
+  query and query-minimized emitted family counts.
 - Added payload-free complete source snapshots and match posture.
-- Added always-on model tests and PostgreSQL conformance coverage.
+- Added always-on model tests, PostgreSQL conformance coverage, and restored-
+  state rehearsal for collaborative authority.
 
 ## 3. Scope Explicitly Not Completed
 
@@ -57,9 +63,11 @@ and logical identity. Each row contains a canonical payload and payload hash;
 duplicated query columns are checked against the decoded value.
 
 The organization high watermark activates one complete revision. Activation is
-serializable. Lower revisions fail, exact replay reconstructs and compares the
-durable inventory, same-revision content conflicts fail, and higher revisions
-insert the full inventory before the high watermark advances atomically.
+serializable and uses an organization-scoped transaction lock, including when
+no watermark row exists yet. Lower revisions fail, exact replay reconstructs
+and compares the durable inventory, same-revision content conflicts fail, and
+higher revisions insert the full inventory before the high watermark advances
+atomically. The high watermark binds the source model version.
 
 ## 6. Exact Read Boundary
 
@@ -70,8 +78,11 @@ an active effective provider, binding, and principal; exact project/principal/
 capability scope; an effective unexpired grant; and no effective matching
 revocation.
 
-The result is payload-free evidence. It does not authorize an action and cannot
-be reused as a capability token.
+Multiple active grants matching one exact query fail closed as ambiguous. The
+snapshot emits counts only for facts relevant to the exact query, even though
+the first implementation reconstructs the complete organization revision
+internally for integrity validation. The result is payload-free evidence. It
+does not authorize an action and cannot be reused as a capability token.
 
 ## 7. Privacy And Redaction
 
@@ -87,7 +98,8 @@ Focused tests cover active, expired, and revoked exact matches; deterministic
 candidate commitment; dangling identity rejection; closed vocabulary; Debug
 and serialization posture; schema V1-to-V3 migration; activation, replay,
 same-revision conflict, higher-revision revocation, rollback rejection, restart
-read, and payload-free match evidence.
+read, concurrent first activation, source-version corruption, restored-state
+equivalence, and payload-free match evidence.
 
 The PostgreSQL conformance test is environment-gated. It compiles locally and
 runs when `WORKFLOW_OS_TEST_POSTGRES_URL` is supplied; the current local run
@@ -111,6 +123,9 @@ skipped database operations because that fixture was absent.
   surface.
 - The first implementation stores one complete inventory per revision rather
   than independent append-only lifecycle deltas.
+- Exact reads reconstruct the bounded complete organization revision
+  internally before emitting query-minimized evidence; a later indexed read
+  optimization must preserve global binding-ambiguity checks.
 - Local validation does not prove live PostgreSQL behavior without the test
   fixture; CI must execute the conformance path.
 - Recovery tooling has no collaborative-identity-specific operator command.

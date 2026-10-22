@@ -1,8 +1,7 @@
 # Authoritative Collaborative Identity Source Boundary Plan
 
-Status: planning and focused maintainer/security review accepted; persistent
-fact-store and Core-owned exact-query source implementation complete, pending
-phase-level review
+Status: planning, focused maintainer/security review, persistent fact-store and
+Core-owned exact-query source implementation, and phase-level review accepted
 
 Related foundations:
 
@@ -48,6 +47,12 @@ uses a separate versioned collaborative request sharing the existing source
 registration and snapshot commitment machinery, preserving the V1 required-
 context request unchanged. No approval-decision consumer or hosted identity
 cutover is implemented.
+
+The phase-level review required and applied four integrity corrections before
+acceptance: organization-scoped activation locking for the first-revision race,
+durable source-model version verification, fail-closed ambiguous matching
+grants, and query-minimized emitted fact counts. Restored-state rehearsal now
+also checks exact replay, negative read posture, and rollback rejection.
 
 ## 2. Why This Phase Is Next
 

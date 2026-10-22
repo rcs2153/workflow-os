@@ -22,7 +22,7 @@ use crate::{
 
 const MAX_AUTHORITY_FACTS_PER_FAMILY: usize = 10_000;
 const POSTGRES_SOURCE_ID: &str = "core/postgres/collaborative-identity";
-const POSTGRES_SOURCE_VERSION: &str = "v1";
+pub(crate) const POSTGRES_SOURCE_VERSION: &str = "v1";
 
 /// Fact families required for one complete collaborative identity authority read.
 pub const COLLABORATIVE_IDENTITY_AUTHORITY_FACT_FAMILIES: [CurrentAuthorityFactFamily; 5] = [
@@ -389,6 +389,46 @@ impl CollaborativeIdentityAuthorityRevisionCandidate {
             })
             .count() as u64
     }
+
+    fn exact_query_fact_counts(&self, query: &CollaborativeIdentityAuthorityQuery) -> [u64; 5] {
+        let bindings = self
+            .bindings
+            .iter()
+            .filter(|binding| binding.principal_id() == query.principal_id())
+            .collect::<Vec<_>>();
+        let provider_ids = bindings
+            .iter()
+            .map(|binding| binding.provider_id().as_str())
+            .collect::<BTreeSet<_>>();
+        let grants = self
+            .grants
+            .iter()
+            .filter(|grant| {
+                grant.project_id() == query.project_id()
+                    && grant.principal_id() == query.principal_id()
+            })
+            .collect::<Vec<_>>();
+        let grant_ids = grants
+            .iter()
+            .map(|grant| grant.grant_id().as_str())
+            .collect::<BTreeSet<_>>();
+        [
+            grants.len() as u64,
+            self.revocations
+                .iter()
+                .filter(|revocation| grant_ids.contains(revocation.grant_id().as_str()))
+                .count() as u64,
+            self.providers
+                .iter()
+                .filter(|provider| provider_ids.contains(provider.provider_id().as_str()))
+                .count() as u64,
+            bindings.len() as u64,
+            self.principals
+                .iter()
+                .filter(|principal| principal.principal_id() == query.principal_id())
+                .count() as u64,
+        ]
+    }
 }
 
 impl fmt::Debug for CollaborativeIdentityAuthorityRevisionCandidate {
@@ -444,18 +484,15 @@ impl CollaborativeIdentityAuthoritySourceRead {
         authority_revision: HostedAuthorityRegistryRevision,
         matching_active_grant_count: u64,
         source_snapshot: CurrentAuthoritySourceSnapshot,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, WorkflowOsError> {
+        let match_posture = match_posture_for_count(matching_active_grant_count)?;
+        Ok(Self {
             query_commitment,
             authority_revision,
-            match_posture: if matching_active_grant_count == 0 {
-                CollaborativeIdentityAuthorityMatchPosture::NoMatchingGrant
-            } else {
-                CollaborativeIdentityAuthorityMatchPosture::MatchingGrantPresent
-            },
+            match_posture,
             matching_active_grant_count,
             source_snapshot,
-        }
+        })
     }
 
     #[must_use]
@@ -586,6 +623,8 @@ pub(crate) fn build_postgres_collaborative_identity_source_read(
     candidate: &CollaborativeIdentityAuthorityRevisionCandidate,
     evaluated_at: Timestamp,
 ) -> Result<CollaborativeIdentityAuthoritySourceRead, WorkflowOsError> {
+    let matching_active_grant_count = candidate.active_matching_grant_count(query, evaluated_at);
+    let exact_fact_counts = candidate.exact_query_fact_counts(query);
     let registration = postgres_collaborative_identity_source_registration()?;
     let request =
         CollaborativeIdentityAuthoritySourceRequest::new(&registration, query, evaluated_at)?;
@@ -620,34 +659,34 @@ pub(crate) fn build_postgres_collaborative_identity_source_read(
             fact_counts: vec![
                 CurrentAuthoritySourceFactCount::new(
                     CurrentAuthorityFactFamily::CapabilityGrants,
-                    candidate.grants().len() as u64,
+                    exact_fact_counts[0],
                 ),
                 CurrentAuthoritySourceFactCount::new(
                     CurrentAuthorityFactFamily::CapabilityGrantRevocations,
-                    candidate.revocations().len() as u64,
+                    exact_fact_counts[1],
                 ),
                 CurrentAuthoritySourceFactCount::new(
                     CurrentAuthorityFactFamily::IdentityProviderRegistrations,
-                    candidate.providers().len() as u64,
+                    exact_fact_counts[2],
                 ),
                 CurrentAuthoritySourceFactCount::new(
                     CurrentAuthorityFactFamily::PrincipalIdentityBindings,
-                    candidate.bindings().len() as u64,
+                    exact_fact_counts[3],
                 ),
                 CurrentAuthoritySourceFactCount::new(
                     CurrentAuthorityFactFamily::PrincipalLifecycle,
-                    candidate.principals().len() as u64,
+                    exact_fact_counts[4],
                 ),
             ],
             records_commitment: candidate.commitment().clone(),
         },
     )?;
-    Ok(CollaborativeIdentityAuthoritySourceRead::new(
+    CollaborativeIdentityAuthoritySourceRead::new(
         query.query_commitment().clone(),
         candidate.authority_revision(),
-        candidate.active_matching_grant_count(query, evaluated_at),
+        matching_active_grant_count,
         snapshot,
-    ))
+    )
 }
 
 fn validate_family_size(size: usize) -> Result<(), WorkflowOsError> {
@@ -669,6 +708,19 @@ fn reject_duplicate_by<'a>(values: impl Iterator<Item = &'a str>) -> Result<(), 
         ));
     }
     Ok(())
+}
+
+fn match_posture_for_count(
+    matching_active_grant_count: u64,
+) -> Result<CollaborativeIdentityAuthorityMatchPosture, WorkflowOsError> {
+    match matching_active_grant_count {
+        0 => Ok(CollaborativeIdentityAuthorityMatchPosture::NoMatchingGrant),
+        1 => Ok(CollaborativeIdentityAuthorityMatchPosture::MatchingGrantPresent),
+        _ => Err(source_error(
+            "query.grant.ambiguous",
+            "collaborative identity authority query has ambiguous matching grants",
+        )),
+    }
 }
 
 fn hash_serializable<T: Serialize>(
@@ -724,7 +776,31 @@ fn concat_code(code: &'static str) -> &'static str {
         "request.registration.invalid" => {
             "collaborative_identity_authority_source.request.registration.invalid"
         }
+        "query.grant.ambiguous" => "collaborative_identity_authority_source.query.grant.ambiguous",
         "commitment.failed" => "collaborative_identity_authority_source.commitment.failed",
         _ => "collaborative_identity_authority_source.invalid",
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::{match_posture_for_count, CollaborativeIdentityAuthorityMatchPosture};
+
+    #[test]
+    fn multiple_active_matching_grants_fail_closed() {
+        assert_eq!(
+            match_posture_for_count(0).expect("complete negative"),
+            CollaborativeIdentityAuthorityMatchPosture::NoMatchingGrant
+        );
+        assert_eq!(
+            match_posture_for_count(1).expect("one matching grant"),
+            CollaborativeIdentityAuthorityMatchPosture::MatchingGrantPresent
+        );
+        let error = match_posture_for_count(2).expect_err("ambiguous grants must fail closed");
+        assert_eq!(
+            error.code(),
+            "collaborative_identity_authority_source.query.grant.ambiguous"
+        );
     }
 }

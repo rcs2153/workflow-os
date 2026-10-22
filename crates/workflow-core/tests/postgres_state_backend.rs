@@ -228,6 +228,8 @@ fn prove_schema_v1_to_v3_migration(config: &Config) {
     for table in [
         "project_approval_routes",
         "hosted_authority_registry_high_watermarks",
+        "collaborative_identity_authority_facts",
+        "collaborative_identity_authority_high_watermarks",
     ] {
         assert_eq!(
             client
@@ -245,11 +247,43 @@ fn prove_schema_v1_to_v3_migration(config: &Config) {
 
 fn prove_collaborative_identity_authority_source(backend: &PostgresStateBackend, config: &Config) {
     let active = collaborative_authority_candidate(7, false);
+    let barrier = Arc::new(Barrier::new(2));
+    let mut activators = Vec::new();
+    for _ in 0..2 {
+        let backend = backend.clone();
+        let candidate = active.clone();
+        let barrier = Arc::clone(&barrier);
+        activators.push(thread::spawn(move || {
+            barrier.wait();
+            backend.activate_collaborative_identity_authority_revision(&candidate)
+        }));
+    }
+    let activation_results = activators
+        .into_iter()
+        .map(|handle| {
+            handle
+                .join()
+                .expect("activation thread")
+                .expect("activation")
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        backend
-            .activate_collaborative_identity_authority_revision(&active)
-            .expect("activate authority"),
-        CollaborativeIdentityAuthorityRevisionActivation::Activated
+        activation_results
+            .iter()
+            .filter(|outcome| {
+                **outcome == CollaborativeIdentityAuthorityRevisionActivation::Activated
+            })
+            .count(),
+        1
+    );
+    assert_eq!(
+        activation_results
+            .iter()
+            .filter(|outcome| {
+                **outcome == CollaborativeIdentityAuthorityRevisionActivation::ReconciledExisting
+            })
+            .count(),
+        1
     );
     assert_eq!(
         backend
@@ -308,6 +342,37 @@ fn prove_collaborative_identity_authority_source(backend: &PostgresStateBackend,
             .code(),
         "postgres_state.collaborative_authority.revision.rollback"
     );
+
+    let mut client = config
+        .connect(NoTls)
+        .expect("connect source-version fixture");
+    client
+        .execute(
+            "UPDATE workflow_os.collaborative_identity_authority_high_watermarks
+                SET source_model_version = 'unsupported'
+              WHERE organization_id = $1",
+            &[&query.organization_id().as_str()],
+        )
+        .expect("corrupt source model version");
+    drop(client);
+    assert_eq!(
+        backend
+            .read_collaborative_identity_authority(&query)
+            .expect_err("unknown source model version must fail closed")
+            .code(),
+        "postgres_state.collaborative_authority.corrupt"
+    );
+    let mut client = config
+        .connect(NoTls)
+        .expect("restore source-version fixture");
+    client
+        .execute(
+            "UPDATE workflow_os.collaborative_identity_authority_high_watermarks
+                SET source_model_version = 'v1'
+              WHERE organization_id = $1",
+            &[&query.organization_id().as_str()],
+        )
+        .expect("restore source model version");
 }
 
 fn prove_project_approval_route_persistence(backend: &PostgresStateBackend, config: &Config) {
@@ -1105,6 +1170,29 @@ fn restored_postgresql_database_passes_integrity_rehearsal() {
     assert_eq!(
         routes[0].source_commitment().authority_registry_revision(),
         HostedAuthorityRegistryRevision::new(2).expect("restored authority revision")
+    );
+    let restored_collaborative_authority = collaborative_authority_candidate(8, true);
+    assert_eq!(
+        backend
+            .activate_collaborative_identity_authority_revision(&restored_collaborative_authority,)
+            .expect("restored collaborative authority exact replay"),
+        CollaborativeIdentityAuthorityRevisionActivation::ReconciledExisting
+    );
+    assert_eq!(
+        backend
+            .read_collaborative_identity_authority(&collaborative_authority_query())
+            .expect("restored collaborative authority read")
+            .match_posture(),
+        CollaborativeIdentityAuthorityMatchPosture::NoMatchingGrant
+    );
+    assert_eq!(
+        backend
+            .activate_collaborative_identity_authority_revision(&collaborative_authority_candidate(
+                7, false
+            ),)
+            .expect_err("restored collaborative authority rollback rejected")
+            .code(),
+        "postgres_state.collaborative_authority.revision.rollback"
     );
     let unresolved_events = event_sequence("project-approval-route-unresolved");
     let unresolved_approval = approval_request(&unresolved_events[0], None);

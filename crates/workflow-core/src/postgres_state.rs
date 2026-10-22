@@ -8,7 +8,9 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::collaborative_identity_authority_source::build_postgres_collaborative_identity_source_read;
+use crate::collaborative_identity_authority_source::{
+    build_postgres_collaborative_identity_source_read, POSTGRES_SOURCE_VERSION,
+};
 use crate::hosted::{
     HostedExecutionAttempt, HostedExecutionAttemptStatus, HostedExecutionProviderId,
     HostedExecutionProviderVersion, HostedSkillDispatch, HostedTerminalReportArtifact,
@@ -859,9 +861,15 @@ impl PostgresStateBackend {
         let organization_id = candidate.organization_id().as_str();
         let mut client = self.connections.connect()?;
         serializable(&mut client, |tx| {
+            let activation_lock = format!("workflow_os_collaborative_identity:{organization_id}");
+            tx.query_one(
+                "SELECT pg_advisory_xact_lock(hashtext($1))",
+                &[&activation_lock],
+            )
+            .map_err(|error| database_error("collaborative_authority_activation_lock", &error))?;
             let existing = tx
                 .query_opt(
-                    "SELECT authority_revision, revision_commitment
+                    "SELECT authority_revision, revision_commitment, source_model_version
                        FROM workflow_os.collaborative_identity_authority_high_watermarks
                       WHERE organization_id = $1 FOR UPDATE",
                     &[&organization_id],
@@ -872,6 +880,10 @@ impl PostgresStateBackend {
             if let Some(row) = existing {
                 let stored_revision: i64 = row.get(0);
                 let stored_commitment: String = row.get(1);
+                let stored_source_model_version: String = row.get(2);
+                if stored_source_model_version != POSTGRES_SOURCE_VERSION {
+                    return Err(collaborative_authority_corruption_error());
+                }
                 if revision < stored_revision {
                     return Err(state_error(
                         "postgres_state.collaborative_authority.revision.rollback",
@@ -900,16 +912,19 @@ impl PostgresStateBackend {
             insert_collaborative_identity_candidate_tx(tx, candidate)?;
             tx.execute(
                 "INSERT INTO workflow_os.collaborative_identity_authority_high_watermarks
-                    (organization_id, authority_revision, revision_commitment)
-                 VALUES ($1, $2, $3)
+                    (organization_id, authority_revision, revision_commitment,
+                     source_model_version)
+                 VALUES ($1, $2, $3, $4)
                  ON CONFLICT (organization_id) DO UPDATE
                     SET authority_revision = EXCLUDED.authority_revision,
                         revision_commitment = EXCLUDED.revision_commitment,
+                        source_model_version = EXCLUDED.source_model_version,
                         accepted_at = clock_timestamp()",
                 &[
                     &organization_id,
                     &revision,
                     &candidate.commitment().as_str(),
+                    &POSTGRES_SOURCE_VERSION,
                 ],
             )
             .map_err(|error| database_error("collaborative_authority_watermark_write", &error))?;
@@ -935,7 +950,7 @@ impl PostgresStateBackend {
             let evaluated_at = database_timestamp_tx(tx)?;
             let row = tx
                 .query_opt(
-                    "SELECT authority_revision, revision_commitment
+                    "SELECT authority_revision, revision_commitment, source_model_version
                        FROM workflow_os.collaborative_identity_authority_high_watermarks
                       WHERE organization_id = $1",
                     &[&query.organization_id().as_str()],
@@ -949,6 +964,10 @@ impl PostgresStateBackend {
                 })?;
             let revision: i64 = row.get(0);
             let commitment: String = row.get(1);
+            let source_model_version: String = row.get(2);
+            if source_model_version != POSTGRES_SOURCE_VERSION {
+                return Err(collaborative_authority_corruption_error());
+            }
             let candidate = read_collaborative_identity_candidate_tx(
                 tx,
                 query.organization_id().as_str(),
@@ -6176,6 +6195,7 @@ CREATE TABLE workflow_os.collaborative_identity_authority_high_watermarks (
     organization_id TEXT PRIMARY KEY,
     authority_revision BIGINT NOT NULL CHECK (authority_revision > 0),
     revision_commitment TEXT NOT NULL,
+    source_model_version TEXT NOT NULL,
     accepted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 ";
