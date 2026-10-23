@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-10-22.
+Status date: 2026-10-23.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -70,7 +70,11 @@ same-repository branches only, and conservatively treats uncertainty after the
 create call boundary as may-have-started. Ordinary tests are network-free; one
 full-helper smoke is ignored by default and compile-time allowlisted to a
 dedicated sandbox repository. The phase review is accepted with non-blocking
-follow-ups; the live sandbox smoke has not yet been run.
+follow-ups. The live sandbox smoke has now passed against the exact allowlisted
+repository and pinned refs. It created one managed draft pull request and the
+same unchanged test independently reconciled that draft without a second
+create. No default write behavior or additional mutation family is authorized
+by this proof.
 
 ## Roadmap At A Glance
 
@@ -81,15 +85,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Complete the dedicated draft-pull-request live sandbox proof.** Once the
-   dedicated least-privilege sandbox credential is available, rerun the existing
-   ignored smoke unchanged. The proof may create or reconcile one managed draft
-   in `rcs2153/workflow-os-sandbox`; it does not authorize another provider,
-   another mutation family, default writes, merge behavior, or automatic
-   cleanup. Until the credential exists, this item remains dependency-tracked
-   and must not block unrelated no-write work.
+1. **Review the completed draft-pull-request live sandbox proof.** Perform one
+   focused maintainer and security review of the unchanged ignored smoke, the
+   least-privilege credential boundary, the exact pinned refs, the single
+   managed draft, and the independent lookup-before-create reconciliation.
+   The review must verify privacy, idempotency, external-state ambiguity, and
+   non-broadening boundaries before the queue selects any additional provider
+   mutation. It does not authorize default writes, merge, close, cleanup,
+   another repository, another provider, or another mutation family.
 
 #### Recently Closed Queue Evidence
+
+- **Dedicated draft-pull-request live sandbox proof completed.** A new
+  repository-scoped credential limited to `rcs2153/workflow-os-sandbox` with
+  contents read and pull requests write was stored in a dedicated operating-
+  system credential entry and supplied only to the ignored test process. The
+  unchanged full-helper smoke passed against pinned `main` and
+  `workflow-os-sandbox-proof-v1` SHAs, created exactly one managed draft pull
+  request, and then independently reconciled it without a second create. The
+  persistent draft is
+  [`rcs2153/workflow-os-sandbox#1`](https://github.com/rcs2153/workflow-os-sandbox/pull/1).
+  No merge, close, cleanup, default write, hidden credential discovery, or
+  additional mutation family was added. See the [live proof
+  report](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_LIVE_SANDBOX_PROOF_REPORT.md).
 
 - **Executor capability-gated GitHub read-only composition accepted.** The
   focused maintainer/security review found no blocker in the crate-private
