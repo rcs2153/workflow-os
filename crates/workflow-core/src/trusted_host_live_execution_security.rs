@@ -71,7 +71,7 @@ impl<'de> Deserialize<'de> for TrustedHostLiveExecutionSecurityProfile {
 }
 
 /// Closed build-time input categories. No path or payload is stored.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuildTimeInputKind {
     /// Repository-controlled source and included content.
@@ -94,6 +94,44 @@ pub enum BuildTimeInputKind {
     DynamicLibrary,
     /// Runtime or sandbox base identity.
     RuntimeBase,
+}
+
+impl<'de> Deserialize<'de> for BuildTimeInputKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct InputKindVisitor;
+
+        impl serde::de::Visitor<'_> for InputKindVisitor {
+            type Value = BuildTimeInputKind;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a supported build-time input kind")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match value {
+                    "repository_content" => Ok(BuildTimeInputKind::RepositoryContent),
+                    "manifest_or_configuration" => Ok(BuildTimeInputKind::ManifestOrConfiguration),
+                    "build_script" => Ok(BuildTimeInputKind::BuildScript),
+                    "procedural_macro" => Ok(BuildTimeInputKind::ProceduralMacro),
+                    "dependency_package" => Ok(BuildTimeInputKind::DependencyPackage),
+                    "toolchain_executable" => Ok(BuildTimeInputKind::ToolchainExecutable),
+                    "linker_or_archiver" => Ok(BuildTimeInputKind::LinkerOrArchiver),
+                    "sdk_or_sysroot" => Ok(BuildTimeInputKind::SdkOrSysroot),
+                    "dynamic_library" => Ok(BuildTimeInputKind::DynamicLibrary),
+                    "runtime_base" => Ok(BuildTimeInputKind::RuntimeBase),
+                    _ => Err(E::custom("unsupported build-time input kind")),
+                }
+            }
+        }
+
+        deserializer.deserialize_str(InputKindVisitor)
+    }
 }
 
 /// How a future component claims it derived an input manifest.

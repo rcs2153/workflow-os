@@ -86,18 +86,26 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the Core trusted-host static build-input discovery model and
-   canonicalization only.** Add non-authorizing request/result vocabulary,
-   exact repository and selection commitments, a static completeness posture
-   distinct from live-input completeness, closed host-obligation states,
-   deterministic domain-separated graph commitments, hard bounds, stable
-   errors, validated serde, redaction-safe Debug, and focused model tests. Do
-   not read repository files, parse TOML, run Cargo or build code, select or
-   integrate a provider, register a handler, add live execution or persistence,
-   expose schemas, enable writes, or change release posture. See the [accepted
-   plan review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_PROOF_PLAN_REVIEW.md).
+1. **Review the Core trusted-host static build-input discovery model.** Verify
+   exact request/result binding, versioned domain-separated canonicalization,
+   strict separation of static graph and live-input completeness, complete
+   unresolved host obligations, count/reason coherence, stable errors,
+   redaction-safe serde and Debug, minimal public API, and absence of
+   filesystem, process, provider, persistence, or authority behavior. Do not
+   begin parser or workspace discovery implementation before acceptance. See
+   the [implementation
+   report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host static build-input discovery Core model
+  implementation.** Core now binds exact repository, selection, source-set,
+  policy, and contract-version commitments; distinguishes static completeness
+  from live-input completeness; requires all unresolved host obligations; and
+  derives bounded payload-free canonical result commitments. It reads no files,
+  parses no manifests, starts no process, selects no provider, and grants no
+  authority. See the [implementation
+  report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
 
 - **Closed deterministic trusted-host build-input discovery proof plan
   review.** The focused review accepts the strict separation between static

@@ -1,6 +1,10 @@
 # Trusted-Host Build-Input Discovery Proof Plan
 
-Status: planning complete; focused maintainer and security review required.
+Status: planning and focused review accepted; Core static-discovery model
+implemented; focused model review required.
+
+Implementation evidence is recorded in the [Trusted-Host Build-Input Discovery
+Core Model Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
 
 Related foundations:
 
