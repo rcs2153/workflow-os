@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-10-23.
+Status date: 2026-10-24.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -86,16 +86,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the fixture-only trusted-host structured metadata parser and
-   graph resolver.** Parse only the accepted closed metadata set from an
-   explicitly supplied immutable fixture root, remain process-free and
-   network-free, fail closed for unsupported or changing inputs, and produce
-   the reviewed non-authorizing request/result model. Do not combine this with
-   live workspace proof, host observation, provider integration, persistence,
-   schemas, runtime execution, or writes. See the [accepted blocker-fix
-   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REVIEW.md).
+1. **Review the fixture-only trusted-host structured metadata parser and graph
+   resolver.** Perform focused maintainer/security review of the closed TOML
+   boundary, root containment, hard limits, lock-graph resolution, semantic
+   graph commitment, unsupported-Cargo fail-closed posture, privacy behavior,
+   dependency surface, and tests. Do not begin live Workflow OS workspace
+   proof, host observation, provider integration, persistence, schemas,
+   runtime execution, or writes before this review closes. See the
+   [implementation report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed fixture-only trusted-host structured metadata parser and graph
+  resolver implementation.** Core now parses the accepted exact subset of
+  root/member manifests, lockfile, optional toolchain metadata, and empty
+  Cargo configuration beneath an explicit fixture root; rejects symlinks,
+  root escapes, nested repositories, unsupported selection/configuration, and
+  hard-bound violations; resolves a deterministic locked graph; and commits
+  its semantic nodes and edges without running Cargo or build code. External
+  locked packages remain explicitly incomplete because fixture metadata cannot
+  prove their build-script or procedural-macro behavior. Live workspace proof,
+  host observation, runtime admission, persistence, schemas, providers, and
+  writes remain unimplemented. See the [implementation
+  report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REPORT.md).
 
 - **Accepted trusted-host static build-input discovery Core model blocker
   fix.** Focused maintainer/security re-review accepted the fixed-width

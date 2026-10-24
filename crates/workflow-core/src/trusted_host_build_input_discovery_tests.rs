@@ -58,6 +58,7 @@ fn complete_definition(
 ) -> TrustedHostBuildInputDiscoveryResultDefinition {
     TrustedHostBuildInputDiscoveryResultDefinition {
         request_fingerprint: request.request_fingerprint().clone(),
+        resolved_graph_commitment: hash("resolved-graph"),
         static_completeness: TrustedHostStaticGraphCompleteness::Complete,
         total_count: 9,
         kind_counts: vec![
@@ -140,13 +141,25 @@ fn graph_commitment_is_order_independent() {
 }
 
 #[test]
+fn graph_commitment_changes_when_resolved_semantic_graph_changes() {
+    let request = request();
+    let first =
+        TrustedHostBuildInputDiscoveryResult::new(complete_definition(&request)).expect("first");
+    let mut changed = complete_definition(&request);
+    changed.resolved_graph_commitment = hash("different-resolved-graph");
+    let second = TrustedHostBuildInputDiscoveryResult::new(changed).expect("second");
+
+    assert_ne!(first.graph_commitment(), second.graph_commitment());
+}
+
+#[test]
 fn graph_commitment_has_fixed_vector() {
     let request = request();
     let result =
         TrustedHostBuildInputDiscoveryResult::new(complete_definition(&request)).expect("result");
     assert_eq!(
         result.graph_commitment().as_str(),
-        "e3d3f32ad6d54f8ffec204b0b100d4b426cf19b7802369cb304afa3ccfae83de"
+        "1d4ea87bce57dc20e8f773cbb9121057eb2e46b5d2a89ad97e37753b4ce01a5a"
     );
 }
 

@@ -521,6 +521,7 @@ impl fmt::Debug for TrustedHostBuildInputDiscoveryRequest {
 #[serde(try_from = "TrustedHostBuildInputDiscoveryResultDefinition")]
 pub struct TrustedHostBuildInputDiscoveryResult {
     request_fingerprint: SpecContentHash,
+    resolved_graph_commitment: SpecContentHash,
     static_completeness: TrustedHostStaticGraphCompleteness,
     total_count: u32,
     kind_counts: Vec<BuildTimeInputKindCount>,
@@ -536,6 +537,8 @@ pub struct TrustedHostBuildInputDiscoveryResult {
 pub struct TrustedHostBuildInputDiscoveryResultDefinition {
     /// Exact request fingerprint this result answers.
     pub request_fingerprint: SpecContentHash,
+    /// Commitment to canonical resolved package nodes and dependency edges.
+    pub resolved_graph_commitment: SpecContentHash,
     /// Completeness of the approved static graph only.
     pub static_completeness: TrustedHostStaticGraphCompleteness,
     /// Total bounded static input count.
@@ -574,6 +577,7 @@ impl<'de> Deserialize<'de> for TrustedHostBuildInputDiscoveryResultDefinition {
         #[derive(Deserialize)]
         struct Wire {
             request_fingerprint: SpecContentHash,
+            resolved_graph_commitment: SpecContentHash,
             static_completeness: TrustedHostStaticGraphCompleteness,
             total_count: u32,
             kind_counts: Vec<StrictBuildTimeInputKindCountWire>,
@@ -615,6 +619,7 @@ impl<'de> Deserialize<'de> for TrustedHostBuildInputDiscoveryResultDefinition {
             })?;
         Ok(Self {
             request_fingerprint: wire.request_fingerprint,
+            resolved_graph_commitment: wire.resolved_graph_commitment,
             static_completeness: wire.static_completeness,
             total_count: wire.total_count,
             kind_counts,
@@ -669,6 +674,7 @@ impl TrustedHostBuildInputDiscoveryResult {
 
         Ok(Self {
             request_fingerprint: definition.request_fingerprint,
+            resolved_graph_commitment: definition.resolved_graph_commitment,
             static_completeness: definition.static_completeness,
             total_count: definition.total_count,
             kind_counts: definition.kind_counts,
@@ -683,6 +689,12 @@ impl TrustedHostBuildInputDiscoveryResult {
     #[must_use]
     pub const fn request_fingerprint(&self) -> &SpecContentHash {
         &self.request_fingerprint
+    }
+
+    /// Returns the canonical resolved package-graph commitment.
+    #[must_use]
+    pub const fn resolved_graph_commitment(&self) -> &SpecContentHash {
+        &self.resolved_graph_commitment
     }
 
     /// Returns static graph completeness, not live build-input completeness.
@@ -763,6 +775,7 @@ impl fmt::Debug for TrustedHostBuildInputDiscoveryResult {
         formatter
             .debug_struct("TrustedHostBuildInputDiscoveryResult")
             .field("request_fingerprint", &"[REDACTED]")
+            .field("resolved_graph_commitment", &"[REDACTED]")
             .field("static_completeness", &self.static_completeness)
             .field("total_count", &self.total_count)
             .field("kind_counts", &self.kind_counts)
@@ -900,6 +913,11 @@ fn result_commitment(
         &mut hasher,
         "request_fingerprint",
         &definition.request_fingerprint,
+    );
+    hash_hash(
+        &mut hasher,
+        "resolved_graph",
+        &definition.resolved_graph_commitment,
     );
     hash_field(
         &mut hasher,

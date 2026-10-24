@@ -1,9 +1,10 @@
 # Trusted-Host Build-Input Discovery Proof Plan
 
-Status: planning and focused review accepted; Core static-discovery model
-implemented; the two focused model-review blockers are fixed and accepted;
-the TOML parser dependency decision is accepted; fixture-only parser and
-graph-resolver implementation is next.
+Status: planning and focused review accepted; Core static-discovery model and
+its blocker fix are accepted; the TOML parser dependency decision is accepted;
+the fixture-only parser and graph resolver are implemented; focused
+maintainer/security review is next. Live Workflow OS workspace proof remains
+unimplemented.
 
 Implementation evidence is recorded in the [Trusted-Host Build-Input Discovery
 Core Model Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
@@ -19,6 +20,8 @@ Review](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REVIEW.
 The parser dependency selection is recorded in the [Trusted-Host Build-Input
 TOML Parser Dependency
 Decision](trusted-host-build-input-toml-parser-dependency-decision.md).
+Fixture implementation evidence is recorded in the [Trusted-Host Build-Input
+Fixture Parser Report](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REPORT.md).
 
 Related foundations:
 
@@ -49,8 +52,9 @@ prove host toolchain, sysroot, linker, dynamic-library, environment-derived,
 or runtime-image inputs. Those facts must remain explicit unsupported or
 unavailable obligations until a separately reviewed observer can bind them.
 
-This is planning only. It does not implement discovery or authorize live
-execution.
+The fixture-only parser and resolver described by this plan are now
+implemented. This document still does not authorize live workspace discovery
+or execution.
 
 ## 2. Goals
 
@@ -438,11 +442,12 @@ one change.
 
 ## 20. Final Recommendation
 
-Implement the **fixture-only structured metadata parser and graph resolver**.
+Perform a focused **fixture-parser maintainer/security review**.
 
-Use the accepted model and preserve its static/live completeness, exact
-snapshot binding, bounds, privacy, and non-authorizing posture. Do not combine
-the parser with Cargo execution, a provider adapter, live workspace proof, a
+Review the implemented parser against the accepted model and this plan's
+static/live completeness, exact snapshot binding, bounds, privacy,
+determinism, dependency, and non-authorizing requirements. Do not combine that
+review with Cargo execution, a provider adapter, live workspace proof, a
 handler, host observation, persistence, schemas, writes, or release changes.
 
 ## 21. Governed Planning Record

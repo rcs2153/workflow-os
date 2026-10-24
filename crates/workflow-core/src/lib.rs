@@ -78,6 +78,7 @@ mod state;
 mod state_migration;
 mod timestamp;
 mod trusted_host_build_input_discovery;
+mod trusted_host_build_input_fixture_discovery;
 mod trusted_host_live_execution_security;
 #[allow(dead_code)]
 mod trusted_host_supervisor;
@@ -673,6 +674,11 @@ pub use trusted_host_build_input_discovery::{
     TrustedHostBuildInputHostObligationKind, TrustedHostBuildInputHostObligationPosture,
     TrustedHostBuildInputSelectionPosture, TrustedHostBuildInputUnsupportedReason,
     TrustedHostStaticGraphCompleteness,
+};
+pub use trusted_host_build_input_fixture_discovery::{
+    discover_trusted_host_build_inputs_from_fixture, TrustedHostBuildInputFixtureDiscovery,
+    TrustedHostBuildInputFixtureDiscoveryInput, TrustedHostBuildInputFixtureDiscoveryLimits,
+    TrustedHostBuildInputFixtureDiscoveryLimitsDefinition,
 };
 pub use trusted_host_live_execution_security::{
     BuildTimeInputCompletenessPosture, BuildTimeInputDiscoveryMethod, BuildTimeInputKind,
