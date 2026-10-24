@@ -5,10 +5,11 @@
 //! code, select a provider, grant authority, or prove that observations are
 //! true.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::de::IgnoredAny;
+use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -22,6 +23,20 @@ const HOST_OBLIGATION_COUNT: usize = 9;
 const UNSUPPORTED_REASON_MAX_COUNT: usize = 16;
 const REQUEST_DOMAIN: &str = "workflow-os/trusted-host-build-input-discovery-request/v1";
 const RESULT_DOMAIN: &str = "workflow-os/trusted-host-build-input-discovery-result/v1";
+
+struct IgnoredWireField {
+    _marker: u8,
+}
+
+impl<'de> Deserialize<'de> for IgnoredWireField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        IgnoredAny::deserialize(deserializer)?;
+        Ok(Self { _marker: 0 })
+    }
+}
 
 macro_rules! impl_closed_string_deserialize {
     ($type:ty, $expecting:literal, $error:literal, { $($tag:literal => $variant:path),+ $(,)? }) => {
@@ -249,10 +264,33 @@ impl_closed_string_deserialize!(
 );
 
 /// Closed posture for one required host fact.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 pub struct TrustedHostBuildInputHostObligation {
     kind: TrustedHostBuildInputHostObligationKind,
     posture: TrustedHostBuildInputHostObligationPosture,
+}
+
+impl<'de> Deserialize<'de> for TrustedHostBuildInputHostObligation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            kind: TrustedHostBuildInputHostObligationKind,
+            posture: TrustedHostBuildInputHostObligationPosture,
+            #[serde(flatten)]
+            extra: BTreeMap<String, IgnoredWireField>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        if !wire.extra.is_empty() {
+            return Err(serde::de::Error::custom(
+                "trusted-host static discovery host obligation contains an unknown field",
+            ));
+        }
+        Ok(Self::new(wire.kind, wire.posture))
+    }
 }
 
 impl TrustedHostBuildInputHostObligation {
@@ -346,7 +384,7 @@ pub struct TrustedHostBuildInputDiscoveryRequest {
 }
 
 /// Authoritative fields for a static discovery request.
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct TrustedHostBuildInputDiscoveryRequestDefinition {
     /// Closed discovery contract version.
     pub version: TrustedHostBuildInputDiscoveryContractVersion,
@@ -360,6 +398,40 @@ pub struct TrustedHostBuildInputDiscoveryRequestDefinition {
     pub metadata_source_set_commitment: SpecContentHash,
     /// Commitment to bounds and supported discovery semantics.
     pub discovery_policy_commitment: SpecContentHash,
+}
+
+impl<'de> Deserialize<'de> for TrustedHostBuildInputDiscoveryRequestDefinition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            version: TrustedHostBuildInputDiscoveryContractVersion,
+            repository_tree_commitment: SpecContentHash,
+            selection_posture: TrustedHostBuildInputSelectionPosture,
+            selection_commitment: SpecContentHash,
+            metadata_source_set_commitment: SpecContentHash,
+            discovery_policy_commitment: SpecContentHash,
+            #[serde(flatten)]
+            extra: BTreeMap<String, IgnoredWireField>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        if !wire.extra.is_empty() {
+            return Err(serde::de::Error::custom(
+                "trusted-host static discovery request contains an unknown field",
+            ));
+        }
+        Ok(Self {
+            version: wire.version,
+            repository_tree_commitment: wire.repository_tree_commitment,
+            selection_posture: wire.selection_posture,
+            selection_commitment: wire.selection_commitment,
+            metadata_source_set_commitment: wire.metadata_source_set_commitment,
+            discovery_policy_commitment: wire.discovery_policy_commitment,
+        })
+    }
 }
 
 impl TrustedHostBuildInputDiscoveryRequest {
@@ -460,7 +532,7 @@ pub struct TrustedHostBuildInputDiscoveryResult {
 }
 
 /// Authoritative fields for a static discovery result.
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct TrustedHostBuildInputDiscoveryResultDefinition {
     /// Exact request fingerprint this result answers.
     pub request_fingerprint: SpecContentHash,
@@ -476,6 +548,81 @@ pub struct TrustedHostBuildInputDiscoveryResultDefinition {
     pub unsupported_reasons: Vec<TrustedHostBuildInputUnsupportedReason>,
     /// Optional payload-free telemetry reference.
     pub observation_reference: Option<HostedExecutionReference>,
+}
+
+#[derive(Deserialize)]
+struct StrictBuildTimeInputKindCountWire {
+    kind: BuildTimeInputKind,
+    count: u32,
+    #[serde(flatten)]
+    extra: BTreeMap<String, IgnoredWireField>,
+}
+
+#[derive(Deserialize)]
+struct StrictHostedExecutionReferenceWire {
+    kind: HostedExecutionReferenceKind,
+    value: String,
+    #[serde(flatten)]
+    extra: BTreeMap<String, IgnoredWireField>,
+}
+
+impl<'de> Deserialize<'de> for TrustedHostBuildInputDiscoveryResultDefinition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            request_fingerprint: SpecContentHash,
+            static_completeness: TrustedHostStaticGraphCompleteness,
+            total_count: u32,
+            kind_counts: Vec<StrictBuildTimeInputKindCountWire>,
+            host_obligations: Vec<TrustedHostBuildInputHostObligation>,
+            unsupported_reasons: Vec<TrustedHostBuildInputUnsupportedReason>,
+            observation_reference: Option<StrictHostedExecutionReferenceWire>,
+            #[serde(flatten)]
+            extra: BTreeMap<String, IgnoredWireField>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        if !wire.extra.is_empty()
+            || wire.kind_counts.iter().any(|entry| !entry.extra.is_empty())
+            || wire
+                .observation_reference
+                .as_ref()
+                .is_some_and(|reference| !reference.extra.is_empty())
+        {
+            return Err(serde::de::Error::custom(
+                "trusted-host static discovery result contains an unknown field",
+            ));
+        }
+        let kind_counts = wire
+            .kind_counts
+            .into_iter()
+            .map(|entry| BuildTimeInputKindCount::new(entry.kind, entry.count))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| {
+                serde::de::Error::custom(
+                    "trusted-host static discovery input kind count is invalid",
+                )
+            })?;
+        let observation_reference = wire
+            .observation_reference
+            .map(|reference| HostedExecutionReference::new(reference.kind, reference.value))
+            .transpose()
+            .map_err(|_| {
+                serde::de::Error::custom("trusted-host static discovery reference is invalid")
+            })?;
+        Ok(Self {
+            request_fingerprint: wire.request_fingerprint,
+            static_completeness: wire.static_completeness,
+            total_count: wire.total_count,
+            kind_counts,
+            host_obligations: wire.host_obligations,
+            unsupported_reasons: wire.unsupported_reasons,
+            observation_reference,
+        })
+    }
 }
 
 impl TrustedHostBuildInputDiscoveryResult {
@@ -799,9 +946,9 @@ fn hash_hash(hasher: &mut Sha256, label: &str, value: &SpecContentHash) {
 }
 
 fn hash_field(hasher: &mut Sha256, label: &str, value: &str) {
-    hasher.update(label.len().to_be_bytes());
+    hasher.update(u64::try_from(label.len()).unwrap_or(u64::MAX).to_be_bytes());
     hasher.update(label.as_bytes());
-    hasher.update(value.len().to_be_bytes());
+    hasher.update(u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
     hasher.update(value.as_bytes());
 }
 
