@@ -1,6 +1,9 @@
 # Trusted-Host Live-Execution Security Contract Core Model Plan
 
-Status: planning complete; focused maintainer and security review required.
+Status: core model implemented; focused maintainer and security review required.
+
+Implementation evidence is recorded in the [Trusted-Host Live-Execution
+Security Contract Core Model Report](../concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_REPORT.md).
 
 Related foundations:
 
@@ -591,8 +594,9 @@ Run:
 
 ## 27. Final Recommendation
 
-Review this model plan. If accepted, implement the core model as one bounded
-non-authorizing phase.
+The accepted model-only phase is implemented. Perform a focused maintainer and
+security review before any input-discovery, provider-composition, registration,
+or live-process work.
 
 Do not run Cargo, add a runner, implement real input discovery, select a
 provider, integrate OpenShell, compose a workflow, register the clippy profile,
