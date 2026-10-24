@@ -86,17 +86,27 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Plan one closed trusted-host Cargo clippy profile.** Return to runtime
-   execution depth rather than broadening provider mutations. The planning
-   phase must reconcile the existing local-check, SideEffect, immutable-input,
-   toolchain-identity, protected-tree-integrity, timeout, bounded-output,
-   report, and artifact boundaries for exactly `cargo clippy --workspace
-   --all-targets -- -D warnings`. It must treat build/cache writes explicitly
-   and must not authorize arbitrary commands, test execution, provider writes,
-   public CLI/config/schema exposure, hosted execution, or another profile
-   before focused review.
+1. **Review the closed trusted-host Cargo clippy profile plan.** The plan binds
+   exactly `cargo clippy --workspace --all-targets -- -D warnings`, explicit
+   build/cache/temp write roots, immutable source/toolchain/dependency inputs,
+   offline and sanitized process posture, bounded output, payload-free results,
+   and existing report/artifact paths. Review must decide whether build-script,
+   procedural-macro, and platform-tool execution are acceptable disclosed
+   trusted-host limitations or blockers. No implementation, live process,
+   arbitrary command, test profile, provider write, default registration,
+   public CLI/config/schema exposure, or hosted execution is authorized before
+   that review. See the [trusted-host Cargo clippy profile plan](docs/implementation-plans/trusted-host-cargo-clippy-profile-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host Cargo clippy profile planned.** The plan selects one
+  exact command and a staged injected-runner-first implementation. It treats
+  Cargo build/cache/temp writes, build-time code execution, immutable
+  repository/toolchain/dependency identity, authority, offline posture,
+  protected-state integrity, process termination, bounded results, reports,
+  artifacts, and replay as explicit governed boundaries. It does not mistake
+  fixed command identity for filesystem/network/process containment and does
+  not authorize live execution before focused security review.
 
 - **Dedicated draft-pull-request live sandbox proof accepted.** Focused
   maintainer/security review confirmed the exact sandbox target and refs, one
