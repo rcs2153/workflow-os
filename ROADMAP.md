@@ -142,6 +142,16 @@ phase` language does not supersede the active queue.
   blocked. See the [focused
   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_PROOF_PLAN_REVIEW.md).
 
+- **Accepted trusted-host TOML parser dependency decision.** The fixture-only
+  discovery parser will use exact `toml` `0.8.23` with default features disabled
+  and only structured parsing enabled. The selection preserves the workspace's
+  Rust `1.78` floor, uses an Apache-2.0-compatible license, keeps recursion
+  limits active, and requires lockfile, transitive dependency, license, and
+  advisory review when the dependency is added. No parser, filesystem
+  discovery, process execution, runtime integration, schema, CLI, provider,
+  write, or authority behavior is implemented by this decision. See the
+  [dependency decision](docs/implementation-plans/trusted-host-build-input-toml-parser-dependency-decision.md).
+
 - **Closed deterministic trusted-host build-input discovery proof planning.**
   The plan defines a fixture-backed and Workflow OS workspace-backed static
   metadata proof, exact repository and selection commitments, bounded
