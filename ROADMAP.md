@@ -86,18 +86,26 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Perform focused maintainer/security review of the static Workflow OS
-   workspace discovery proof.** Verify the isolated metadata snapshot, closed
-   workspace-inheritance and binary-target subset, deterministic workspace
-   counts, honest external-package and host incompleteness, non-authorizing
-   posture, privacy boundary, and test quality. Do not begin host observation,
-   runtime admission, providers, persistence, schemas, CLI behavior, examples,
-   or writes before acceptance. See the [implementation
-   report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REPORT.md) and
+1. **Plan the provider-neutral trusted-host input observer.** Define the
+   smallest independently reviewable boundary for toolchain, sysroot, linker,
+   dynamic-library, and immutable object-binding facts that remain unavailable
+   after the accepted static workspace proof. Keep this phase planning-only.
+   Do not add a live observer, process execution, runtime admission, provider
+   integration, persistence, schemas, CLI behavior, examples, writes, or
+   authority broadening. See the accepted [workspace proof
+   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REVIEW.md) and
    [proof
    plan](docs/implementation-plans/trusted-host-build-input-discovery-proof-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted static Workflow OS workspace discovery proof.** Focused
+  maintainer/security review verified the isolated metadata snapshot, minimal
+  workspace-inheritance and explicit-binary subset, deterministic reviewable
+  counts, complete unavailable host-obligation posture, payload-free result,
+  and non-authorizing boundary. External package roles and independent Git
+  object binding remain honestly unresolved. See the [focused
+  review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REVIEW.md).
 
 - **Closed static Workflow OS workspace discovery proof.** A test-only proof
   copies the root manifest, lockfile, and four member manifests into an

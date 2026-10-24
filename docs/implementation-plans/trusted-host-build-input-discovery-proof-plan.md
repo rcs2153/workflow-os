@@ -4,7 +4,8 @@ Status: planning and focused review accepted; Core static-discovery model and
 its blocker fix are accepted; the TOML parser dependency decision is accepted;
 the fixture-only parser and graph resolver are implemented, its four focused
 blockers are fixed, and focused re-review accepts the corrected boundary. The
-static Workflow OS workspace proof is implemented and awaits focused review.
+static Workflow OS workspace proof is implemented and accepted with
+non-blocking follow-ups.
 
 Implementation evidence is recorded in the [Trusted-Host Build-Input Discovery
 Core Model Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
@@ -30,6 +31,9 @@ Report](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REPORT.m
 Focused acceptance is recorded in the [Trusted-Host Build-Input Fixture Parser
 Blocker Fix
 Review](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REVIEW.md).
+The static workspace proof verdict is recorded in the [Trusted-Host
+Build-Input Workspace Proof
+Review](../concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REVIEW.md).
 
 Related foundations:
 
@@ -380,7 +384,8 @@ The implementation proof should include:
 - current lockfile package closure;
 - current absence of repo-local toolchain, Cargo config, and build-script files
   recorded as observed absence, not implied global absence;
-- transitive procedural-macro packages classified from the locked graph; and
+- transitive build-script and procedural-macro roles left unresolved when the
+  closed snapshot lacks the external package manifests needed to prove them;
 - host toolchain/sysroot/linker/dynamic-library obligations reported as
   unavailable, preventing a complete live-input claim.
 
@@ -430,8 +435,8 @@ Future implementation tests must cover:
 4. Fixture-only structured metadata parser and graph resolver. Completed.
 5. Focused parser/security review and blocker repair. Completed and accepted.
 6. Workflow OS workspace proof using the reviewed parser. Completed.
-7. Focused proof review. Next.
-8. Only then plan a provider-neutral host-input observer for toolchain,
+7. Focused proof review. Completed and accepted with non-blocking follow-ups.
+8. Plan a provider-neutral host-input observer for toolchain,
    sysroot, linker, dynamic-library, and object-binding facts.
 9. Provider suitability and live execution remain later phases.
 
@@ -460,11 +465,9 @@ one change.
 
 ## 20. Final Recommendation
 
-Perform focused maintainer/security review of the static **Workflow OS
-workspace discovery proof**. Verify its snapshot construction, minimum parser
-surface, deterministic counts and commitments, external-package
-incompleteness, host obligations, privacy posture, and non-authorizing
-boundary.
+Plan a provider-neutral host-input observer for toolchain, sysroot, linker,
+dynamic-library, and immutable object-binding facts. Keep the first phase
+planning-only and preserve the accepted static proof as non-authorizing input.
 
 Do not run Cargo, package code, build scripts, procedural macros, providers, or
 shell commands as part of discovery. Do not add host observation, a handler,
