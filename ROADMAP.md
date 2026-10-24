@@ -86,19 +86,34 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Re-evaluate trusted-host local Cargo execution-provider suitability.** The
-   observation-binding blocker fix is accepted: the pre-start coordinator
-   cannot receive an uncommitted provider claim, returns only exact
-   absence-driven denial, and retains a future non-authorizing Core SPI.
-   Re-evaluate the native and optional OpenShell boundaries against the already
-   documented effective-control, lifecycle, cleanup, and reconciliation facts.
-   This is a bounded decision phase, not provider wiring. Do not add a runner,
-   run Cargo, add a live smoke, select or wire OpenShell, change admission,
-   persist outcomes, emit events, add schemas or CLI behavior, enable writes,
-   broaden authority, fork OpenShell, or change release posture. See the
-   [blocker-fix review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_BINDING_BLOCKER_FIX_REVIEW.md).
+1. **Refresh the OpenShell `v0.1.5` execution-evidence sufficiency matrix.**
+   Provider suitability re-evaluation found material stable upstream advances:
+   durable request IDs, typed deletion outcomes, resource-version checks for
+   selected mutations, driver-observed resolved workload and fence evidence,
+   durable configuration operations, and stronger lifecycle reconciliation.
+   Provider wiring remains blocked because exec terminal results are not
+   replayable after stream loss, pending driver-operation owner loss has no
+   resolution API, OCSF collection remains best-effort rather than an
+   operation-bound complete observation record, and terminal cleanup still
+   lacks one complete immutable receipt. Refresh the exact matrix against
+   stable `v0.1.5`, then perform focused maintainer/security review. Do not add
+   Rust, install or run OpenShell, invoke Cargo, add a transport or live smoke,
+   wire a provider, change admission, persist outcomes, emit events, add
+   schemas or CLI behavior, enable writes, broaden authority, fork OpenShell,
+   or change release posture. See the
+   [provider-suitability re-evaluation](docs/implementation-plans/trusted-host-local-cargo-execution-provider-suitability-reevaluation.md).
 
 #### Recently Closed Queue Evidence
+
+- **Re-evaluated trusted-host local Cargo execution-provider suitability.**
+  Stable OpenShell `v0.1.5` materially improves request identity, observed
+  workload/fence evidence, capability negotiation, desired-state operations,
+  and deletion outcomes. Native execution remains unsuitable, and OpenShell
+  wiring remains blocked on exact exec reconciliation, pending-driver owner
+  loss, complete operation observations, terminal cleanup proof, and a live
+  selected-platform proof. A refreshed exact `v0.1.5` evidence matrix is next;
+  a fork remains unjustified. See the
+  [decision](docs/implementation-plans/trusted-host-local-cargo-execution-provider-suitability-reevaluation.md).
 
 - **Accepted the local Cargo composition observation-binding blocker fix.**
   Focused review verifies that the private coordinator cannot accept provider
