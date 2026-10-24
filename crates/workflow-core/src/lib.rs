@@ -77,6 +77,7 @@ mod sqlite_state;
 mod state;
 mod state_migration;
 mod timestamp;
+mod trusted_host_build_input_discovery;
 mod trusted_host_live_execution_security;
 #[allow(dead_code)]
 mod trusted_host_supervisor;
@@ -665,6 +666,14 @@ pub use state_migration::{
     StateMigrationWriterProtocolVersion,
 };
 pub use timestamp::Timestamp;
+pub use trusted_host_build_input_discovery::{
+    TrustedHostBuildInputDiscoveryContractVersion, TrustedHostBuildInputDiscoveryRequest,
+    TrustedHostBuildInputDiscoveryRequestDefinition, TrustedHostBuildInputDiscoveryResult,
+    TrustedHostBuildInputDiscoveryResultDefinition, TrustedHostBuildInputHostObligation,
+    TrustedHostBuildInputHostObligationKind, TrustedHostBuildInputHostObligationPosture,
+    TrustedHostBuildInputSelectionPosture, TrustedHostBuildInputUnsupportedReason,
+    TrustedHostStaticGraphCompleteness,
+};
 pub use trusted_host_live_execution_security::{
     BuildTimeInputCompletenessPosture, BuildTimeInputDiscoveryMethod, BuildTimeInputKind,
     BuildTimeInputKindCount, BuildTimeInputManifest, BuildTimeInputManifestDefinition,
