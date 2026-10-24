@@ -1,14 +1,17 @@
 # Trusted-Host Build-Input Discovery Proof Plan
 
 Status: planning and focused review accepted; Core static-discovery model
-implemented; focused model review found two blocker fixes required before
-parser work.
+implemented; the two focused model-review blockers are fixed; focused re-review
+is required before parser work.
 
 Implementation evidence is recorded in the [Trusted-Host Build-Input Discovery
 Core Model Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
 The focused model verdict is recorded in the [Trusted-Host Build-Input
 Discovery Core Model
 Review](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REVIEW.md).
+Blocker-fix evidence is recorded in the [Trusted-Host Build-Input Discovery
+Core Model Blocker Fix
+Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REPORT.md).
 
 Related foundations:
 

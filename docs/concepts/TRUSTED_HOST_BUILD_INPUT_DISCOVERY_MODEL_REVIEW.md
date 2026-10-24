@@ -236,3 +236,14 @@ and roadmap update.
   security documentation, roadmap evidence, CI results, and canonicalization
   precedent and authored this review. The kernel coordinated governance only.
 - Report posture: no runtime WorkReport artifact was generated or persisted.
+
+## 18. Fix-Forward Note
+
+The two blockers identified by this review have been fixed without erasing the
+original finding. Version-one field lengths now use fixed-width `u64`
+big-endian framing, both request and result vectors are pinned, and private
+strict wire representations reject unknown request, result, host-obligation,
+input-count, and observation-reference fields with value-independent errors.
+
+This note does not change the original verdict. A focused blocker-fix review
+must accept the repair before fixture parsing or workspace discovery begins.

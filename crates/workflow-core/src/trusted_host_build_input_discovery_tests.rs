@@ -120,6 +120,14 @@ fn request_fingerprint_is_deterministic_and_selection_sensitive() {
 }
 
 #[test]
+fn request_fingerprint_has_fixed_vector() {
+    assert_eq!(
+        request().request_fingerprint().as_str(),
+        "c7af6033b90672844948848e25a063ef515b24126c947468b0d0ba6ee54c532f"
+    );
+}
+
+#[test]
 fn graph_commitment_is_order_independent() {
     let request = request();
     let first =
@@ -140,6 +148,62 @@ fn graph_commitment_has_fixed_vector() {
         result.graph_commitment().as_str(),
         "e3d3f32ad6d54f8ffec204b0b100d4b426cf19b7802369cb304afa3ccfae83de"
     );
+}
+
+#[test]
+fn unknown_request_field_fails_closed_without_leakage() {
+    let mut value = serde_json::to_value(request()).expect("request");
+    value["secret-token-like-request-field"] = json!("secret-token-like-request-value");
+    let error = serde_json::from_value::<TrustedHostBuildInputDiscoveryRequest>(value)
+        .expect_err("unknown request field rejected")
+        .to_string();
+    assert!(!error.contains("secret-token-like-request-field"));
+    assert!(!error.contains("secret-token-like-request-value"));
+}
+
+#[test]
+fn unknown_result_field_fails_closed_without_leakage() {
+    let request = request();
+    let mut value = serde_json::to_value(complete_definition(&request)).expect("result");
+    value["secret-token-like-result-field"] = json!("secret-token-like-result-value");
+    let error = serde_json::from_value::<TrustedHostBuildInputDiscoveryResult>(value)
+        .expect_err("unknown result field rejected")
+        .to_string();
+    assert!(!error.contains("secret-token-like-result-field"));
+    assert!(!error.contains("secret-token-like-result-value"));
+}
+
+#[test]
+fn unknown_nested_fields_fail_closed_without_leakage() {
+    let request = request();
+
+    let mut obligation = serde_json::to_value(complete_definition(&request)).expect("result");
+    obligation["host_obligations"][0]["secret-token-like-obligation-field"] =
+        json!("secret-token-like-obligation-value");
+    let obligation_error =
+        serde_json::from_value::<TrustedHostBuildInputDiscoveryResult>(obligation)
+            .expect_err("unknown obligation field rejected")
+            .to_string();
+    assert!(!obligation_error.contains("secret-token-like-obligation-field"));
+    assert!(!obligation_error.contains("secret-token-like-obligation-value"));
+
+    let mut kind_count = serde_json::to_value(complete_definition(&request)).expect("result");
+    kind_count["kind_counts"][0]["secret-token-like-count-field"] =
+        json!("secret-token-like-count-value");
+    let count_error = serde_json::from_value::<TrustedHostBuildInputDiscoveryResult>(kind_count)
+        .expect_err("unknown count field rejected")
+        .to_string();
+    assert!(!count_error.contains("secret-token-like-count-field"));
+    assert!(!count_error.contains("secret-token-like-count-value"));
+
+    let mut reference = serde_json::to_value(complete_definition(&request)).expect("result");
+    reference["observation_reference"]["secret-token-like-reference-field"] =
+        json!("secret-token-like-reference-value");
+    let reference_error = serde_json::from_value::<TrustedHostBuildInputDiscoveryResult>(reference)
+        .expect_err("unknown reference field rejected")
+        .to_string();
+    assert!(!reference_error.contains("secret-token-like-reference-field"));
+    assert!(!reference_error.contains("secret-token-like-reference-value"));
 }
 
 #[test]

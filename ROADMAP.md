@@ -86,16 +86,24 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Fix the Core trusted-host static build-input discovery model blockers.**
-   Replace architecture-width commitment framing with checked fixed-width
-   framing and fail closed on unknown request/result wire fields. Add fixed
-   request/result vectors and unknown-field regressions without adding parser,
+1. **Re-review the trusted-host static build-input discovery model blocker
+   fix.** Verify fixed-width version-one canonical framing, pinned request and
+   result vectors, strict top-level and nested wire decoding, value-independent
+   errors, unchanged valid serde behavior, and the continued absence of parser,
    filesystem, process, provider, persistence, schema, CLI, write, or authority
-   behavior. Focused re-review is required before fixture parser or workspace
-   discovery implementation. See the [model
-   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REVIEW.md).
+   behavior. Do not begin fixture parser or workspace discovery before
+   acceptance. See the [blocker-fix
+   report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host static build-input discovery Core model blocker fix.**
+  Canonical label and value lengths now use checked fixed-width `u64`
+  big-endian framing, request and result vectors are pinned, and private strict
+  wire decoding rejects unknown top-level and nested fields without echoing
+  their names or values. The model remains non-authorizing and performs no
+  discovery. Focused re-review remains required. See the [blocker-fix
+  report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REPORT.md).
 
 - **Closed trusted-host static build-input discovery Core model review.** The
   model preserves the intended non-authorizing boundary, exact request/result
