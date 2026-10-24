@@ -86,18 +86,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the provider-neutral trusted-host live-execution security contract
-   model blocker fix.** Verify that the closed versioned strict profile binds
-   every evaluated control into the canonical requirements fingerprint, root
-   commitments cannot alias typed roles, assessment orchestration is absent
-   from the public crate API, and requirements serde recomputes its derived
-   fingerprint from authoritative fields. Do not begin input discovery,
-   provider composition, registration, OpenShell integration, a runner, live
-   Cargo, persistence, public execution surfaces, writes, or release changes.
-   See the [blocker-fix
-   report](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_BLOCKER_FIX_REPORT.md).
+1. **Plan the deterministic trusted-host build-input discovery proof.** Define
+   one fixture-backed and workspace-backed, no-build-code-execution inventory
+   boundary that can support a truthful complete-input claim for the closed
+   trusted-host security profile. The plan must define manifest inputs,
+   toolchain/dependency/build-script/procedural-macro coverage, symlink and
+   dynamic-input ambiguity, hard bounds, observation references, privacy, and
+   failure-closed unsupported states. Do not select or integrate a provider,
+   start Cargo or build scripts, register a handler, add live execution,
+   persist new runtime state, expose schemas, enable writes, or change release
+   posture. See the [accepted blocker-fix
+   review](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_BLOCKER_FIX_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed provider-neutral trusted-host live-execution security contract
+  model blocker-fix review.** The focused review accepts the closed versioned
+  profile as a complete commitment to the current hard-coded assessment
+  semantics, confirms role-unique root commitments, unambiguous fingerprint
+  reconstruction, and crate-private assessment orchestration, and finds no
+  remaining blocker in the model slice. The next phase is deterministic input
+  discovery planning, not provider selection or live execution. See the
+  [blocker-fix
+  review](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_BLOCKER_FIX_REVIEW.md).
 
 - **Closed provider-neutral trusted-host live-execution security contract
   model blocker fix.** The accepted contract now carries a closed versioned
