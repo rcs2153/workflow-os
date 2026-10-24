@@ -86,17 +86,27 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the private local Cargo observer contracts.** Verify exact
-   selection, operation, security, producer, repository, revision, and
-   evidence-bundle binding; all nine process-free posture ceilings; injected
-   source closure; deterministic reference derivation; non-leaking output;
-   and preservation of the private non-authorizing boundary. Do not add a
-   standard process source, live smoke, runtime composition, admission, Cargo
-   execution, OpenShell wiring, persistence, events, schemas, CLI behavior,
-   writes, or broader authority. See the [implementation
-   report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REPORT.md).
+1. **Implement the reviewed fixed local Cargo source and opt-in smoke.** Add
+   closed typed roots, executable candidates, sanitized environment, and
+   fixed probe definitions; fixed read-only filesystem operations and bounded
+   process probes; exact identity, timeout, output, parser, and drift failure
+   handling; process-free ordinary tests; and one ignored opt-in
+   `aarch64-apple-darwin` smoke. Preserve every non-`Observed` ceiling. Do not
+   add runtime composition, admission, Cargo clippy execution, OpenShell
+   wiring, persistence, events, schemas, CLI behavior, writes, or broader
+   authority. See the [accepted contract
+   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted private local Cargo trusted-host observer contracts.** Focused
+  maintainer/security review confirms exact request, producer, repository,
+  revision, posture, and in-memory evidence binding; injected source closure;
+  deterministic references; and non-leaking failures. The current definition
+  remains a commitment envelope, so the concrete source must add typed closed
+  probe inputs rather than interpreting hashes or ambient state. See the
+  [focused
+  review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REVIEW.md).
 
 - **Implemented private local Cargo trusted-host observer contracts.** The
   unpublished local-host crate now contains a selection-bound definition,

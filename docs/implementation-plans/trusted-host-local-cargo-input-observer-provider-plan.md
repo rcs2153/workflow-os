@@ -1,7 +1,7 @@
 # Trusted-Host Local Cargo Input Observer Provider Plan
 
-Status: private contract implementation complete; focused maintainer/security
-review required before any live source or smoke implementation.
+Status: private contract implementation accepted with non-blocking follow-ups;
+the reviewed fixed local source and opt-in smoke are next.
 
 ## 1. Executive Summary
 
@@ -471,3 +471,13 @@ implementation adds no concrete host or process source, live smoke, admission,
 runtime composition, Cargo execution, persistence, events, schemas, CLI
 behavior, OpenShell wiring, writes, or release changes. Focused review is the
 next phase. See the [implementation report](../concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REPORT.md).
+
+## 24. Private Contract Review Record
+
+Focused maintainer/security review accepts the private contract slice with no
+blocker. Request, producer, repository, ordering, fact, posture, and evidence
+bindings fail closed; ordinary tests remain process-free; and the result is
+non-authorizing. The review records that the current definition is a
+commitment envelope, not executable configuration. The next concrete source
+must add closed typed probe inputs before performing host or process work. See
+the [focused review](../concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REVIEW.md).

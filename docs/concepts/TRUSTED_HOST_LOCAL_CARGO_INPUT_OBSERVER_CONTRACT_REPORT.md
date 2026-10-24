@@ -120,10 +120,11 @@ All ordinary tests remain process-free through injected fakes.
 
 ## 11. Recommended Next Phase
 
-Perform a focused maintainer/security review of this private contract slice.
-Do not implement the concrete source or opt-in live smoke until the review
-accepts source closure, posture ceilings, deterministic evidence resolution,
-privacy, and the absence of runtime authority.
+Focused maintainer/security review accepted this private contract slice with
+non-blocking follow-ups. The next phase is the reviewed fixed local Cargo
+source and one opt-in `aarch64-apple-darwin` smoke. It must add closed typed
+probe inputs and preserve all posture, privacy, and non-authority boundaries.
+See the [focused review](TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REVIEW.md).
 
 ## 12. Governed Phase Evidence
 
