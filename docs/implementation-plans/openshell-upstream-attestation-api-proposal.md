@@ -1,8 +1,8 @@
 # OpenShell Upstream Attestation API Proposal
 
-Status: original planning and focused review accepted; gap record refreshed for
-stable `v0.1.5`; no new upstream submission or runtime implementation is
-authorized.
+Status: original planning and focused review accepted; stable `v0.1.5` gap
+refresh and follow-up draft accepted by focused review; no new upstream
+submission or runtime implementation is authorized.
 
 ## 1. Executive Summary
 

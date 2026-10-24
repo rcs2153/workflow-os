@@ -3,7 +3,7 @@
 Status: original body submitted exactly once as
 [OpenShell Design Discussion #2661](https://github.com/NVIDIA/OpenShell/discussions/2661)
 after focused maintainer review; one stable `v0.1.5` follow-up comment draft is
-prepared but not reviewed or submitted.
+accepted by focused review but not submitted.
 
 Source currency was re-verified on 2026-08-09. Official upstream `main` at
 commit `4cb77a900ebd6b789d2b68daaba4830866833b1c` has the same public protobuf and
@@ -166,9 +166,9 @@ progress that addresses these gaps.
 
 ## 4. Stable v0.1.5 Follow-Up Comment Draft
 
-This is a proposed follow-up comment on the existing discussion, not a second
-discussion, issue, or pull request. It must pass focused maintainer/security
-review and a separately governed external-action gate before submission.
+This is an accepted follow-up comment on the existing discussion, not a second
+discussion, issue, or pull request. A separately governed external-action gate
+remains required before submission.
 
 ### 4.1 Copy-Ready Follow-Up Comment
 
