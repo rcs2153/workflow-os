@@ -70,11 +70,12 @@ same-repository branches only, and conservatively treats uncertainty after the
 create call boundary as may-have-started. Ordinary tests are network-free; one
 full-helper smoke is ignored by default and compile-time allowlisted to a
 dedicated sandbox repository. The phase review is accepted with non-blocking
-follow-ups. The live sandbox smoke has now passed against the exact allowlisted
+follow-ups. The live sandbox smoke has passed against the exact allowlisted
 repository and pinned refs. It created one managed draft pull request and the
 same unchanged test independently reconciled that draft without a second
-create. No default write behavior or additional mutation family is authorized
-by this proof.
+create. Focused maintainer/security review accepts the proof with non-blocking
+operational follow-ups. No default write behavior or additional mutation
+family is authorized by this proof.
 
 ## Roadmap At A Glance
 
@@ -85,16 +86,26 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the completed draft-pull-request live sandbox proof.** Perform one
-   focused maintainer and security review of the unchanged ignored smoke, the
-   least-privilege credential boundary, the exact pinned refs, the single
-   managed draft, and the independent lookup-before-create reconciliation.
-   The review must verify privacy, idempotency, external-state ambiguity, and
-   non-broadening boundaries before the queue selects any additional provider
-   mutation. It does not authorize default writes, merge, close, cleanup,
-   another repository, another provider, or another mutation family.
+1. **Plan one closed trusted-host Cargo clippy profile.** Return to runtime
+   execution depth rather than broadening provider mutations. The planning
+   phase must reconcile the existing local-check, SideEffect, immutable-input,
+   toolchain-identity, protected-tree-integrity, timeout, bounded-output,
+   report, and artifact boundaries for exactly `cargo clippy --workspace
+   --all-targets -- -D warnings`. It must treat build/cache writes explicitly
+   and must not authorize arbitrary commands, test execution, provider writes,
+   public CLI/config/schema exposure, hosted execution, or another profile
+   before focused review.
 
 #### Recently Closed Queue Evidence
+
+- **Dedicated draft-pull-request live sandbox proof accepted.** Focused
+  maintainer/security review confirmed the exact sandbox target and refs, one
+  persistent managed draft, least-privilege access posture, full-helper
+  governance entry, independent lookup-before-create reconciliation,
+  non-retry ambiguity handling, and privacy boundaries. The proof has no
+  blocker. Access rotation, deterministic live ambiguity proof, and eventual
+  cleanup remain separately governed follow-ups. No mutation broadening is
+  authorized. See the [focused review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_LIVE_SANDBOX_PROOF_REVIEW.md).
 
 - **Dedicated draft-pull-request live sandbox proof completed.** A new
   repository-scoped credential limited to `rcs2153/workflow-os-sandbox` with
