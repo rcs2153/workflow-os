@@ -546,6 +546,18 @@ impl TrustedHostInputObservationFact {
     pub const fn posture(&self) -> TrustedHostInputObservationPosture {
         self.posture
     }
+
+    /// Returns the payload-free commitment to the observed value set.
+    #[must_use]
+    pub const fn commitment(&self) -> &SpecContentHash {
+        &self.commitment
+    }
+
+    /// Returns the optional stable telemetry reference.
+    #[must_use]
+    pub const fn reference(&self) -> Option<&HostedExecutionReference> {
+        self.reference.as_ref()
+    }
 }
 
 impl TryFrom<TrustedHostInputObservationFactDefinition> for TrustedHostInputObservationFact {
@@ -670,6 +682,24 @@ impl TrustedHostInputObservationRequest {
     #[must_use]
     pub const fn repository_tree(&self) -> &SpecContentHash {
         &self.repository_tree
+    }
+
+    /// Returns the exact operation-contract commitment.
+    #[must_use]
+    pub const fn operation_contract(&self) -> &SpecContentHash {
+        &self.operation_contract
+    }
+
+    /// Returns the exact security-requirements commitment.
+    #[must_use]
+    pub const fn security_requirements(&self) -> &SpecContentHash {
+        &self.security_requirements
+    }
+
+    /// Returns the exact observer-selection commitment.
+    #[must_use]
+    pub const fn selection(&self) -> &SpecContentHash {
+        &self.selection
     }
 
     /// Returns the authority commitment shared by every ordered revision.
@@ -865,6 +895,12 @@ impl TrustedHostInputObservationResult {
     #[must_use]
     pub const fn producer(&self) -> &TrustedHostInputObservationProducer {
         &self.producer
+    }
+
+    /// Returns the completion revision in the shared ordering authority.
+    #[must_use]
+    pub const fn completed_revision(&self) -> u64 {
+        self.completed_revision
     }
 }
 

@@ -86,18 +86,36 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the private local Cargo observer contracts.** Add one canonical
-   selection-bound observation definition, a private observer interface in
-   `workflow-local-host`, an in-memory evidence bundle with exact reference
-   resolution, injected filesystem/process/revision source interfaces, and
-   deterministic process-free tests that enforce every accepted posture
-   ceiling. Do not add a standard process source, live smoke, runtime
-   composition, admission, Cargo execution, OpenShell wiring, persistence,
-   events, schemas, CLI behavior, writes, or broader authority. See the
-   [accepted plan
-   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_PROVIDER_PLAN_REVIEW.md).
+1. **Implement the reviewed fixed local Cargo source and opt-in smoke.** Add
+   closed typed roots, executable candidates, sanitized environment, and
+   fixed probe definitions; fixed read-only filesystem operations and bounded
+   process probes; exact identity, timeout, output, parser, and drift failure
+   handling; process-free ordinary tests; and one ignored opt-in
+   `aarch64-apple-darwin` smoke. Preserve every non-`Observed` ceiling. Do not
+   add runtime composition, admission, Cargo clippy execution, OpenShell
+   wiring, persistence, events, schemas, CLI behavior, writes, or broader
+   authority. See the [accepted contract
+   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted private local Cargo trusted-host observer contracts.** Focused
+  maintainer/security review confirms exact request, producer, repository,
+  revision, posture, and in-memory evidence binding; injected source closure;
+  deterministic references; and non-leaking failures. The current definition
+  remains a commitment envelope, so the concrete source must add typed closed
+  probe inputs rather than interpreting hashes or ambient state. See the
+  [focused
+  review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REVIEW.md).
+
+- **Implemented private local Cargo trusted-host observer contracts.** The
+  unpublished local-host crate now contains a selection-bound definition,
+  private observer and injected source interfaces, exact in-memory evidence
+  entries and bundle validation, and deterministic process-free tests. No
+  concrete filesystem or process source exists, and no fact can claim
+  `Observed` before same-call execution continuity is implemented. Focused
+  review is next. See the [implementation
+  report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REPORT.md).
 
 - **Accepted local Cargo trusted-host observer provider plan.** Focused
   maintainer/security review accepts `workflow-local-host` ownership, exact

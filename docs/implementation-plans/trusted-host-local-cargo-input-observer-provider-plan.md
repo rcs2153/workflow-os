@@ -1,7 +1,7 @@
 # Trusted-Host Local Cargo Input Observer Provider Plan
 
-Status: planning complete; focused maintainer/security review required before
-implementation.
+Status: private contract implementation accepted with non-blocking follow-ups;
+the reviewed fixed local source and opt-in smoke are next.
 
 ## 1. Executive Summary
 
@@ -456,3 +456,28 @@ The next phase is the private contract implementation only: selection-bound
 definition, observer interface, evidence bundle, injected source interfaces,
 and process-free tests. See [Trusted-Host Local Cargo Input Observer Provider
 Plan Review](../concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_PROVIDER_PLAN_REVIEW.md).
+
+## 23. Private Contract Implementation Record
+
+The accepted private slice is implemented in `workflow-local-host`. It adds a
+canonical selection-, operation-, and security-bound definition; a private
+observer interface; injected filesystem, closed process-fact, and monotonic
+revision interfaces; exact in-memory evidence entries and bundle validation;
+and deterministic process-free tests for the accepted matrix ceilings.
+
+Core exposes only the additional read-only request, fact, and completion
+accessors needed to compare canonical commitments and resolve references. The
+implementation adds no concrete host or process source, live smoke, admission,
+runtime composition, Cargo execution, persistence, events, schemas, CLI
+behavior, OpenShell wiring, writes, or release changes. Focused review is the
+next phase. See the [implementation report](../concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REPORT.md).
+
+## 24. Private Contract Review Record
+
+Focused maintainer/security review accepts the private contract slice with no
+blocker. Request, producer, repository, ordering, fact, posture, and evidence
+bindings fail closed; ordinary tests remain process-free; and the result is
+non-authorizing. The review records that the current definition is a
+commitment envelope, not executable configuration. The next concrete source
+must add closed typed probe inputs before performing host or process work. See
+the [focused review](../concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REVIEW.md).
