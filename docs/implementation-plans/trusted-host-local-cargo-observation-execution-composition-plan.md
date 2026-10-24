@@ -1,6 +1,7 @@
 # Trusted-Host Local Cargo Observation And Execution Composition Plan
 
-Status: planning complete; focused maintainer and security review required.
+Status: implementation and observation-binding blocker fix accepted; provider
+suitability re-evaluation is next.
 
 Related foundations:
 
@@ -406,3 +407,24 @@ CLI behavior, enable writes, broaden authority, or change release posture.
   authored this plan and roadmap update; and ran documentation validation. The
   kernel governed scope and approval but did not inspect files, edit documents,
   run validation, or perform git and PR operations.
+
+## 23. Implementation Status
+
+The first implementation is complete as a private, in-memory, process-free
+composition boundary. It binds the immutable local-check execution contract,
+observer request and evidence, live-security requirements, and attempt before
+routing security posture through the Core-owned assessment SPI.
+
+Missing execution-provider observations produce the required
+`DeniedBeforeStart` result. The coordinator has no runner, process, provider,
+state-store, event, report-store, or workflow-mutation capability in its input
+surface, so the current slice cannot enter Cargo even if a caller supplies a
+different assessment fixture. Focused maintainer and security review is next.
+
+Focused review found that the first implementation nevertheless accepted an
+optional provider-observation value without committing the exact value into
+the outcome identity. The blocker fix removes that input from the pre-start-
+only local coordinator. It now always passes explicit observation absence to
+the Core SPI. The future SPI may still assess provider-owned observations in a
+separately reviewed provider contract, but this slice cannot accept or collapse
+uncommitted provider claims. Focused blocker-fix review is next.

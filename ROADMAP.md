@@ -86,19 +86,52 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the private injected local Cargo observation/execution
-   composition contract.** Focused maintainer/security review accepts the plan
-   with mandatory constraints. The first slice must bind immutable run,
-   observer, roots, executables, distinct observer/execution environments,
-   Core-owned live-security assessment, invocation, result, and attestation;
-   then prove a stable pre-start denial and zero runner entries for current
-   native observer evidence. Do not add a standard runner, run Cargo, add a
-   live smoke, select or wire OpenShell, change admission, persist outcomes,
-   emit events, add schemas or CLI behavior, enable writes, broaden authority,
-   or change release posture. See the [focused
-   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_PLAN_REVIEW.md).
+1. **Re-evaluate trusted-host local Cargo execution-provider suitability.** The
+   observation-binding blocker fix is accepted: the pre-start coordinator
+   cannot receive an uncommitted provider claim, returns only exact
+   absence-driven denial, and retains a future non-authorizing Core SPI.
+   Re-evaluate the native and optional OpenShell boundaries against the already
+   documented effective-control, lifecycle, cleanup, and reconciliation facts.
+   This is a bounded decision phase, not provider wiring. Do not add a runner,
+   run Cargo, add a live smoke, select or wire OpenShell, change admission,
+   persist outcomes, emit events, add schemas or CLI behavior, enable writes,
+   broaden authority, fork OpenShell, or change release posture. See the
+   [blocker-fix review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_BINDING_BLOCKER_FIX_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted the local Cargo composition observation-binding blocker fix.**
+  Focused review verifies that the private coordinator cannot accept provider
+  observations, exact absence produces only `DeniedBeforeStart` with
+  `ObservationUnavailable`, deterministic fingerprints are input-sensitive,
+  and the future Core SPI remains non-authorizing. Provider suitability
+  re-evaluation is next; provider wiring remains blocked. See the [focused
+  review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_BINDING_BLOCKER_FIX_REVIEW.md).
+
+- **Fixed the local Cargo composition observation-binding blocker.** The
+  private pre-start coordinator no longer accepts provider observations that
+  it cannot commit. It routes explicit absence to the Core assessment SPI,
+  preserves deterministic pre-start denial, and now tests unchanged replay and
+  changed-request fingerprint sensitivity. Focused blocker-fix review is next.
+  See the [fix report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_BINDING_BLOCKER_FIX_REPORT.md).
+
+- **Reviewed the private local Cargo observation/execution composition with one
+  blocker.** Immutable execution, observer request/evidence, requirements,
+  attempt, Core-owned assessment, pre-start denial, process-free posture, and
+  privacy are sound. The optional provider-observation input is not included
+  in the composition commitment or returned outcome, so exact provider claims
+  are not yet identity-bound. A narrow blocker fix is required before provider
+  suitability work. See the [focused
+  review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_REVIEW.md).
+
+- **Implemented the private local Cargo observation/execution composition
+  contract.** The process-free coordinator validates exact immutable execution
+  and observation bindings, validates the observer evidence bundle, delegates
+  security assessment to Core, and returns `DeniedBeforeStart` when execution-
+  provider observations are absent. It exposes no runner or process capability
+  and adds no runtime, persistence, event, schema, CLI, provider, or write
+  behavior. Focused maintainer/security review is next. See the
+  [implementation report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_REPORT.md).
 
 - **Accepted same-call local Cargo observation and execution composition
   planning.** Review confirms that same-call adjacency is not custody and the
