@@ -86,20 +86,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the provider-neutral trusted-host live-execution security
-   contract core model.** Add separate validated requirements and observations,
-   explicit not-started/started/may-have-started posture, exact provider-neutral
-   attempt binding, bounded input and root facts, process-tree and
-   transient-write posture, domain-separated fingerprints, and one pure
-   non-authorizing assessment. Reuse existing hosted vocabulary only where its
-   semantics are exact; do not fabricate a runtime-image digest or create a
-   parallel receipt hierarchy. This phase must not add a runner, live Cargo,
-   input discovery, provider selection, OpenShell integration, composition,
-   registration, persistence, public execution surfaces, dependencies, writes,
-   or release changes. See the [model plan](docs/implementation-plans/trusted-host-live-execution-security-contract-model-plan.md)
-   and its [focused review](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_PLAN_REVIEW.md).
+1. **Perform focused maintainer/security review of the provider-neutral
+   trusted-host live-execution security contract core model.** Verify exact
+   binding, requirement/observation separation, explicit attempt-start
+   ambiguity, canonical bounded fingerprints, fail-closed serde, redaction,
+   and the non-authorizing assessment boundary. Do not begin input discovery,
+   provider composition, registration, OpenShell integration, a runner, live
+   Cargo, persistence, public execution surfaces, writes, or release changes.
+   See the [model plan](docs/implementation-plans/trusted-host-live-execution-security-contract-model-plan.md),
+   its [plan review](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_PLAN_REVIEW.md),
+   and the [implementation report](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed provider-neutral trusted-host live-execution security contract core
+  model implementation.** Core now has separate validated requirements and
+  payload-free observations, exact run/command/attempt/request/provider-selection
+  commitments, bounded build-input and root facts, explicit
+  not-started/started/may-have-started posture, process-tree and transient-write
+  observations, and a pure non-authorizing assessment. Invalid nested serde,
+  substituted bindings, policy drift, incomplete observation, missing probes,
+  and incoherent terminality fail closed. No live process, discovery, provider,
+  registration, persistence, schema, write, or release surface was added. See
+  the [implementation report](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_REPORT.md).
 
 - **Closed provider-neutral trusted-host live-execution security contract model
   plan review.** The focused review accepts the model-only direction with

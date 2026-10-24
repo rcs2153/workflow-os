@@ -77,6 +77,7 @@ mod sqlite_state;
 mod state;
 mod state_migration;
 mod timestamp;
+mod trusted_host_live_execution_security;
 #[allow(dead_code)]
 mod trusted_host_supervisor;
 mod trusted_host_workflow_lifecycle;
@@ -664,6 +665,22 @@ pub use state_migration::{
     StateMigrationWriterProtocolVersion,
 };
 pub use timestamp::Timestamp;
+pub use trusted_host_live_execution_security::{
+    assess_trusted_host_live_execution_security, BuildTimeInputCompletenessPosture,
+    BuildTimeInputDiscoveryMethod, BuildTimeInputKind, BuildTimeInputKindCount,
+    BuildTimeInputManifest, BuildTimeInputManifestDefinition, TrustedHostAttemptStartPosture,
+    TrustedHostLiveExecutionBinding, TrustedHostLiveExecutionSecurityAssessment,
+    TrustedHostLiveExecutionSecurityDisposition, TrustedHostLiveExecutionSecurityObservations,
+    TrustedHostLiveExecutionSecurityObservationsDefinition, TrustedHostLiveExecutionSecurityReason,
+    TrustedHostLiveExecutionSecurityRequirements,
+    TrustedHostLiveExecutionSecurityRequirementsDefinition, TrustedHostObservationPosture,
+    TrustedHostProcessTreeObservation, TrustedHostProcessTreeTerminality,
+    TrustedHostResourceBudgetObservation, TrustedHostRootAccess, TrustedHostRootBindingRequirement,
+    TrustedHostRootObservation, TrustedHostRootObservationDefinition,
+    TrustedHostRootObservationMethod, TrustedHostRootRequirement, TrustedHostRootRole,
+    TrustedHostSecurityAffirmation, TrustedHostTransientWriteObservation,
+    TrustedHostTransientWriteObservationDefinition, TrustedHostTransientWriteObservationPosture,
+};
 pub use typed_handoff::{
     TypedHandoff, TypedHandoffContract, TypedHandoffContractDefinition, TypedHandoffContractId,
     TypedHandoffContractVersion, TypedHandoffDefinition, TypedHandoffEndpoint,
