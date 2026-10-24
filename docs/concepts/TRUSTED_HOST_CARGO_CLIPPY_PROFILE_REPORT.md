@@ -68,10 +68,13 @@ Before runner entry, the handler validates and commits:
 - explicitly enumerated dependency files under one dependency-cache root; and
 - typed cache, build-output, and temporary roots plus their initial state.
 
-It repeats source, toolchain, dependency, root-role, and execution-identity
-validation after the injected call. Missing inputs, symbolic links, duplicate
-identity inputs, root overlap, role substitution, or persistent protected
-drift fail closed with stable non-leaking errors.
+Immediately before and after runner entry, it revalidates that every repository,
+toolchain, dependency-cache, build-output, and temporary root remains an
+unlinked directory that canonicalizes to its stored identity. It also repeats
+source, toolchain, dependency, root-role, disjoint-root, and execution-identity
+validation. Missing inputs, symbolic links, duplicate identity inputs, root
+overlap, role substitution, root replacement, or persistent protected drift
+fail closed with stable non-leaking errors.
 
 ## 6. Environment And Side-Effect Boundary
 
@@ -110,11 +113,16 @@ Focused tests cover:
 - payload-free pass, failure, and timeout results;
 - missing platform-tool identity before runner entry;
 - root overlap and writable-root role substitution;
+- nested root overlap in both directions;
+- empty and duplicate toolchain/dependency inventories;
+- pre-entry and post-entry replacement of every typed root;
 - source, manifest, lockfile, build-script, toolchain, platform-tool, and
   dependency drift after runner entry;
 - accepted cache, build-output, and temporary mutations;
 - redacted Debug and serialized result output; and
-- rejection by the public generic production resolver.
+- rejection by the public generic production resolver and trusted-host
+  executor authority boundary; and
+- absence from standard/default handler registration profiles.
 
 Existing local-check integration tests continue to cover default registration,
 contract validation, output privacy, profile collision, and existing profile

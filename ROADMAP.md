@@ -86,18 +86,27 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Fix the trusted-host Cargo clippy profile review blockers.** Revalidate
-   repository, toolchain, dependency-cache, build-output, and temporary root
-   identity immediately before and after injected-runner entry; add the
-   missing substitution, overlap, inventory, executor-rejection, and default-
-   registration regressions; and correct the implementation report's root-
-   validation claim. The fix remains injected-runner-only. It must not add a
-   standard runner, live Cargo execution, production resolver, workflow
+1. **Review the trusted-host Cargo clippy profile blocker fix.** Confirm that
+   all five typed roots are revalidated as unlinked directories with unchanged
+   canonical identities immediately before and after injected-runner entry;
+   the required substitution, overlap, inventory, executor-rejection, and
+   registration regressions are complete; and the implementation report no
+   longer overstates the previous boundary. The review must not authorize live
+   Cargo execution, a standard runner, production resolver, workflow
    composition, default registration, public CLI/config/schema/SDK exposure,
    provider access, hosted execution, OpenShell integration, or another
-   profile. See the [implementation review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_REVIEW.md).
+   profile. See the [blocker-fix report](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_BLOCKER_FIX_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host Cargo clippy profile blocker fix.** The private handler
+  now re-establishes current canonical identity for repository, toolchain,
+  dependency-cache, build-output, and temporary roots before and after
+  injected-runner entry. Focused tests cover every root substitution, both
+  nested-overlap directions, empty and duplicate inventories, direct executor
+  denial, and absence from default registration. The profile remains non-live
+  and injected-runner-only. See the [blocker-fix
+  report](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_BLOCKER_FIX_REPORT.md).
 
 - **Closed trusted-host Cargo clippy profile implementation review with
   blockers.** The review confirms the exact closed command, offline sanitized
