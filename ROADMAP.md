@@ -86,18 +86,28 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the trusted-host Cargo clippy profile blocker fix.** Confirm that
-   all five typed roots are revalidated as unlinked directories with unchanged
-   canonical identities immediately before and after injected-runner entry;
-   the required substitution, overlap, inventory, executor-rejection, and
-   registration regressions are complete; and the implementation report no
-   longer overstates the previous boundary. The review must not authorize live
-   Cargo execution, a standard runner, production resolver, workflow
-   composition, default registration, public CLI/config/schema/SDK exposure,
-   provider access, hosted execution, OpenShell integration, or another
-   profile. See the [blocker-fix report](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_BLOCKER_FIX_REPORT.md).
+1. **Plan the trusted-host Cargo clippy live-execution security boundary.**
+   Define how a future real process would close complete build-script,
+   procedural-macro, SDK, platform-tool, and dependency discovery; root object
+   identity and time-of-check/time-of-use behavior; process-group termination;
+   filesystem and network containment; transient-write observation; and
+   independent sandbox attestation. Planning must not implement a standard
+   runner, live smoke, workflow composition, default registration, public
+   CLI/config/schema/SDK exposure, provider access, hosted execution,
+   OpenShell integration, another profile, writes, or release changes. The
+   accepted injected-runner boundary is recorded in the [blocker-fix
+   review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_BLOCKER_FIX_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host Cargo clippy profile blocker-fix review.** Focused
+  maintainer/security review accepts the crate-private injected-runner proof.
+  Every root is revalidated as an unlinked directory at its stored canonical
+  path before and after runner entry; role, overlap, inventory, executor-denial,
+  and registration regressions are complete. Canonical-path identity is not
+  inode pinning or operating-system containment, and all live-execution
+  limitations remain blockers to a standard runner or smoke test. See the
+  [focused review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_BLOCKER_FIX_REVIEW.md).
 
 - **Closed trusted-host Cargo clippy profile blocker fix.** The private handler
   now re-establishes current canonical identity for repository, toolchain,
