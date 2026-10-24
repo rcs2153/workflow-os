@@ -86,19 +86,26 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the local Cargo trusted-host observer provider plan and
-   capability/evidence matrix.** Verify `workflow-local-host` is the correct
-   owner, every obligation has a conservative evidence requirement and
-   posture ceiling, unsupported preflight facts cannot become observed, exact
-   request/ordering/root bindings remain intact, in-memory evidence references
-   are coherent, and OpenShell remains blocked rather than bypassed. This is
-   review only: do not inspect a host, execute a process, implement or wire a
-   producer, admit runtime execution, persist observations, add events,
-   schemas, CLI behavior, writes, or broader authority. See the [local Cargo
-   observer provider
-   plan](docs/implementation-plans/trusted-host-local-cargo-input-observer-provider-plan.md).
+1. **Implement the private local Cargo observer contracts.** Add one canonical
+   selection-bound observation definition, a private observer interface in
+   `workflow-local-host`, an in-memory evidence bundle with exact reference
+   resolution, injected filesystem/process/revision source interfaces, and
+   deterministic process-free tests that enforce every accepted posture
+   ceiling. Do not add a standard process source, live smoke, runtime
+   composition, admission, Cargo execution, OpenShell wiring, persistence,
+   events, schemas, CLI behavior, writes, or broader authority. See the
+   [accepted plan
+   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_PROVIDER_PLAN_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted local Cargo trusted-host observer provider plan.** Focused
+  maintainer/security review accepts `workflow-local-host` ownership, exact
+  selection and ordering binding, conservative no-`Observed` preflight
+  ceilings, deterministic in-memory evidence resolution, fixed probe and
+  privacy rules, one initial platform, and continued OpenShell deferral. The
+  private injected contract slice is next. See the [focused
+  review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_PROVIDER_PLAN_REVIEW.md).
 
 - **Closed local Cargo trusted-host observer provider planning.** The plan
   selects one native read-only `workflow-local-host` producer, maps all nine

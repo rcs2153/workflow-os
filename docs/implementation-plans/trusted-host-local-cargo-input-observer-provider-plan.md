@@ -139,12 +139,13 @@ The observer accepts only:
 - one Core-issued ordering-authority revision source.
 
 The profile observation definition is not free caller configuration. Its
-canonical commitment must equal the applicable request-bound operation,
-selection, and security commitments. Every root and inventory commitment must
-be derivable from the exact static-discovery result or the bound profile
-definition. An extra root, executable, dependency, target, or environment
-definition that is not covered by those commitments is request substitution
-and fails closed.
+canonical commitment must equal `TrustedHostInputObservationRequest.selection`.
+The request's `operation_contract` separately binds the closed Cargo clippy
+profile and `security_requirements` binds the required posture. Every root and
+inventory commitment must be derivable from the exact static-discovery result
+or the selection-bound observation definition. An extra root, executable,
+dependency, target, or environment definition that is not covered by those
+commitments is request substitution and fails closed.
 
 Candidate inventories are claims to inspect, not proof. The observer must
 independently resolve, inspect, and classify them. It must reject hidden global
@@ -284,6 +285,22 @@ bundle alongside the Core result so every reference resolves within the exact
 call. Persistent evidence storage is deferred. The bundle should contain only
 canonical commitments and bounded typed metadata, never raw probe output.
 
+Each evidence reference must be derived deterministically from:
+
+- the request fingerprint;
+- producer identity and version;
+- completed observation revision;
+- one closed evidence class (`repository_root` or one obligation kind); and
+- the evidence-entry commitment.
+
+References must be unique and the bundle must contain exactly one entry for
+the required root reference and exactly one entry for every present fact
+reference. Bundle validation must reject missing, duplicate, extra,
+substituted, or cross-request references. The result fingerprint may bind the
+references, but references must not depend on the result fingerprint; this
+avoids circular construction. The completed output may then bind the final
+result fingerprint back into the bundle envelope.
+
 Do not store or expose:
 
 - absolute host paths;
@@ -303,7 +320,11 @@ Debug, serialization, and errors must remain non-leaking.
 Validation failure before host interaction is a stable construction error.
 After any process probe starts, ambiguity must not be retried silently. The
 producer either reconciles the exact fixed probe through retained local
-process outcome or returns `Uncertain`/a stable observation error.
+process outcome or returns a complete result with the affected fact marked
+`Uncertain` when the failure is safely classifiable. Request, producer,
+identity, root, ordering, output-bound, parser, or evidence-integrity failure
+fails the whole observation with a stable error; it must not be softened into
+an uncertain fact.
 
 Unknown platform capability, unsupported command shape, oversized output,
 unexpected stderr, timeout, identity drift, incomplete inventory, parse
@@ -313,11 +334,14 @@ converts failure into approval denial, workflow failure, or runtime status.
 ## 15. Implementation Sequence
 
 1. Perform a focused maintainer/security review of this plan and matrix.
-2. Add one private provider interface and in-memory evidence-bundle contract,
-   preserving Core/local-host dependency direction.
+2. Add one private provider interface, canonical selection-bound observation
+   definition, and in-memory evidence-bundle contract, preserving
+   Core/local-host dependency direction.
 3. Implement the local Cargo observer with injected filesystem, process, and
    revision sources; prove all matrix ceilings with deterministic fixtures.
-4. Add one opt-in live smoke for the exact local platform and closed probe set.
+4. Add one opt-in `aarch64-apple-darwin` live smoke for the exact closed probe
+   set. Other platforms return `Unsupported` before starting a process until
+   separately reviewed.
 5. Perform focused review before any runtime composition.
 6. Separately plan same-call composition with the existing Cargo clippy local
    host path only after the observer proof is accepted.
@@ -383,16 +407,12 @@ The implementation is acceptable only if:
 
 - Is `workflow-local-host` the correct owner, or should operating-system
   observation live in a new unpublished adapter crate?
-- Should the first implementation support one exact platform only, or expose a
-  platform capability snapshot and return `Unsupported` elsewhere?
 - Can an in-memory evidence bundle provide sufficiently exact reference
   resolution without adding persistence?
 - Does the existing `IndependentlyReviewed` assurance label need wording
   clarification so it cannot be mistaken for independent machine attestation?
 - Confirm that no fact may be `Observed` before same-call execution
   composition under the existing admission-to-terminal continuity semantics.
-- Should process-probe ambiguity return a result with `Uncertain` facts or one
-  stable whole-observation error?
 
 ## 20. Final Recommendation
 
@@ -424,3 +444,15 @@ OpenShell wiring, persistence, schemas, CLI exposure, or writes.
   upstream discussion records and authored this plan. The kernel governed
   scope and approval but did not inspect sources, edit files, query GitHub, or
   run validation.
+
+## 22. Focused Plan Review Record
+
+Focused maintainer/security review accepts the plan with no blocker after
+clarifying exact selection binding, admission-to-terminal continuity ceilings,
+non-circular in-memory evidence references, process ambiguity, and the first
+live-smoke platform.
+
+The next phase is the private contract implementation only: selection-bound
+definition, observer interface, evidence bundle, injected source interfaces,
+and process-free tests. See [Trusted-Host Local Cargo Input Observer Provider
+Plan Review](../concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_PROVIDER_PLAN_REVIEW.md).
