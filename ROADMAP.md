@@ -86,19 +86,37 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the static Workflow OS workspace discovery proof.** Use the
-   accepted fixture parser against an explicitly supplied, immutable
-   repository snapshot and selection commitment. Assert deterministic
-   workspace invariants and honest incompleteness for unresolved external
-   build-time behavior without running Cargo, package code, build scripts,
-   procedural macros, providers, or shell commands. Keep host observation,
-   runtime admission, persistence, schemas, CLI behavior, examples, and writes
-   deferred. See the [accepted blocker-fix
-   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REVIEW.md)
-   and [proof
+1. **Plan the provider-neutral trusted-host input observer.** Define the
+   smallest independently reviewable boundary for toolchain, sysroot, linker,
+   dynamic-library, and immutable object-binding facts that remain unavailable
+   after the accepted static workspace proof. Keep this phase planning-only.
+   Do not add a live observer, process execution, runtime admission, provider
+   integration, persistence, schemas, CLI behavior, examples, writes, or
+   authority broadening. See the accepted [workspace proof
+   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REVIEW.md) and
+   [proof
    plan](docs/implementation-plans/trusted-host-build-input-discovery-proof-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted static Workflow OS workspace discovery proof.** Focused
+  maintainer/security review verified the isolated metadata snapshot, minimal
+  workspace-inheritance and explicit-binary subset, deterministic reviewable
+  counts, complete unavailable host-obligation posture, payload-free result,
+  and non-authorizing boundary. External package roles and independent Git
+  object binding remain honestly unresolved. See the [focused
+  review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REVIEW.md).
+
+- **Closed static Workflow OS workspace discovery proof.** A test-only proof
+  copies the root manifest, lockfile, and four member manifests into an
+  isolated snapshot, supplies explicit repository and selection commitments,
+  runs the accepted process-free parser twice, and proves deterministic
+  payload-free results. The current snapshot reports 1 repository input, 6
+  metadata inputs, 208 external dependency packages, and 215 total inputs;
+  all nine host obligations remain unavailable and external package metadata
+  keeps the result honestly incomplete. Review is next. See the
+  [implementation
+  report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REPORT.md).
 
 - **Accepted fixture-parser blocker fix.** Focused maintainer/security review
   verified root containment for every accepted path-bearing Cargo field, one

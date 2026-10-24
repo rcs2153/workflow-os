@@ -534,6 +534,9 @@ struct CargoManifest {
     package: Option<CargoPackage>,
     workspace: Option<CargoWorkspace>,
     lib: Option<CargoLib>,
+    #[serde(default, rename = "bin")]
+    bins: Vec<CargoBin>,
+    lints: Option<CargoInheritedLints>,
     #[serde(default)]
     dependencies: BTreeMap<String, CargoDependency>,
     #[serde(default)]
@@ -550,15 +553,34 @@ struct CargoManifest {
 struct CargoPackage {
     name: String,
     version: String,
-    edition: Option<String>,
-    rust_version: Option<String>,
+    edition: Option<CargoInheritedString>,
+    rust_version: Option<CargoInheritedString>,
     build: Option<CargoBuildDeclaration>,
     publish: Option<toml::Value>,
     description: Option<String>,
-    license: Option<String>,
-    repository: Option<String>,
-    homepage: Option<String>,
-    readme: Option<toml::Value>,
+    license: Option<CargoInheritedString>,
+    repository: Option<CargoInheritedString>,
+    homepage: Option<CargoInheritedString>,
+    readme: Option<CargoInheritedString>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(untagged)]
+enum CargoInheritedString {
+    Value(String),
+    Workspace(CargoWorkspaceMarker),
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CargoWorkspaceMarker {
+    workspace: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CargoInheritedLints {
+    workspace: bool,
 }
 
 #[derive(Deserialize)]
@@ -576,8 +598,21 @@ struct CargoWorkspace {
     #[serde(default)]
     exclude: Vec<String>,
     resolver: Option<String>,
-    package: Option<toml::Value>,
+    package: Option<CargoWorkspacePackage>,
     dependencies: Option<toml::Value>,
+    lints: Option<toml::Value>,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct CargoWorkspacePackage {
+    version: Option<String>,
+    edition: Option<String>,
+    rust_version: Option<String>,
+    license: Option<String>,
+    repository: Option<String>,
+    homepage: Option<String>,
+    readme: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -587,6 +622,13 @@ struct CargoLib {
     name: Option<String>,
     #[serde(default)]
     proc_macro: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct CargoBin {
+    name: String,
+    path: String,
 }
 
 #[derive(Deserialize)]
@@ -680,11 +722,22 @@ fn validate_manifest_shape(manifest: &CargoManifest) -> Result<(), WorkflowOsErr
     if manifest
         .workspace
         .as_ref()
-        .is_some_and(|workspace| workspace.package.is_some() || workspace.dependencies.is_some())
+        .is_some_and(|workspace| workspace.dependencies.is_some())
     {
         return Err(fixture_error(
             "workspace_inheritance_unsupported",
-            "trusted-host fixture workspace inheritance is unsupported",
+            "trusted-host fixture workspace dependency inheritance is unsupported",
+        ));
+    }
+    if manifest.workspace.as_ref().is_some_and(|workspace| {
+        workspace
+            .package
+            .as_ref()
+            .is_some_and(|package| package.version.is_some())
+    }) {
+        return Err(fixture_error(
+            "workspace_inheritance_unsupported",
+            "trusted-host fixture workspace package inheritance is unsupported",
         ));
     }
     for dependency in manifest
@@ -695,7 +748,7 @@ fn validate_manifest_shape(manifest: &CargoManifest) -> Result<(), WorkflowOsErr
     {
         validate_dependency(dependency)?;
     }
-    if manifest.package.is_some() && manifest.lib.is_none() {
+    if manifest.package.is_some() && manifest.lib.is_none() && manifest.bins.is_empty() {
         return Err(fixture_error(
             "implicit_target_unsupported",
             "trusted-host fixture implicit targets are unsupported",
@@ -767,6 +820,23 @@ fn resolve_manifests(
     root_path: &Path,
     root_manifest: CargoManifest,
 ) -> Result<Vec<ManifestRecord>, WorkflowOsError> {
+    let workspace_package = root_manifest
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.package.clone())
+        .unwrap_or_default();
+    let workspace_lints_available = root_manifest
+        .workspace
+        .as_ref()
+        .is_some_and(|workspace| workspace.lints.is_some());
+    if let Some(resolver) = root_manifest
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.resolver.as_ref())
+    {
+        validate_bounded_value(resolver)?;
+    }
+    validate_workspace_package(&workspace_package)?;
     let mut pending = VecDeque::new();
     let mut parsed = BTreeMap::new();
     parsed.insert(root_path.to_path_buf(), root_manifest);
@@ -815,6 +885,7 @@ fn resolve_manifests(
             reject_nested_repository(reader, parent)?;
             parse_manifest(&reader.read(&relative_path)?)?
         };
+        validate_inherited_lints(manifest.lints.as_ref(), workspace_lints_available)?;
         let Some(package) = manifest.package.as_ref() else {
             if relative_path == root_path && manifest.workspace.is_some() {
                 continue;
@@ -826,24 +897,32 @@ fn resolve_manifests(
         };
         validate_bounded_identifier(&package.name)?;
         validate_bounded_identifier(&package.version)?;
-        if let Some(edition) = &package.edition {
-            validate_bounded_value(edition)?;
-        }
-        if let Some(rust_version) = &package.rust_version {
-            validate_bounded_value(rust_version)?;
-        }
-        let lib = manifest.lib.as_ref().ok_or_else(|| {
-            fixture_error(
+        validate_inherited_string(
+            package.edition.as_ref(),
+            workspace_package.edition.as_deref(),
+        )?;
+        validate_inherited_string(
+            package.rust_version.as_ref(),
+            workspace_package.rust_version.as_deref(),
+        )?;
+        let package_directory = relative_path.parent().unwrap_or_else(|| Path::new("."));
+        if manifest.lib.is_none() && manifest.bins.is_empty() {
+            return Err(fixture_error(
                 "implicit_target_unsupported",
                 "trusted-host fixture implicit targets are unsupported",
-            )
-        })?;
-        let package_directory = relative_path.parent().unwrap_or_else(|| Path::new("."));
-        let _ = normalize_relative_join(package_directory, &lib.path)?;
-        if let Some(name) = &lib.name {
-            validate_bounded_identifier(name)?;
+            ));
         }
-        validate_package_metadata(&manifest, package)?;
+        if let Some(lib) = manifest.lib.as_ref() {
+            let _ = normalize_relative_join(package_directory, &lib.path)?;
+            if let Some(name) = &lib.name {
+                validate_bounded_identifier(name)?;
+            }
+        }
+        for binary in &manifest.bins {
+            validate_bounded_identifier(&binary.name)?;
+            let _ = normalize_relative_join(package_directory, &binary.path)?;
+        }
+        validate_package_metadata(package, &workspace_package)?;
 
         let explicit_build_script = match &package.build {
             Some(CargoBuildDeclaration::Enabled(false)) => false,
@@ -930,7 +1009,7 @@ fn resolve_manifests(
             package_version: package.version.clone(),
             dependencies,
             explicit_build_script,
-            procedural_macro: lib.proc_macro,
+            procedural_macro: manifest.lib.as_ref().is_some_and(|lib| lib.proc_macro),
             features,
         });
     }
@@ -938,25 +1017,72 @@ fn resolve_manifests(
     Ok(records)
 }
 
-fn validate_package_metadata(
-    manifest: &CargoManifest,
-    package: &CargoPackage,
-) -> Result<(), WorkflowOsError> {
-    let _ = (&package.publish, &package.readme);
+fn validate_workspace_package(workspace: &CargoWorkspacePackage) -> Result<(), WorkflowOsError> {
     for value in [
-        package.description.as_ref(),
-        package.license.as_ref(),
-        package.repository.as_ref(),
-        package.homepage.as_ref(),
-        manifest
-            .workspace
-            .as_ref()
-            .and_then(|value| value.resolver.as_ref()),
+        workspace.version.as_ref(),
+        workspace.edition.as_ref(),
+        workspace.rust_version.as_ref(),
+        workspace.license.as_ref(),
+        workspace.repository.as_ref(),
+        workspace.homepage.as_ref(),
+        workspace.readme.as_ref(),
     ]
     .into_iter()
     .flatten()
     {
         validate_bounded_value(value)?;
+    }
+    Ok(())
+}
+
+fn validate_package_metadata(
+    package: &CargoPackage,
+    workspace: &CargoWorkspacePackage,
+) -> Result<(), WorkflowOsError> {
+    let _ = &package.publish;
+    if let Some(description) = package.description.as_ref() {
+        validate_bounded_value(description)?;
+    }
+    validate_inherited_string(package.license.as_ref(), workspace.license.as_deref())?;
+    validate_inherited_string(package.repository.as_ref(), workspace.repository.as_deref())?;
+    validate_inherited_string(package.homepage.as_ref(), workspace.homepage.as_deref())?;
+    validate_inherited_string(package.readme.as_ref(), workspace.readme.as_deref())?;
+    Ok(())
+}
+
+fn validate_inherited_string(
+    value: Option<&CargoInheritedString>,
+    workspace_value: Option<&str>,
+) -> Result<(), WorkflowOsError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    match value {
+        CargoInheritedString::Value(value) => validate_bounded_value(value),
+        CargoInheritedString::Workspace(marker)
+            if marker.workspace && workspace_value.is_some() =>
+        {
+            validate_bounded_value(workspace_value.unwrap_or_default())
+        }
+        CargoInheritedString::Workspace(_) => Err(fixture_error(
+            "workspace_inheritance_unsupported",
+            "trusted-host fixture workspace inheritance is unsupported",
+        )),
+    }
+}
+
+fn validate_inherited_lints(
+    lints: Option<&CargoInheritedLints>,
+    workspace_lints_available: bool,
+) -> Result<(), WorkflowOsError> {
+    if lints.is_some_and(|lints| lints.workspace && workspace_lints_available) {
+        return Ok(());
+    }
+    if lints.is_some() {
+        return Err(fixture_error(
+            "workspace_inheritance_unsupported",
+            "trusted-host fixture workspace inheritance is unsupported",
+        ));
     }
     Ok(())
 }

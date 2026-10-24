@@ -4,7 +4,8 @@ Status: planning and focused review accepted; Core static-discovery model and
 its blocker fix are accepted; the TOML parser dependency decision is accepted;
 the fixture-only parser and graph resolver are implemented, its four focused
 blockers are fixed, and focused re-review accepts the corrected boundary. The
-static Workflow OS workspace proof is next and remains unimplemented.
+static Workflow OS workspace proof is implemented and accepted with
+non-blocking follow-ups.
 
 Implementation evidence is recorded in the [Trusted-Host Build-Input Discovery
 Core Model Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
@@ -30,6 +31,9 @@ Report](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REPORT.m
 Focused acceptance is recorded in the [Trusted-Host Build-Input Fixture Parser
 Blocker Fix
 Review](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REVIEW.md).
+The static workspace proof verdict is recorded in the [Trusted-Host
+Build-Input Workspace Proof
+Review](../concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REVIEW.md).
 
 Related foundations:
 
@@ -60,9 +64,9 @@ prove host toolchain, sysroot, linker, dynamic-library, environment-derived,
 or runtime-image inputs. Those facts must remain explicit unsupported or
 unavailable obligations until a separately reviewed observer can bind them.
 
-The fixture-only parser and resolver described by this plan are now
-implemented. This document still does not authorize live workspace discovery
-or execution.
+The fixture-only parser, resolver, and isolated Workflow OS workspace proof
+described by this plan are now implemented. This document still does not
+authorize ambient live-workspace discovery or execution.
 
 ## 2. Goals
 
@@ -380,9 +384,20 @@ The implementation proof should include:
 - current lockfile package closure;
 - current absence of repo-local toolchain, Cargo config, and build-script files
   recorded as observed absence, not implied global absence;
-- transitive procedural-macro packages classified from the locked graph; and
+- transitive build-script and procedural-macro roles left unresolved when the
+  closed snapshot lacks the external package manifests needed to prove them;
 - host toolchain/sysroot/linker/dynamic-library obligations reported as
   unavailable, preventing a complete live-input claim.
+
+Implemented proof posture: the test copies only the approved root manifest,
+lockfile, and four member manifests into an isolated temporary snapshot before
+discovery. It supplies explicit repository and conservative-selection
+commitments, runs discovery twice, and asserts deterministic equality. The
+current reviewable counts are 1 repository input, 6 metadata inputs, 208
+external dependency packages, and 215 total inputs. External package metadata
+is not available from the closed snapshot, so no external build-script or
+procedural-macro claim is fabricated and static completeness remains
+`Incomplete`.
 
 The workspace test should avoid a brittle whole-repository golden value where
 ordinary dependency updates would create unexplained churn. Protect canonical
@@ -419,9 +434,9 @@ Future implementation tests must cover:
 3. Focused model review and blocker repair. Completed and accepted.
 4. Fixture-only structured metadata parser and graph resolver. Completed.
 5. Focused parser/security review and blocker repair. Completed and accepted.
-6. Workflow OS workspace proof using the reviewed parser. Next.
-7. Focused proof review.
-8. Only then plan a provider-neutral host-input observer for toolchain,
+6. Workflow OS workspace proof using the reviewed parser. Completed.
+7. Focused proof review. Completed and accepted with non-blocking follow-ups.
+8. Plan a provider-neutral host-input observer for toolchain,
    sysroot, linker, dynamic-library, and object-binding facts.
 9. Provider suitability and live execution remain later phases.
 
@@ -450,10 +465,9 @@ one change.
 
 ## 20. Final Recommendation
 
-Implement the static **Workflow OS workspace discovery proof** using the
-accepted fixture parser against an explicitly supplied immutable repository
-snapshot and selection commitment. Assert deterministic repeatability,
-reviewable workspace invariants, and honest incomplete host obligations.
+Plan a provider-neutral host-input observer for toolchain, sysroot, linker,
+dynamic-library, and immutable object-binding facts. Keep the first phase
+planning-only and preserve the accepted static proof as non-authorizing input.
 
 Do not run Cargo, package code, build scripts, procedural macros, providers, or
 shell commands as part of discovery. Do not add host observation, a handler,
