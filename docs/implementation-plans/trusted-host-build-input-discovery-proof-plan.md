@@ -2,9 +2,9 @@
 
 Status: planning and focused review accepted; Core static-discovery model and
 its blocker fix are accepted; the TOML parser dependency decision is accepted;
-the fixture-only parser and graph resolver are implemented and reviewed; its
-four focused blockers are fixed and await focused re-review. Live Workflow OS
-workspace proof remains unimplemented and blocked pending acceptance.
+the fixture-only parser and graph resolver are implemented, its four focused
+blockers are fixed, and focused re-review accepts the corrected boundary. The
+static Workflow OS workspace proof is next and remains unimplemented.
 
 Implementation evidence is recorded in the [Trusted-Host Build-Input Discovery
 Core Model Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
@@ -27,6 +27,9 @@ Review](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REVIEW.md).
 The focused fixes are recorded in the [Trusted-Host Build-Input Fixture Parser
 Blocker Fix
 Report](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REPORT.md).
+Focused acceptance is recorded in the [Trusted-Host Build-Input Fixture Parser
+Blocker Fix
+Review](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REVIEW.md).
 
 Related foundations:
 
@@ -414,9 +417,9 @@ Future implementation tests must cover:
 2. Core static-discovery request/result model and canonicalization only.
    Completed.
 3. Focused model review and blocker repair. Completed and accepted.
-4. Fixture-only structured metadata parser and graph resolver. Next.
-5. Focused parser/security review.
-6. Workflow OS workspace proof using the reviewed parser.
+4. Fixture-only structured metadata parser and graph resolver. Completed.
+5. Focused parser/security review and blocker repair. Completed and accepted.
+6. Workflow OS workspace proof using the reviewed parser. Next.
 7. Focused proof review.
 8. Only then plan a provider-neutral host-input observer for toolchain,
    sysroot, linker, dynamic-library, and object-binding facts.
@@ -447,14 +450,15 @@ one change.
 
 ## 20. Final Recommendation
 
-Perform a focused **fixture-parser blocker-fix review**.
+Implement the static **Workflow OS workspace discovery proof** using the
+accepted fixture parser against an explicitly supplied immutable repository
+snapshot and selection commitment. Assert deterministic repeatability,
+reviewable workspace invariants, and honest incomplete host obligations.
 
-Verify path containment for every accepted path-bearing Cargo field, the
-operation-wide feature-expression budget, dependency feature/default/optional
-commitment and canonical ordering, and optional metadata symlink handling. Do
-not combine the review with Cargo execution, a provider adapter, live workspace
-proof, a handler, host observation, persistence, schemas, writes, or release
-changes.
+Do not run Cargo, package code, build scripts, procedural macros, providers, or
+shell commands as part of discovery. Do not add host observation, a handler,
+runtime admission, persistence, schemas, CLI behavior, examples, writes,
+authority broadening, or release changes.
 
 ## 21. Governed Planning Record
 

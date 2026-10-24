@@ -86,16 +86,28 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the fixture-only trusted-host parser blocker fix.** Verify the
-   corrected path containment, operation-wide feature-expression budget,
-   dependency feature/default/optional commitment, canonical set semantics,
-   and fail-closed optional metadata symlink handling. Do not begin live
-   Workflow OS workspace proof, host observation, provider integration,
-   persistence, schemas, runtime execution, or writes before focused
-   acceptance. See the [blocker-fix
-   report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REPORT.md).
+1. **Implement the static Workflow OS workspace discovery proof.** Use the
+   accepted fixture parser against an explicitly supplied, immutable
+   repository snapshot and selection commitment. Assert deterministic
+   workspace invariants and honest incompleteness for unresolved external
+   build-time behavior without running Cargo, package code, build scripts,
+   procedural macros, providers, or shell commands. Keep host observation,
+   runtime admission, persistence, schemas, CLI behavior, examples, and writes
+   deferred. See the [accepted blocker-fix
+   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REVIEW.md)
+   and [proof
+   plan](docs/implementation-plans/trusted-host-build-input-discovery-proof-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted fixture-parser blocker fix.** Focused maintainer/security review
+  verified root containment for every accepted path-bearing Cargo field, one
+  operation-wide feature budget, canonical commitment of dependency
+  optional/default/feature semantics, and fail-closed optional metadata
+  symlink handling. No blocker remains for the static Workflow OS workspace
+  proof. Host observation, execution, providers, persistence, schemas, and
+  writes remain deferred. See the [focused
+  review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REVIEW.md).
 
 - **Closed fixture-parser blocker fix.** Every accepted explicit target,
   build-script, dependency, member, and exclusion path is now normalized under
