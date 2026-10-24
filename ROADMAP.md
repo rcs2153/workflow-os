@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-10-23.
+Status date: 2026-10-24.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -86,16 +86,58 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the fixture-only trusted-host structured metadata parser and
-   graph resolver.** Parse only the accepted closed metadata set from an
-   explicitly supplied immutable fixture root, remain process-free and
-   network-free, fail closed for unsupported or changing inputs, and produce
-   the reviewed non-authorizing request/result model. Do not combine this with
-   live workspace proof, host observation, provider integration, persistence,
-   schemas, runtime execution, or writes. See the [accepted blocker-fix
-   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REVIEW.md).
+1. **Implement the static Workflow OS workspace discovery proof.** Use the
+   accepted fixture parser against an explicitly supplied, immutable
+   repository snapshot and selection commitment. Assert deterministic
+   workspace invariants and honest incompleteness for unresolved external
+   build-time behavior without running Cargo, package code, build scripts,
+   procedural macros, providers, or shell commands. Keep host observation,
+   runtime admission, persistence, schemas, CLI behavior, examples, and writes
+   deferred. See the [accepted blocker-fix
+   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REVIEW.md)
+   and [proof
+   plan](docs/implementation-plans/trusted-host-build-input-discovery-proof-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted fixture-parser blocker fix.** Focused maintainer/security review
+  verified root containment for every accepted path-bearing Cargo field, one
+  operation-wide feature budget, canonical commitment of dependency
+  optional/default/feature semantics, and fail-closed optional metadata
+  symlink handling. No blocker remains for the static Workflow OS workspace
+  proof. Host observation, execution, providers, persistence, schemas, and
+  writes remain deferred. See the [focused
+  review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REVIEW.md).
+
+- **Closed fixture-parser blocker fix.** Every accepted explicit target,
+  build-script, dependency, member, and exclusion path is now normalized under
+  the fixture root; one checked feature-expression budget spans the operation;
+  dependency optional/default/feature semantics and canonical set-like feature
+  expressions are committed; and broken optional metadata symlinks fail
+  closed. Focused adversarial tests pass. Live workspace proof remains blocked
+  pending focused re-review. See the [blocker-fix
+  report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REPORT.md).
+
+- **Closed fixture-parser maintainer/security review with blocker findings.**
+  The review accepted the parser dependency, non-authorizing architecture,
+  external-package incompleteness, privacy boundary, and broad fail-closed
+  Cargo subset. It found four narrow blockers in path containment, aggregate
+  feature bounds, feature-semantic commitment/canonicalization, and optional
+  metadata symlink handling. Live workspace proof remains blocked. See the
+  [focused review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REVIEW.md).
+
+- **Closed fixture-only trusted-host structured metadata parser and graph
+  resolver implementation.** Core now parses the accepted exact subset of
+  root/member manifests, lockfile, optional toolchain metadata, and empty
+  Cargo configuration beneath an explicit fixture root; rejects symlinks,
+  root escapes, nested repositories, unsupported selection/configuration, and
+  hard-bound violations; resolves a deterministic locked graph; and commits
+  its semantic nodes and edges without running Cargo or build code. External
+  locked packages remain explicitly incomplete because fixture metadata cannot
+  prove their build-script or procedural-macro behavior. Live workspace proof,
+  host observation, runtime admission, persistence, schemas, providers, and
+  writes remain unimplemented. See the [implementation
+  report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REPORT.md).
 
 - **Accepted trusted-host static build-input discovery Core model blocker
   fix.** Focused maintainer/security re-review accepted the fixed-width
