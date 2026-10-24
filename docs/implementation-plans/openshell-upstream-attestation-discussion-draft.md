@@ -1,8 +1,9 @@
 # OpenShell Trustworthy Sandbox Attestation Discussion Draft
 
-Status: submitted exactly once as
+Status: original body submitted exactly once as
 [OpenShell Design Discussion #2661](https://github.com/NVIDIA/OpenShell/discussions/2661)
-after focused maintainer review.
+after focused maintainer review; one stable `v0.1.5` follow-up comment draft is
+prepared but not reviewed or submitted.
 
 Source currency was re-verified on 2026-08-09. Official upstream `main` at
 commit `4cb77a900ebd6b789d2b68daaba4830866833b1c` has the same public protobuf and
@@ -10,6 +11,16 @@ attestation-relevant observability contracts as the reviewed `v0.0.101` tree.
 The only four tree differences concern Podman loopback/TLS behavior and related
 guidance. The source-backed claims and questions below remain current; this
 re-verification does not authorize submission.
+
+Source currency was refreshed again on 2026-10-24. Stable OpenShell `v0.1.5`
+at `bdb956f2cd65a635f1294fccf1d138d263bf650f` materially advances the original
+request, while the selected Docker implementation and public contracts retain
+mandatory gaps. The original submitted body remains immutable historical
+evidence. The new follow-up draft in section 4 is separate and unsubmitted.
+
+Discussion #2661 currently has two comments from an external researcher and
+no recorded response from an OpenShell maintainer. Those comments do not
+constitute upstream acceptance or authorize Workflow OS provider work.
 
 ## 1. Purpose And Use
 
@@ -153,7 +164,106 @@ Thank you for any direction on fit, preferred API shape, or work already in
 progress that addresses these gaps.
 ~~~
 
-## 4. Maintainer Review Checklist
+## 4. Stable v0.1.5 Follow-Up Comment Draft
+
+This is a proposed follow-up comment on the existing discussion, not a second
+discussion, issue, or pull request. It must pass focused maintainer/security
+review and a separately governed external-action gate before submission.
+
+### 4.1 Copy-Ready Follow-Up Comment
+
+~~~markdown
+An update from our evaluation: we reran the evidence-sufficiency analysis
+against stable OpenShell `v0.1.5` at exact source commit
+`bdb956f2cd65a635f1294fccf1d138d263bf650f`, selecting the Docker compute
+driver on an Apple Silicon macOS evaluation host.
+
+This release materially advances several parts of the original discussion:
+
+- create and exec requests now have bounded durable request identity;
+- selected mutations support resource-version checks;
+- desired-state configuration has durable typed operation records;
+- provisioning exposes pending driver-operation identity;
+- endpoint status binds policy, provider revision, supervisor session, and
+  sequence;
+- deletion has typed outcomes and identifies the immutable targeted sandbox;
+  and
+- the compute-driver schema includes resolved workload identity and fence
+  evidence.
+
+Those additions are valuable. For this selected Docker boundary, however, we
+still cannot construct a complete restart-safe execution receipt:
+
+1. The Docker driver resolves workload identity internally, but its production
+   `DriverSandboxStatus` projection leaves `resolved_identity` and
+   `fence_evidence` empty/default. Field presence therefore does not yet give a
+   caller the driver-observed workload and generation facts.
+2. An admitted exec retry is fenced against relaunch but returns
+   `REQUEST_STREAM_UNAVAILABLE`; output, exit code, stream attachment, and a
+   durable terminal operation result are not replayed.
+3. If a gateway owner crashes before recording a driver response,
+   `driver_operation_pending` can remain unresolved indefinitely. The current
+   lifecycle docs say no resolution API exists for that lost ownership.
+4. OCSF export is structured but explicitly best-effort. Queue drops,
+   shutdown loss without a gap record, and collector partial rejection mean
+   there is still no operation-bound complete observation manifest.
+5. Deletion identifies the exact target and outcome, but completed gateway
+   deletion may precede downstream platform garbage collection. We still lack
+   one terminal receipt binding exact-generation reclamation, descendant
+   termination, credential purge, and degradation.
+6. Resource and extension capability metadata exists, but the active
+   gateway/driver/platform does not negotiate every mandatory filesystem,
+   process, egress, observation-completeness, reconciliation, and cleanup
+   capability.
+
+The strongest next increments for our use case would therefore be:
+
+- project the existing resolved workload and fence fields from the Docker
+  production status path;
+- provide durable terminal exec lookup after stream loss;
+- provide an explicit resolution path for lost driver-operation ownership;
+- finalize an operation-bound observation manifest with watermarks, event and
+  drop counts, finalization state, and integrity/retrieval posture;
+- expose complete applied-control/degradation capabilities; and
+- return an exact terminal cleanup receipt.
+
+Does this stable-release assessment match the intended semantics of the new
+fields and lifecycle records? In particular, are the empty Docker
+`resolved_identity`/`fence_evidence` projection and lost-owner/exec-terminal
+lookup gaps already on an upstream path, or would focused issues or patches be
+useful after maintainers advise on preferred boundaries?
+
+We are still treating OpenShell as an optional containment provider and are
+not proposing a fork. Provider wiring remains blocked in our project until the
+selected stable boundary can expose these facts authoritatively and pass a
+separate live proof.
+
+Reviewed stable sources:
+
+- [`v0.1.5` source](https://github.com/NVIDIA/OpenShell/tree/bdb956f2cd65a635f1294fccf1d138d263bf650f)
+- [gateway API](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/proto/openshell.proto)
+- [compute-driver API](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/proto/compute_driver.proto)
+- [Docker driver](https://github.com/NVIDIA/OpenShell/tree/bdb956f2cd65a635f1294fccf1d138d263bf650f/crates/openshell-driver-docker)
+- [API errors and retries](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/docs/sdk/api-errors.mdx)
+- [sandbox lifecycle](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/docs/how-it-works/sandboxes/overview.mdx)
+- [OCSF export](https://github.com/NVIDIA/OpenShell/blob/bdb956f2cd65a635f1294fccf1d138d263bf650f/docs/observability/ocsf-json-export.mdx)
+~~~
+
+### 4.2 Follow-Up Review Requirements
+
+Before any external comment, verify:
+
+- every claim against the exact stable source and selected Docker behavior;
+- the current discussion thread and maintainer-response posture;
+- that the comment does not repeat the full original proposal;
+- that improvements are credited clearly before remaining gaps;
+- that no access material, private payload, host path, unpublished
+  vulnerability, or production-security claim is included;
+- that candidate next increments remain general OpenShell capabilities;
+- that no Workflow OS-specific type or implementation demand is imposed; and
+- that submission is one explicit, separately governed comment action.
+
+## 5. Maintainer Review Checklist
 
 Before any submission, a human reviewer must confirm:
 
@@ -179,7 +289,7 @@ the exact accepted title and body. The immutable accepted source and content
 commitments are recorded in the
 [Submission Report](../concepts/OPENSHELL_UPSTREAM_ATTESTATION_DISCUSSION_SUBMISSION_REPORT.md).
 
-## 5. Submission And Follow-Up Boundary
+## 6. Submission And Follow-Up Boundary
 
 If a human approves submission:
 
@@ -195,7 +305,7 @@ Submission would not authorize Workflow OS provider wiring, OpenShell
 installation or execution, access material, writes, schemas, examples, a fork,
 or a production claim.
 
-## 6. Governed Planning Evidence
+## 7. Governed Planning Evidence
 
 - workflow ID: `dg/d`;
 - run ID: `run-1786269770989982000-2`;
@@ -218,10 +328,13 @@ Required phase-close validation:
 - changed-surface inspection: only documentation changed, excluding local
   untracked `.workflow-os/` state.
 
-## 7. Recommended Next Phase
+## 8. Recommended Next Phase
 
-Wait for upstream maintainer feedback, then review any response as planning
-input through a new bounded governed phase.
+Perform focused maintainer/security review of the stable `v0.1.5` follow-up
+comment draft. If accepted, one separately governed external-engagement phase
+may post that exact comment to Discussion #2661 and preserve the returned
+identity and content commitment.
 
-Do not open a related issue or pull request, post a second discussion, or begin
-provider wiring while waiting for an upstream response.
+Do not post during review. Do not open a related issue or pull request, start a
+second discussion, install or execute OpenShell, add provider wiring, or infer
+runtime authorization from upstream engagement.
