@@ -666,12 +666,13 @@ pub use state_migration::{
 };
 pub use timestamp::Timestamp;
 pub use trusted_host_live_execution_security::{
-    assess_trusted_host_live_execution_security, BuildTimeInputCompletenessPosture,
-    BuildTimeInputDiscoveryMethod, BuildTimeInputKind, BuildTimeInputKindCount,
-    BuildTimeInputManifest, BuildTimeInputManifestDefinition, TrustedHostAttemptStartPosture,
-    TrustedHostLiveExecutionBinding, TrustedHostLiveExecutionSecurityAssessment,
-    TrustedHostLiveExecutionSecurityDisposition, TrustedHostLiveExecutionSecurityObservations,
-    TrustedHostLiveExecutionSecurityObservationsDefinition, TrustedHostLiveExecutionSecurityReason,
+    BuildTimeInputCompletenessPosture, BuildTimeInputDiscoveryMethod, BuildTimeInputKind,
+    BuildTimeInputKindCount, BuildTimeInputManifest, BuildTimeInputManifestDefinition,
+    TrustedHostAttemptStartPosture, TrustedHostLiveExecutionBinding,
+    TrustedHostLiveExecutionSecurityAssessment, TrustedHostLiveExecutionSecurityDisposition,
+    TrustedHostLiveExecutionSecurityObservations,
+    TrustedHostLiveExecutionSecurityObservationsDefinition,
+    TrustedHostLiveExecutionSecurityProfile, TrustedHostLiveExecutionSecurityReason,
     TrustedHostLiveExecutionSecurityRequirements,
     TrustedHostLiveExecutionSecurityRequirementsDefinition, TrustedHostObservationPosture,
     TrustedHostProcessTreeObservation, TrustedHostProcessTreeTerminality,

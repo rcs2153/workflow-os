@@ -2,18 +2,14 @@
 
 //! Behavioral tests for the non-authorizing trusted-host live-security model.
 
-use workflow_core::{
+use super::{
     assess_trusted_host_live_execution_security, BuildTimeInputCompletenessPosture,
     BuildTimeInputDiscoveryMethod, BuildTimeInputKind, BuildTimeInputKindCount,
-    BuildTimeInputManifest, BuildTimeInputManifestDefinition, HostedExecutionCleanupPosture,
-    HostedExecutionControlPosture, HostedExecutionEnforcementMode,
-    HostedExecutionObservationSummary, HostedExecutionProviderId, HostedExecutionProviderVersion,
-    HostedExecutionReference, HostedExecutionReferenceKind, SpecContentHash,
-    TrustedHostAttemptStartPosture, TrustedHostLiveExecutionBinding,
-    TrustedHostLiveExecutionSecurityAssessment, TrustedHostLiveExecutionSecurityDisposition,
-    TrustedHostLiveExecutionSecurityObservations,
+    BuildTimeInputManifest, BuildTimeInputManifestDefinition, TrustedHostAttemptStartPosture,
+    TrustedHostLiveExecutionBinding, TrustedHostLiveExecutionSecurityAssessment,
+    TrustedHostLiveExecutionSecurityDisposition, TrustedHostLiveExecutionSecurityObservations,
     TrustedHostLiveExecutionSecurityObservationsDefinition,
-    TrustedHostLiveExecutionSecurityRequirements,
+    TrustedHostLiveExecutionSecurityProfile, TrustedHostLiveExecutionSecurityRequirements,
     TrustedHostLiveExecutionSecurityRequirementsDefinition, TrustedHostObservationPosture,
     TrustedHostProcessTreeObservation, TrustedHostProcessTreeTerminality,
     TrustedHostResourceBudgetObservation, TrustedHostRootAccess, TrustedHostRootBindingRequirement,
@@ -21,6 +17,11 @@ use workflow_core::{
     TrustedHostRootObservationMethod, TrustedHostRootRequirement, TrustedHostRootRole,
     TrustedHostSecurityAffirmation, TrustedHostTransientWriteObservation,
     TrustedHostTransientWriteObservationDefinition, TrustedHostTransientWriteObservationPosture,
+};
+use crate::{
+    HostedExecutionCleanupPosture, HostedExecutionControlPosture, HostedExecutionEnforcementMode,
+    HostedExecutionObservationSummary, HostedExecutionProviderId, HostedExecutionProviderVersion,
+    HostedExecutionReference, HostedExecutionReferenceKind, SpecContentHash,
 };
 
 fn hash(label: &str) -> SpecContentHash {
@@ -90,6 +91,7 @@ fn requirements() -> TrustedHostLiveExecutionSecurityRequirements {
     TrustedHostLiveExecutionSecurityRequirements::new(
         TrustedHostLiveExecutionSecurityRequirementsDefinition {
             binding: binding(),
+            profile: TrustedHostLiveExecutionSecurityProfile::StrictBuildExecutionV1,
             requested_policy_hash: hash("policy"),
             root_requirements: root_requirements(),
             denied_egress_probe_required: false,
@@ -339,6 +341,7 @@ fn duplicate_roots_and_incoherent_attempt_posture_fail_construction() {
     let error = TrustedHostLiveExecutionSecurityRequirements::new(
         TrustedHostLiveExecutionSecurityRequirementsDefinition {
             binding: binding(),
+            profile: TrustedHostLiveExecutionSecurityProfile::StrictBuildExecutionV1,
             requested_policy_hash: hash("policy"),
             root_requirements: roots,
             denied_egress_probe_required: false,
@@ -467,6 +470,7 @@ fn required_denied_egress_probe_is_fail_closed() {
     let requirements = TrustedHostLiveExecutionSecurityRequirements::new(
         TrustedHostLiveExecutionSecurityRequirementsDefinition {
             binding: binding(),
+            profile: TrustedHostLiveExecutionSecurityProfile::StrictBuildExecutionV1,
             requested_policy_hash: hash("policy"),
             root_requirements: root_requirements(),
             denied_egress_probe_required: true,
@@ -487,6 +491,7 @@ fn requirements_fingerprint_is_canonical_across_root_order() {
     let second = TrustedHostLiveExecutionSecurityRequirements::new(
         TrustedHostLiveExecutionSecurityRequirementsDefinition {
             binding: binding(),
+            profile: TrustedHostLiveExecutionSecurityProfile::StrictBuildExecutionV1,
             requested_policy_hash: hash("policy"),
             root_requirements: reversed,
             denied_egress_probe_required: false,
@@ -495,10 +500,64 @@ fn requirements_fingerprint_is_canonical_across_root_order() {
     .expect("requirements");
 
     assert_eq!(first.fingerprint(), second.fingerprint());
+    assert_eq!(
+        first.profile(),
+        TrustedHostLiveExecutionSecurityProfile::StrictBuildExecutionV1
+    );
     let serialized = serde_json::to_string(&first).expect("requirements serialization");
+    assert!(serialized.contains("\"profile\":\"strict_build_execution_v1\""));
+    assert!(!serialized.contains("\"fingerprint\""));
     let restored: TrustedHostLiveExecutionSecurityRequirements =
         serde_json::from_str(&serialized).expect("requirements deserialization");
     assert_eq!(first.fingerprint(), restored.fingerprint());
+}
+
+#[test]
+fn requirements_profile_and_fingerprint_fail_closed_and_stay_stable() {
+    let requirements = requirements();
+    assert_eq!(
+        requirements.fingerprint().as_str(),
+        "0c5ab92eaec1a17229f303b0196c601ffb451401a9924b6e222aab1e3ebd4a84"
+    );
+
+    let mut serialized = serde_json::to_value(&requirements).expect("requirements serialization");
+    serialized["profile"] = serde_json::Value::String("token-secret-profile".to_owned());
+    let error = serde_json::from_value::<TrustedHostLiveExecutionSecurityRequirements>(serialized)
+        .expect_err("unknown profile must fail closed");
+    let message = error.to_string();
+    assert!(message.contains("unsupported trusted-host live-execution security profile"));
+    assert!(!message.contains("token-secret-profile"));
+}
+
+#[test]
+fn root_observations_reject_commitment_aliasing_without_leakage() {
+    let requirements = requirements();
+    let mut definition = observations_definition(&requirements);
+    let aliased_commitment = definition.root_observations[0].commitment.clone();
+    let second = &definition.root_observations[1];
+    definition.root_observations[1] =
+        TrustedHostRootObservation::new(TrustedHostRootObservationDefinition {
+            role: second.role(),
+            access: second.access(),
+            object_binding: TrustedHostObservationPosture::Proven,
+            continuity: TrustedHostObservationPosture::Proven,
+            method: TrustedHostRootObservationMethod::ImmutableProjection,
+            invocation_scoped: false,
+            commitment: aliased_commitment.clone(),
+            reference: reference(
+                HostedExecutionReferenceKind::Telemetry,
+                "telemetry/aliased-root",
+            ),
+        })
+        .expect("aliased observation shape");
+
+    let error = TrustedHostLiveExecutionSecurityObservations::new(definition)
+        .expect_err("root commitments must be role-unique");
+    assert_eq!(
+        error.code(),
+        "trusted_host.live_security.observation.root_binding.invalid"
+    );
+    assert!(!error.to_string().contains(aliased_commitment.as_str()));
 }
 
 #[test]

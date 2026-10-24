@@ -1,9 +1,12 @@
 # Trusted-Host Live-Execution Security Contract Core Model Plan
 
-Status: core model implemented; focused maintainer and security review required.
+Status: core model implemented and reviewed; narrow blocker fix implemented;
+focused blocker-fix review required.
 
 Implementation evidence is recorded in the [Trusted-Host Live-Execution
 Security Contract Core Model Report](../concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_REPORT.md).
+Blocker-fix evidence is recorded in the [Trusted-Host Live-Execution Security
+Contract Model Blocker Fix Report](../concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_BLOCKER_FIX_REPORT.md).
 
 Related foundations:
 

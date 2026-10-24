@@ -86,17 +86,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Fix the provider-neutral trusted-host live-execution security contract
-   core-model blockers.** Bind every decision-relevant security requirement
-   into the accepted requirements contract and canonical fingerprint, reject
-   duplicate root commitments across typed roles, narrow the assessment
-   function back to crate-private, add focused regressions, and correct the
-   implementation report. Do not begin input discovery, provider composition,
-   registration, OpenShell integration, a runner, live Cargo, persistence,
-   public execution surfaces, writes, or release changes. See the [focused
-   implementation review](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_REVIEW.md).
+1. **Review the provider-neutral trusted-host live-execution security contract
+   model blocker fix.** Verify that the closed versioned strict profile binds
+   every evaluated control into the canonical requirements fingerprint, root
+   commitments cannot alias typed roles, assessment orchestration is absent
+   from the public crate API, and requirements serde recomputes its derived
+   fingerprint from authoritative fields. Do not begin input discovery,
+   provider composition, registration, OpenShell integration, a runner, live
+   Cargo, persistence, public execution surfaces, writes, or release changes.
+   See the [blocker-fix
+   report](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_BLOCKER_FIX_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed provider-neutral trusted-host live-execution security contract
+  model blocker fix.** The accepted contract now carries a closed versioned
+  strict profile whose semantics cover every evaluated security control and
+  whose identity participates in a fixed-vector canonical fingerprint. Root
+  observations reject commitment reuse across typed roles, requirements serde
+  omits and recomputes the derived fingerprint, unknown profiles fail without
+  echoing values, and assessment orchestration is crate-private. No live
+  process, discovery, provider composition, registration, persistence, schema,
+  write, or release surface was added. See the [blocker-fix
+  report](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_BLOCKER_FIX_REPORT.md).
 
 - **Closed provider-neutral trusted-host live-execution security contract core
   model review with blocker fixes required.** The model remains provider
