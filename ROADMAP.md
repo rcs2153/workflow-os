@@ -86,17 +86,25 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Fix the fixture-only trusted-host parser review blockers.** Normalize and
-   root-check every accepted path-bearing Cargo field; enforce aggregate
-   feature-expression bounds; commit dependency feature/default/optional
-   semantics under canonical ordering; and reject ambiguous optional metadata
-   presence including broken symlinks. Add focused adversarial tests, then
-   perform blocker-fix review. Do not begin live Workflow OS workspace proof,
-   host observation, provider integration, persistence, schemas, runtime
-   execution, or writes before acceptance. See the [focused
-   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REVIEW.md).
+1. **Review the fixture-only trusted-host parser blocker fix.** Verify the
+   corrected path containment, operation-wide feature-expression budget,
+   dependency feature/default/optional commitment, canonical set semantics,
+   and fail-closed optional metadata symlink handling. Do not begin live
+   Workflow OS workspace proof, host observation, provider integration,
+   persistence, schemas, runtime execution, or writes before focused
+   acceptance. See the [blocker-fix
+   report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed fixture-parser blocker fix.** Every accepted explicit target,
+  build-script, dependency, member, and exclusion path is now normalized under
+  the fixture root; one checked feature-expression budget spans the operation;
+  dependency optional/default/feature semantics and canonical set-like feature
+  expressions are committed; and broken optional metadata symlinks fail
+  closed. Focused adversarial tests pass. Live workspace proof remains blocked
+  pending focused re-review. See the [blocker-fix
+  report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REPORT.md).
 
 - **Closed fixture-parser maintainer/security review with blocker findings.**
   The review accepted the parser dependency, non-authorizing architecture,

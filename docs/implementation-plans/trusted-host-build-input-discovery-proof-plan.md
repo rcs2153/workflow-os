@@ -2,9 +2,9 @@
 
 Status: planning and focused review accepted; Core static-discovery model and
 its blocker fix are accepted; the TOML parser dependency decision is accepted;
-the fixture-only parser and graph resolver are implemented and reviewed with
-blocker fixes required. Live Workflow OS workspace proof remains unimplemented
-and blocked pending fix and focused re-review.
+the fixture-only parser and graph resolver are implemented and reviewed; its
+four focused blockers are fixed and await focused re-review. Live Workflow OS
+workspace proof remains unimplemented and blocked pending acceptance.
 
 Implementation evidence is recorded in the [Trusted-Host Build-Input Discovery
 Core Model Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
@@ -24,6 +24,9 @@ Fixture implementation evidence is recorded in the [Trusted-Host Build-Input
 Fixture Parser Report](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REPORT.md).
 The focused verdict is recorded in the [Trusted-Host Build-Input Fixture Parser
 Review](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REVIEW.md).
+The focused fixes are recorded in the [Trusted-Host Build-Input Fixture Parser
+Blocker Fix
+Report](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REPORT.md).
 
 Related foundations:
 
@@ -444,13 +447,14 @@ one change.
 
 ## 20. Final Recommendation
 
-Implement a focused **fixture-parser blocker fix**, then re-review it.
+Perform a focused **fixture-parser blocker-fix review**.
 
-Fix path containment for every accepted path-bearing Cargo field, aggregate
-feature-expression bounds, dependency feature/default/optional commitment and
-canonical ordering, and optional metadata symlink ambiguity. Do not combine
-the fix with Cargo execution, a provider adapter, live workspace proof, a
-handler, host observation, persistence, schemas, writes, or release changes.
+Verify path containment for every accepted path-bearing Cargo field, the
+operation-wide feature-expression budget, dependency feature/default/optional
+commitment and canonical ordering, and optional metadata symlink handling. Do
+not combine the review with Cargo execution, a provider adapter, live workspace
+proof, a handler, host observation, persistence, schemas, writes, or release
+changes.
 
 ## 21. Governed Planning Record
 

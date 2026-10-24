@@ -735,7 +735,7 @@ struct ManifestRecord {
     dependencies: Vec<ManifestDependency>,
     explicit_build_script: bool,
     procedural_macro: bool,
-    feature_expressions: Vec<String>,
+    features: Vec<ManifestFeature>,
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
@@ -750,6 +750,15 @@ struct ManifestDependency {
     package_name: String,
     local_manifest_path: Option<PathBuf>,
     role: DependencyRole,
+    optional: bool,
+    default_features: bool,
+    features: Vec<String>,
+}
+
+#[derive(Clone)]
+struct ManifestFeature {
+    name: String,
+    expressions: Vec<String>,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -786,6 +795,7 @@ fn resolve_manifests(
     let mut records = Vec::new();
     let mut visited = BTreeSet::new();
     let mut local_dependency_count = 0_u32;
+    let mut feature_expression_count = 0_u32;
     while let Some(relative_path) = pending.pop_front() {
         if !visited.insert(relative_path.clone()) {
             continue;
@@ -828,18 +838,18 @@ fn resolve_manifests(
                 "trusted-host fixture implicit targets are unsupported",
             )
         })?;
-        validate_relative_text_path(&lib.path)?;
+        let package_directory = relative_path.parent().unwrap_or_else(|| Path::new("."));
+        let _ = normalize_relative_join(package_directory, &lib.path)?;
         if let Some(name) = &lib.name {
             validate_bounded_identifier(name)?;
         }
         validate_package_metadata(&manifest, package)?;
 
-        let package_directory = relative_path.parent().unwrap_or_else(|| Path::new("."));
         let explicit_build_script = match &package.build {
             Some(CargoBuildDeclaration::Enabled(false)) => false,
             Some(CargoBuildDeclaration::Enabled(true)) => true,
             Some(CargoBuildDeclaration::Path(path)) => {
-                validate_relative_text_path(path)?;
+                let _ = normalize_relative_join(package_directory, path)?;
                 true
             }
             None => {
@@ -886,18 +896,32 @@ fn resolve_manifests(
             reader.limits,
         )?;
 
-        let feature_expressions = manifest
-            .features
-            .iter()
-            .flat_map(|(feature, entries)| {
-                std::iter::once(feature.clone()).chain(entries.iter().cloned())
-            })
-            .collect::<Vec<_>>();
-        if usize_to_u32(feature_expressions.len())? > reader.limits.max_feature_expressions {
-            return Err(bound_exceeded());
+        let mut features = Vec::with_capacity(manifest.features.len());
+        for (name, entries) in &manifest.features {
+            validate_bounded_identifier(name)?;
+            add_feature_expressions(&mut feature_expression_count, 1, reader.limits)?;
+            let mut expressions = entries.clone();
+            expressions.sort();
+            expressions.dedup();
+            add_feature_expressions(
+                &mut feature_expression_count,
+                expressions.len(),
+                reader.limits,
+            )?;
+            for expression in &expressions {
+                validate_bounded_value(expression)?;
+            }
+            features.push(ManifestFeature {
+                name: name.clone(),
+                expressions,
+            });
         }
-        for expression in &feature_expressions {
-            validate_bounded_value(expression)?;
+        for dependency in &dependencies {
+            add_feature_expressions(
+                &mut feature_expression_count,
+                dependency.features.len(),
+                reader.limits,
+            )?;
         }
 
         records.push(ManifestRecord {
@@ -907,7 +931,7 @@ fn resolve_manifests(
             dependencies,
             explicit_build_script,
             procedural_macro: lib.proc_macro,
-            feature_expressions,
+            features,
         });
     }
     records.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
@@ -948,43 +972,55 @@ fn collect_dependencies(
 ) -> Result<(), WorkflowOsError> {
     for (alias, dependency) in dependencies {
         validate_bounded_identifier(alias)?;
-        let (package_name, local_manifest_path) = match dependency {
-            CargoDependency::Version(version) => {
-                validate_bounded_value(version)?;
-                (alias.clone(), None)
-            }
-            CargoDependency::Detailed(detail) => {
-                if let Some(version) = &detail.version {
+        let (package_name, local_manifest_path, optional, default_features, features) =
+            match dependency {
+                CargoDependency::Version(version) => {
                     validate_bounded_value(version)?;
+                    (alias.clone(), None, false, true, Vec::new())
                 }
-                for feature in &detail.features {
-                    validate_bounded_value(feature)?;
-                }
-                let _ = (detail.optional, detail.default_features);
-                let package_name = detail.package.clone().unwrap_or_else(|| alias.clone());
-                validate_bounded_identifier(&package_name)?;
-                let local_manifest_path = if let Some(path) = &detail.path {
-                    validate_relative_text_path(path)?;
-                    *local_dependency_count = local_dependency_count
-                        .checked_add(1)
-                        .ok_or_else(bound_exceeded)?;
-                    if *local_dependency_count > limits.max_local_path_dependencies {
-                        return Err(bound_exceeded());
+                CargoDependency::Detailed(detail) => {
+                    if let Some(version) = &detail.version {
+                        validate_bounded_value(version)?;
                     }
-                    let manifest_path =
-                        normalize_relative_join(package_directory, path)?.join("Cargo.toml");
-                    pending.push_back(manifest_path.clone());
-                    Some(manifest_path)
-                } else {
-                    None
-                };
-                (package_name, local_manifest_path)
-            }
-        };
+                    let mut features = detail.features.clone();
+                    features.sort();
+                    features.dedup();
+                    for feature in &features {
+                        validate_bounded_value(feature)?;
+                    }
+                    let package_name = detail.package.clone().unwrap_or_else(|| alias.clone());
+                    validate_bounded_identifier(&package_name)?;
+                    let local_manifest_path = if let Some(path) = &detail.path {
+                        validate_relative_text_path(path)?;
+                        *local_dependency_count = local_dependency_count
+                            .checked_add(1)
+                            .ok_or_else(bound_exceeded)?;
+                        if *local_dependency_count > limits.max_local_path_dependencies {
+                            return Err(bound_exceeded());
+                        }
+                        let manifest_path =
+                            normalize_relative_join(package_directory, path)?.join("Cargo.toml");
+                        pending.push_back(manifest_path.clone());
+                        Some(manifest_path)
+                    } else {
+                        None
+                    };
+                    (
+                        package_name,
+                        local_manifest_path,
+                        detail.optional,
+                        detail.default_features.unwrap_or(true),
+                        features,
+                    )
+                }
+            };
         output.push(ManifestDependency {
             package_name,
             local_manifest_path,
             role,
+            optional,
+            default_features,
+            features,
         });
     }
     Ok(())
@@ -997,8 +1033,21 @@ fn validated_directory_manifest_path(value: &str) -> Result<PathBuf, WorkflowOsE
             "trusted-host fixture workspace globs are unsupported",
         ));
     }
-    validate_relative_text_path(value)?;
-    Ok(PathBuf::from(value).join("Cargo.toml"))
+    Ok(normalize_relative_join(Path::new("."), value)?.join("Cargo.toml"))
+}
+
+fn add_feature_expressions(
+    count: &mut u32,
+    additional: usize,
+    limits: TrustedHostBuildInputFixtureDiscoveryLimits,
+) -> Result<(), WorkflowOsError> {
+    *count = count
+        .checked_add(usize_to_u32(additional)?)
+        .ok_or_else(bound_exceeded)?;
+    if *count > limits.max_feature_expressions {
+        return Err(bound_exceeded());
+    }
+    Ok(())
 }
 
 fn normalize_relative_join(base: &Path, value: &str) -> Result<PathBuf, WorkflowOsError> {
@@ -1082,8 +1131,12 @@ fn read_optional_metadata(reader: &mut FixtureReader) -> Result<(), WorkflowOsEr
     ];
     let present_toolchains = toolchain_paths
         .iter()
-        .filter(|path| reader.canonical_root.join(path).exists())
-        .copied()
+        .map(|path| {
+            optional_metadata_present(&reader.canonical_root, path).map(|present| (*path, present))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter_map(|(path, present)| present.then_some(path))
         .collect::<Vec<_>>();
     if present_toolchains.len() > 1 {
         return Err(metadata_invalid());
@@ -1109,8 +1162,12 @@ fn read_optional_metadata(reader: &mut FixtureReader) -> Result<(), WorkflowOsEr
     let config_paths = [Path::new(".cargo/config"), Path::new(".cargo/config.toml")];
     let present_configs = config_paths
         .iter()
-        .filter(|path| reader.canonical_root.join(path).exists())
-        .copied()
+        .map(|path| {
+            optional_metadata_present(&reader.canonical_root, path).map(|present| (*path, present))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter_map(|(path, present)| present.then_some(path))
         .collect::<Vec<_>>();
     if present_configs.len() > 1 {
         return Err(metadata_invalid());
@@ -1128,6 +1185,17 @@ fn read_optional_metadata(reader: &mut FixtureReader) -> Result<(), WorkflowOsEr
         }
     }
     Ok(())
+}
+
+fn optional_metadata_present(root: &Path, relative: &Path) -> Result<bool, WorkflowOsError> {
+    match fs::symlink_metadata(root.join(relative)) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(fixture_error(
+            "metadata.unreadable",
+            "trusted-host fixture metadata could not be read",
+        )),
+    }
 }
 
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
@@ -1192,7 +1260,14 @@ fn resolve_graph(
     for key in local_keys.values() {
         pending.push_back((key.clone(), 0_u32));
     }
-    let mut edges = BTreeSet::<(PackageKey, PackageKey, &'static str)>::new();
+    let mut edges = BTreeSet::<(
+        PackageKey,
+        PackageKey,
+        &'static str,
+        bool,
+        bool,
+        Vec<String>,
+    )>::new();
     while let Some((key, depth)) = pending.pop_front() {
         if depth > limits.max_graph_depth {
             return Err(bound_exceeded());
@@ -1203,7 +1278,14 @@ fn resolve_graph(
         let package = packages.get(&key).ok_or_else(lockfile_inconsistent)?;
         for dependency in &package.dependencies {
             let target = resolve_lock_dependency(dependency, &packages)?;
-            edges.insert((key.clone(), target.clone(), "locked"));
+            edges.insert((
+                key.clone(),
+                target.clone(),
+                "locked",
+                false,
+                true,
+                Vec::new(),
+            ));
             pending.push_back((target, depth.saturating_add(1)));
         }
     }
@@ -1217,8 +1299,8 @@ fn resolve_graph(
             .ok_or_else(lockfile_inconsistent)?;
         let lock_targets = edges
             .iter()
-            .filter(|(from, _, _)| from == source)
-            .map(|(_, target, _)| target.clone())
+            .filter(|(from, _, _, _, _, _)| from == source)
+            .map(|(_, target, _, _, _, _)| target.clone())
             .collect::<Vec<_>>();
         for dependency in &manifest.dependencies {
             let matching = lock_targets
@@ -1237,7 +1319,14 @@ fn resolve_graph(
                     return Err(lockfile_inconsistent());
                 }
             }
-            edges.insert((source.clone(), target.clone(), role_tag(dependency.role)));
+            edges.insert((
+                source.clone(),
+                target.clone(),
+                role_tag(dependency.role),
+                dependency.optional,
+                dependency.default_features,
+                dependency.features.clone(),
+            ));
         }
     }
 
@@ -1274,10 +1363,23 @@ fn resolve_graph(
             );
         }
     }
-    for (source, target, role) in &edges {
+    for (source, target, role, optional, default_features, features) in &edges {
         hash_package_key(&mut hasher, "edge_source", source);
         hash_package_key(&mut hasher, "edge_target", target);
         hash_field(&mut hasher, "edge_role", role);
+        hash_field(
+            &mut hasher,
+            "edge_optional",
+            if *optional { "true" } else { "false" },
+        );
+        hash_field(
+            &mut hasher,
+            "edge_default_features",
+            if *default_features { "true" } else { "false" },
+        );
+        for feature in features {
+            hash_field(&mut hasher, "edge_feature", feature);
+        }
     }
     for manifest in manifests {
         hash_field(
@@ -1303,8 +1405,11 @@ fn resolve_graph(
                 "false"
             },
         );
-        for expression in &manifest.feature_expressions {
-            hash_field(&mut hasher, "feature_expression", expression);
+        for feature in &manifest.features {
+            hash_field(&mut hasher, "feature_name", &feature.name);
+            for expression in &feature.expressions {
+                hash_field(&mut hasher, "feature_expression", expression);
+            }
         }
     }
 

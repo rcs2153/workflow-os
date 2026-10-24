@@ -45,11 +45,18 @@ impl Fixture {
     fn discover(
         &self,
     ) -> Result<super::TrustedHostBuildInputFixtureDiscovery, crate::WorkflowOsError> {
+        self.discover_with_limits(TrustedHostBuildInputFixtureDiscoveryLimits::standard())
+    }
+
+    fn discover_with_limits(
+        &self,
+        limits: TrustedHostBuildInputFixtureDiscoveryLimits,
+    ) -> Result<super::TrustedHostBuildInputFixtureDiscovery, crate::WorkflowOsError> {
         let input = TrustedHostBuildInputFixtureDiscoveryInput::new(
             &self.root,
             SpecContentHash::from_text("fixture-repository"),
             SpecContentHash::from_text("fixture-selection"),
-            TrustedHostBuildInputFixtureDiscoveryLimits::standard(),
+            limits,
         );
         discover_trusted_host_build_inputs_from_fixture(&input)
     }
@@ -213,11 +220,11 @@ fn fixture_discovery_is_deterministic_with_fixed_semantic_graph_vector() {
     assert_eq!(first, second);
     assert_eq!(
         first.result().resolved_graph_commitment().as_str(),
-        "a14d2f79e95bc7fcd0ee1c0e56993125cde7fc33773cbc47aa2d566395c25544"
+        "381bb0687a930fc071af924aafb64a525dbefbd0770c04ad34bcb9b96b8434a3"
     );
     assert_eq!(
         first.result().graph_commitment().as_str(),
-        "d9a9b4b2b7bc605e66e45073fc4992682e200cca4eb61438a46c4e5488bb4b60"
+        "a2a3f26d4f7a3325f35dd66843ea332c03f35fd4cee177606562634e3d64f803"
     );
 }
 
@@ -296,6 +303,48 @@ fn root_escape_local_dependency_fails_closed() {
     );
 }
 
+#[test]
+fn root_escape_target_build_and_exclusion_paths_fail_closed() {
+    let library = Fixture::new("library-root-escape");
+    library.write(
+        "Cargo.toml",
+        "[package]\nname=\"fixture-app\"\nversion=\"0.1.0\"\nbuild=false\n[lib]\npath=\"../../outside.rs\"",
+    );
+    library.write(
+        "Cargo.lock",
+        "version=4\n[[package]]\nname=\"fixture-app\"\nversion=\"0.1.0\"",
+    );
+    assert_error_code(
+        &library,
+        "trusted_host.build_input_fixture_discovery.root_escape",
+    );
+
+    let build = Fixture::new("build-root-escape");
+    build.write(
+        "Cargo.toml",
+        "[package]\nname=\"fixture-app\"\nversion=\"0.1.0\"\nbuild=\"../../build.rs\"\n[lib]\npath=\"src/lib.rs\"",
+    );
+    build.write(
+        "Cargo.lock",
+        "version=4\n[[package]]\nname=\"fixture-app\"\nversion=\"0.1.0\"",
+    );
+    assert_error_code(
+        &build,
+        "trusted_host.build_input_fixture_discovery.root_escape",
+    );
+
+    let exclusion = Fixture::new("exclude-root-escape");
+    exclusion.write(
+        "Cargo.toml",
+        "[workspace]\nmembers=[]\nexclude=[\"../../outside\"]\nresolver=\"2\"",
+    );
+    exclusion.write("Cargo.lock", "version=4");
+    assert_error_code(
+        &exclusion,
+        "trusted_host.build_input_fixture_discovery.root_escape",
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn symlinked_workspace_member_fails_closed() {
@@ -336,6 +385,34 @@ fn nested_repository_and_nonempty_cargo_configuration_fail_closed() {
     assert_error_code(
         &config,
         "trusted_host.build_input_fixture_discovery.cargo_configuration_unsupported",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn broken_optional_metadata_symlinks_fail_closed() {
+    use std::os::unix::fs::symlink;
+
+    let toolchain = Fixture::new("broken-toolchain-symlink");
+    write_single_package(&toolchain, "", "");
+    symlink(
+        "missing-toolchain",
+        toolchain.root.join("rust-toolchain.toml"),
+    )
+    .expect("create broken toolchain symlink");
+    assert_error_code(
+        &toolchain,
+        "trusted_host.build_input_fixture_discovery.symlink_unsupported",
+    );
+
+    let config = Fixture::new("broken-config-symlink");
+    write_single_package(&config, "", "");
+    fs::create_dir_all(config.root.join(".cargo")).expect("create cargo directory");
+    symlink("missing-config", config.root.join(".cargo/config.toml"))
+        .expect("create broken config symlink");
+    assert_error_code(
+        &config,
+        "trusted_host.build_input_fixture_discovery.symlink_unsupported",
     );
 }
 
@@ -442,6 +519,97 @@ fn hard_file_bound_and_inconsistent_lockfile_fail_closed() {
         &inconsistent,
         "trusted_host.build_input_fixture_discovery.lockfile_inconsistent",
     );
+}
+
+#[test]
+fn feature_expression_bound_is_aggregate_across_manifests_and_dependencies() {
+    let fixture = Fixture::new("aggregate-features");
+    fixture.write(
+        "Cargo.toml",
+        "[workspace]\nmembers=[\"one\",\"two\"]\nresolver=\"2\"",
+    );
+    for (member, dependency) in [("one", "two"), ("two", "one")] {
+        fixture.write(
+            &format!("{member}/Cargo.toml"),
+            &format!(
+                "[package]\nname=\"{member}\"\nversion=\"0.1.0\"\nbuild=false\n[lib]\npath=\"src/lib.rs\"\n[dependencies]\n{dependency}={{path=\"../{dependency}\",version=\"0.1.0\",features=[\"dep-feature\"]}}\n[features]\nlocal=[\"dep:{dependency}\"]"
+            ),
+        );
+    }
+    fixture.write(
+        "Cargo.lock",
+        "version=4\n[[package]]\nname=\"one\"\nversion=\"0.1.0\"\ndependencies=[\"two\"]\n[[package]]\nname=\"two\"\nversion=\"0.1.0\"\ndependencies=[\"one\"]",
+    );
+    let limits = TrustedHostBuildInputFixtureDiscoveryLimits::new(
+        TrustedHostBuildInputFixtureDiscoveryLimitsDefinition {
+            max_files: 8,
+            max_bytes_per_file: 4096,
+            max_total_bytes: 16_384,
+            max_workspace_members: 4,
+            max_local_path_dependencies: 4,
+            max_locked_packages: 4,
+            max_package_edges: 8,
+            max_feature_expressions: 5,
+            max_graph_depth: 8,
+        },
+    )
+    .expect("aggregate feature limits");
+
+    let error = fixture
+        .discover_with_limits(limits)
+        .expect_err("aggregate feature count must fail closed");
+    assert_eq!(
+        error.code(),
+        "trusted_host.build_input_fixture_discovery.bound_exceeded"
+    );
+}
+
+#[test]
+fn dependency_feature_semantics_are_canonical_and_commitment_sensitive() {
+    fn dependency_fixture(label: &str, declaration: &str) -> Fixture {
+        let fixture = Fixture::new(label);
+        write_single_package(
+            &fixture,
+            &format!("[dependencies]\nexternal = {declaration}"),
+            "dependencies=[\"external 1.0.0 (registry+https://example.invalid/index)\"]\n\n[[package]]\nname=\"external\"\nversion=\"1.0.0\"\nsource=\"registry+https://example.invalid/index\"\nchecksum=\"bounded\"",
+        );
+        fixture
+    }
+
+    let first = dependency_fixture(
+        "feature-order-a",
+        "{version=\"1\",optional=true,default-features=false,features=[\"derive\",\"alloc\"]}",
+    );
+    let reordered = dependency_fixture(
+        "feature-order-b",
+        "{version=\"1\",optional=true,default-features=false,features=[\"alloc\",\"derive\"]}",
+    );
+    let changed = dependency_fixture(
+        "feature-semantics-changed",
+        "{version=\"1\",optional=false,default-features=true,features=[\"alloc\",\"derive\"]}",
+    );
+
+    let first_commitment = first
+        .discover()
+        .expect("first feature fixture")
+        .result()
+        .resolved_graph_commitment()
+        .clone();
+    let reordered_commitment = reordered
+        .discover()
+        .expect("reordered feature fixture")
+        .result()
+        .resolved_graph_commitment()
+        .clone();
+    let changed_commitment = changed
+        .discover()
+        .expect("changed feature fixture")
+        .result()
+        .resolved_graph_commitment()
+        .clone();
+
+    assert_eq!(first_commitment, reordered_commitment);
+    assert_ne!(first_commitment, changed_commitment);
 }
 
 #[test]

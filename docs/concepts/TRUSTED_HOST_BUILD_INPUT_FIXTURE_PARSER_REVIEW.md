@@ -286,3 +286,18 @@ Documentation checks and diff hygiene must be rerun after this review.
   dependency and license surfaces, roadmap evidence, and validation results and
   authored this review. The kernel coordinated governance only.
 - Report posture: no runtime WorkReport artifact was generated or persisted.
+
+## 18. Fix-Forward Note
+
+The four blockers in this review were addressed in a separately governed,
+focused phase. The implementation normalizes every accepted explicit target,
+build-script, workspace member/exclusion, and local dependency path under the
+fixture root; applies one checked feature-expression budget across all selected
+manifests and dependency declarations; commits canonical dependency
+optional/default/feature semantics; and treats every present optional metadata
+symlink, including a broken symlink, as fail-closed input.
+
+The original `Needs blocker fixes` verdict remains the historical verdict of
+this review. Acceptance requires the separately documented focused blocker-fix
+review. See [Trusted-Host Build-Input Fixture Parser Blocker Fix
+Report](TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REPORT.md).
