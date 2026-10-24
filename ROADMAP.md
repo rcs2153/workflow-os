@@ -86,21 +86,37 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the fixture-backed in-memory trusted-host input observer
-   proof.** Construct the same complete semantic observation result twice from
-   an explicit synthetic fact source, validate it through the accepted Core
-   constructors, and prove deterministic commitments without reading the real
-   host. Preserve exact operation, static-discovery, producer,
-   ordering-authority, obligation, root, and security-requirement binding. Do
-   not add live host inspection, filesystem or environment access, process
-   execution, provider selection or integration, runtime admission,
-   persistence, events, schemas, CLI behavior, writes, or broader authority.
-   See the [accepted freshness-authority
-   review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REVIEW.md)
-   and [implementation
+1. **Plan one live trusted-host input observer provider and its
+   capability/evidence matrix.** Select exactly one provider candidate and map
+   all nine host-input obligations plus repository-root observation to
+   authoritative provider surfaces, freshness, object continuity, stable
+   evidence references, and explicit unsupported/unavailable outcomes. Keep
+   discovery, observation, assessment, and admission separate. This is
+   planning only: do not inspect a host, execute a process, integrate a live
+   provider, admit runtime execution, persist observations, add events,
+   schemas, CLI behavior, writes, or broader authority. See the [accepted
+   fixture proof
+   review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FIXTURE_PROOF_REVIEW.md)
+   and [observer
    plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted fixture-backed in-memory trusted-host input observer proof.**
+  Focused maintainer/security review confirms that the helper accepts only
+  explicit fixture-only producers, derives exact authoritative bindings from
+  the request, reuses the accepted Core constructor and validator, produces
+  deterministic results, rejects incomplete, stale, or substituted inputs,
+  and remains process-free and non-authorizing. See the [focused
+  review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FIXTURE_PROOF_REVIEW.md).
+
+- **Closed fixture-backed in-memory trusted-host input observer proof.** An
+  explicit synthetic fixture source now constructs a complete
+  exact-request-bound observation result through the accepted Core constructor
+  and validator. Repeated construction is deterministic; non-fixture,
+  incomplete, stale, or substituted input fails closed. No live host or
+  process access exists. Focused proof review is next. See the [implementation
+  report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FIXTURE_PROOF_REPORT.md).
 
 - **Accepted trusted-host input observer freshness-authority fix.** Focused
   maintainer/security review confirms that request and result bind one exact
