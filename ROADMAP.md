@@ -86,24 +86,30 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Refresh the OpenShell `v0.1.5` execution-evidence sufficiency matrix.**
-   Provider suitability re-evaluation found material stable upstream advances:
-   durable request IDs, typed deletion outcomes, resource-version checks for
-   selected mutations, driver-observed resolved workload and fence evidence,
-   durable configuration operations, and stronger lifecycle reconciliation.
-   Provider wiring remains blocked because exec terminal results are not
-   replayable after stream loss, pending driver-operation owner loss has no
-   resolution API, OCSF collection remains best-effort rather than an
-   operation-bound complete observation record, and terminal cleanup still
-   lacks one complete immutable receipt. Refresh the exact matrix against
-   stable `v0.1.5`, then perform focused maintainer/security review. Do not add
-   Rust, install or run OpenShell, invoke Cargo, add a transport or live smoke,
-   wire a provider, change admission, persist outcomes, emit events, add
-   schemas or CLI behavior, enable writes, broaden authority, fork OpenShell,
-   or change release posture. See the
-   [provider-suitability re-evaluation](docs/implementation-plans/trusted-host-local-cargo-execution-provider-suitability-reevaluation.md).
+1. **Review the OpenShell `v0.1.5` execution-evidence sufficiency matrix.** The
+   exact stable matrix is complete for one Docker-on-Apple-Silicon evaluation
+   boundary. It confirms material upstream progress but finds selected-driver
+   and API blockers: Docker does not project resolved workload or fence
+   evidence in production status; exec terminal results cannot be replayed
+   after stream loss; pending driver owner loss has no resolution API;
+   observations remain best-effort; and terminal cleanup lacks one complete
+   receipt. Perform focused maintainer/security review. Do not add Rust,
+   install or run OpenShell, invoke Cargo, add a transport or live smoke, wire
+   a provider, change admission, persist outcomes, emit events, add schemas or
+   CLI behavior, enable writes, broaden authority, fork OpenShell, or change
+   release posture. See the [matrix](docs/implementation-plans/openshell-v0-1-5-execution-evidence-sufficiency-matrix.md)
+   and [phase report](docs/concepts/OPENSHELL_V0_1_5_EXECUTION_EVIDENCE_MATRIX_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Completed the OpenShell `v0.1.5` execution-evidence matrix.** The stable
+  release materially strengthens request identity, lifecycle ownership,
+  desired-state operations, endpoint status, and delete-target identity. The
+  selected Docker driver does not project required workload/fence evidence,
+  and exact exec reconciliation, observation completeness, owner-loss
+  resolution, and terminal cleanup remain blocked. Focused matrix review is
+  next; no transport or smoke is authorized. See the
+  [matrix](docs/implementation-plans/openshell-v0-1-5-execution-evidence-sufficiency-matrix.md).
 
 - **Accepted the trusted-host local Cargo execution-provider suitability
   re-evaluation.** Focused maintainer/security review confirms that stable
