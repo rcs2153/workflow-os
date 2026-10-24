@@ -133,6 +133,16 @@ request/result binding, repository-root reuse, complete obligation semantics,
 canonical hashing, strict serde, privacy, and non-authorizing scope before any
 fixture-backed proof or live provider work.
 
+## 11.1 Review Fix-Forward Note
+
+The focused review found blocker gaps in producer identity/version binding,
+per-fact provenance, non-proof reasons, posture/method/producer coherence,
+nested deserialization privacy, and freshness relative to static discovery.
+The implementation remains model-only and non-authorizing. It is not accepted
+for fixture-backed or live observation work until a narrow blocker fix is
+implemented and re-reviewed. See
+[Trusted-Host Input Observer Core Model Review](TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REVIEW.md).
+
 ## 12. Governed Phase Evidence
 
 - Workflow ID: `dg/implement`.

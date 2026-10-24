@@ -86,19 +86,30 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the provider-neutral trusted-host input observer Core model.**
-   Perform focused maintainer/security review of exact-request binding, the
-   closed nine-obligation result, producer assurance, repository-root
-   composition, canonical commitments, strict serde, privacy-safe Debug and
-   errors, and non-authorizing scope. Do not add a callable observer, inspect a
-   host, execute a process, integrate a provider, admit runtime work, persist
-   observations, add schemas or CLI behavior, enable writes, or broaden
-   authority. See the [implementation
-   report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REPORT.md) and
+1. **Fix trusted-host input observer Core model blockers.** Add exact expected
+   producer identity/version binding, per-fact provenance, closed non-proof
+   reasons, complete posture/method/producer coherence, non-echoing nested
+   deserialization, and a deterministic static-discovery freshness floor.
+   Preserve the process-free, provider-neutral, non-authorizing boundary. Do
+   not add a callable observer, inspect a host, execute a process, integrate a
+   provider, admit runtime work, persist observations, add schemas or CLI
+   behavior, enable writes, or broaden authority. See the [focused
+   review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REVIEW.md),
+   [implementation
+   report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REPORT.md), and
    [implementation
    plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host input observer Core model review with blocker
+  findings.** The review accepted the model-only scope, closed nine-obligation
+  set, repository-root composition, deterministic commitments, and
+  non-authorizing boundary. It found seven focused gaps in producer binding,
+  per-fact provenance, non-proof reasons, fact coherence, producer/method
+  coherence, nested deserialization privacy, and freshness relative to static
+  discovery. A narrow blocker fix is next. See the [focused
+  review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REVIEW.md).
 
 - **Closed provider-neutral trusted-host input observer Core model
   implementation.** Core now validates exact observation requests, producer

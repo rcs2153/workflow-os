@@ -1,6 +1,7 @@
 # Provider-Neutral Trusted-Host Input Observer Plan
 
-Status: Core model implemented; focused maintainer/security review is next.
+Status: Core model implemented and reviewed; focused blocker fixes are required
+before acceptance.
 
 This plan follows:
 
