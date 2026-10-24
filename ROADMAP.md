@@ -86,21 +86,28 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the injected-runner-only closed Cargo clippy profile
-   implementation.** Confirm the exact command and environment, typed
-   cache/build/temp roots, immutable source/toolchain/dependency inputs,
-   payload-free results, private authoritative-handler boundary, and absence
-   of every production resolver or standard-process path. The review must not
-   authorize live execution. Build-script, procedural-macro, platform-tool,
-   containment, egress, process-group, transient-write, and live sandbox
-   attestation gaps remain blockers for any real-process phase. No workflow
+1. **Fix the trusted-host Cargo clippy profile review blockers.** Revalidate
+   repository, toolchain, dependency-cache, build-output, and temporary root
+   identity immediately before and after injected-runner entry; add the
+   missing substitution, overlap, inventory, executor-rejection, and default-
+   registration regressions; and correct the implementation report's root-
+   validation claim. The fix remains injected-runner-only. It must not add a
+   standard runner, live Cargo execution, production resolver, workflow
    composition, default registration, public CLI/config/schema/SDK exposure,
    provider access, hosted execution, OpenShell integration, or another
-   profile is authorized. See the [plan](docs/implementation-plans/trusted-host-cargo-clippy-profile-plan.md),
-   [plan review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_PLAN_REVIEW.md),
-   and [implementation report](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_REPORT.md).
+   profile. See the [implementation review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host Cargo clippy profile implementation review with
+  blockers.** The review confirms the exact closed command, offline sanitized
+  environment, typed writable-root roles, protected input commitments,
+  payload-free results, and absence of live/public execution authority. It
+  found that current-identity validation does not re-canonicalize or reject
+  root substitution after handler construction and that mandatory focused
+  regressions are incomplete. One narrow blocker fix is required before any
+  live-smoke planning. See the [focused
+  review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_REVIEW.md).
 
 - **Closed injected-runner-only Cargo clippy profile implementation.** The
   exact profile is represented through public non-executing vocabulary and a
