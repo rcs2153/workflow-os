@@ -86,20 +86,30 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the private injected local Cargo observation/execution composition
-   contract.** The first process-free slice now binds immutable local-check
-   execution, observer request and evidence, live-security requirements, and
-   attempt through a narrow Core-owned assessment SPI. Missing provider
-   observations produce a stable pre-start denial, and the private coordinator
-   has no runner or process capability. Focused review must verify exact
-   binding, deterministic denial, privacy, process-free tests, and preserved
-   non-goals before any provider suitability work. Do not add a standard
-   runner, run Cargo, add a live smoke, select or wire OpenShell, change
-   admission, persist outcomes, emit events, add schemas or CLI behavior,
-   enable writes, broaden authority, or change release posture. See the
-   [implementation report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_REPORT.md).
+1. **Fix the local Cargo composition observation-binding blocker.** Focused
+   review found that the private coordinator accepts optional provider
+   observations but neither commits the exact observation set nor preserves
+   it in the returned outcome. Distinct provider claims with the same security
+   assessment can collapse to one composition identity. The smallest accepted
+   fix should either remove provider observations from this pre-start-only
+   slice or add one canonical Core-owned observation commitment and bind it
+   into the outcome and composition fingerprint. Preserve reconciliation
+   semantics and add substitution/determinism tests. Do not add a runner, run
+   Cargo, add a live smoke, select or wire OpenShell, change admission,
+   persist outcomes, emit events, add schemas or CLI behavior, enable writes,
+   broaden authority, or change release posture. See the [focused
+   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Reviewed the private local Cargo observation/execution composition with one
+  blocker.** Immutable execution, observer request/evidence, requirements,
+  attempt, Core-owned assessment, pre-start denial, process-free posture, and
+  privacy are sound. The optional provider-observation input is not included
+  in the composition commitment or returned outcome, so exact provider claims
+  are not yet identity-bound. A narrow blocker fix is required before provider
+  suitability work. See the [focused
+  review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_REVIEW.md).
 
 - **Implemented the private local Cargo observation/execution composition
   contract.** The process-free coordinator validates exact immutable execution
