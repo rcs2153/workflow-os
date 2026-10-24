@@ -493,13 +493,14 @@ assessment, and admission into one phase.
 
 ## 22. Final Recommendation
 
-Implement the fixture-backed in-memory observer proof already sequenced in
-this plan. Use explicit synthetic facts and the accepted Core constructors to
-prove complete, deterministic result construction without host access.
+Plan one live trusted-host input observation provider and a provider
+capability/evidence matrix. Select exactly one provider candidate and map each
+mandatory observation obligation to an authoritative, request-bound provider
+surface before implementing any live observer.
 
-Do not implement a live observer, inspect a host, execute a process, select or
-integrate a provider, admit runtime execution, persist observations, add
-schemas or CLI behavior, enable writes, or change release posture.
+Do not implement the provider during planning, inspect a host, execute a
+process, admit runtime execution, persist observations, add schemas or CLI
+behavior, enable writes, or change release posture.
 
 ## 23. Blocker-Fix Record
 
@@ -618,3 +619,15 @@ No host access, process, provider, persistence, admission, event, schema, CLI,
 write, or authority behavior was added. Focused proof review is next. See
 [Trusted-Host Input Observer Fixture Proof
 Report](../concepts/TRUSTED_HOST_INPUT_OBSERVER_FIXTURE_PROOF_REPORT.md).
+
+## 31. Fixture Proof Review Record
+
+Focused maintainer/security review accepts the fixture proof with no blocker.
+The helper permits only explicit fixture-only producers, derives authoritative
+bindings from the exact request, reuses the accepted Core constructor and
+validator, produces deterministic results, rejects incomplete, stale, and
+substituted input, and remains process-free and non-authorizing.
+
+The next phase is separate planning for one live provider implementation and
+its capability/evidence matrix. See [Trusted-Host Input Observer Fixture Proof
+Review](../concepts/TRUSTED_HOST_INPUT_OBSERVER_FIXTURE_PROOF_REVIEW.md).
