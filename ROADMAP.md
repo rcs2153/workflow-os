@@ -86,18 +86,28 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the provider-neutral trusted-host input observer plan.** Verify the
-   exact request/result binding, closed nine-obligation result, observation
-   provenance, object-binding and continuity postures, freshness rules,
-   privacy boundary, authority separation, and provider-neutral composition
-   path. Keep review planning-only. Do not add a live observer, process
-   execution, runtime admission, provider integration, persistence, schemas,
-   CLI behavior, examples, writes, or authority broadening. See the
-   [observer plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md)
-   and accepted [workspace proof
-   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REVIEW.md).
+1. **Fix the provider-neutral trusted-host input observer planning blocker.**
+   Require the observer result to bind one independently observed repository
+   input root through the accepted `TrustedHostRootObservation` vocabulary,
+   including the exact static repository commitment, read-only access,
+   object-binding and continuity postures, observation method, and evidence
+   reference. Add the corresponding planned tests. Keep the fix documentation
+   only. Do not implement an observer, inspect a host, execute a process,
+   select a provider, admit runtime work, persist observations, add schemas or
+   CLI behavior, enable writes, or broaden authority. See the [focused plan
+   review](docs/concepts/PROVIDER_NEUTRAL_TRUSTED_HOST_INPUT_OBSERVER_PLAN_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed provider-neutral trusted-host input observer plan review with one
+  blocker.** The review accepted the closed nine-obligation taxonomy,
+  discovery/observation/assessment/admission separation, exact operation
+  binding, provenance, freshness, privacy, and provider-neutral OpenShell
+  boundary. It found one narrow gap: the result does not explicitly compose an
+  independently observed repository-root binding, even though the static proof
+  cannot prove Git/object identity. A documentation-only blocker fix is next.
+  See the [focused
+  review](docs/concepts/PROVIDER_NEUTRAL_TRUSTED_HOST_INPUT_OBSERVER_PLAN_REVIEW.md).
 
 - **Closed provider-neutral trusted-host input observer planning.** The plan
   defines a non-authorizing request/result contract for all nine host
