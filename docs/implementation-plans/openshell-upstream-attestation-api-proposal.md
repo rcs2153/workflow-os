@@ -1,7 +1,8 @@
 # OpenShell Upstream Attestation API Proposal
 
-Status: planning complete and focused review accepted; no upstream submission
-or runtime implementation is authorized.
+Status: original planning and focused review accepted; stable `v0.1.5` gap
+refresh and follow-up draft accepted by focused review; no new upstream
+submission or runtime implementation is authorized.
 
 ## 1. Executive Summary
 
@@ -27,28 +28,78 @@ The required upstream additions are:
    and
 7. typed attestation capability negotiation.
 
-No live provider wiring should begin until an accepted upstream release or
-reviewed commit exposes sufficient authoritative facts and the complete matrix
-is rerun.
+Stable OpenShell `v0.1.5` now implements or narrows parts of the original
+proposal: durable create and exec request IDs, selected resource-version
+checks, typed desired-state operations, driver-operation ownership, typed
+deletion outcomes, endpoint status, and public workload/fence vocabulary.
+Those additions do not yet provide a complete selected-driver execution
+receipt. No live provider wiring should begin until an accepted stable release
+exposes every mandatory authoritative fact for the selected driver/platform
+and the complete matrix is rerun.
+
+### 1.1 Stable v0.1.5 Delta And Current Gap Record
+
+The current assessed boundary is:
+
+- OpenShell stable tag `v0.1.5` at
+  `bdb956f2cd65a635f1294fccf1d138d263bf650f`;
+- the OpenShell Docker compute driver;
+- a local Apple Silicon macOS evaluation host using Docker; and
+- one future fixed no-network Cargo operation only after source contracts and
+  a separately governed live proof become sufficient.
+
+The original proposal is partially realized:
+
+| Original need | Stable `v0.1.5` posture | Remaining requirement |
+| --- | --- | --- |
+| Idempotent create | Nonzero request IDs provide bounded durable admission and matching success replay | Preserve exact Workflow OS request binding and define retention-expiry reconciliation |
+| Applied state | Typed effective policy, policy-load state, desired-state operations, endpoint status, and workload/fence fields exist | Docker must project non-empty workload/fence facts plus complete applied-control/degradation posture |
+| Durable exec | Request IDs prevent duplicate relaunch | Durable operation lookup must recover exact terminal outcome after stream loss |
+| Complete observations | Structured OCSF records, loss counters, selected gap records, and endpoint status exist | Operation-bound manifest must prove interval watermarks, finalization, counts, drops, integrity, and retrieval posture |
+| Exact deletion | Typed outcomes identify the immutable targeted sandbox | Terminal receipt must prove exact-generation platform reclamation, descendant termination, credential purge, and degradation |
+| Typed capabilities | Resource and extension capability metadata exists | Selected gateway/driver/platform must negotiate every mandatory security, observation, reconciliation, and cleanup capability |
+
+Two additional stable lifecycle gaps are now explicit:
+
+- if the gateway owner crashes before recording a driver response,
+  `driver_operation_pending` can remain unresolved indefinitely and no
+  resolution API exists; and
+- admitted exec retries return `REQUEST_STREAM_UNAVAILABLE` without output,
+  exit code, stream attachment, or terminal-operation lookup.
+
+The selected Docker implementation also makes one important schema-versus-
+behavior gap concrete. It resolves workload identity internally, but its
+production `DriverSandboxStatus` constructors leave `resolved_identity` and
+`fence_evidence` at default values. Public field presence must not be treated
+as emitted evidence.
+
+The authoritative current classifications and blockers are recorded in the
+[OpenShell v0.1.5 Execution-Evidence Sufficiency Matrix](openshell-v0-1-5-execution-evidence-sufficiency-matrix.md)
+and its focused
+[Review](../concepts/OPENSHELL_V0_1_5_EXECUTION_EVIDENCE_MATRIX_REVIEW.md).
 
 ## 2. Problem Statement
 
-OpenShell v0.0.101 already provides valuable typed facts, especially
-gateway-owned sandbox identity and effective-policy revision/load state. It
-does not provide a complete, restart-safe execution attestation.
+OpenShell `v0.1.5` provides valuable typed facts, especially gateway-owned
+sandbox identity, bounded mutation admission, effective-policy revision/load
+state, desired-state operation records, endpoint status, and typed deletion
+outcomes. It still does not provide a complete, restart-safe execution
+attestation for the selected Docker boundary.
 
-A caller can currently request a sandbox and operation, observe an exit code,
-read partial or sandbox-resident logs, request deletion, and inspect later
-state. Those observations are useful, but they do not exactly answer:
+A caller can request a sandbox and operation with durable request identity,
+observe an exit code while connected, read best-effort observations, request
+deletion, and inspect later state. Those facts are useful, but they do not
+exactly answer:
 
-- whether an ambiguous create response produced one exact sandbox;
-- which immutable image the compute driver actually ran;
+- how an expired create replay or lost owner is reconciled without ambiguity;
+- which immutable image and process identity the selected Docker driver
+  projects through its public status;
 - which control revision was applied for one operation;
-- whether the exact operation started, timed out, was signaled, or completed;
+- how the exact operation terminated after the live stream is lost;
 - whether an observation set completely covers that operation;
 - whether events were dropped;
-- whether deletion targeted the exact observed resource version; or
-- whether cleanup reached terminal absence after caller restart.
+- whether deletion completed downstream platform reclamation, descendant
+  termination, and credential purge for the exact generation.
 
 Workflow OS cannot infer those facts without weakening its governance and
 evidence boundary. OpenShell is the enforcing or observing component for them
@@ -523,15 +574,16 @@ that declared boundary.
 
 ## 15. Backward Compatibility And Rollout
 
-A possible incremental upstream sequence is:
+A possible incremental upstream sequence, updated for `v0.1.5`, is:
 
-1. add optional create idempotency and durable creation lookup;
-2. expose canonical policy and applied environment snapshots;
-3. expose driver-observed image and typed controls;
-4. add durable exec operations;
-5. add observation manifests;
-6. add exact deletion operations; and
-7. expose one combined capability snapshot.
+1. project non-empty resolved workload and fence evidence from the selected
+   Docker driver;
+2. expose complete typed applied-control and degradation posture;
+3. add durable terminal exec-operation lookup;
+4. add lost driver-owner reconciliation;
+5. add operation-bound complete observation manifests;
+6. add exact terminal cleanup receipts; and
+7. extend capability negotiation across all mandatory facts.
 
 Until all required capabilities are present, Workflow OS should keep provider
 wiring disconnected. Partial upstream delivery is still useful to other
@@ -570,7 +622,7 @@ not automatically authorize production provider wiring.
 After focused review, prepare a concise upstream package containing:
 
 - problem statement centered on trustworthy sandbox attestation;
-- v0.0.101 gap matrix with exact source references;
+- `v0.1.5` gap matrix with exact source and selected-driver references;
 - this provider-neutral semantic proposal;
 - one no-write CI/governance use case;
 - candidate protobuf sketches clearly labeled non-final;
@@ -634,12 +686,12 @@ If upstream adds the surfaces, a future Workflow OS phase should verify:
 
 ## 21. Recommended Next Phase
 
-The focused maintainer review is accepted. One bounded
-[OpenShell Trustworthy Sandbox Attestation Discussion Draft](openshell-upstream-attestation-discussion-draft.md)
-is prepared for human review.
-Do not submit it automatically. Do not install or execute OpenShell, implement
-provider wiring, change Workflow OS Rust contracts, fork OpenShell, add access
-material, or broaden provider mutations in that phase.
+Perform focused maintainer/security review of the refreshed `v0.1.5` gap
+record and the bounded follow-up comment draft in
+[OpenShell Trustworthy Sandbox Attestation Discussion Draft](openshell-upstream-attestation-discussion-draft.md).
 
-See the
-[OpenShell Upstream Attestation API Proposal Review](../concepts/OPENSHELL_UPSTREAM_ATTESTATION_API_PROPOSAL_REVIEW.md).
+Do not post the follow-up automatically. Do not install or execute OpenShell,
+implement provider wiring, add a compatibility transport, run a live smoke,
+change Workflow OS Rust contracts, fork OpenShell, add access material, or
+broaden provider mutations in that phase. Any external comment remains one
+separately governed action after draft acceptance.

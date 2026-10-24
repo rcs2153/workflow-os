@@ -86,21 +86,36 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Refresh the OpenShell upstream attestation gap record and discussion
-   draft for stable `v0.1.5`.** The accepted exact matrix and focused security
-   review confirm meaningful request-identity, lifecycle, desired-state,
-   endpoint-status, and deletion improvements while retaining selected Docker
-   and public-contract blockers. Update the existing upstream communication
-   material with the exact stable delta, missing Docker workload/fence
-   projection, exec and owner-loss reconciliation gaps, incomplete observation
-   contract, and terminal cleanup requirement. The phase prepares a reviewed
-   draft only; any upstream post or comment remains a separately governed
-   action. Do not add a compatibility transport, live smoke, provider wiring,
-   Cargo execution, access material, fork, or release change. See the
-   [matrix](docs/implementation-plans/openshell-v0-1-5-execution-evidence-sufficiency-matrix.md)
-   and [focused review](docs/concepts/OPENSHELL_V0_1_5_EXECUTION_EVIDENCE_MATRIX_REVIEW.md).
+1. **Post the accepted OpenShell `v0.1.5` follow-up comment exactly once.** The
+   focused review accepts one 4,503-byte body for existing Discussion #2661 at
+   SHA-256
+   `4541ea7d05380112d86e45f78c225fd98ddf278531031452eb928289a6f700a8`.
+   Run one separately governed external-engagement phase that verifies the
+   target, detects an existing identical comment, submits the exact body,
+   compares the returned content, and records the stable comment identity.
+   Do not open a second discussion, issue, or pull request; add a compatibility
+   transport; run a live smoke; wire a provider; execute Cargo; add access
+   material; fork; or change release posture. See the
+   [focused review](docs/concepts/OPENSHELL_V0_1_5_UPSTREAM_GAP_REFRESH_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted the OpenShell `v0.1.5` upstream gap refresh and follow-up draft.**
+  Focused maintainer/security review verifies source fidelity, selected Docker
+  projection claims, improvement credit, collaborative tone, privacy,
+  non-duplication, no-fork posture, and the separate external-action boundary.
+  The exact accepted body is committed by hash and may be posted only through
+  one separately governed action on existing Discussion #2661. See the
+  [review](docs/concepts/OPENSHELL_V0_1_5_UPSTREAM_GAP_REFRESH_REVIEW.md).
+
+- **Refreshed the OpenShell upstream gap record and discussion draft for stable
+  `v0.1.5`.** The proposal now credits durable request identity, desired-state
+  operations, lifecycle ownership, endpoint status, deletion outcomes, and new
+  workload/fence vocabulary while retaining exact selected-driver,
+  reconciliation, observation, capability, and cleanup blockers. The original
+  Discussion #2661 body remains unchanged; one separate follow-up comment
+  draft is prepared but neither reviewed nor posted. See the
+  [phase report](docs/concepts/OPENSHELL_V0_1_5_UPSTREAM_GAP_REFRESH_REPORT.md).
 
 - **Accepted the OpenShell `v0.1.5` execution-evidence matrix.** Focused
   maintainer/security review confirms the exact stable and selected Docker
