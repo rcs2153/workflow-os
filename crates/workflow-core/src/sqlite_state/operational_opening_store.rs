@@ -4928,17 +4928,22 @@ mod tests {
                 .sum::<u32>(),
             1
         );
-        assert!(outcomes.iter().all(|outcome| match outcome {
-            Ok(outcome) => outcome.executor_entries <= 1,
-            Err(error) => matches!(
-                error.code(),
-                "trusted_host_time_window_scheduling.ticket_stale"
-                    | "trusted_host_time_window_scheduling.posture_ineligible"
-                    | "trusted_host_redispatch.directive_replayed"
-                    | "trusted_host_redispatch.attempt_limit_inconsistent"
-                    | "trusted_host_time_window_caller.operation_replay_conflict"
-            ),
-        }));
+        assert!(
+            outcomes.iter().all(|outcome| match outcome {
+                Ok(outcome) => outcome.executor_entries <= 1,
+                Err(error) => matches!(
+                    error.code(),
+                    "trusted_host_time_window_scheduling.ticket_stale"
+                        | "trusted_host_time_window_scheduling.posture_ineligible"
+                        | "trusted_host_redispatch.directive_replayed"
+                        | "trusted_host_redispatch.directive_missing"
+                        | "trusted_host_redispatch.active_yield_missing"
+                        | "trusted_host_redispatch.attempt_limit_inconsistent"
+                        | "trusted_host_time_window_caller.operation_replay_conflict"
+                ),
+            }),
+            "unexpected competing local-timer result: {outcomes:?}"
+        );
     }
 
     #[test]
@@ -5698,9 +5703,11 @@ mod tests {
             Err(error) => matches!(
                 error.code(),
                 "trusted_host_redispatch.directive_replayed"
+                    | "trusted_host_redispatch.directive_missing"
+                    | "trusted_host_redispatch.active_yield_missing"
                     | "trusted_host_redispatch.attempt_limit_inconsistent"
             ),
-        }));
+        }), "unexpected concurrent reinvocation result: {outcomes:?}");
         assert_eq!(
             fixture
                 .backend

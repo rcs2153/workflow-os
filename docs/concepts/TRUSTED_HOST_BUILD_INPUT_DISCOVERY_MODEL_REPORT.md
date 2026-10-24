@@ -216,3 +216,45 @@ Do not begin parser or workspace discovery implementation before that review.
   model, updated documentation and roadmap state, ran validation, and performs
   git and pull-request operations. The kernel governed scope and approval but
   did not edit files, run commands, or operate git/GitHub.
+
+## 14. CI Concurrency Blocker Fix
+
+The first two CI Rust executions each failed a different existing
+trusted-host concurrency test after the static-discovery model tests passed.
+Both failures preserved the security invariant: exactly one caller entered the
+executor and the aggregate executor-entry count remained one. The assertions
+failed because they omitted two lawful fail-closed loser observations already
+proved by the adjacent competing-owner contract:
+
+- `trusted_host_redispatch.directive_missing`, when the winner consumes the
+  only available directive before the loser reads it; and
+- `trusted_host_redispatch.active_yield_missing`, when terminal reconciliation
+  removes the active yield before the loser reads it.
+
+The focused blocker fix adds only those two exact stable codes to the closed
+loser sets for the competing local-timer and explicit-reinvocation composition
+tests. It retains the one-call, one-entry, and one-winner assertions and adds
+bounded result diagnostics for future assertion failures. Production behavior
+is unchanged.
+
+Focused stress passed across 20 competing local-timer races and 10 concurrent
+explicit-reinvocation races. The complete validation matrix then passed:
+
+- `cargo fmt --all --check`;
+- `cargo clippy --workspace --all-targets -- -D warnings`;
+- `cargo test --workspace`;
+- `npm run check`;
+- `npm run check:integrations`;
+- `npm run check:docs`; and
+- `git diff --check`.
+
+The fix was governed by `dg/blocker` run
+`run-1792821803893758000-2`, approval
+`approval/run-1792821803893758000-2/fix-approved`, and persisted
+approval-presentation proof `presentation/c6c9f5c8837cd0c0`. The delegated
+maintainer granted the exact bounded fix scope; no retry-only workaround,
+assertion weakening, ignored test, production runtime change, or discovery
+model expansion was authorized. The run completed with 39 events, one approval,
+zero retries, zero escalations, one matching presentation record, and the
+presentation marker present in the approval event trail. Repository edits,
+validation, git, pull-request, and CI operations remained out-of-kernel work.
