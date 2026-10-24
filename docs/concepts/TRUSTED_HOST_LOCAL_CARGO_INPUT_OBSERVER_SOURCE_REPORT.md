@@ -145,6 +145,9 @@ identity, process-group timeout behavior, output and parser bounds, privacy,
 ordinary process-free coverage, the live-smoke isolation, and every
 non-`Observed` posture ceiling before any runtime composition is planned.
 
+That focused review is complete and accepts the implementation with
+non-blocking follow-ups. See the [review](TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_SOURCE_REVIEW.md).
+
 ## 13. Governed Phase Evidence
 
 - Workflow ID: `dg/implement`.

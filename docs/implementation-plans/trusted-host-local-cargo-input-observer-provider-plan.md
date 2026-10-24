@@ -505,3 +505,18 @@ execution, OpenShell wiring, persistence, events, schemas, CLI behavior,
 provider writes, or broader authority. Focused maintainer/security review is
 the next phase. See the [implementation
 report](../concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_SOURCE_REPORT.md).
+
+## 26. Fixed Source Review Record
+
+Focused maintainer/security review accepts the private fixed source and
+opt-in smoke with non-blocking follow-ups. Closed typed selection, fixed
+argument vectors, ambient-environment clearing, output and timeout bounds,
+process-group termination, repository and executable drift checks, strict
+parsers, conservative fact posture, process-free ordinary tests, and the
+isolated Apple Silicon smoke are all consistent with the accepted plan.
+
+The acceptance does not treat pre/post commitments as same-call custody,
+machine attestation, admission authority, or execution continuity. The next
+phase is planning only for same-call composition with the existing Cargo
+clippy local-check boundary. See the [focused
+review](../concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_SOURCE_REVIEW.md).

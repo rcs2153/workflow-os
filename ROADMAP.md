@@ -86,17 +86,28 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the fixed local Cargo source and opt-in smoke.** Perform a focused
-   maintainer/security review of the closed typed roots, exact executable set,
-   sanitized environment, fixed read-only filesystem operations, bounded
-   process probes, identity continuity, timeout/process-group termination,
-   parser closure, drift failures, process-free ordinary tests, and ignored
-   `aarch64-apple-darwin` smoke. Confirm every non-`Observed` ceiling and the
-   non-authorizing boundary before any runtime composition. See the
-   [implementation
-   report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_SOURCE_REPORT.md).
+1. **Plan same-call local Cargo observation and execution composition.** Define
+   how the accepted fixed observer can compose with the existing Cargo clippy
+   local-check boundary while preserving exact request, executable, root,
+   environment, admission, invocation, result, and terminal-report identity.
+   Planning must distinguish preflight evidence from same-call custody and
+   must not promote facts to `Observed` without an accepted continuous owner.
+   Do not implement admission, Cargo execution composition, OpenShell wiring,
+   persistence, events, schemas, CLI behavior, provider writes, or broader
+   authority in the planning phase. See the [accepted source
+   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_SOURCE_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted the fixed local Cargo source and opt-in smoke.** Focused
+  maintainer/security review confirms closed typed selection, fixed probe
+  arguments, cleared environment, bounded process behavior, repository and
+  executable drift detection, conservative fact posture, process-free
+  ordinary tests, and the isolated Apple Silicon smoke. The review preserves
+  the central non-claim: pre/post commitments are useful preflight evidence,
+  not same-call custody or execution authority. Same-call composition
+  planning is next. See the [focused
+  review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_SOURCE_REVIEW.md).
 
 - **Implemented the fixed local Cargo source and opt-in smoke.** The private
   local-host source accepts only canonical closed roots and the exact Cargo,
