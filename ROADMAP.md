@@ -86,21 +86,31 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the OpenShell `v0.1.5` execution-evidence sufficiency matrix.** The
-   exact stable matrix is complete for one Docker-on-Apple-Silicon evaluation
-   boundary. It confirms material upstream progress but finds selected-driver
-   and API blockers: Docker does not project resolved workload or fence
-   evidence in production status; exec terminal results cannot be replayed
-   after stream loss; pending driver owner loss has no resolution API;
-   observations remain best-effort; and terminal cleanup lacks one complete
-   receipt. Perform focused maintainer/security review. Do not add Rust,
-   install or run OpenShell, invoke Cargo, add a transport or live smoke, wire
-   a provider, change admission, persist outcomes, emit events, add schemas or
-   CLI behavior, enable writes, broaden authority, fork OpenShell, or change
-   release posture. See the [matrix](docs/implementation-plans/openshell-v0-1-5-execution-evidence-sufficiency-matrix.md)
-   and [phase report](docs/concepts/OPENSHELL_V0_1_5_EXECUTION_EVIDENCE_MATRIX_REPORT.md).
+1. **Refresh the OpenShell upstream attestation gap record and discussion
+   draft for stable `v0.1.5`.** The accepted exact matrix and focused security
+   review confirm meaningful request-identity, lifecycle, desired-state,
+   endpoint-status, and deletion improvements while retaining selected Docker
+   and public-contract blockers. Update the existing upstream communication
+   material with the exact stable delta, missing Docker workload/fence
+   projection, exec and owner-loss reconciliation gaps, incomplete observation
+   contract, and terminal cleanup requirement. The phase prepares a reviewed
+   draft only; any upstream post or comment remains a separately governed
+   action. Do not add a compatibility transport, live smoke, provider wiring,
+   Cargo execution, access material, fork, or release change. See the
+   [matrix](docs/implementation-plans/openshell-v0-1-5-execution-evidence-sufficiency-matrix.md)
+   and [focused review](docs/concepts/OPENSHELL_V0_1_5_EXECUTION_EVIDENCE_MATRIX_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted the OpenShell `v0.1.5` execution-evidence matrix.** Focused
+  maintainer/security review confirms the exact stable and selected Docker
+  findings, conservative fact classifications, fail-closed mappings, privacy
+  boundary, blocked provider verdict, and no-fork posture. Schema vocabulary
+  remains insufficient where the Docker production projection is empty, and
+  launch admission remains distinct from terminal reconciliation. The next
+  phase may refresh upstream communication material only; transport, smoke,
+  provider wiring, and execution remain blocked. See the
+  [review](docs/concepts/OPENSHELL_V0_1_5_EXECUTION_EVIDENCE_MATRIX_REVIEW.md).
 
 - **Completed the OpenShell `v0.1.5` execution-evidence matrix.** The stable
   release materially strengthens request identity, lifecycle ownership,
