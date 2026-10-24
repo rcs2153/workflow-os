@@ -86,22 +86,31 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the trusted-host input observer Core model blocker fix.** Verify
-   exact expected producer identity/version binding, homogeneous per-fact
-   provenance, closed non-proof reasons, complete posture/method/producer
-   coherence, non-echoing nested deserialization, and deterministic freshness
-   relative to static discovery. Preserve the process-free, provider-neutral,
-   non-authorizing boundary. Do not add a callable observer, inspect a host,
-   execute a process, integrate a provider, admit runtime work, persist
-   observations, add schemas or CLI behavior, enable writes, or broaden
-   authority. See the [blocker-fix
+1. **Fix the trusted-host input observer freshness authority blocker.** Replace
+   the comparison between a static-discovery revision and a producer-local
+   observation revision with one explicitly shared ordered-revision domain or
+   an equivalent request-bound non-clock freshness challenge. Preserve exact
+   producer binding and the process-free, provider-neutral, non-authorizing
+   boundary. Do not add a callable observer, inspect a host, execute a process,
+   integrate a provider, admit runtime work, persist observations, add schemas
+   or CLI behavior, enable writes, or broaden authority. See the [blocker-fix
+   review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REVIEW.md),
+   [blocker-fix
    report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REPORT.md),
-   [original focused
-   review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REVIEW.md), and
-   [implementation
+   and [implementation
    plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host input observer Core model blocker-fix review with one
+  remaining blocker.** Six original findings are closed: producer identity and
+  version, homogeneous per-fact provenance, closed non-proof reasons,
+  non-observed false-proof rejection, producer/method coherence, and nested
+  wire privacy. Freshness is still not proven because the implementation
+  compares a static-discovery revision to a producer-local revision without
+  binding a shared ordering authority. A narrow freshness-authority fix is
+  next. See the [blocker-fix
+  review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REVIEW.md).
 
 - **Closed trusted-host input observer Core model blocker fix.** The request
   now binds the exact expected producer identity/version and a static-discovery

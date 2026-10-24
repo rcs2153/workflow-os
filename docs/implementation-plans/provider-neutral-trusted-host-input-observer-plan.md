@@ -1,7 +1,7 @@
 # Provider-Neutral Trusted-Host Input Observer Plan
 
-Status: Core model blocker fixes implemented; focused blocker-fix review is
-required before acceptance.
+Status: Core model blocker fixes reviewed; six findings are closed and one
+freshness-authority blocker remains before acceptance.
 
 This plan follows:
 
@@ -562,3 +562,18 @@ Observer Core Model Blocker Fix
 Report](../concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REPORT.md).
 Focused blocker-fix review is next; no fixture-backed or live observer work is
 authorized yet.
+
+## 27. Blocker-Fix Review Record
+
+Focused re-review accepted producer binding, homogeneous per-fact provenance,
+closed non-proof reasons, posture/method/producer coherence, nested wire
+privacy, and pinned version-two commitments. One blocker remains: the request
+stores a static-discovery completion revision while the result documents its
+start/completion revisions as producer local. Comparing those unrelated
+counters does not establish a shared temporal order.
+
+The next fix must bind one explicit ordered-revision authority/domain shared by
+discovery and observation, or use an equivalent request-bound non-clock
+freshness challenge. It must remain model-only. See [Trusted-Host Input
+Observer Core Model Blocker Fix
+Review](../concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REVIEW.md).
