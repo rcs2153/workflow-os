@@ -86,19 +86,28 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the trusted-host Cargo clippy live-execution security boundary
-   plan.** The plan requires complete build-time input closure, root object and
-   TOCTOU controls, process-tree termination, OS-enforced filesystem and egress
-   containment, transient-write posture, and independently observed effective
-   controls before any real Cargo process can be considered. Review must decide
-   whether the first implementation may add a provider-neutral security
-   contract model only. It must not implement a runner, live smoke, workflow
-   composition, registration, public surfaces, provider selection, OpenShell
-   integration, writes, dependencies, or release changes. See the [live-
-   execution security boundary
-   plan](docs/implementation-plans/trusted-host-cargo-clippy-live-execution-security-plan.md).
+1. **Plan the provider-neutral trusted-host live-execution security contract
+   core model.** Define the smallest validated requirement and observation
+   vocabulary for build-time input closure, root binding, process-tree policy,
+   filesystem and network containment, transient-write posture, effective-
+   control attestation, and ambiguity. Requirements and observations must be
+   distinct, mandatory unavailable/degraded controls must fail closed, and the
+   model must not authorize execution. Planning must not add a runner, live
+   Cargo, smoke, input discovery, provider selection, OpenShell integration,
+   workflow composition, registration, public surfaces, dependencies, writes,
+   or release changes. See the focused [security-plan
+   review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_LIVE_EXECUTION_SECURITY_PLAN_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host Cargo clippy live-execution security plan review.** The
+  focused review accepts the plan with mandatory implementation constraints
+  and authorizes planning for a provider-neutral, non-authorizing core model
+  only. It requires separate requirement and observation facts, explicit
+  unavailable/degraded/uncertain states, exact request and attempt binding,
+  failure-closed state combinations, bounded references, and redaction-safe
+  serde and Debug. All real-process blockers remain open. See the [focused
+  review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_LIVE_EXECUTION_SECURITY_PLAN_REVIEW.md).
 
 - **Closed trusted-host Cargo clippy live-execution security planning.** The
   plan rejects a standard host-process runner and defines the mandatory
