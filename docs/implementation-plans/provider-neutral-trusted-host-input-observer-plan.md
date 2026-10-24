@@ -1,6 +1,7 @@
 # Provider-Neutral Trusted-Host Input Observer Plan
 
-Status: planning complete; implementation not started.
+Status: Core model accepted after freshness-authority blocker repair and
+focused review. Fixture-backed in-memory observer proof is next.
 
 This plan follows:
 
@@ -492,8 +493,9 @@ assessment, and admission into one phase.
 
 ## 22. Final Recommendation
 
-Perform a focused maintainer and security review of this plan. If accepted,
-implement the provider-neutral observer request/result/fact Core model only.
+Implement the fixture-backed in-memory observer proof already sequenced in
+this plan. Use explicit synthetic facts and the accepted Core constructors to
+prove complete, deterministic result construction without host access.
 
 Do not implement a live observer, inspect a host, execute a process, select or
 integrate a provider, admit runtime execution, persist observations, add
@@ -538,3 +540,69 @@ schemas or CLI behavior, enable writes, or change release posture.
   authored this plan and roadmap update; and ran documentation validation. The
   kernel governed scope and approval but did not edit files, run validation,
   or perform git or pull-request operations.
+
+## 25. Implementation Record
+
+The model-only implementation is documented in [Trusted-Host Input Observer
+Core Model Report](../concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REPORT.md).
+It adds no callable observer, host inspection, process execution, provider
+integration, runtime admission, persistence, events, schemas, CLI behavior,
+writes, or authority.
+
+## 26. Core Model Blocker-Fix Record
+
+The seven focused model-review blockers are fixed. The request now binds an
+exact expected producer identity/version and static-discovery completion
+revision. Results bind homogeneous per-fact provenance, enforce exact
+non-proof reasons and posture/method/producer coherence, reject stale
+observations, and use non-echoing deserializers for every nested enum reachable
+through the observer wire boundary.
+
+The fix remains model-only and non-authorizing. See [Trusted-Host Input
+Observer Core Model Blocker Fix
+Report](../concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REPORT.md).
+Focused blocker-fix review is next; no fixture-backed or live observer work is
+authorized yet.
+
+## 27. Blocker-Fix Review Record
+
+Focused re-review accepted producer binding, homogeneous per-fact provenance,
+closed non-proof reasons, posture/method/producer coherence, nested wire
+privacy, and pinned version-two commitments. One blocker remains: the request
+stores a static-discovery completion revision while the result documents its
+start/completion revisions as producer local. Comparing those unrelated
+counters does not establish a shared temporal order.
+
+The next fix must bind one explicit ordered-revision authority/domain shared by
+discovery and observation, or use an equivalent request-bound non-clock
+freshness challenge. It must remain model-only. See [Trusted-Host Input
+Observer Core Model Blocker Fix
+Review](../concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REVIEW.md).
+
+## 28. Freshness-Authority Fix Record
+
+The request and result now carry the same payload-free ordering-authority
+commitment. Static-discovery completion, observation start, and observation
+completion revisions are explicitly defined in that shared domain.
+Result-to-request validation rejects authority substitution before accepting
+the numeric freshness relation, and both canonical commitments include the
+authority binding.
+
+The change remains model-only and introduces no clock, observer, process,
+provider, persistence, runtime admission, schema, CLI, write, or authority
+behavior. See [Trusted-Host Input Observer Freshness Authority Fix
+Report](../concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REPORT.md).
+
+## 29. Freshness-Authority Fix Review Record
+
+Focused maintainer/security review accepts the shared ordering-authority
+semantics with no remaining Core-model blocker. Request and result bind the
+same authority, both canonical commitments include it, substitution and stale
+observation fail closed, and Debug and error paths remain non-leaking.
+
+The model remains non-authorizing. A later provider review must determine
+which producer and ordering-authority identities may support live admission.
+The next phase is the already-planned fixture-backed in-memory observer proof,
+with no host inspection or process access. See [Trusted-Host Input Observer
+Freshness Authority Fix
+Review](../concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REVIEW.md).

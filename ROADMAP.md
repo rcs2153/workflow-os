@@ -86,21 +86,76 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the provider-neutral trusted-host input observer Core model.**
-   Add validated request, result, producer, fact, posture, method, and canonical
-   commitment vocabulary for the closed nine host obligations, plus exact
-   composition of the existing repository-root observation. Keep the model
-   non-authorizing and process-free. Add strict serde, privacy-safe Debug and
-   errors, pinned canonical vectors, substitution/coherence tests, honest docs,
-   and an implementation report. Do not inspect a host, add a callable
-   observer, execute a process, integrate a provider, admit runtime work,
-   persist observations, add schemas or CLI behavior, enable writes, or
-   broaden authority. See the accepted [blocker-fix
-   review](docs/concepts/PROVIDER_NEUTRAL_TRUSTED_HOST_INPUT_OBSERVER_PLAN_BLOCKER_FIX_REVIEW.md)
+1. **Implement the fixture-backed in-memory trusted-host input observer
+   proof.** Construct the same complete semantic observation result twice from
+   an explicit synthetic fact source, validate it through the accepted Core
+   constructors, and prove deterministic commitments without reading the real
+   host. Preserve exact operation, static-discovery, producer,
+   ordering-authority, obligation, root, and security-requirement binding. Do
+   not add live host inspection, filesystem or environment access, process
+   execution, provider selection or integration, runtime admission,
+   persistence, events, schemas, CLI behavior, writes, or broader authority.
+   See the [accepted freshness-authority
+   review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REVIEW.md)
    and [implementation
    plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted trusted-host input observer freshness-authority fix.** Focused
+  maintainer/security review confirms that request and result bind one exact
+  ordering-authority commitment, every compared revision is defined in that
+  shared domain, authority substitution and stale observation fail closed,
+  canonical commitments include the authority, and privacy remains intact.
+  The Core model is accepted with no remaining blocker. See the [focused
+  review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REVIEW.md).
+
+- **Closed trusted-host input observer freshness-authority blocker fix.** The
+  request and result now bind one exact ordering-authority commitment, and all
+  static-discovery completion and observation revisions are explicitly defined
+  in that shared domain. Request and result commitments include the authority;
+  omission and substitution fail closed. Focused review is next. See the
+  [freshness-authority fix
+  report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REPORT.md).
+
+- **Closed trusted-host input observer Core model blocker-fix review with one
+  remaining blocker.** Six original findings are closed: producer identity and
+  version, homogeneous per-fact provenance, closed non-proof reasons,
+  non-observed false-proof rejection, producer/method coherence, and nested
+  wire privacy. Freshness is still not proven because the implementation
+  compares a static-discovery revision to a producer-local revision without
+  binding a shared ordering authority. A narrow freshness-authority fix is
+  next. See the [blocker-fix
+  review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REVIEW.md).
+
+- **Closed trusted-host input observer Core model blocker fix.** The request
+  now binds the exact expected producer identity/version and a static-discovery
+  completion revision. Results bind homogeneous per-fact provenance and reject
+  stale observations. Non-proven facts require closed reasons and cannot retain
+  a proven binding axis; producer, posture, and method combinations fail closed.
+  Every nested enum reachable through the wire boundary now rejects unknown
+  values without echoing caller input. Focused blocker-fix review is next. See
+  the [blocker-fix
+  report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REPORT.md).
+
+- **Closed trusted-host input observer Core model review with blocker
+  findings.** The review accepted the model-only scope, closed nine-obligation
+  set, repository-root composition, deterministic commitments, and
+  non-authorizing boundary. It found seven focused gaps in producer binding,
+  per-fact provenance, non-proof reasons, fact coherence, producer/method
+  coherence, nested deserialization privacy, and freshness relative to static
+  discovery. A narrow blocker fix is next. See the [focused
+  review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REVIEW.md).
+
+- **Closed provider-neutral trusted-host input observer Core model
+  implementation.** Core now validates exact observation requests, producer
+  claims, all nine payload-free host-input facts, and one reused read-only
+  repository-root observation. Canonical request/result commitments bind every
+  semantic field with pinned vectors; malformed, incomplete, substituted, or
+  incoherent values fail closed. The model remains process-free and
+  non-authorizing. Focused maintainer/security review is next. See the
+  [implementation
+  report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REPORT.md).
 
 - **Accepted provider-neutral trusted-host input observer planning blocker
   fix.** Focused re-review verified exact reuse of the existing repository-root
