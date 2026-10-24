@@ -26,6 +26,7 @@ fn request() -> TrustedHostInputObservationRequest {
         operation_contract: hash("operation"),
         static_request: hash("static-request"),
         static_result: hash("static-result"),
+        ordering_authority: hash("shared-ordering-authority"),
         static_discovery_completed_revision: 10,
         repository_tree: hash("repository"),
         security_requirements: hash("security"),
@@ -92,6 +93,7 @@ fn result_definition(
     TrustedHostInputObservationResultDefinition {
         request_fingerprint: request.fingerprint().clone(),
         repository_tree: request.repository_tree().clone(),
+        ordering_authority: request.ordering_authority().clone(),
         producer: TrustedHostInputObservationProducer::new(
             TrustedHostInputObservationProducerDefinition {
                 id: producer_id(),
@@ -119,11 +121,11 @@ fn complete_result_is_deterministic_and_matches_exact_request() {
     assert_eq!(first.facts().len(), 9);
     assert_eq!(
         request.fingerprint().as_str(),
-        "d818624dacb8ea7e0a75e97c8ce6d0f1ab5867292011cf6667eb3a682ec71e04"
+        "ad620f841a71eb841584eb6c6e57f2654c372774ad06777eb9f0f1c9b2794283"
     );
     assert_eq!(
         first.fingerprint().as_str(),
-        "3e507baeb1e8ba792bcebe0e0ea14744c6c0494a6dd0da5c6e9801c5f095149a"
+        "5d43583ebce718dec4aff65c88601f66370c5dfb09900a093b1b0a1cc13fba37"
     );
     first.validate_for_request(&request).unwrap();
 }
@@ -157,6 +159,11 @@ fn every_semantic_binding_changes_the_result_commitment() {
         .unwrap();
     let producer_changed = TrustedHostInputObservationResult::new(producer_changed).unwrap();
     assert_ne!(baseline.fingerprint(), producer_changed.fingerprint());
+
+    let mut authority_changed = result_definition(&request);
+    authority_changed.ordering_authority = hash("different-ordering-authority");
+    let authority_changed = TrustedHostInputObservationResult::new(authority_changed).unwrap();
+    assert_ne!(baseline.fingerprint(), authority_changed.fingerprint());
 
     let mut fact_changed = result_definition(&request);
     fact_changed.facts[0] =
@@ -372,6 +379,7 @@ fn request_binds_expected_producer_and_static_discovery_freshness() {
         operation_contract: hash("operation"),
         static_request: hash("static-request"),
         static_result: hash("static-result"),
+        ordering_authority: hash("shared-ordering-authority"),
         static_discovery_completed_revision: 0,
         repository_tree: hash("repository"),
         security_requirements: hash("security"),
@@ -387,6 +395,16 @@ fn request_binds_expected_producer_and_static_discovery_freshness() {
     );
 
     definition.static_discovery_completed_revision = 10;
+    let baseline_request = TrustedHostInputObservationRequest::new(definition.clone()).unwrap();
+    definition.ordering_authority = hash("different-ordering-authority");
+    let changed_authority_request =
+        TrustedHostInputObservationRequest::new(definition.clone()).unwrap();
+    assert_ne!(
+        baseline_request.fingerprint(),
+        changed_authority_request.fingerprint()
+    );
+
+    definition.ordering_authority = hash("shared-ordering-authority");
     definition.expected_producer_id =
         TrustedHostInputObservationProducerId::new("observer/other").unwrap();
     let mismatched_request = TrustedHostInputObservationRequest::new(definition).unwrap();
@@ -400,6 +418,23 @@ fn request_binds_expected_producer_and_static_discovery_freshness() {
     stale.completed_revision = 10;
     let stale = TrustedHostInputObservationResult::new(stale).unwrap();
     assert!(stale.validate_for_request(&original_request).is_err());
+
+    let mut substituted_authority = result_definition(&original_request);
+    substituted_authority.ordering_authority = hash("substituted-ordering-authority");
+    let substituted_authority =
+        TrustedHostInputObservationResult::new(substituted_authority).unwrap();
+    assert!(substituted_authority
+        .validate_for_request(&original_request)
+        .is_err());
+
+    let mut serialized_request = serde_json::to_value(&original_request).unwrap();
+    serialized_request
+        .as_object_mut()
+        .unwrap()
+        .remove("ordering_authority");
+    assert!(
+        serde_json::from_value::<TrustedHostInputObservationRequest>(serialized_request).is_err()
+    );
 }
 
 #[test]

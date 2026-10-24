@@ -92,6 +92,15 @@ request/result behavior.
 - No persistence, events, schemas, CLI behavior, examples, writes, or authority
   are added.
 
+## 8.1 Freshness Fix-Forward Note
+
+Focused review found that the first blocker fix compared revisions from an
+unbound static-discovery domain and a producer-local domain. The follow-up fix
+binds one ordering-authority commitment to both request and result and defines
+all revisions in that shared domain. See [Trusted-Host Input Observer
+Freshness Authority Fix
+Report](TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REPORT.md).
+
 ## 9. Recommended Next Phase
 
 Perform a focused maintainer/security review of this blocker fix. Verify each

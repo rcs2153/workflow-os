@@ -9,6 +9,15 @@ compares revisions that the model documents as belonging to different
 ordering authorities, so it cannot prove that observation occurred after
 static discovery.
 
+### Fix-Forward Status
+
+The remaining freshness-authority blocker has been addressed by binding one
+exact ordering-authority commitment into both request and result and defining
+all three revisions in that shared domain. This note preserves the original
+review finding; focused review of the fix remains required. See [Trusted-Host
+Input Observer Freshness Authority Fix
+Report](TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REPORT.md).
+
 ## 2. Scope Verification
 
 The fix stayed within the approved model-only boundary. It added no callable

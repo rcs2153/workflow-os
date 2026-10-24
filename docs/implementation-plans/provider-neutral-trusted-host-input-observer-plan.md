@@ -1,7 +1,7 @@
 # Provider-Neutral Trusted-Host Input Observer Plan
 
-Status: Core model blocker fixes reviewed; six findings are closed and one
-freshness-authority blocker remains before acceptance.
+Status: Freshness-authority blocker fixed; focused review is required before
+Core model acceptance.
 
 This plan follows:
 
@@ -577,3 +577,17 @@ discovery and observation, or use an equivalent request-bound non-clock
 freshness challenge. It must remain model-only. See [Trusted-Host Input
 Observer Core Model Blocker Fix
 Review](../concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REVIEW.md).
+
+## 28. Freshness-Authority Fix Record
+
+The request and result now carry the same payload-free ordering-authority
+commitment. Static-discovery completion, observation start, and observation
+completion revisions are explicitly defined in that shared domain.
+Result-to-request validation rejects authority substitution before accepting
+the numeric freshness relation, and both canonical commitments include the
+authority binding.
+
+The change remains model-only and introduces no clock, observer, process,
+provider, persistence, runtime admission, schema, CLI, write, or authority
+behavior. See [Trusted-Host Input Observer Freshness Authority Fix
+Report](../concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REPORT.md).

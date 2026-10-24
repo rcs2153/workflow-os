@@ -583,6 +583,7 @@ pub struct TrustedHostInputObservationRequest {
     operation_contract: SpecContentHash,
     static_request: SpecContentHash,
     static_result: SpecContentHash,
+    ordering_authority: SpecContentHash,
     static_discovery_completed_revision: u64,
     repository_tree: SpecContentHash,
     security_requirements: SpecContentHash,
@@ -608,7 +609,9 @@ pub struct TrustedHostInputObservationRequestDefinition {
     pub static_request: SpecContentHash,
     /// Static result commitment.
     pub static_result: SpecContentHash,
-    /// Ordered static-discovery completion revision that observation must follow.
+    /// Commitment identifying the authority for every ordered revision.
+    pub ordering_authority: SpecContentHash,
+    /// Static-discovery completion revision in the shared ordering authority.
     pub static_discovery_completed_revision: u64,
     /// Immutable repository-tree commitment.
     pub repository_tree: SpecContentHash,
@@ -646,6 +649,7 @@ impl TrustedHostInputObservationRequest {
             operation_contract: definition.operation_contract,
             static_request: definition.static_request,
             static_result: definition.static_result,
+            ordering_authority: definition.ordering_authority,
             static_discovery_completed_revision: definition.static_discovery_completed_revision,
             repository_tree: definition.repository_tree,
             security_requirements: definition.security_requirements,
@@ -666,6 +670,12 @@ impl TrustedHostInputObservationRequest {
     #[must_use]
     pub const fn repository_tree(&self) -> &SpecContentHash {
         &self.repository_tree
+    }
+
+    /// Returns the authority commitment shared by every ordered revision.
+    #[must_use]
+    pub const fn ordering_authority(&self) -> &SpecContentHash {
+        &self.ordering_authority
     }
 
     /// Returns the static-discovery completion revision observation must follow.
@@ -704,6 +714,7 @@ impl fmt::Debug for TrustedHostInputObservationRequest {
             .field("operation_contract", &"[REDACTED]")
             .field("static_request", &"[REDACTED]")
             .field("static_result", &"[REDACTED]")
+            .field("ordering_authority", &"[REDACTED]")
             .field(
                 "static_discovery_completed_revision",
                 &self.static_discovery_completed_revision,
@@ -725,6 +736,7 @@ impl fmt::Debug for TrustedHostInputObservationRequest {
 pub struct TrustedHostInputObservationResult {
     request_fingerprint: SpecContentHash,
     repository_tree: SpecContentHash,
+    ordering_authority: SpecContentHash,
     producer: TrustedHostInputObservationProducer,
     started_revision: u64,
     completed_revision: u64,
@@ -742,11 +754,13 @@ pub struct TrustedHostInputObservationResultDefinition {
     pub request_fingerprint: SpecContentHash,
     /// Immutable repository-tree commitment.
     pub repository_tree: SpecContentHash,
+    /// Commitment identifying the authority for every ordered revision.
+    pub ordering_authority: SpecContentHash,
     /// Validated producer claim.
     pub producer: TrustedHostInputObservationProducer,
-    /// Producer-local starting revision.
+    /// Observation start revision in the shared ordering authority.
     pub started_revision: u64,
-    /// Producer-local terminal revision.
+    /// Observation completion revision in the shared ordering authority.
     pub completed_revision: u64,
     /// Independently observed repository-root binding.
     pub repository_root: TrustedHostRootObservation,
@@ -797,6 +811,7 @@ impl TrustedHostInputObservationResult {
         Ok(Self {
             request_fingerprint: definition.request_fingerprint,
             repository_tree: definition.repository_tree,
+            ordering_authority: definition.ordering_authority,
             producer: definition.producer,
             started_revision: definition.started_revision,
             completed_revision: definition.completed_revision,
@@ -817,6 +832,7 @@ impl TrustedHostInputObservationResult {
     ) -> Result<(), WorkflowOsError> {
         if &self.request_fingerprint != request.fingerprint()
             || &self.repository_tree != request.repository_tree()
+            || &self.ordering_authority != request.ordering_authority()
             || self.started_revision <= request.static_discovery_completed_revision()
             || self.producer.id() != request.expected_producer_id()
             || self.producer.version() != request.expected_producer_version()
@@ -865,6 +881,7 @@ impl fmt::Debug for TrustedHostInputObservationResult {
             .debug_struct("TrustedHostInputObservationResult")
             .field("request_fingerprint", &"[REDACTED]")
             .field("repository_tree", &"[REDACTED]")
+            .field("ordering_authority", &"[REDACTED]")
             .field("producer", &self.producer)
             .field("started_revision", &self.started_revision)
             .field("completed_revision", &self.completed_revision)
@@ -889,6 +906,11 @@ fn request_fingerprint(
         &mut hasher,
         "static_discovery_completed_revision",
         &definition.static_discovery_completed_revision.to_string(),
+    );
+    hash_hash(
+        &mut hasher,
+        "ordering_authority",
+        &definition.ordering_authority,
     );
     hash_field(
         &mut hasher,
@@ -920,6 +942,11 @@ fn result_fingerprint(definition: &TrustedHostInputObservationResultDefinition) 
     hash_field(&mut hasher, "domain", RESULT_DOMAIN);
     hash_hash(&mut hasher, "request", &definition.request_fingerprint);
     hash_hash(&mut hasher, "repository", &definition.repository_tree);
+    hash_hash(
+        &mut hasher,
+        "ordering_authority",
+        &definition.ordering_authority,
+    );
     hash_producer(&mut hasher, &definition.producer);
     hash_field(
         &mut hasher,

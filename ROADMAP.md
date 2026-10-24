@@ -86,21 +86,30 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Fix the trusted-host input observer freshness authority blocker.** Replace
-   the comparison between a static-discovery revision and a producer-local
-   observation revision with one explicitly shared ordered-revision domain or
-   an equivalent request-bound non-clock freshness challenge. Preserve exact
-   producer binding and the process-free, provider-neutral, non-authorizing
-   boundary. Do not add a callable observer, inspect a host, execute a process,
-   integrate a provider, admit runtime work, persist observations, add schemas
-   or CLI behavior, enable writes, or broaden authority. See the [blocker-fix
+1. **Review the trusted-host input observer freshness-authority fix.** Verify
+   the request and result bind one exact payload-free ordering-authority
+   commitment, all revisions are explicitly in that shared domain, authority
+   substitution fails closed, and canonical commitments include the binding.
+   Preserve exact producer binding and the process-free, provider-neutral,
+   non-authorizing boundary. Do not add a callable observer, inspect a host,
+   execute a process, integrate a provider, admit runtime work, persist
+   observations, add schemas or CLI behavior, enable writes, or broaden
+   authority. See the [freshness-authority fix
+   report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REPORT.md),
+   [prior blocker-fix
    review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REVIEW.md),
-   [blocker-fix
-   report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REPORT.md),
    and [implementation
    plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host input observer freshness-authority blocker fix.** The
+  request and result now bind one exact ordering-authority commitment, and all
+  static-discovery completion and observation revisions are explicitly defined
+  in that shared domain. Request and result commitments include the authority;
+  omission and substitution fail closed. Focused review is next. See the
+  [freshness-authority fix
+  report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REPORT.md).
 
 - **Closed trusted-host input observer Core model blocker-fix review with one
   remaining blocker.** Six original findings are closed: producer identity and
