@@ -86,18 +86,28 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the reviewed fixed local Cargo source and opt-in smoke.** Add
-   closed typed roots, executable candidates, sanitized environment, and
-   fixed probe definitions; fixed read-only filesystem operations and bounded
-   process probes; exact identity, timeout, output, parser, and drift failure
-   handling; process-free ordinary tests; and one ignored opt-in
-   `aarch64-apple-darwin` smoke. Preserve every non-`Observed` ceiling. Do not
-   add runtime composition, admission, Cargo clippy execution, OpenShell
-   wiring, persistence, events, schemas, CLI behavior, writes, or broader
-   authority. See the [accepted contract
-   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REVIEW.md).
+1. **Review the fixed local Cargo source and opt-in smoke.** Perform a focused
+   maintainer/security review of the closed typed roots, exact executable set,
+   sanitized environment, fixed read-only filesystem operations, bounded
+   process probes, identity continuity, timeout/process-group termination,
+   parser closure, drift failures, process-free ordinary tests, and ignored
+   `aarch64-apple-darwin` smoke. Confirm every non-`Observed` ceiling and the
+   non-authorizing boundary before any runtime composition. See the
+   [implementation
+   report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_SOURCE_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Implemented the fixed local Cargo source and opt-in smoke.** The private
+  local-host source accepts only canonical closed roots and the exact Cargo,
+  rustc, rustdoc, cargo-clippy, and clippy-driver executable set. It performs
+  four fixed probes with absolute executables, a cleared environment, bounded
+  output, timeout/process-group termination, strict parsers, and pre/post
+  identity checks. Ordinary tests remain process-free, and one ignored
+  `aarch64-apple-darwin` smoke passes when explicitly selected. No fact is
+  promoted to `Observed`, and no runtime composition or admission is added.
+  Focused review is next. See the [implementation
+  report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_SOURCE_REPORT.md).
 
 - **Accepted private local Cargo trusted-host observer contracts.** Focused
   maintainer/security review confirms exact request, producer, repository,

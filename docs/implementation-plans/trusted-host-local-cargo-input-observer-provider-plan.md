@@ -481,3 +481,27 @@ non-authorizing. The review records that the current definition is a
 commitment envelope, not executable configuration. The next concrete source
 must add closed typed probe inputs before performing host or process work. See
 the [focused review](../concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REVIEW.md).
+
+## 25. Fixed Source Implementation Record
+
+The reviewed fixed local Cargo source is implemented privately in
+`workflow-local-host`. It adds canonical closed repository and Cargo-home
+roots, an exact five-role executable set, one explicit `CARGO_HOME`
+environment entry, and four fixed probes: `rustc -vV`, rustc sysroot, rustc
+target libdir, and offline locked Cargo metadata without dependencies.
+
+The standard runner uses absolute executables, clears ambient environment,
+provides null stdin, bounds stdout and stderr, terminates the process group on
+timeout, rejects nonzero status and any stderr, strictly parses each output,
+and verifies executable identity before and after each invocation. Repository
+and executable-set commitments are also checked for drift. Ordinary tests use
+an injected scripted runner and start no process; one ignored opt-in
+`aarch64-apple-darwin` smoke exercises the real fixed probe path in a
+disposable Cargo project.
+
+The result remains non-authorizing. No fact is promoted to `Observed`, and the
+implementation adds no runtime composition, admission, Cargo clippy
+execution, OpenShell wiring, persistence, events, schemas, CLI behavior,
+provider writes, or broader authority. Focused maintainer/security review is
+the next phase. See the [implementation
+report](../concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_SOURCE_REPORT.md).

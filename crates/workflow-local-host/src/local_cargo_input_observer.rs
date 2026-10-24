@@ -4,8 +4,25 @@
 //! must inject closed sources, and the observer returns non-authorizing Core
 //! observations plus an exact in-memory evidence bundle.
 
-use std::collections::BTreeSet;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::fmt;
+use std::fs::{self, File};
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use sha2::{Digest, Sha256};
+
+#[cfg(unix)]
+use nix::sys::signal::{killpg, Signal};
+#[cfg(unix)]
+use nix::unistd::Pid;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 
 use workflow_core::{
     HostedExecutionReference, HostedExecutionReferenceKind, SpecContentHash,
@@ -32,6 +49,12 @@ const REQUIRED_FACT_KINDS: [TrustedHostBuildInputHostObligationKind; 9] = [
     TrustedHostBuildInputHostObligationKind::Environment,
     TrustedHostBuildInputHostObligationKind::RuntimeBase,
 ];
+
+const MAX_PROBE_STREAM_BYTES: usize = 256 * 1024;
+const MAX_EXECUTABLE_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_ROOT_FILES: usize = 20_000;
+const MAX_ROOT_BYTES: u64 = 512 * 1024 * 1024;
+const FIXED_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Eq, PartialEq)]
 struct LocalCargoObservationDefinition {
@@ -587,6 +610,834 @@ fn posture_allowed_for_kind(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum LocalCargoExecutableRole {
+    Cargo,
+    Rustc,
+    Rustdoc,
+    CargoClippy,
+    ClippyDriver,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LocalCargoFixedProbe {
+    RustcVerboseVersion,
+    RustcSysroot,
+    RustcTargetLibdir,
+    CargoMetadata,
+}
+
+#[derive(Clone)]
+struct LocalCargoFixedProbeDefinition {
+    repository_root: PathBuf,
+    cargo_home: PathBuf,
+    executables: BTreeMap<LocalCargoExecutableRole, PathBuf>,
+    environment: BTreeMap<OsString, OsString>,
+    selection: SpecContentHash,
+}
+
+impl LocalCargoFixedProbeDefinition {
+    fn new(
+        repository_root: &Path,
+        cargo_home: &Path,
+        executables: BTreeMap<LocalCargoExecutableRole, PathBuf>,
+    ) -> Result<Self, WorkflowOsError> {
+        let expected_roles = [
+            LocalCargoExecutableRole::Cargo,
+            LocalCargoExecutableRole::Rustc,
+            LocalCargoExecutableRole::Rustdoc,
+            LocalCargoExecutableRole::CargoClippy,
+            LocalCargoExecutableRole::ClippyDriver,
+        ];
+        if expected_roles
+            .iter()
+            .any(|role| !executables.contains_key(role))
+            || executables.len() != expected_roles.len()
+        {
+            return Err(observer_error(
+                "fixed_definition.executables.invalid",
+                "local Cargo fixed executable set is invalid",
+            ));
+        }
+        let repository_root = canonical_directory(repository_root)?;
+        let cargo_home = canonical_directory(cargo_home)?;
+        let executables = executables
+            .into_iter()
+            .map(|(role, path)| canonical_regular_file(&path).map(|path| (role, path)))
+            .collect::<Result<BTreeMap<_, _>, WorkflowOsError>>()?;
+        let environment =
+            BTreeMap::from([(OsString::from("CARGO_HOME"), cargo_home.clone().into())]);
+        let selection =
+            fixed_selection_commitment(&repository_root, &cargo_home, &executables, &environment);
+        Ok(Self {
+            repository_root,
+            cargo_home,
+            executables,
+            environment,
+            selection,
+        })
+    }
+
+    fn selection(&self) -> &SpecContentHash {
+        &self.selection
+    }
+
+    fn bind(
+        &self,
+        request: &TrustedHostInputObservationRequest,
+    ) -> Result<LocalCargoObservationDefinition, WorkflowOsError> {
+        LocalCargoObservationDefinition::new(
+            request,
+            self.selection.clone(),
+            request.operation_contract().clone(),
+            request.security_requirements().clone(),
+        )
+    }
+
+    fn executable(&self, role: LocalCargoExecutableRole) -> Result<&Path, WorkflowOsError> {
+        self.executables
+            .get(&role)
+            .map(PathBuf::as_path)
+            .ok_or_else(|| {
+                observer_error(
+                    "fixed_definition.executables.invalid",
+                    "local Cargo fixed executable set is invalid",
+                )
+            })
+    }
+}
+
+impl fmt::Debug for LocalCargoFixedProbeDefinition {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCargoFixedProbeDefinition")
+            .field("repository_root", &"[REDACTED]")
+            .field("cargo_home", &"[REDACTED]")
+            .field("executable_count", &self.executables.len())
+            .field("environment_count", &self.environment.len())
+            .field("selection", &"[REDACTED]")
+            .finish()
+    }
+}
+
+trait LocalCargoFixedProbeRunner {
+    fn run(
+        &self,
+        probe: LocalCargoFixedProbe,
+        definition: &LocalCargoFixedProbeDefinition,
+    ) -> Result<LocalCargoFixedProbeOutput, WorkflowOsError>;
+}
+
+#[derive(Clone, Eq, PartialEq)]
+struct LocalCargoFixedProbeOutput {
+    commitment: SpecContentHash,
+    item_count: u32,
+}
+
+struct LocalCargoFixedFilesystemSource {
+    definition: LocalCargoFixedProbeDefinition,
+}
+
+impl LocalCargoFilesystemSource for LocalCargoFixedFilesystemSource {
+    fn repository_root(
+        &self,
+        request: &TrustedHostInputObservationRequest,
+        _definition: &LocalCargoObservationDefinition,
+    ) -> Result<LocalCargoRootSourceObservation, WorkflowOsError> {
+        let commitment = repository_tree_commitment(&self.definition.repository_root)?;
+        if &commitment != request.repository_tree() {
+            return Err(observer_error(
+                "fixed_source.repository_drift",
+                "local Cargo repository root changed before observation",
+            ));
+        }
+        LocalCargoRootSourceObservation::new(
+            TrustedHostObservationPosture::Uncertain,
+            TrustedHostObservationPosture::Uncertain,
+            TrustedHostRootObservationMethod::ImmutableProjection,
+            commitment,
+        )
+    }
+}
+
+struct LocalCargoFixedProcessSource<R> {
+    definition: LocalCargoFixedProbeDefinition,
+    runner: R,
+    cached: RefCell<
+        Option<BTreeMap<TrustedHostBuildInputHostObligationKind, LocalCargoFactSourceObservation>>,
+    >,
+}
+
+impl<R> LocalCargoFixedProcessSource<R>
+where
+    R: LocalCargoFixedProbeRunner,
+{
+    fn new(definition: LocalCargoFixedProbeDefinition, runner: R) -> Self {
+        Self {
+            definition,
+            runner,
+            cached: RefCell::new(None),
+        }
+    }
+
+    fn collect(
+        &self,
+    ) -> Result<
+        BTreeMap<TrustedHostBuildInputHostObligationKind, LocalCargoFactSourceObservation>,
+        WorkflowOsError,
+    > {
+        let before = executable_set_commitment(&self.definition.executables)?;
+        let verbose = self
+            .runner
+            .run(LocalCargoFixedProbe::RustcVerboseVersion, &self.definition)?;
+        let sysroot = self
+            .runner
+            .run(LocalCargoFixedProbe::RustcSysroot, &self.definition)?;
+        let target_libdir = self
+            .runner
+            .run(LocalCargoFixedProbe::RustcTargetLibdir, &self.definition)?;
+        let metadata = self
+            .runner
+            .run(LocalCargoFixedProbe::CargoMetadata, &self.definition)?;
+        let after = executable_set_commitment(&self.definition.executables)?;
+        if before != after {
+            return Err(observer_error(
+                "fixed_source.executable_drift",
+                "local Cargo executable identity changed during observation",
+            ));
+        }
+
+        let combined_sysroot =
+            combine_commitments("sysroot", &[&sysroot.commitment, &target_libdir.commitment]);
+        let environment = environment_commitment(&self.definition.environment);
+        let linker = combine_commitments("linker-declaration", &[self.definition.selection()]);
+        let facts = [
+            uncertain_fact(
+                TrustedHostBuildInputHostObligationKind::ToolchainExecutable,
+                before,
+                u32::try_from(self.definition.executables.len()).map_err(|_| {
+                    observer_error(
+                        "fixed_source.count.invalid",
+                        "local Cargo item count is invalid",
+                    )
+                })?,
+            )?,
+            uncertain_fact(
+                TrustedHostBuildInputHostObligationKind::TargetSpecification,
+                verbose.commitment,
+                verbose.item_count,
+            )?,
+            uncertain_fact(
+                TrustedHostBuildInputHostObligationKind::SdkOrSysroot,
+                combined_sysroot,
+                sysroot.item_count.saturating_add(target_libdir.item_count),
+            )?,
+            declared_fact(
+                TrustedHostBuildInputHostObligationKind::LinkerOrArchiver,
+                linker,
+                0,
+            )?,
+            uncertain_fact(
+                TrustedHostBuildInputHostObligationKind::NativeCompilerTools,
+                metadata.commitment.clone(),
+                metadata.item_count,
+            )?,
+            unsupported_fact(TrustedHostBuildInputHostObligationKind::DynamicLibraries)?,
+            uncertain_fact(
+                TrustedHostBuildInputHostObligationKind::RegistryAndPackageSources,
+                metadata.commitment,
+                metadata.item_count,
+            )?,
+            declared_fact(
+                TrustedHostBuildInputHostObligationKind::Environment,
+                environment,
+                u32::try_from(self.definition.environment.len()).map_err(|_| {
+                    observer_error(
+                        "fixed_source.count.invalid",
+                        "local Cargo item count is invalid",
+                    )
+                })?,
+            )?,
+            unsupported_fact(TrustedHostBuildInputHostObligationKind::RuntimeBase)?,
+        ];
+        Ok(facts.into_iter().map(|fact| (fact.kind, fact)).collect())
+    }
+}
+
+fn uncertain_fact(
+    kind: TrustedHostBuildInputHostObligationKind,
+    commitment: SpecContentHash,
+    item_count: u32,
+) -> Result<LocalCargoFactSourceObservation, WorkflowOsError> {
+    LocalCargoFactSourceObservation::new(
+        kind,
+        TrustedHostInputObservationPosture::Uncertain,
+        TrustedHostInputObservationReason::IntegrityOrContinuityUncertain,
+        TrustedHostInputObservationMethod::PreAndPostObjectIdentity,
+        TrustedHostObservationPosture::Uncertain,
+        TrustedHostObservationPosture::Uncertain,
+        commitment,
+        item_count,
+    )
+}
+
+fn declared_fact(
+    kind: TrustedHostBuildInputHostObligationKind,
+    commitment: SpecContentHash,
+    item_count: u32,
+) -> Result<LocalCargoFactSourceObservation, WorkflowOsError> {
+    LocalCargoFactSourceObservation::new(
+        kind,
+        TrustedHostInputObservationPosture::DeclaredOnly,
+        TrustedHostInputObservationReason::NotIndependentlyObserved,
+        TrustedHostInputObservationMethod::DeclaredConfiguration,
+        TrustedHostObservationPosture::Uncertain,
+        TrustedHostObservationPosture::Uncertain,
+        commitment,
+        item_count,
+    )
+}
+
+fn unsupported_fact(
+    kind: TrustedHostBuildInputHostObligationKind,
+) -> Result<LocalCargoFactSourceObservation, WorkflowOsError> {
+    LocalCargoFactSourceObservation::new(
+        kind,
+        TrustedHostInputObservationPosture::Unsupported,
+        TrustedHostInputObservationReason::ObservationUnsupported,
+        TrustedHostInputObservationMethod::Unsupported,
+        TrustedHostObservationPosture::Uncertain,
+        TrustedHostObservationPosture::Uncertain,
+        SpecContentHash::from_text(&format!("unsupported/{kind:?}")),
+        0,
+    )
+}
+
+impl<R> LocalCargoProcessSource for LocalCargoFixedProcessSource<R>
+where
+    R: LocalCargoFixedProbeRunner,
+{
+    fn observe(
+        &self,
+        kind: TrustedHostBuildInputHostObligationKind,
+        _request: &TrustedHostInputObservationRequest,
+        _definition: &LocalCargoObservationDefinition,
+    ) -> Result<LocalCargoFactSourceObservation, WorkflowOsError> {
+        if self.cached.borrow().is_none() {
+            *self.cached.borrow_mut() = Some(self.collect()?);
+        }
+        self.cached
+            .borrow()
+            .as_ref()
+            .and_then(|facts| facts.get(&kind))
+            .cloned()
+            .ok_or_else(|| {
+                observer_error("fixed_source.fact_missing", "local Cargo fact is missing")
+            })
+    }
+}
+
+struct StandardLocalCargoProbeRunner;
+
+impl LocalCargoFixedProbeRunner for StandardLocalCargoProbeRunner {
+    fn run(
+        &self,
+        probe: LocalCargoFixedProbe,
+        definition: &LocalCargoFixedProbeDefinition,
+    ) -> Result<LocalCargoFixedProbeOutput, WorkflowOsError> {
+        if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            return Err(observer_error(
+                "fixed_probe.platform_unsupported",
+                "local Cargo fixed probes are unsupported on this platform",
+            ));
+        }
+        let (role, arguments): (LocalCargoExecutableRole, &[&str]) = match probe {
+            LocalCargoFixedProbe::RustcVerboseVersion => {
+                (LocalCargoExecutableRole::Rustc, &["-vV"])
+            }
+            LocalCargoFixedProbe::RustcSysroot => {
+                (LocalCargoExecutableRole::Rustc, &["--print", "sysroot"])
+            }
+            LocalCargoFixedProbe::RustcTargetLibdir => (
+                LocalCargoExecutableRole::Rustc,
+                &["--print", "target-libdir"],
+            ),
+            LocalCargoFixedProbe::CargoMetadata => (
+                LocalCargoExecutableRole::Cargo,
+                &[
+                    "metadata",
+                    "--locked",
+                    "--offline",
+                    "--format-version",
+                    "1",
+                    "--no-deps",
+                ],
+            ),
+        };
+        let executable = definition.executable(role)?;
+        let before = regular_file_commitment(executable)?;
+        let output = run_bounded_process(
+            executable,
+            arguments,
+            &definition.repository_root,
+            &definition.environment,
+        )?;
+        let after = regular_file_commitment(executable)?;
+        if before != after {
+            return Err(observer_error(
+                "fixed_probe.executable_drift",
+                "local Cargo probe executable changed during invocation",
+            ));
+        }
+        parse_probe_output(probe, &output)
+    }
+}
+
+fn run_bounded_process(
+    executable: &Path,
+    arguments: &[&str],
+    working_directory: &Path,
+    environment: &BTreeMap<OsString, OsString>,
+) -> Result<Vec<u8>, WorkflowOsError> {
+    let mut command = Command::new(executable);
+    command
+        .args(arguments)
+        .current_dir(working_directory)
+        .env_clear()
+        .envs(environment)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command.spawn().map_err(|_| {
+        observer_error(
+            "fixed_probe.spawn_failed",
+            "local Cargo probe could not start",
+        )
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        observer_error(
+            "fixed_probe.stdout_missing",
+            "local Cargo probe output is unavailable",
+        )
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        observer_error(
+            "fixed_probe.stderr_missing",
+            "local Cargo probe error output is unavailable",
+        )
+    })?;
+    let stdout_reader = thread::spawn(move || read_bounded_stream(stdout));
+    let stderr_reader = thread::spawn(move || read_bounded_stream(stderr));
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|_| {
+            observer_error(
+                "fixed_probe.wait_failed",
+                "local Cargo probe status is unavailable",
+            )
+        })? {
+            break status;
+        }
+        if started.elapsed() >= FIXED_PROBE_TIMEOUT {
+            #[cfg(unix)]
+            if let Ok(process_group) = i32::try_from(child.id()) {
+                let _ = killpg(Pid::from_raw(process_group), Signal::SIGKILL);
+            }
+            #[cfg(not(unix))]
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = join_bounded_stream(stdout_reader);
+            let _ = join_bounded_stream(stderr_reader);
+            return Err(observer_error(
+                "fixed_probe.timeout",
+                "local Cargo probe timed out",
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    let stdout = join_bounded_stream(stdout_reader)?;
+    let stderr = join_bounded_stream(stderr_reader)?;
+    if !status.success() {
+        return Err(observer_error(
+            "fixed_probe.failed",
+            "local Cargo probe failed",
+        ));
+    }
+    if !stderr.is_empty() {
+        return Err(observer_error(
+            "fixed_probe.stderr_unexpected",
+            "local Cargo probe produced unexpected error output",
+        ));
+    }
+    Ok(stdout)
+}
+
+fn read_bounded_stream<R: Read>(reader: R) -> Result<Vec<u8>, WorkflowOsError> {
+    let mut output = Vec::new();
+    reader
+        .take(u64::try_from(MAX_PROBE_STREAM_BYTES + 1).unwrap_or(u64::MAX))
+        .read_to_end(&mut output)
+        .map_err(|_| {
+            observer_error("fixed_probe.output_read", "local Cargo probe output failed")
+        })?;
+    if output.len() > MAX_PROBE_STREAM_BYTES {
+        return Err(observer_error(
+            "fixed_probe.output_oversized",
+            "local Cargo probe output exceeds its bound",
+        ));
+    }
+    Ok(output)
+}
+
+fn join_bounded_stream(
+    reader: thread::JoinHandle<Result<Vec<u8>, WorkflowOsError>>,
+) -> Result<Vec<u8>, WorkflowOsError> {
+    reader
+        .join()
+        .map_err(|_| observer_error("fixed_probe.output_join", "local Cargo probe output failed"))?
+}
+
+fn parse_probe_output(
+    probe: LocalCargoFixedProbe,
+    output: &[u8],
+) -> Result<LocalCargoFixedProbeOutput, WorkflowOsError> {
+    let text = std::str::from_utf8(output).map_err(|_| {
+        observer_error(
+            "fixed_probe.output_invalid",
+            "local Cargo probe output is invalid",
+        )
+    })?;
+    let normalized = text.trim();
+    if normalized.is_empty() {
+        return Err(observer_error(
+            "fixed_probe.output_empty",
+            "local Cargo probe output is empty",
+        ));
+    }
+    let item_count = match probe {
+        LocalCargoFixedProbe::RustcVerboseVersion => {
+            for required in ["release:", "commit-hash:", "host:"] {
+                if !normalized.lines().any(|line| line.starts_with(required)) {
+                    return Err(observer_error(
+                        "fixed_probe.rustc_verbose_invalid",
+                        "local Cargo rustc version output is incomplete",
+                    ));
+                }
+            }
+            1
+        }
+        LocalCargoFixedProbe::RustcSysroot | LocalCargoFixedProbe::RustcTargetLibdir => {
+            if normalized.lines().count() != 1 || !Path::new(normalized).is_absolute() {
+                return Err(observer_error(
+                    "fixed_probe.path_invalid",
+                    "local Cargo rustc path output is invalid",
+                ));
+            }
+            1
+        }
+        LocalCargoFixedProbe::CargoMetadata => {
+            let value: serde_json::Value = serde_json::from_str(normalized).map_err(|_| {
+                observer_error(
+                    "fixed_probe.metadata_invalid",
+                    "local Cargo metadata is invalid",
+                )
+            })?;
+            let packages = value
+                .get("packages")
+                .and_then(serde_json::Value::as_array)
+                .ok_or_else(|| {
+                    observer_error(
+                        "fixed_probe.metadata_invalid",
+                        "local Cargo metadata is invalid",
+                    )
+                })?;
+            u32::try_from(packages.len()).map_err(|_| {
+                observer_error(
+                    "fixed_probe.metadata_oversized",
+                    "local Cargo metadata is oversized",
+                )
+            })?
+        }
+    };
+    Ok(LocalCargoFixedProbeOutput {
+        commitment: SpecContentHash::from_text(normalized),
+        item_count,
+    })
+}
+
+fn canonical_directory(path: &Path) -> Result<PathBuf, WorkflowOsError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| {
+        observer_error(
+            "fixed_definition.path_invalid",
+            "local Cargo path is invalid",
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(observer_error(
+            "fixed_definition.path_invalid",
+            "local Cargo path is invalid",
+        ));
+    }
+    path.canonicalize().map_err(|_| {
+        observer_error(
+            "fixed_definition.path_invalid",
+            "local Cargo path is invalid",
+        )
+    })
+}
+
+fn canonical_regular_file(path: &Path) -> Result<PathBuf, WorkflowOsError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| {
+        observer_error(
+            "fixed_definition.executable_invalid",
+            "local Cargo executable is invalid",
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(observer_error(
+            "fixed_definition.executable_invalid",
+            "local Cargo executable is invalid",
+        ));
+    }
+    path.canonicalize().map_err(|_| {
+        observer_error(
+            "fixed_definition.executable_invalid",
+            "local Cargo executable is invalid",
+        )
+    })
+}
+
+fn regular_file_commitment(path: &Path) -> Result<SpecContentHash, WorkflowOsError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| {
+        observer_error(
+            "fixed_source.file_unavailable",
+            "local Cargo file is unavailable",
+        )
+    })?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_file()
+        || metadata.len() > MAX_EXECUTABLE_BYTES
+    {
+        return Err(observer_error(
+            "fixed_source.file_invalid",
+            "local Cargo file is invalid",
+        ));
+    }
+    let mut file = File::open(path).map_err(|_| {
+        observer_error(
+            "fixed_source.file_unavailable",
+            "local Cargo file is unavailable",
+        )
+    })?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 16 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|_| {
+            observer_error(
+                "fixed_source.file_read",
+                "local Cargo file could not be read",
+            )
+        })?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(SpecContentHash::from_text(&format!(
+        "sha256:{:x}",
+        hasher.finalize()
+    )))
+}
+
+fn executable_set_commitment(
+    executables: &BTreeMap<LocalCargoExecutableRole, PathBuf>,
+) -> Result<SpecContentHash, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    for (role, path) in executables {
+        hasher.update(format!("{role:?}\0").as_bytes());
+        hasher.update(regular_file_commitment(path)?.as_str().as_bytes());
+        hasher.update(b"\0");
+    }
+    Ok(SpecContentHash::from_text(&format!(
+        "sha256:{:x}",
+        hasher.finalize()
+    )))
+}
+
+fn repository_tree_commitment(root: &Path) -> Result<SpecContentHash, WorkflowOsError> {
+    let mut files = Vec::new();
+    collect_regular_files(root, root, &mut files)?;
+    files.sort();
+    if files.len() > MAX_ROOT_FILES {
+        return Err(observer_error(
+            "fixed_source.root_oversized",
+            "local Cargo repository root exceeds its file bound",
+        ));
+    }
+    let mut total_bytes = 0_u64;
+    let mut hasher = Sha256::new();
+    for relative in files {
+        let path = root.join(&relative);
+        let metadata = fs::symlink_metadata(&path).map_err(|_| {
+            observer_error(
+                "fixed_source.root_drift",
+                "local Cargo repository root changed",
+            )
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(observer_error(
+                "fixed_source.root_invalid",
+                "local Cargo repository root contains an unsupported object",
+            ));
+        }
+        total_bytes = total_bytes.checked_add(metadata.len()).ok_or_else(|| {
+            observer_error(
+                "fixed_source.root_oversized",
+                "local Cargo repository root is oversized",
+            )
+        })?;
+        if total_bytes > MAX_ROOT_BYTES {
+            return Err(observer_error(
+                "fixed_source.root_oversized",
+                "local Cargo repository root exceeds its byte bound",
+            ));
+        }
+        hasher.update(relative.to_string_lossy().as_bytes());
+        hasher.update(b"\0");
+        let mut file = File::open(&path).map_err(|_| {
+            observer_error(
+                "fixed_source.root_read",
+                "local Cargo repository root could not be read",
+            )
+        })?;
+        let mut buffer = vec![0_u8; 16 * 1024];
+        loop {
+            let read = file.read(&mut buffer).map_err(|_| {
+                observer_error(
+                    "fixed_source.root_read",
+                    "local Cargo repository root could not be read",
+                )
+            })?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        hasher.update(b"\0");
+    }
+    Ok(SpecContentHash::from_text(&format!(
+        "sha256:{:x}",
+        hasher.finalize()
+    )))
+}
+
+fn collect_regular_files(
+    root: &Path,
+    current: &Path,
+    files: &mut Vec<PathBuf>,
+) -> Result<(), WorkflowOsError> {
+    let mut entries = fs::read_dir(current)
+        .map_err(|_| {
+            observer_error(
+                "fixed_source.root_read",
+                "local Cargo repository root could not be read",
+            )
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| {
+            observer_error(
+                "fixed_source.root_read",
+                "local Cargo repository root could not be read",
+            )
+        })?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    for entry in entries {
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|_| {
+            observer_error(
+                "fixed_source.root_read",
+                "local Cargo repository root could not be read",
+            )
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(observer_error(
+                "fixed_source.root_symlink",
+                "local Cargo repository root contains a symlink",
+            ));
+        }
+        if metadata.is_dir() {
+            collect_regular_files(root, &path, files)?;
+        } else if metadata.is_file() {
+            files.push(
+                path.strip_prefix(root)
+                    .map_err(|_| {
+                        observer_error(
+                            "fixed_source.root_invalid",
+                            "local Cargo repository root is invalid",
+                        )
+                    })?
+                    .to_path_buf(),
+            );
+        } else {
+            return Err(observer_error(
+                "fixed_source.root_invalid",
+                "local Cargo repository root contains an unsupported object",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn fixed_selection_commitment(
+    repository_root: &Path,
+    cargo_home: &Path,
+    executables: &BTreeMap<LocalCargoExecutableRole, PathBuf>,
+    environment: &BTreeMap<OsString, OsString>,
+) -> SpecContentHash {
+    let mut hasher = Sha256::new();
+    hasher.update(b"workflow-os/local-cargo-fixed-probes/v1\0");
+    hasher.update(repository_root.as_os_str().as_encoded_bytes());
+    hasher.update(b"\0");
+    hasher.update(cargo_home.as_os_str().as_encoded_bytes());
+    hasher.update(b"\0");
+    for (role, path) in executables {
+        hasher.update(format!("{role:?}\0").as_bytes());
+        hasher.update(path.as_os_str().as_encoded_bytes());
+        hasher.update(b"\0");
+    }
+    for (name, value) in environment {
+        hasher.update(name.as_encoded_bytes());
+        hasher.update(b"\0");
+        hasher.update(value.as_encoded_bytes());
+        hasher.update(b"\0");
+    }
+    SpecContentHash::from_text(&format!("sha256:{:x}", hasher.finalize()))
+}
+
+fn environment_commitment(environment: &BTreeMap<OsString, OsString>) -> SpecContentHash {
+    let mut hasher = Sha256::new();
+    for (name, value) in environment {
+        hasher.update(name.as_encoded_bytes());
+        hasher.update(b"\0");
+        hasher.update(value.as_encoded_bytes());
+        hasher.update(b"\0");
+    }
+    SpecContentHash::from_text(&format!("sha256:{:x}", hasher.finalize()))
+}
+
+fn combine_commitments(label: &str, commitments: &[&SpecContentHash]) -> SpecContentHash {
+    let mut hasher = Sha256::new();
+    hasher.update(label.as_bytes());
+    hasher.update(b"\0");
+    for commitment in commitments {
+        hasher.update(commitment.as_str().as_bytes());
+        hasher.update(b"\0");
+    }
+    SpecContentHash::from_text(&format!("sha256:{:x}", hasher.finalize()))
+}
+
 fn evidence_entry(
     request: &TrustedHostInputObservationRequest,
     producer: &TrustedHostInputObservationProducer,
@@ -663,6 +1514,7 @@ fn observer_error(suffix: &str, message: &str) -> WorkflowOsError {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use workflow_core::{
         TrustedHostInputObservationContractVersion, TrustedHostInputObservationProducerDefinition,
         TrustedHostInputObservationProducerId, TrustedHostInputObservationProducerVersion,
@@ -757,7 +1609,10 @@ mod tests {
         .expect("producer")
     }
 
-    fn request() -> TrustedHostInputObservationRequest {
+    fn request_with(
+        selection: SpecContentHash,
+        repository_tree: SpecContentHash,
+    ) -> TrustedHostInputObservationRequest {
         let producer = producer();
         TrustedHostInputObservationRequest::new(TrustedHostInputObservationRequestDefinition {
             version: TrustedHostInputObservationContractVersion::CargoHostInputsV2,
@@ -767,14 +1622,18 @@ mod tests {
             static_result: hash("static-result"),
             ordering_authority: hash("ordering-authority"),
             static_discovery_completed_revision: 10,
-            repository_tree: hash("repository-tree"),
+            repository_tree,
             security_requirements: hash("security-requirements"),
-            selection: hash("selection"),
+            selection,
             attempt: hash("attempt"),
             expected_producer_id: producer.id().clone(),
             expected_producer_version: producer.version().clone(),
         })
         .expect("request")
+    }
+
+    fn request() -> TrustedHostInputObservationRequest {
+        request_with(hash("selection"), hash("repository-tree"))
     }
 
     fn definition(request: &TrustedHostInputObservationRequest) -> LocalCargoObservationDefinition {
@@ -1044,5 +1903,261 @@ mod tests {
         assert!(!debug.contains(request.fingerprint().as_str()));
         assert!(!debug.contains(output.evidence.entries[0].reference.value()));
         assert!(!debug.contains("repository-tree"));
+    }
+
+    struct TempFixture {
+        root: PathBuf,
+    }
+
+    impl TempFixture {
+        fn new() -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "workflow-os-local-cargo-source-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir_all(root.join("repository/src")).expect("repository");
+            fs::create_dir_all(root.join("cargo-home")).expect("cargo home");
+            fs::create_dir_all(root.join("bin")).expect("bin");
+            fs::write(
+                root.join("repository/Cargo.toml"),
+                "[package]\nname='fixture'\nversion='0.1.0'\n",
+            )
+            .expect("manifest");
+            fs::write(root.join("repository/src/lib.rs"), "pub fn fixture() {}\n").expect("source");
+            for name in ["cargo", "rustc", "rustdoc", "cargo-clippy", "clippy-driver"] {
+                fs::write(root.join("bin").join(name), format!("fixture-{name}"))
+                    .expect("executable fixture");
+            }
+            Self { root }
+        }
+
+        fn definition(&self) -> LocalCargoFixedProbeDefinition {
+            LocalCargoFixedProbeDefinition::new(
+                &self.root.join("repository"),
+                &self.root.join("cargo-home"),
+                BTreeMap::from([
+                    (LocalCargoExecutableRole::Cargo, self.root.join("bin/cargo")),
+                    (LocalCargoExecutableRole::Rustc, self.root.join("bin/rustc")),
+                    (
+                        LocalCargoExecutableRole::Rustdoc,
+                        self.root.join("bin/rustdoc"),
+                    ),
+                    (
+                        LocalCargoExecutableRole::CargoClippy,
+                        self.root.join("bin/cargo-clippy"),
+                    ),
+                    (
+                        LocalCargoExecutableRole::ClippyDriver,
+                        self.root.join("bin/clippy-driver"),
+                    ),
+                ]),
+            )
+            .expect("fixed definition")
+        }
+    }
+
+    impl Drop for TempFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[derive(Default)]
+    struct ScriptedFixedRunner {
+        probes: RefCell<Vec<LocalCargoFixedProbe>>,
+    }
+
+    impl LocalCargoFixedProbeRunner for ScriptedFixedRunner {
+        fn run(
+            &self,
+            probe: LocalCargoFixedProbe,
+            _definition: &LocalCargoFixedProbeDefinition,
+        ) -> Result<LocalCargoFixedProbeOutput, WorkflowOsError> {
+            self.probes.borrow_mut().push(probe);
+            Ok(LocalCargoFixedProbeOutput {
+                commitment: hash(&format!("probe-{probe:?}")),
+                item_count: 1,
+            })
+        }
+    }
+
+    #[test]
+    fn fixed_source_is_selection_bound_complete_and_process_free_under_injected_runner() {
+        let fixture = TempFixture::new();
+        let fixed = fixture.definition();
+        let tree = repository_tree_commitment(&fixed.repository_root).expect("tree");
+        let request = request_with(fixed.selection().clone(), tree);
+        let definition = fixed.bind(&request).expect("binding");
+        let runner = ScriptedFixedRunner::default();
+        let process = LocalCargoFixedProcessSource::new(fixed.clone(), runner);
+        let mut observer = LocalCargoHostObserver::new(
+            producer(),
+            LocalCargoFixedFilesystemSource { definition: fixed },
+            process,
+            FakeRevisions {
+                revisions: vec![11, 12],
+            },
+        )
+        .expect("observer");
+
+        let output = observer
+            .observe(&request, &definition)
+            .expect("observation");
+
+        assert_eq!(output.result.facts().len(), 9);
+        assert!(output
+            .result
+            .facts()
+            .iter()
+            .all(|fact| { fact.posture() != TrustedHostInputObservationPosture::Observed }));
+        assert_eq!(observer.process.runner.probes.borrow().len(), 4);
+    }
+
+    #[test]
+    fn fixed_definition_rejects_missing_roles_and_symlinked_executables() {
+        let fixture = TempFixture::new();
+        let mut executables = fixture.definition().executables;
+        executables.remove(&LocalCargoExecutableRole::CargoClippy);
+        assert!(LocalCargoFixedProbeDefinition::new(
+            &fixture.root.join("repository"),
+            &fixture.root.join("cargo-home"),
+            executables,
+        )
+        .is_err());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let link = fixture.root.join("bin/cargo-link");
+            symlink(fixture.root.join("bin/cargo"), &link).expect("symlink");
+            let mut executables = fixture.definition().executables;
+            executables.insert(LocalCargoExecutableRole::Cargo, link);
+            assert!(LocalCargoFixedProbeDefinition::new(
+                &fixture.root.join("repository"),
+                &fixture.root.join("cargo-home"),
+                executables,
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn fixed_probe_parsers_fail_closed_and_accept_only_closed_shapes() {
+        assert!(parse_probe_output(
+            LocalCargoFixedProbe::RustcVerboseVersion,
+            b"rustc 1.0\nrelease: 1.0\ncommit-hash: abc\nhost: aarch64-apple-darwin\n",
+        )
+        .is_ok());
+        assert!(
+            parse_probe_output(LocalCargoFixedProbe::RustcVerboseVersion, b"rustc 1.0\n").is_err()
+        );
+        assert!(
+            parse_probe_output(LocalCargoFixedProbe::RustcSysroot, b"relative/path\n").is_err()
+        );
+        assert!(parse_probe_output(
+            LocalCargoFixedProbe::CargoMetadata,
+            br#"{"packages":[],"workspace_members":[]}"#,
+        )
+        .is_ok());
+        assert!(parse_probe_output(LocalCargoFixedProbe::CargoMetadata, b"not-json").is_err());
+    }
+
+    #[test]
+    fn fixed_source_detects_repository_and_executable_drift() {
+        let fixture = TempFixture::new();
+        let fixed = fixture.definition();
+        let original_tree = repository_tree_commitment(&fixed.repository_root).expect("tree");
+        let request = request_with(fixed.selection().clone(), original_tree);
+        fs::write(
+            fixed.repository_root.join("src/lib.rs"),
+            "pub fn changed() {}\n",
+        )
+        .expect("change root");
+        let source = LocalCargoFixedFilesystemSource {
+            definition: fixed.clone(),
+        };
+        assert!(source
+            .repository_root(&request, &fixed.bind(&request).expect("binding"))
+            .is_err());
+
+        let before = executable_set_commitment(&fixed.executables).expect("executables");
+        fs::write(
+            fixed
+                .executable(LocalCargoExecutableRole::Rustdoc)
+                .expect("rustdoc"),
+            "changed",
+        )
+        .expect("change executable");
+        let after = executable_set_commitment(&fixed.executables).expect("executables");
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn fixed_definition_debug_redacts_paths_and_selection() {
+        let fixture = TempFixture::new();
+        let fixed = fixture.definition();
+        let debug = format!("{fixed:?}");
+        assert!(!debug.contains(fixture.root.to_string_lossy().as_ref()));
+        assert!(!debug.contains(fixed.selection().as_str()));
+    }
+
+    #[test]
+    #[ignore = "opt-in Apple Silicon live Cargo observation smoke"]
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    fn opt_in_apple_silicon_fixed_probe_smoke() {
+        let fixture = TempFixture::new();
+        fs::write(
+            fixture.root.join("repository/Cargo.lock"),
+            "# This file is automatically @generated by Cargo.\nversion = 3\n\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("lockfile");
+        let cargo = PathBuf::from(env!("CARGO"));
+        let bin = cargo.parent().expect("cargo bin").to_path_buf();
+        let cargo_home = bin.parent().expect("cargo home").to_path_buf();
+        let fixed = LocalCargoFixedProbeDefinition::new(
+            &fixture.root.join("repository"),
+            &cargo_home,
+            BTreeMap::from([
+                (LocalCargoExecutableRole::Cargo, cargo),
+                (LocalCargoExecutableRole::Rustc, bin.join("rustc")),
+                (LocalCargoExecutableRole::Rustdoc, bin.join("rustdoc")),
+                (
+                    LocalCargoExecutableRole::CargoClippy,
+                    bin.join("cargo-clippy"),
+                ),
+                (
+                    LocalCargoExecutableRole::ClippyDriver,
+                    bin.join("clippy-driver"),
+                ),
+            ]),
+        )
+        .expect("live definition");
+        let tree = repository_tree_commitment(&fixed.repository_root).expect("tree");
+        let request = request_with(fixed.selection().clone(), tree);
+        let definition = fixed.bind(&request).expect("binding");
+        let mut observer = LocalCargoHostObserver::new(
+            producer(),
+            LocalCargoFixedFilesystemSource {
+                definition: fixed.clone(),
+            },
+            LocalCargoFixedProcessSource::new(fixed, StandardLocalCargoProbeRunner),
+            FakeRevisions {
+                revisions: vec![11, 12],
+            },
+        )
+        .expect("observer");
+        let output = observer
+            .observe(&request, &definition)
+            .expect("live observation");
+        assert_eq!(output.result.facts().len(), 9);
+        assert!(output
+            .result
+            .facts()
+            .iter()
+            .all(|fact| { fact.posture() != TrustedHostInputObservationPosture::Observed }));
     }
 }
