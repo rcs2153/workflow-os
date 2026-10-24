@@ -1,7 +1,7 @@
 # Trusted-Host Cargo Clippy Profile Plan
 
-Status: planning complete; focused maintainer/security review required before
-implementation.
+Status: injected-runner-only implementation complete; focused
+maintainer/security implementation review required.
 
 Related foundations:
 

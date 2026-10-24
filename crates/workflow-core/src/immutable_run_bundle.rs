@@ -1250,6 +1250,7 @@ const fn explicit_local_check_profile_label(
         }
         crate::ExplicitLocalCheckProfileId::DocsCheck => "docs_check",
         crate::ExplicitLocalCheckProfileId::CargoFmtCheck => "cargo_fmt_check",
+        crate::ExplicitLocalCheckProfileId::CargoClippyWorkspace => "cargo_clippy_workspace",
     }
 }
 const fn handler_posture_label(value: ImmutableRunBundleHandlerPosture) -> &'static str {

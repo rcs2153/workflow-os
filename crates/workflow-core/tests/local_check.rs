@@ -1298,6 +1298,7 @@ fn local_check_contract_build_or_cache_writes_require_safe_output_directories() 
             LocalCheckSideEffectKind::SourceReadOnly,
             LocalCheckSideEffectKind::CacheWriteOnly,
             LocalCheckSideEffectKind::BuildOutputWrite,
+            LocalCheckSideEffectKind::TempWriteOnly,
         ]
     );
     assert_eq!(contract.permitted_output_directories(), ["target"]);
