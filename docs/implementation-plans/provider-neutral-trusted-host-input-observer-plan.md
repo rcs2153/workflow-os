@@ -1,7 +1,7 @@
 # Provider-Neutral Trusted-Host Input Observer Plan
 
-Status: Freshness-authority blocker fixed; focused review is required before
-Core model acceptance.
+Status: Core model accepted after freshness-authority blocker repair and
+focused review. Fixture-backed in-memory observer proof is next.
 
 This plan follows:
 
@@ -493,8 +493,9 @@ assessment, and admission into one phase.
 
 ## 22. Final Recommendation
 
-Perform a focused maintainer and security review of this plan. If accepted,
-implement the provider-neutral observer request/result/fact Core model only.
+Implement the fixture-backed in-memory observer proof already sequenced in
+this plan. Use explicit synthetic facts and the accepted Core constructors to
+prove complete, deterministic result construction without host access.
 
 Do not implement a live observer, inspect a host, execute a process, select or
 integrate a provider, admit runtime execution, persist observations, add
@@ -591,3 +592,17 @@ The change remains model-only and introduces no clock, observer, process,
 provider, persistence, runtime admission, schema, CLI, write, or authority
 behavior. See [Trusted-Host Input Observer Freshness Authority Fix
 Report](../concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REPORT.md).
+
+## 29. Freshness-Authority Fix Review Record
+
+Focused maintainer/security review accepts the shared ordering-authority
+semantics with no remaining Core-model blocker. Request and result bind the
+same authority, both canonical commitments include it, substitution and stale
+observation fail closed, and Debug and error paths remain non-leaking.
+
+The model remains non-authorizing. A later provider review must determine
+which producer and ordering-authority identities may support live admission.
+The next phase is the already-planned fixture-backed in-memory observer proof,
+with no host inspection or process access. See [Trusted-Host Input Observer
+Freshness Authority Fix
+Review](../concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REVIEW.md).

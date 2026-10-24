@@ -86,22 +86,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the trusted-host input observer freshness-authority fix.** Verify
-   the request and result bind one exact payload-free ordering-authority
-   commitment, all revisions are explicitly in that shared domain, authority
-   substitution fails closed, and canonical commitments include the binding.
-   Preserve exact producer binding and the process-free, provider-neutral,
-   non-authorizing boundary. Do not add a callable observer, inspect a host,
-   execute a process, integrate a provider, admit runtime work, persist
-   observations, add schemas or CLI behavior, enable writes, or broaden
-   authority. See the [freshness-authority fix
-   report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REPORT.md),
-   [prior blocker-fix
-   review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REVIEW.md),
+1. **Implement the fixture-backed in-memory trusted-host input observer
+   proof.** Construct the same complete semantic observation result twice from
+   an explicit synthetic fact source, validate it through the accepted Core
+   constructors, and prove deterministic commitments without reading the real
+   host. Preserve exact operation, static-discovery, producer,
+   ordering-authority, obligation, root, and security-requirement binding. Do
+   not add live host inspection, filesystem or environment access, process
+   execution, provider selection or integration, runtime admission,
+   persistence, events, schemas, CLI behavior, writes, or broader authority.
+   See the [accepted freshness-authority
+   review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REVIEW.md)
    and [implementation
    plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted trusted-host input observer freshness-authority fix.** Focused
+  maintainer/security review confirms that request and result bind one exact
+  ordering-authority commitment, every compared revision is defined in that
+  shared domain, authority substitution and stale observation fail closed,
+  canonical commitments include the authority, and privacy remains intact.
+  The Core model is accepted with no remaining blocker. See the [focused
+  review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REVIEW.md).
 
 - **Closed trusted-host input observer freshness-authority blocker fix.** The
   request and result now bind one exact ordering-authority commitment, and all
