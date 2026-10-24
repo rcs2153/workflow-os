@@ -86,18 +86,27 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Perform focused maintainer/security review of the provider-neutral
-   trusted-host live-execution security contract core model.** Verify exact
-   binding, requirement/observation separation, explicit attempt-start
-   ambiguity, canonical bounded fingerprints, fail-closed serde, redaction,
-   and the non-authorizing assessment boundary. Do not begin input discovery,
-   provider composition, registration, OpenShell integration, a runner, live
-   Cargo, persistence, public execution surfaces, writes, or release changes.
-   See the [model plan](docs/implementation-plans/trusted-host-live-execution-security-contract-model-plan.md),
-   its [plan review](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_PLAN_REVIEW.md),
-   and the [implementation report](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_REPORT.md).
+1. **Fix the provider-neutral trusted-host live-execution security contract
+   core-model blockers.** Bind every decision-relevant security requirement
+   into the accepted requirements contract and canonical fingerprint, reject
+   duplicate root commitments across typed roles, narrow the assessment
+   function back to crate-private, add focused regressions, and correct the
+   implementation report. Do not begin input discovery, provider composition,
+   registration, OpenShell integration, a runner, live Cargo, persistence,
+   public execution surfaces, writes, or release changes. See the [focused
+   implementation review](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed provider-neutral trusted-host live-execution security contract core
+  model review with blocker fixes required.** The model remains provider
+  neutral, payload free, deterministic, and non-authorizing, but its Core-owned
+  requirements value omits most decision-relevant security requirements and
+  therefore does not fingerprint the full accepted contract. Root observations
+  also permit one commitment to alias incompatible typed roles, and the pure
+  assessment function was exported publicly before an approved composition
+  consumer exists. The next phase is a narrow blocker fix only. See the
+  [focused review](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_REVIEW.md).
 
 - **Closed provider-neutral trusted-host live-execution security contract core
   model implementation.** Core now has separate validated requirements and
