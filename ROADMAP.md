@@ -86,19 +86,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Plan the provider-neutral trusted-host live-execution security contract
-   core model.** Define the smallest validated requirement and observation
-   vocabulary for build-time input closure, root binding, process-tree policy,
-   filesystem and network containment, transient-write posture, effective-
-   control attestation, and ambiguity. Requirements and observations must be
-   distinct, mandatory unavailable/degraded controls must fail closed, and the
-   model must not authorize execution. Planning must not add a runner, live
-   Cargo, smoke, input discovery, provider selection, OpenShell integration,
-   workflow composition, registration, public surfaces, dependencies, writes,
-   or release changes. See the focused [security-plan
-   review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_LIVE_EXECUTION_SECURITY_PLAN_REVIEW.md).
+1. **Review the provider-neutral trusted-host live-execution security contract
+   core model plan.** The plan composes existing hosted attestation vocabulary
+   with only the missing build-input completeness, root-binding,
+   process-tree-terminal, transient-write, and requirement/observation
+   assessment facts. Review must verify the model remains non-authorizing,
+   does not create a parallel receipt hierarchy, rejects unsafe state
+   combinations, and preserves every live-process blocker. It must not add
+   code, a runner, live Cargo, input discovery, provider selection, OpenShell
+   integration, composition, registration, public surfaces, dependencies,
+   writes, or release changes. See the [core model
+   plan](docs/implementation-plans/trusted-host-live-execution-security-contract-model-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed provider-neutral trusted-host live-execution security contract model
+  planning.** The model plan separates requirements, observations, and a pure
+  assessment; reuses existing hosted policy, control, reference, observation,
+  cleanup, attestation, and receipt vocabulary; and adds only the missing
+  build-input, root-binding, process-tree, transient-write, and ambiguity
+  facts. It explicitly grants no execution authority and keeps all runner,
+  provider, discovery, composition, and registration work deferred. See the
+  [model
+  plan](docs/implementation-plans/trusted-host-live-execution-security-contract-model-plan.md).
 
 - **Closed trusted-host Cargo clippy live-execution security plan review.** The
   focused review accepts the plan with mandatory implementation constraints
