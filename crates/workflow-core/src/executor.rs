@@ -769,6 +769,7 @@ pub fn compose_trusted_host_terminal_work_report(
             }
             ExplicitLocalCheckProfileId::DocsCheck => "docs_check",
             ExplicitLocalCheckProfileId::CargoFmtCheck => "cargo_fmt_check",
+            ExplicitLocalCheckProfileId::CargoClippyWorkspace => "cargo_clippy_workspace",
         },
         bindings.result_binding.step_id().as_str(),
         bindings.result_binding.command_id().as_str(),
@@ -1039,6 +1040,9 @@ pub fn compose_trusted_host_two_step_terminal_work_report(
                 }
                 ExplicitLocalCheckProfileId::DocsCheck => "docs_check",
                 ExplicitLocalCheckProfileId::CargoFmtCheck => "cargo_fmt_check",
+                ExplicitLocalCheckProfileId::CargoClippyWorkspace => {
+                    "cargo_clippy_workspace"
+                }
             },
             result.command_id().as_str(),
             result.result_id().as_str(),
@@ -1473,6 +1477,9 @@ pub fn compose_trusted_host_three_step_terminal_work_report(
                 }
                 ExplicitLocalCheckProfileId::DocsCheck => "docs_check",
                 ExplicitLocalCheckProfileId::CargoFmtCheck => "cargo_fmt_check",
+                ExplicitLocalCheckProfileId::CargoClippyWorkspace => {
+                    "cargo_clippy_workspace"
+                }
             },
             profile.command_contract().command_id().as_str(),
             schedule_event.event_id.as_str(),
@@ -13598,6 +13605,11 @@ fn trusted_host_profile_authority_identities(
         ExplicitLocalCheckProfileId::CargoFmtCheck => Ok((
             crate::HarnessContractId::new("harness/cargo-fmt-check")?,
             crate::CurrentAuthoritySourceId::new("source/trusted-host-cargo-fmt-check")?,
+        )),
+        ExplicitLocalCheckProfileId::CargoClippyWorkspace => Err(executor_error(
+            WorkflowOsErrorKind::Security,
+            "executor.trusted_host.profile_not_executable",
+            "selected trusted-host profile has no accepted production execution authority",
         )),
     }
 }

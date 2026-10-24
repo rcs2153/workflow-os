@@ -19,6 +19,8 @@ use crate::{
     WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId,
 };
 
+mod cargo_clippy_profile;
+
 const LOCAL_CHECK_ID_MAX_BYTES: usize = 128;
 const LOCAL_CHECK_ARG_MAX_BYTES: usize = 256;
 const LOCAL_CHECK_ARG_MAX_COUNT: usize = 32;
@@ -426,6 +428,7 @@ impl LocalCheckSideEffectBoundary {
     }
 
     fn from_contract_parts(
+        command_kind: LocalCheckCommandKind,
         side_effect_class: LocalCheckSideEffectClass,
         permitted_output_directories: &[String],
         network_policy: LocalCheckNetworkPolicy,
@@ -434,11 +437,17 @@ impl LocalCheckSideEffectBoundary {
             LocalCheckSideEffectClass::NoSourceWrites => {
                 vec![LocalCheckSideEffectKind::SourceReadOnly]
             }
-            LocalCheckSideEffectClass::BuildOrCacheWrites => vec![
-                LocalCheckSideEffectKind::SourceReadOnly,
-                LocalCheckSideEffectKind::CacheWriteOnly,
-                LocalCheckSideEffectKind::BuildOutputWrite,
-            ],
+            LocalCheckSideEffectClass::BuildOrCacheWrites => {
+                let mut effects = vec![
+                    LocalCheckSideEffectKind::SourceReadOnly,
+                    LocalCheckSideEffectKind::CacheWriteOnly,
+                    LocalCheckSideEffectKind::BuildOutputWrite,
+                ];
+                if command_kind == LocalCheckCommandKind::CargoClippyWorkspace {
+                    effects.push(LocalCheckSideEffectKind::TempWriteOnly);
+                }
+                effects
+            }
             LocalCheckSideEffectClass::Unclassified => {
                 vec![LocalCheckSideEffectKind::Unclassified]
             }
@@ -965,6 +974,7 @@ impl LocalCheckCommandContract {
     /// execution posture that would authorize command execution prematurely.
     pub fn new(definition: LocalCheckCommandContractDefinition) -> Result<Self, WorkflowOsError> {
         let side_effect_boundary = LocalCheckSideEffectBoundary::from_contract_parts(
+            definition.command_kind,
             definition.side_effect_class,
             &definition.permitted_output_directories,
             definition.network_policy,
@@ -1105,6 +1115,56 @@ impl LocalCheckCommandContract {
             timeout_seconds: 120,
             side_effect_class: LocalCheckSideEffectClass::NoSourceWrites,
             permitted_output_directories: Vec::new(),
+            output_capture: LocalCheckOutputCapturePolicy::bounded(16 * 1024, 16 * 1024),
+            redaction_policy: LocalCheckRedactionPolicy::BoundedRedactedSummary,
+            citation_kinds: vec![
+                WorkReportCitationKind::ValidationDiagnostic,
+                WorkReportCitationKind::WorkflowEvent,
+                WorkReportCitationKind::AuditEvent,
+            ],
+        })
+    }
+
+    /// Creates the canonical model-only Cargo clippy workspace contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only if the built-in closed definition violates model
+    /// validation.
+    pub fn cargo_clippy_workspace_model_only() -> Result<Self, WorkflowOsError> {
+        Self::new(LocalCheckCommandContractDefinition {
+            command_id: LocalCheckCommandId::new("local-check/cargo-clippy-workspace")?,
+            command_kind: LocalCheckCommandKind::CargoClippyWorkspace,
+            execution_posture: LocalCheckExecutionPosture::ModelOnly,
+            executable: "cargo".to_owned(),
+            arguments: vec![
+                "clippy".to_owned(),
+                "--workspace".to_owned(),
+                "--all-targets".to_owned(),
+                "--".to_owned(),
+                "-D".to_owned(),
+                "warnings".to_owned(),
+            ],
+            working_directory_policy: LocalCheckWorkingDirectoryPolicy::RepositoryRoot,
+            environment_policy: LocalCheckEnvironmentPolicy::ExplicitAllowlistOnly,
+            allowed_environment_variables: vec![
+                "CARGO_HOME".to_owned(),
+                "CARGO_NET_OFFLINE".to_owned(),
+                "CARGO_TARGET_DIR".to_owned(),
+                "PATH".to_owned(),
+                "RUSTC".to_owned(),
+                "RUSTDOC".to_owned(),
+                "RUSTUP_HOME".to_owned(),
+                "TMPDIR".to_owned(),
+            ],
+            network_policy: LocalCheckNetworkPolicy::Disabled,
+            timeout_seconds: 15 * 60,
+            side_effect_class: LocalCheckSideEffectClass::BuildOrCacheWrites,
+            permitted_output_directories: vec![
+                "cargo-cache".to_owned(),
+                "cargo-target".to_owned(),
+                "cargo-temp".to_owned(),
+            ],
             output_capture: LocalCheckOutputCapturePolicy::bounded(16 * 1024, 16 * 1024),
             redaction_policy: LocalCheckRedactionPolicy::BoundedRedactedSummary,
             citation_kinds: vec![
@@ -1836,6 +1896,9 @@ pub enum ExplicitLocalCheckProfileId {
     DocsCheck,
     /// Run the canonical Cargo format check.
     CargoFmtCheck,
+    /// Model the canonical Cargo clippy workspace check without exposing a
+    /// production process resolver.
+    CargoClippyWorkspace,
 }
 
 /// Closed, non-executing selection of one local-check profile.
@@ -1866,6 +1929,17 @@ impl ExplicitLocalCheckProfileSelection {
     pub const fn cargo_fmt_check() -> Self {
         Self {
             profile_id: ExplicitLocalCheckProfileId::CargoFmtCheck,
+        }
+    }
+
+    /// Selects the canonical Cargo clippy workspace profile vocabulary.
+    ///
+    /// The first accepted implementation is injected-runner-only and does not
+    /// expose a public production resolver.
+    #[must_use]
+    pub const fn cargo_clippy_workspace() -> Self {
+        Self {
+            profile_id: ExplicitLocalCheckProfileId::CargoClippyWorkspace,
         }
     }
 
@@ -1925,13 +1999,13 @@ impl ExplicitLocalCheckProfileSelection {
                     ),
                 })
             }
-            ExplicitLocalCheckProfileId::DocsCheck | ExplicitLocalCheckProfileId::CargoFmtCheck => {
-                Err(local_check_error(
-                    WorkflowOsErrorKind::Validation,
-                    "local_check.profile.resolver_mismatch",
-                    "selected local-check profile requires its matching explicit resolver",
-                ))
-            }
+            ExplicitLocalCheckProfileId::DocsCheck
+            | ExplicitLocalCheckProfileId::CargoFmtCheck
+            | ExplicitLocalCheckProfileId::CargoClippyWorkspace => Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.profile.resolver_mismatch",
+                "selected local-check profile requires its matching explicit resolver",
+            )),
         }
     }
 
@@ -2261,6 +2335,9 @@ impl ResolvedExplicitLocalCheckProfile {
             }
             ExplicitLocalCheckProfileId::CargoFmtCheck => {
                 LocalCheckCommandContract::cargo_fmt_check_model_only()?
+            }
+            ExplicitLocalCheckProfileId::CargoClippyWorkspace => {
+                LocalCheckCommandContract::cargo_clippy_workspace_model_only()?
             }
         };
         if self.command_contract() != &canonical {

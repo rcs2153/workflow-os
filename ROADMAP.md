@@ -86,21 +86,32 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the injected-runner-only closed Cargo clippy profile.** Add the
-   exact `cargo clippy --workspace --all-targets -- -D warnings` profile,
-   typed cache/build/temp root roles, immutable source/toolchain/dependency
-   inputs, offline and sanitized request posture, payload-free result behavior,
-   replay, and focused tests. The runner seam must remain crate-private or
-   explicitly test-only: no standard-process constructor or production
-   resolver may permit live clippy execution. Build-script, procedural-macro,
-   platform-tool, containment, egress, process-group, and transient-write gaps
-   remain blockers for a later live-process phase. No workflow composition,
-   default registration, public CLI/config/schema/SDK exposure, provider
-   access, hosted execution, OpenShell integration, or another profile is
-   authorized. See the [plan](docs/implementation-plans/trusted-host-cargo-clippy-profile-plan.md)
-   and [focused review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_PLAN_REVIEW.md).
+1. **Review the injected-runner-only closed Cargo clippy profile
+   implementation.** Confirm the exact command and environment, typed
+   cache/build/temp roots, immutable source/toolchain/dependency inputs,
+   payload-free results, private authoritative-handler boundary, and absence
+   of every production resolver or standard-process path. The review must not
+   authorize live execution. Build-script, procedural-macro, platform-tool,
+   containment, egress, process-group, transient-write, and live sandbox
+   attestation gaps remain blockers for any real-process phase. No workflow
+   composition, default registration, public CLI/config/schema/SDK exposure,
+   provider access, hosted execution, OpenShell integration, or another
+   profile is authorized. See the [plan](docs/implementation-plans/trusted-host-cargo-clippy-profile-plan.md),
+   [plan review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_PLAN_REVIEW.md),
+   and [implementation report](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed injected-runner-only Cargo clippy profile implementation.** The
+  exact profile is represented through public non-executing vocabulary and a
+  crate-private authoritative handler with only an injected runner. It binds
+  explicit source, toolchain, platform-tool, dependency, cache, build, and
+  temporary inputs; synthesizes an offline eight-variable environment; and
+  returns the existing payload-free result. The public generic resolver fails
+  closed for this profile, and no standard process, live smoke, runtime
+  composition, default registration, CLI/schema/SDK surface, provider access,
+  or hosted behavior was added. See the [implementation
+  report](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_REPORT.md).
 
 - **Closed trusted-host Cargo clippy profile plan accepted with mandatory
   implementation constraints.** The focused review accepts only an
