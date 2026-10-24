@@ -437,7 +437,9 @@ Future implementation tests must cover:
 6. Workflow OS workspace proof using the reviewed parser. Completed.
 7. Focused proof review. Completed and accepted with non-blocking follow-ups.
 8. Plan a provider-neutral host-input observer for toolchain,
-   sysroot, linker, dynamic-library, and object-binding facts.
+   sysroot, linker, dynamic-library, and object-binding facts. Completed; see
+   [Provider-Neutral Trusted-Host Input Observer
+   Plan](provider-neutral-trusted-host-input-observer-plan.md).
 9. Provider suitability and live execution remain later phases.
 
 Each implementation phase must remain independently reviewable. Do not combine
@@ -465,9 +467,9 @@ one change.
 
 ## 20. Final Recommendation
 
-Plan a provider-neutral host-input observer for toolchain, sysroot, linker,
-dynamic-library, and immutable object-binding facts. Keep the first phase
-planning-only and preserve the accepted static proof as non-authorizing input.
+The provider-neutral host-input observer plan is complete. Perform a focused
+maintainer/security review of that plan before its model-only implementation,
+and preserve this accepted static proof as non-authorizing input.
 
 Do not run Cargo, package code, build scripts, procedural macros, providers, or
 shell commands as part of discovery. Do not add host observation, a handler,

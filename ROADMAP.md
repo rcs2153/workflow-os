@@ -86,18 +86,56 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Plan the provider-neutral trusted-host input observer.** Define the
-   smallest independently reviewable boundary for toolchain, sysroot, linker,
-   dynamic-library, and immutable object-binding facts that remain unavailable
-   after the accepted static workspace proof. Keep this phase planning-only.
-   Do not add a live observer, process execution, runtime admission, provider
-   integration, persistence, schemas, CLI behavior, examples, writes, or
-   authority broadening. See the accepted [workspace proof
-   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REVIEW.md) and
-   [proof
-   plan](docs/implementation-plans/trusted-host-build-input-discovery-proof-plan.md).
+1. **Implement the provider-neutral trusted-host input observer Core model.**
+   Add validated request, result, producer, fact, posture, method, and canonical
+   commitment vocabulary for the closed nine host obligations, plus exact
+   composition of the existing repository-root observation. Keep the model
+   non-authorizing and process-free. Add strict serde, privacy-safe Debug and
+   errors, pinned canonical vectors, substitution/coherence tests, honest docs,
+   and an implementation report. Do not inspect a host, add a callable
+   observer, execute a process, integrate a provider, admit runtime work,
+   persist observations, add schemas or CLI behavior, enable writes, or
+   broaden authority. See the accepted [blocker-fix
+   review](docs/concepts/PROVIDER_NEUTRAL_TRUSTED_HOST_INPUT_OBSERVER_PLAN_BLOCKER_FIX_REVIEW.md)
+   and [implementation
+   plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted provider-neutral trusted-host input observer planning blocker
+  fix.** Focused re-review verified exact reuse of the existing repository-root
+  observation, static repository commitment binding, read-only and
+  non-invocation-scoped posture, coherence failures, planned regressions, and
+  unchanged non-authorizing scope. The Core model may begin. See the [focused
+  blocker-fix
+  review](docs/concepts/PROVIDER_NEUTRAL_TRUSTED_HOST_INPUT_OBSERVER_PLAN_BLOCKER_FIX_REVIEW.md).
+
+- **Closed provider-neutral trusted-host input observer planning blocker fix.**
+  The plan now composes exactly one accepted repository-root observation,
+  binds it to the static repository commitment, requires read-only and
+  non-invocation-scoped posture, fails closed on substitution or incoherence,
+  and adds focused planned regressions without inventing a parallel root model.
+  Focused re-review is next. See the [fix-forward
+  plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
+
+- **Closed provider-neutral trusted-host input observer plan review with one
+  blocker.** The review accepted the closed nine-obligation taxonomy,
+  discovery/observation/assessment/admission separation, exact operation
+  binding, provenance, freshness, privacy, and provider-neutral OpenShell
+  boundary. It found one narrow gap: the result does not explicitly compose an
+  independently observed repository-root binding, even though the static proof
+  cannot prove Git/object identity. A documentation-only blocker fix is next.
+  See the [focused
+  review](docs/concepts/PROVIDER_NEUTRAL_TRUSTED_HOST_INPUT_OBSERVER_PLAN_REVIEW.md).
+
+- **Closed provider-neutral trusted-host input observer planning.** The plan
+  defines a non-authorizing request/result contract for all nine host
+  obligations left unavailable by static discovery, including exact immutable
+  binding, producer provenance, freshness, object continuity, payload-free
+  privacy, fail-closed ambiguity, and strict separation from admission and
+  provider selection. The first recommended implementation remains model-only
+  after focused maintainer/security review. See the [implementation
+  plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 - **Accepted static Workflow OS workspace discovery proof.** Focused
   maintainer/security review verified the isolated metadata snapshot, minimal
