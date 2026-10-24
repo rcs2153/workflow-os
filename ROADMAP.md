@@ -86,18 +86,27 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Plan the provider-neutral trusted-host input observer.** Define the
-   smallest independently reviewable boundary for toolchain, sysroot, linker,
-   dynamic-library, and immutable object-binding facts that remain unavailable
-   after the accepted static workspace proof. Keep this phase planning-only.
-   Do not add a live observer, process execution, runtime admission, provider
-   integration, persistence, schemas, CLI behavior, examples, writes, or
-   authority broadening. See the accepted [workspace proof
-   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REVIEW.md) and
-   [proof
-   plan](docs/implementation-plans/trusted-host-build-input-discovery-proof-plan.md).
+1. **Review the provider-neutral trusted-host input observer plan.** Verify the
+   exact request/result binding, closed nine-obligation result, observation
+   provenance, object-binding and continuity postures, freshness rules,
+   privacy boundary, authority separation, and provider-neutral composition
+   path. Keep review planning-only. Do not add a live observer, process
+   execution, runtime admission, provider integration, persistence, schemas,
+   CLI behavior, examples, writes, or authority broadening. See the
+   [observer plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md)
+   and accepted [workspace proof
+   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed provider-neutral trusted-host input observer planning.** The plan
+  defines a non-authorizing request/result contract for all nine host
+  obligations left unavailable by static discovery, including exact immutable
+  binding, producer provenance, freshness, object continuity, payload-free
+  privacy, fail-closed ambiguity, and strict separation from admission and
+  provider selection. The first recommended implementation remains model-only
+  after focused maintainer/security review. See the [implementation
+  plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 - **Accepted static Workflow OS workspace discovery proof.** Focused
   maintainer/security review verified the isolated metadata snapshot, minimal
