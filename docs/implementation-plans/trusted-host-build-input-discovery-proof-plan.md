@@ -2,7 +2,8 @@
 
 Status: planning and focused review accepted; Core static-discovery model
 implemented; the two focused model-review blockers are fixed and accepted;
-fixture-only parser and graph-resolver implementation is next.
+the TOML parser dependency decision is accepted; fixture-only parser and
+graph-resolver implementation is next.
 
 Implementation evidence is recorded in the [Trusted-Host Build-Input Discovery
 Core Model Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
@@ -15,6 +16,9 @@ Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REPORT.
 Focused acceptance is recorded in the [Trusted-Host Build-Input Discovery Core
 Model Blocker Fix
 Review](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REVIEW.md).
+The parser dependency selection is recorded in the [Trusted-Host Build-Input
+TOML Parser Dependency
+Decision](trusted-host-build-input-toml-parser-dependency-decision.md).
 
 Related foundations:
 
@@ -153,10 +157,12 @@ Use structured parsing with a pinned, reviewed syntax boundary. The parser must
 not evaluate commands, environment interpolation, shell expressions, plugin
 code, or Cargo configuration aliases.
 
-The plan prefers repository-existing parsing capabilities if they can preserve
-Cargo semantics and fail closed. If a new TOML parser is required, dependency
-selection and supply-chain review must be a separate explicit implementation
-decision.
+The workspace has no existing TOML parser. The accepted dependency decision
+selects exact `toml` version `0.8.23` with default features disabled and only
+the `parse` feature enabled. The separately governed parser implementation must
+add and lock that dependency, inspect its resolved dependency and license
+surface, and fail the phase for any unexpected supply-chain expansion. It must
+not enable formatting, insertion-order preservation, or unbounded parsing.
 
 The parser must reject or classify as unsupported:
 
