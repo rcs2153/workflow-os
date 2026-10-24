@@ -1,7 +1,13 @@
 # Trusted-Host Local Cargo Input Observer Provider Plan
 
-Status: private contract implementation accepted with non-blocking follow-ups;
-the reviewed fixed local source and opt-in smoke are next.
+Status: fixed local source and opt-in smoke accepted; same-call composition is
+planned and awaiting focused maintainer/security review.
+
+The follow-on [same-call composition
+plan](trusted-host-local-cargo-observation-execution-composition-plan.md)
+preserves the observer as preflight evidence. It does not promote current
+facts to `Observed` or authorize Cargo execution without an accepted
+continuous execution owner.
 
 ## 1. Executive Summary
 
