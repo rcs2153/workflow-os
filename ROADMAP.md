@@ -86,17 +86,26 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the Core trusted-host static build-input discovery model.** Verify
-   exact request/result binding, versioned domain-separated canonicalization,
-   strict separation of static graph and live-input completeness, complete
-   unresolved host obligations, count/reason coherence, stable errors,
-   redaction-safe serde and Debug, minimal public API, and absence of
-   filesystem, process, provider, persistence, or authority behavior. Do not
-   begin parser or workspace discovery implementation before acceptance. See
-   the [implementation
-   report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
+1. **Fix the Core trusted-host static build-input discovery model blockers.**
+   Replace architecture-width commitment framing with checked fixed-width
+   framing and fail closed on unknown request/result wire fields. Add fixed
+   request/result vectors and unknown-field regressions without adding parser,
+   filesystem, process, provider, persistence, schema, CLI, write, or authority
+   behavior. Focused re-review is required before fixture parser or workspace
+   discovery implementation. See the [model
+   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host static build-input discovery Core model review.** The
+  model preserves the intended non-authorizing boundary, exact request/result
+  binding, static/live completeness separation, complete host obligations,
+  bounded privacy posture, and one-entry concurrency proof. Review found two
+  narrow blockers: canonical field lengths use architecture-width `usize`, and
+  the new request/result wire definitions accept unknown fields. Parser and
+  workspace discovery remain blocked pending fix and focused re-review. See
+  the [focused
+  review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REVIEW.md).
 
 - **Closed trusted-host static build-input discovery Core model
   implementation.** Core now binds exact repository, selection, source-set,
