@@ -10,8 +10,8 @@ use super::{
     TrustedHostBuildInputFixtureDiscoveryLimitsDefinition,
 };
 use crate::{
-    BuildTimeInputKind, SpecContentHash, TrustedHostBuildInputUnsupportedReason,
-    TrustedHostStaticGraphCompleteness,
+    BuildTimeInputKind, SpecContentHash, TrustedHostBuildInputHostObligationPosture,
+    TrustedHostBuildInputUnsupportedReason, TrustedHostStaticGraphCompleteness,
 };
 
 static FIXTURE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -40,6 +40,14 @@ impl Fixture {
             fs::create_dir_all(parent).expect("create fixture parent");
         }
         fs::write(path, contents).expect("write fixture file");
+    }
+
+    fn copy_from(&self, source_root: &std::path::Path, relative: &str) {
+        let destination = self.root.join(relative);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).expect("create fixture parent");
+        }
+        fs::copy(source_root.join(relative), destination).expect("copy fixture metadata");
     }
 
     fn discover(
@@ -225,6 +233,164 @@ fn fixture_discovery_is_deterministic_with_fixed_semantic_graph_vector() {
     assert_eq!(
         first.result().graph_commitment().as_str(),
         "a2a3f26d4f7a3325f35dd66843ea332c03f35fd4cee177606562634e3d64f803"
+    );
+}
+
+#[test]
+fn workflow_os_workspace_snapshot_is_repeatable_and_honestly_incomplete() {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("canonical Workflow OS workspace");
+    let fixture = Fixture::new("workflow-os-workspace-proof");
+    for relative in [
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/workflow-core/Cargo.toml",
+        "crates/workflow-cli/Cargo.toml",
+        "crates/workflow-hosted/Cargo.toml",
+        "crates/workflow-local-host/Cargo.toml",
+    ] {
+        fixture.copy_from(&source_root, relative);
+    }
+
+    let discover = || {
+        let input = TrustedHostBuildInputFixtureDiscoveryInput::new(
+            &fixture.root,
+            SpecContentHash::from_text("workflow-os-repository-snapshot"),
+            SpecContentHash::from_text("workflow-os-all-potential-edges"),
+            TrustedHostBuildInputFixtureDiscoveryLimits::standard(),
+        );
+        discover_trusted_host_build_inputs_from_fixture(&input)
+            .expect("Workflow OS workspace snapshot discovery")
+    };
+
+    let first = discover();
+    let second = discover();
+
+    assert_eq!(first, second);
+    assert_eq!(
+        first.result().static_completeness(),
+        TrustedHostStaticGraphCompleteness::Incomplete
+    );
+    assert_eq!(
+        first.result().unsupported_reasons(),
+        [TrustedHostBuildInputUnsupportedReason::SelectionAmbiguous]
+    );
+    assert_eq!(count(&first, BuildTimeInputKind::RepositoryContent), 1);
+    assert_eq!(
+        count(&first, BuildTimeInputKind::ManifestOrConfiguration),
+        6
+    );
+    assert_eq!(count(&first, BuildTimeInputKind::DependencyPackage), 208);
+    assert_eq!(count(&first, BuildTimeInputKind::BuildScript), 0);
+    assert_eq!(count(&first, BuildTimeInputKind::ProceduralMacro), 0);
+    assert_eq!(first.result().total_count(), 215);
+    assert!(first
+        .result()
+        .host_obligations()
+        .iter()
+        .all(|obligation| obligation.posture()
+            == TrustedHostBuildInputHostObligationPosture::Unavailable));
+    assert!(first.result().observation_reference().is_none());
+    first
+        .result()
+        .validate_for_request(first.request())
+        .expect("workspace proof request binding");
+}
+
+#[test]
+fn workspace_package_and_lint_inheritance_remain_closed_and_fail_closed() {
+    let missing_value = Fixture::new("workspace-inheritance-missing-value");
+    missing_value.write(
+        "Cargo.toml",
+        r#"
+[workspace]
+members = ["member"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+"#,
+    );
+    missing_value.write(
+        "member/Cargo.toml",
+        r#"
+[package]
+name = "member"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+build = false
+
+[[bin]]
+name = "member"
+path = "src/main.rs"
+"#,
+    );
+    missing_value.write(
+        "Cargo.lock",
+        "version=4\n[[package]]\nname=\"member\"\nversion=\"0.1.0\"",
+    );
+    assert_error_code(
+        &missing_value,
+        "trusted_host.build_input_fixture_discovery.workspace_inheritance_unsupported",
+    );
+
+    let missing_lints = Fixture::new("workspace-lints-missing");
+    missing_lints.write(
+        "Cargo.toml",
+        "[workspace]\nmembers=[\"member\"]\nresolver=\"2\"",
+    );
+    missing_lints.write(
+        "member/Cargo.toml",
+        r#"
+[package]
+name = "member"
+version = "0.1.0"
+build = false
+
+[[bin]]
+name = "member"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+"#,
+    );
+    missing_lints.write(
+        "Cargo.lock",
+        "version=4\n[[package]]\nname=\"member\"\nversion=\"0.1.0\"",
+    );
+    assert_error_code(
+        &missing_lints,
+        "trusted_host.build_input_fixture_discovery.workspace_inheritance_unsupported",
+    );
+}
+
+#[test]
+fn explicit_binary_target_must_remain_inside_the_fixture_root() {
+    let fixture = Fixture::new("binary-root-escape");
+    fixture.write(
+        "Cargo.toml",
+        r#"
+[package]
+name = "fixture-app"
+version = "0.1.0"
+build = false
+
+[[bin]]
+name = "fixture-app"
+path = "../outside.rs"
+"#,
+    );
+    fixture.write(
+        "Cargo.lock",
+        "version=4\n[[package]]\nname=\"fixture-app\"\nversion=\"0.1.0\"",
+    );
+    assert_error_code(
+        &fixture,
+        "trusted_host.build_input_fixture_discovery.root_escape",
     );
 }
 

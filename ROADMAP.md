@@ -86,19 +86,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the static Workflow OS workspace discovery proof.** Use the
-   accepted fixture parser against an explicitly supplied, immutable
-   repository snapshot and selection commitment. Assert deterministic
-   workspace invariants and honest incompleteness for unresolved external
-   build-time behavior without running Cargo, package code, build scripts,
-   procedural macros, providers, or shell commands. Keep host observation,
-   runtime admission, persistence, schemas, CLI behavior, examples, and writes
-   deferred. See the [accepted blocker-fix
-   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_BLOCKER_FIX_REVIEW.md)
-   and [proof
+1. **Perform focused maintainer/security review of the static Workflow OS
+   workspace discovery proof.** Verify the isolated metadata snapshot, closed
+   workspace-inheritance and binary-target subset, deterministic workspace
+   counts, honest external-package and host incompleteness, non-authorizing
+   posture, privacy boundary, and test quality. Do not begin host observation,
+   runtime admission, providers, persistence, schemas, CLI behavior, examples,
+   or writes before acceptance. See the [implementation
+   report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REPORT.md) and
+   [proof
    plan](docs/implementation-plans/trusted-host-build-input-discovery-proof-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed static Workflow OS workspace discovery proof.** A test-only proof
+  copies the root manifest, lockfile, and four member manifests into an
+  isolated snapshot, supplies explicit repository and selection commitments,
+  runs the accepted process-free parser twice, and proves deterministic
+  payload-free results. The current snapshot reports 1 repository input, 6
+  metadata inputs, 208 external dependency packages, and 215 total inputs;
+  all nine host obligations remain unavailable and external package metadata
+  keeps the result honestly incomplete. Review is next. See the
+  [implementation
+  report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_WORKSPACE_PROOF_REPORT.md).
 
 - **Accepted fixture-parser blocker fix.** Focused maintainer/security review
   verified root containment for every accepted path-bearing Cargo field, one
