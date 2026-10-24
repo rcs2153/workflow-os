@@ -86,21 +86,32 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Fix trusted-host input observer Core model blockers.** Add exact expected
-   producer identity/version binding, per-fact provenance, closed non-proof
-   reasons, complete posture/method/producer coherence, non-echoing nested
-   deserialization, and a deterministic static-discovery freshness floor.
-   Preserve the process-free, provider-neutral, non-authorizing boundary. Do
-   not add a callable observer, inspect a host, execute a process, integrate a
-   provider, admit runtime work, persist observations, add schemas or CLI
-   behavior, enable writes, or broaden authority. See the [focused
-   review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REVIEW.md),
-   [implementation
-   report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REPORT.md), and
+1. **Review the trusted-host input observer Core model blocker fix.** Verify
+   exact expected producer identity/version binding, homogeneous per-fact
+   provenance, closed non-proof reasons, complete posture/method/producer
+   coherence, non-echoing nested deserialization, and deterministic freshness
+   relative to static discovery. Preserve the process-free, provider-neutral,
+   non-authorizing boundary. Do not add a callable observer, inspect a host,
+   execute a process, integrate a provider, admit runtime work, persist
+   observations, add schemas or CLI behavior, enable writes, or broaden
+   authority. See the [blocker-fix
+   report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REPORT.md),
+   [original focused
+   review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REVIEW.md), and
    [implementation
    plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host input observer Core model blocker fix.** The request
+  now binds the exact expected producer identity/version and a static-discovery
+  completion revision. Results bind homogeneous per-fact provenance and reject
+  stale observations. Non-proven facts require closed reasons and cannot retain
+  a proven binding axis; producer, posture, and method combinations fail closed.
+  Every nested enum reachable through the wire boundary now rejects unknown
+  values without echoing caller input. Focused blocker-fix review is next. See
+  the [blocker-fix
+  report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REPORT.md).
 
 - **Closed trusted-host input observer Core model review with blocker
   findings.** The review accepted the model-only scope, closed nine-obligation

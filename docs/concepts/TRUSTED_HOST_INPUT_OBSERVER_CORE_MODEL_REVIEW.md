@@ -12,6 +12,14 @@ provenance, or why a non-proven fact was not established. Several coherence
 and deserialization boundaries can therefore admit stronger or less safe
 claims than the accepted plan permits.
 
+### Fix-Forward Status
+
+The seven blockers in this original review have been addressed in a narrow
+model-only blocker fix. This note does not erase or retroactively change the
+original verdict. Focused re-review must verify the fix before the model is
+accepted. See [Trusted-Host Input Observer Core Model Blocker Fix
+Report](TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REPORT.md).
+
 ## 2. Scope Verification
 
 The phase stayed within the approved model-only scope. It added no host

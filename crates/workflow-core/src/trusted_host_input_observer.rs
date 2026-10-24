@@ -19,8 +19,10 @@ use crate::{
 
 const HOST_OBLIGATION_COUNT: usize = 9;
 const FACT_ITEM_MAX_COUNT: u32 = 16_384;
-const REQUEST_DOMAIN: &str = "workflow-os/trusted-host-input-observation-request/v1";
-const RESULT_DOMAIN: &str = "workflow-os/trusted-host-input-observation-result/v1";
+const PRODUCER_ID_MAX_BYTES: usize = 128;
+const PRODUCER_VERSION_MAX_BYTES: usize = 64;
+const REQUEST_DOMAIN: &str = "workflow-os/trusted-host-input-observation-request/v2";
+const RESULT_DOMAIN: &str = "workflow-os/trusted-host-input-observation-result/v2";
 
 macro_rules! impl_closed_string_deserialize {
     ($type:ty, $expecting:literal, $error:literal, { $($tag:literal => $variant:path),+ $(,)? }) => {
@@ -59,15 +61,88 @@ macro_rules! impl_closed_string_deserialize {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustedHostInputObservationContractVersion {
-    /// Cargo/Rust host-input observation contract, version one.
-    CargoHostInputsV1,
+    /// Cargo/Rust host-input observation contract, version two.
+    CargoHostInputsV2,
 }
 
 impl_closed_string_deserialize!(
     TrustedHostInputObservationContractVersion,
     "a supported trusted-host input observation contract version",
     "unsupported trusted-host input observation contract version",
-    { "cargo_host_inputs_v1" => TrustedHostInputObservationContractVersion::CargoHostInputsV1 }
+    { "cargo_host_inputs_v2" => TrustedHostInputObservationContractVersion::CargoHostInputsV2 }
+);
+
+macro_rules! producer_identifier {
+    ($(#[$meta:meta])* $name:ident, $max_bytes:expr, $suffix:literal, $label:literal) => {
+        $(#[$meta])*
+        #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+        #[serde(try_from = "String", into = "String")]
+        pub struct $name(String);
+
+        impl $name {
+            /// Creates a bounded payload-free producer identifier.
+            ///
+            /// # Errors
+            ///
+            /// Rejects empty, oversized, malformed, or secret-like text.
+            pub fn new(value: impl Into<String>) -> Result<Self, WorkflowOsError> {
+                let value = value.into();
+                let valid = !value.is_empty()
+                    && value.len() <= $max_bytes
+                    && value.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/')
+                    })
+                    && !is_secret_like(&value);
+                if !valid {
+                    return Err(observer_error($suffix, concat!($label, " is invalid")));
+                }
+                Ok(Self(value))
+            }
+
+            /// Returns the validated identifier text.
+            #[must_use]
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let value = String::deserialize(deserializer)?;
+                Self::new(value).map_err(|_| serde::de::Error::custom(concat!($label, " is invalid")))
+            }
+        }
+
+        impl From<$name> for String {
+            fn from(value: $name) -> Self {
+                value.0
+            }
+        }
+
+        impl fmt::Debug for $name {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.debug_tuple(stringify!($name)).field(&"[REDACTED]").finish()
+            }
+        }
+    };
+}
+
+producer_identifier!(
+    /// Stable observer producer identity without authority semantics.
+    TrustedHostInputObservationProducerId,
+    PRODUCER_ID_MAX_BYTES,
+    "producer.id.invalid",
+    "trusted-host input observation producer id"
+);
+producer_identifier!(
+    /// Stable observer producer version without authority semantics.
+    TrustedHostInputObservationProducerVersion,
+    PRODUCER_VERSION_MAX_BYTES,
+    "producer.version.invalid",
+    "trusted-host input observation producer version"
 );
 
 /// Closed producer category. This identifies a claimant; it does not trust it.
@@ -120,6 +195,8 @@ impl_closed_string_deserialize!(
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "TrustedHostInputObservationProducerDefinition")]
 pub struct TrustedHostInputObservationProducer {
+    id: TrustedHostInputObservationProducerId,
+    version: TrustedHostInputObservationProducerVersion,
     kind: TrustedHostInputObservationProducerKind,
     assurance: TrustedHostInputObservationProducerAssurance,
     implementation: SpecContentHash,
@@ -130,6 +207,10 @@ pub struct TrustedHostInputObservationProducer {
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustedHostInputObservationProducerDefinition {
+    /// Stable observer identity.
+    pub id: TrustedHostInputObservationProducerId,
+    /// Stable observer version.
+    pub version: TrustedHostInputObservationProducerVersion,
     /// Closed producer category.
     pub kind: TrustedHostInputObservationProducerKind,
     /// Claimed producer assurance.
@@ -149,20 +230,41 @@ impl TrustedHostInputObservationProducer {
     pub fn new(
         definition: TrustedHostInputObservationProducerDefinition,
     ) -> Result<Self, WorkflowOsError> {
-        if (definition.kind == TrustedHostInputObservationProducerKind::Fixture)
-            != (definition.assurance == TrustedHostInputObservationProducerAssurance::FixtureOnly)
-        {
+        let assurance_valid = match definition.kind {
+            TrustedHostInputObservationProducerKind::Fixture => {
+                definition.assurance == TrustedHostInputObservationProducerAssurance::FixtureOnly
+            }
+            TrustedHostInputObservationProducerKind::HostObserver
+            | TrustedHostInputObservationProducerKind::ExecutionProvider => {
+                definition.assurance != TrustedHostInputObservationProducerAssurance::FixtureOnly
+            }
+        };
+        if !assurance_valid {
             return Err(observer_error(
                 "producer.assurance.invalid",
                 "trusted-host input observation producer assurance is invalid",
             ));
         }
         Ok(Self {
+            id: definition.id,
+            version: definition.version,
             kind: definition.kind,
             assurance: definition.assurance,
             implementation: definition.implementation,
             configuration: definition.configuration,
         })
+    }
+
+    /// Returns the stable producer identity.
+    #[must_use]
+    pub const fn id(&self) -> &TrustedHostInputObservationProducerId {
+        &self.id
+    }
+
+    /// Returns the stable producer version.
+    #[must_use]
+    pub const fn version(&self) -> &TrustedHostInputObservationProducerVersion {
+        &self.version
     }
 
     /// Returns the closed producer category.
@@ -192,6 +294,8 @@ impl fmt::Debug for TrustedHostInputObservationProducer {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("TrustedHostInputObservationProducer")
+            .field("id", &self.id)
+            .field("version", &self.version)
             .field("kind", &self.kind)
             .field("assurance", &self.assurance)
             .field("implementation", &"[REDACTED]")
@@ -226,6 +330,32 @@ impl_closed_string_deserialize!(
         "unavailable" => TrustedHostInputObservationPosture::Unavailable,
         "unsupported" => TrustedHostInputObservationPosture::Unsupported,
         "uncertain" => TrustedHostInputObservationPosture::Uncertain
+    }
+);
+
+/// Closed reason explaining why a host-input fact is not proven.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustedHostInputObservationReason {
+    /// The fact was declared but not independently observed.
+    NotIndependentlyObserved,
+    /// The observation channel was unavailable.
+    ObservationUnavailable,
+    /// The observation method is unsupported.
+    ObservationUnsupported,
+    /// Object integrity or continuity could not be established.
+    IntegrityOrContinuityUncertain,
+}
+
+impl_closed_string_deserialize!(
+    TrustedHostInputObservationReason,
+    "a supported trusted-host input observation reason",
+    "unsupported trusted-host input observation reason",
+    {
+        "not_independently_observed" => TrustedHostInputObservationReason::NotIndependentlyObserved,
+        "observation_unavailable" => TrustedHostInputObservationReason::ObservationUnavailable,
+        "observation_unsupported" => TrustedHostInputObservationReason::ObservationUnsupported,
+        "integrity_or_continuity_uncertain" => TrustedHostInputObservationReason::IntegrityOrContinuityUncertain
     }
 );
 
@@ -274,8 +404,11 @@ impl_closed_string_deserialize!(
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "TrustedHostInputObservationFactDefinition")]
 pub struct TrustedHostInputObservationFact {
+    producer_id: TrustedHostInputObservationProducerId,
+    producer_version: TrustedHostInputObservationProducerVersion,
     kind: TrustedHostBuildInputHostObligationKind,
     posture: TrustedHostInputObservationPosture,
+    reason: Option<TrustedHostInputObservationReason>,
     method: TrustedHostInputObservationMethod,
     object_binding: TrustedHostObservationPosture,
     continuity: TrustedHostObservationPosture,
@@ -288,10 +421,16 @@ pub struct TrustedHostInputObservationFact {
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustedHostInputObservationFactDefinition {
+    /// Identity of the component that produced this fact.
+    pub producer_id: TrustedHostInputObservationProducerId,
+    /// Version of the component that produced this fact.
+    pub producer_version: TrustedHostInputObservationProducerVersion,
     /// Closed host-input obligation category.
     pub kind: TrustedHostBuildInputHostObligationKind,
     /// Observation posture.
     pub posture: TrustedHostInputObservationPosture,
+    /// Closed reason required for every non-proven posture.
+    pub reason: Option<TrustedHostInputObservationReason>,
     /// Observation method.
     pub method: TrustedHostInputObservationMethod,
     /// Object-binding posture.
@@ -322,23 +461,44 @@ impl TrustedHostInputObservationFact {
                 "trusted-host input observation fact count is invalid",
             ));
         }
-        let observed = definition.posture == TrustedHostInputObservationPosture::Observed;
         let observed_method = !matches!(
             definition.method,
             TrustedHostInputObservationMethod::DeclaredConfiguration
                 | TrustedHostInputObservationMethod::Unavailable
                 | TrustedHostInputObservationMethod::Unsupported
         );
-        let proven = definition.object_binding == TrustedHostObservationPosture::Proven
+        let both_proven = definition.object_binding == TrustedHostObservationPosture::Proven
             && definition.continuity == TrustedHostObservationPosture::Proven;
-        if observed != (observed_method && proven)
-            || (!observed && proven)
-            || (definition.posture == TrustedHostInputObservationPosture::DeclaredOnly
-                && definition.method != TrustedHostInputObservationMethod::DeclaredConfiguration)
-            || (definition.posture == TrustedHostInputObservationPosture::Unavailable
-                && definition.method != TrustedHostInputObservationMethod::Unavailable)
-            || (definition.posture == TrustedHostInputObservationPosture::Unsupported
-                && definition.method != TrustedHostInputObservationMethod::Unsupported)
+        let either_proven = definition.object_binding == TrustedHostObservationPosture::Proven
+            || definition.continuity == TrustedHostObservationPosture::Proven;
+        let posture_details_valid = match definition.posture {
+            TrustedHostInputObservationPosture::Observed => {
+                definition.reason.is_none() && observed_method && both_proven
+            }
+            TrustedHostInputObservationPosture::DeclaredOnly => {
+                definition.reason
+                    == Some(TrustedHostInputObservationReason::NotIndependentlyObserved)
+                    && definition.method == TrustedHostInputObservationMethod::DeclaredConfiguration
+                    && !either_proven
+            }
+            TrustedHostInputObservationPosture::Unavailable => {
+                definition.reason == Some(TrustedHostInputObservationReason::ObservationUnavailable)
+                    && definition.method == TrustedHostInputObservationMethod::Unavailable
+                    && !either_proven
+            }
+            TrustedHostInputObservationPosture::Unsupported => {
+                definition.reason == Some(TrustedHostInputObservationReason::ObservationUnsupported)
+                    && definition.method == TrustedHostInputObservationMethod::Unsupported
+                    && !either_proven
+            }
+            TrustedHostInputObservationPosture::Uncertain => {
+                definition.reason
+                    == Some(TrustedHostInputObservationReason::IntegrityOrContinuityUncertain)
+                    && observed_method
+                    && !either_proven
+            }
+        };
+        if !posture_details_valid
             || definition.reference.as_ref().is_some_and(|reference| {
                 reference.kind() != HostedExecutionReferenceKind::Telemetry
             })
@@ -349,8 +509,11 @@ impl TrustedHostInputObservationFact {
             ));
         }
         Ok(Self {
+            producer_id: definition.producer_id,
+            producer_version: definition.producer_version,
             kind: definition.kind,
             posture: definition.posture,
+            reason: definition.reason,
             method: definition.method,
             object_binding: definition.object_binding,
             continuity: definition.continuity,
@@ -358,6 +521,18 @@ impl TrustedHostInputObservationFact {
             item_count: definition.item_count,
             reference: definition.reference,
         })
+    }
+
+    /// Returns the component identity that produced this fact.
+    #[must_use]
+    pub const fn producer_id(&self) -> &TrustedHostInputObservationProducerId {
+        &self.producer_id
+    }
+
+    /// Returns the component version that produced this fact.
+    #[must_use]
+    pub const fn producer_version(&self) -> &TrustedHostInputObservationProducerVersion {
+        &self.producer_version
     }
 
     /// Returns the closed host-input obligation category.
@@ -384,8 +559,11 @@ impl fmt::Debug for TrustedHostInputObservationFact {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("TrustedHostInputObservationFact")
+            .field("producer_id", &self.producer_id)
+            .field("producer_version", &self.producer_version)
             .field("kind", &self.kind)
             .field("posture", &self.posture)
+            .field("reason", &self.reason)
             .field("method", &self.method)
             .field("object_binding", &self.object_binding)
             .field("continuity", &self.continuity)
@@ -405,10 +583,13 @@ pub struct TrustedHostInputObservationRequest {
     operation_contract: SpecContentHash,
     static_request: SpecContentHash,
     static_result: SpecContentHash,
+    static_discovery_completed_revision: u64,
     repository_tree: SpecContentHash,
     security_requirements: SpecContentHash,
     selection: SpecContentHash,
     attempt: SpecContentHash,
+    expected_producer_id: TrustedHostInputObservationProducerId,
+    expected_producer_version: TrustedHostInputObservationProducerVersion,
     #[serde(skip_serializing)]
     fingerprint: SpecContentHash,
 }
@@ -427,6 +608,8 @@ pub struct TrustedHostInputObservationRequestDefinition {
     pub static_request: SpecContentHash,
     /// Static result commitment.
     pub static_result: SpecContentHash,
+    /// Ordered static-discovery completion revision that observation must follow.
+    pub static_discovery_completed_revision: u64,
     /// Immutable repository-tree commitment.
     pub repository_tree: SpecContentHash,
     /// Security-requirements commitment.
@@ -435,25 +618,43 @@ pub struct TrustedHostInputObservationRequestDefinition {
     pub selection: SpecContentHash,
     /// Attempt commitment.
     pub attempt: SpecContentHash,
+    /// Exact observer identity expected to answer this request.
+    pub expected_producer_id: TrustedHostInputObservationProducerId,
+    /// Exact observer version expected to answer this request.
+    pub expected_producer_version: TrustedHostInputObservationProducerVersion,
 }
 
 impl TrustedHostInputObservationRequest {
-    #[must_use]
     /// Creates an exact non-authorizing observation request.
-    pub fn new(definition: TrustedHostInputObservationRequestDefinition) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Rejects a missing static-discovery completion revision.
+    pub fn new(
+        definition: TrustedHostInputObservationRequestDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        if definition.static_discovery_completed_revision == 0 {
+            return Err(observer_error(
+                "request.freshness.invalid",
+                "trusted-host input observation request freshness is invalid",
+            ));
+        }
         let fingerprint = request_fingerprint(&definition);
-        Self {
+        Ok(Self {
             version: definition.version,
             run_bundle: definition.run_bundle,
             operation_contract: definition.operation_contract,
             static_request: definition.static_request,
             static_result: definition.static_result,
+            static_discovery_completed_revision: definition.static_discovery_completed_revision,
             repository_tree: definition.repository_tree,
             security_requirements: definition.security_requirements,
             selection: definition.selection,
             attempt: definition.attempt,
+            expected_producer_id: definition.expected_producer_id,
+            expected_producer_version: definition.expected_producer_version,
             fingerprint,
-        }
+        })
     }
 
     /// Returns the canonical request commitment.
@@ -466,10 +667,30 @@ impl TrustedHostInputObservationRequest {
     pub const fn repository_tree(&self) -> &SpecContentHash {
         &self.repository_tree
     }
+
+    /// Returns the static-discovery completion revision observation must follow.
+    #[must_use]
+    pub const fn static_discovery_completed_revision(&self) -> u64 {
+        self.static_discovery_completed_revision
+    }
+
+    /// Returns the exact expected producer identity.
+    #[must_use]
+    pub const fn expected_producer_id(&self) -> &TrustedHostInputObservationProducerId {
+        &self.expected_producer_id
+    }
+
+    /// Returns the exact expected producer version.
+    #[must_use]
+    pub const fn expected_producer_version(&self) -> &TrustedHostInputObservationProducerVersion {
+        &self.expected_producer_version
+    }
 }
 
-impl From<TrustedHostInputObservationRequestDefinition> for TrustedHostInputObservationRequest {
-    fn from(value: TrustedHostInputObservationRequestDefinition) -> Self {
+impl TryFrom<TrustedHostInputObservationRequestDefinition> for TrustedHostInputObservationRequest {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: TrustedHostInputObservationRequestDefinition) -> Result<Self, Self::Error> {
         Self::new(value)
     }
 }
@@ -483,10 +704,16 @@ impl fmt::Debug for TrustedHostInputObservationRequest {
             .field("operation_contract", &"[REDACTED]")
             .field("static_request", &"[REDACTED]")
             .field("static_result", &"[REDACTED]")
+            .field(
+                "static_discovery_completed_revision",
+                &self.static_discovery_completed_revision,
+            )
             .field("repository_tree", &"[REDACTED]")
             .field("security_requirements", &"[REDACTED]")
             .field("selection", &"[REDACTED]")
             .field("attempt", &"[REDACTED]")
+            .field("expected_producer_id", &self.expected_producer_id)
+            .field("expected_producer_version", &self.expected_producer_version)
             .field("fingerprint", &"[REDACTED]")
             .finish()
     }
@@ -552,6 +779,11 @@ impl TrustedHostInputObservationResult {
                 .collect::<BTreeSet<_>>()
                 .len()
                 != HOST_OBLIGATION_COUNT
+            || definition.facts.iter().any(|fact| {
+                fact.producer_id() != definition.producer.id()
+                    || fact.producer_version() != definition.producer.version()
+                    || !producer_method_is_coherent(&definition.producer, fact)
+            })
         {
             return Err(observer_error(
                 "result.binding.invalid",
@@ -585,6 +817,9 @@ impl TrustedHostInputObservationResult {
     ) -> Result<(), WorkflowOsError> {
         if &self.request_fingerprint != request.fingerprint()
             || &self.repository_tree != request.repository_tree()
+            || self.started_revision <= request.static_discovery_completed_revision()
+            || self.producer.id() != request.expected_producer_id()
+            || self.producer.version() != request.expected_producer_version()
         {
             return Err(observer_error(
                 "result.request_mismatch",
@@ -650,6 +885,21 @@ fn request_fingerprint(
         "version",
         contract_version_tag(definition.version),
     );
+    hash_field(
+        &mut hasher,
+        "static_discovery_completed_revision",
+        &definition.static_discovery_completed_revision.to_string(),
+    );
+    hash_field(
+        &mut hasher,
+        "expected_producer_id",
+        definition.expected_producer_id.as_str(),
+    );
+    hash_field(
+        &mut hasher,
+        "expected_producer_version",
+        definition.expected_producer_version.as_str(),
+    );
     for (label, value) in [
         ("run_bundle", &definition.run_bundle),
         ("operation_contract", &definition.operation_contract),
@@ -670,26 +920,7 @@ fn result_fingerprint(definition: &TrustedHostInputObservationResultDefinition) 
     hash_field(&mut hasher, "domain", RESULT_DOMAIN);
     hash_hash(&mut hasher, "request", &definition.request_fingerprint);
     hash_hash(&mut hasher, "repository", &definition.repository_tree);
-    hash_field(
-        &mut hasher,
-        "producer_kind",
-        producer_kind_tag(definition.producer.kind),
-    );
-    hash_field(
-        &mut hasher,
-        "producer_assurance",
-        producer_assurance_tag(definition.producer.assurance),
-    );
-    hash_hash(
-        &mut hasher,
-        "producer_implementation",
-        &definition.producer.implementation,
-    );
-    hash_hash(
-        &mut hasher,
-        "producer_configuration",
-        &definition.producer.configuration,
-    );
+    hash_producer(&mut hasher, &definition.producer);
     hash_field(
         &mut hasher,
         "started",
@@ -700,73 +931,127 @@ fn result_fingerprint(definition: &TrustedHostInputObservationResultDefinition) 
         "completed",
         &definition.completed_revision.to_string(),
     );
-    hash_field(
-        &mut hasher,
-        "root_role",
-        root_role_tag(definition.repository_root.role()),
-    );
-    hash_field(
-        &mut hasher,
-        "root_access",
-        root_access_tag(definition.repository_root.access()),
-    );
-    hash_field(
-        &mut hasher,
-        "root_object_binding",
-        observation_posture_tag(definition.repository_root.object_binding()),
-    );
-    hash_field(
-        &mut hasher,
-        "root_continuity",
-        observation_posture_tag(definition.repository_root.continuity()),
-    );
-    hash_field(
-        &mut hasher,
-        "root_method",
-        root_method_tag(definition.repository_root.method()),
-    );
-    hash_field(
-        &mut hasher,
-        "root_invocation_scoped",
-        bool_tag(definition.repository_root.invocation_scoped()),
-    );
-    hash_hash(
-        &mut hasher,
-        "root_commitment",
-        definition.repository_root.commitment(),
-    );
-    hash_reference(
-        &mut hasher,
-        "root_reference",
-        definition.repository_root.reference(),
-    );
+    hash_repository_root(&mut hasher, &definition.repository_root);
     for fact in &definition.facts {
-        hash_field(&mut hasher, "kind", obligation_kind_tag(fact.kind));
-        hash_field(&mut hasher, "posture", input_posture_tag(fact.posture));
-        hash_field(&mut hasher, "method", input_method_tag(fact.method));
-        hash_field(
-            &mut hasher,
-            "object_binding",
-            observation_posture_tag(fact.object_binding),
-        );
-        hash_field(
-            &mut hasher,
-            "continuity",
-            observation_posture_tag(fact.continuity),
-        );
-        hash_hash(&mut hasher, "commitment", &fact.commitment);
-        hash_field(&mut hasher, "count", &fact.item_count.to_string());
-        match &fact.reference {
-            Some(reference) => hash_reference(&mut hasher, "reference", reference),
-            None => hash_field(&mut hasher, "reference", "none"),
-        }
+        hash_observation_fact(&mut hasher, fact);
     }
     SpecContentHash::from_bytes(hasher.finalize())
 }
 
+fn hash_producer(hasher: &mut Sha256, producer: &TrustedHostInputObservationProducer) {
+    hash_field(hasher, "producer_id", producer.id.as_str());
+    hash_field(hasher, "producer_version", producer.version.as_str());
+    hash_field(hasher, "producer_kind", producer_kind_tag(producer.kind));
+    hash_field(
+        hasher,
+        "producer_assurance",
+        producer_assurance_tag(producer.assurance),
+    );
+    hash_hash(hasher, "producer_implementation", &producer.implementation);
+    hash_hash(hasher, "producer_configuration", &producer.configuration);
+}
+
+fn hash_repository_root(hasher: &mut Sha256, root: &TrustedHostRootObservation) {
+    hash_field(hasher, "root_role", root_role_tag(root.role()));
+    hash_field(hasher, "root_access", root_access_tag(root.access()));
+    hash_field(
+        hasher,
+        "root_object_binding",
+        observation_posture_tag(root.object_binding()),
+    );
+    hash_field(
+        hasher,
+        "root_continuity",
+        observation_posture_tag(root.continuity()),
+    );
+    hash_field(hasher, "root_method", root_method_tag(root.method()));
+    hash_field(
+        hasher,
+        "root_invocation_scoped",
+        bool_tag(root.invocation_scoped()),
+    );
+    hash_hash(hasher, "root_commitment", root.commitment());
+    hash_reference(hasher, "root_reference", root.reference());
+}
+
+fn hash_observation_fact(hasher: &mut Sha256, fact: &TrustedHostInputObservationFact) {
+    hash_field(hasher, "fact_producer_id", fact.producer_id.as_str());
+    hash_field(
+        hasher,
+        "fact_producer_version",
+        fact.producer_version.as_str(),
+    );
+    hash_field(hasher, "kind", obligation_kind_tag(fact.kind));
+    hash_field(hasher, "posture", input_posture_tag(fact.posture));
+    match fact.reason {
+        Some(reason) => hash_field(hasher, "reason", input_reason_tag(reason)),
+        None => hash_field(hasher, "reason", "none"),
+    }
+    hash_field(hasher, "method", input_method_tag(fact.method));
+    hash_field(
+        hasher,
+        "object_binding",
+        observation_posture_tag(fact.object_binding),
+    );
+    hash_field(
+        hasher,
+        "continuity",
+        observation_posture_tag(fact.continuity),
+    );
+    hash_hash(hasher, "commitment", &fact.commitment);
+    hash_field(hasher, "count", &fact.item_count.to_string());
+    match &fact.reference {
+        Some(reference) => hash_reference(hasher, "reference", reference),
+        None => hash_field(hasher, "reference", "none"),
+    }
+}
+
 fn contract_version_tag(value: TrustedHostInputObservationContractVersion) -> &'static str {
     match value {
-        TrustedHostInputObservationContractVersion::CargoHostInputsV1 => "cargo_host_inputs_v1",
+        TrustedHostInputObservationContractVersion::CargoHostInputsV2 => "cargo_host_inputs_v2",
+    }
+}
+
+fn input_reason_tag(value: TrustedHostInputObservationReason) -> &'static str {
+    match value {
+        TrustedHostInputObservationReason::NotIndependentlyObserved => "not_independently_observed",
+        TrustedHostInputObservationReason::ObservationUnavailable => "observation_unavailable",
+        TrustedHostInputObservationReason::ObservationUnsupported => "observation_unsupported",
+        TrustedHostInputObservationReason::IntegrityOrContinuityUncertain => {
+            "integrity_or_continuity_uncertain"
+        }
+    }
+}
+
+fn producer_method_is_coherent(
+    producer: &TrustedHostInputObservationProducer,
+    fact: &TrustedHostInputObservationFact,
+) -> bool {
+    if fact.posture != TrustedHostInputObservationPosture::Observed {
+        return true;
+    }
+    if producer.assurance == TrustedHostInputObservationProducerAssurance::CallerSupplied {
+        return false;
+    }
+    match producer.kind {
+        TrustedHostInputObservationProducerKind::Fixture => {
+            fact.method == TrustedHostInputObservationMethod::Fixture
+        }
+        TrustedHostInputObservationProducerKind::HostObserver => matches!(
+            fact.method,
+            TrustedHostInputObservationMethod::ContentAddressedObject
+                | TrustedHostInputObservationMethod::ProtectedHandle
+                | TrustedHostInputObservationMethod::ImmutableProjection
+                | TrustedHostInputObservationMethod::PreAndPostObjectIdentity
+        ),
+        TrustedHostInputObservationProducerKind::ExecutionProvider => matches!(
+            fact.method,
+            TrustedHostInputObservationMethod::ContentAddressedObject
+                | TrustedHostInputObservationMethod::ProtectedHandle
+                | TrustedHostInputObservationMethod::ImmutableProjection
+                | TrustedHostInputObservationMethod::ProviderNativeIdentity
+                | TrustedHostInputObservationMethod::PreAndPostObjectIdentity
+        ),
     }
 }
 
@@ -906,6 +1191,25 @@ fn hash_hash(hasher: &mut Sha256, label: &str, value: &SpecContentHash) {
 fn hash_bytes(hasher: &mut Sha256, value: &[u8]) {
     hasher.update(u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
     hasher.update(value);
+}
+
+fn is_secret_like(value: &str) -> bool {
+    let lowered = value.to_ascii_lowercase();
+    [
+        "authorization",
+        "bearer",
+        "credential",
+        "password",
+        "private_key",
+        "private-key",
+        "secret",
+        "token",
+        "api_key",
+        "api-key",
+        "sk-",
+    ]
+    .iter()
+    .any(|marker| lowered.contains(marker))
 }
 
 fn observer_error(suffix: &str, message: &str) -> WorkflowOsError {

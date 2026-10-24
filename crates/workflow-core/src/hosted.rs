@@ -132,7 +132,7 @@ impl fmt::Debug for HostedExecutionRequestFingerprint {
 }
 
 /// Kind of a stable payload-free hosted execution reference.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostedExecutionReferenceKind {
     /// Input artifact made available to the provider.
@@ -149,6 +149,26 @@ pub enum HostedExecutionReferenceKind {
     AccessMaterial,
     /// Provider-side `SideEffect` reconciliation record.
     SideEffectReconciliation,
+}
+
+impl<'de> Deserialize<'de> for HostedExecutionReferenceKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.as_str() {
+            "input" => Ok(Self::Input),
+            "artifact" => Ok(Self::Artifact),
+            "log" => Ok(Self::Log),
+            "denied_action" => Ok(Self::DeniedAction),
+            "telemetry" => Ok(Self::Telemetry),
+            "access_material" => Ok(Self::AccessMaterial),
+            "side_effect_reconciliation" => Ok(Self::SideEffectReconciliation),
+            _ => Err(serde::de::Error::custom(
+                "hosted execution reference kind is invalid",
+            )),
+        }
+    }
 }
 
 /// Stable payload-free reference passed across the hosted execution boundary.

@@ -143,6 +143,18 @@ for fixture-backed or live observation work until a narrow blocker fix is
 implemented and re-reviewed. See
 [Trusted-Host Input Observer Core Model Review](TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REVIEW.md).
 
+## 11.2 Blocker-Fix Completion Note
+
+The seven review blockers are now fixed without broadening the model-only
+scope. The request binds the expected producer identity/version and a static
+discovery completion revision. Results bind homogeneous per-fact provenance
+and reject stale observations. Non-proven facts require closed reasons, cannot
+retain a proven binding axis, and must use coherent methods for their posture
+and producer. Nested reused enums now reject unknown values without echoing
+caller input. Focused blocker-fix review remains required before fixture-backed
+or live observation work. See [Trusted-Host Input Observer Core Model Blocker
+Fix Report](TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REPORT.md).
+
 ## 12. Governed Phase Evidence
 
 - Workflow ID: `dg/implement`.

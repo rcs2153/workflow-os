@@ -1,7 +1,7 @@
 # Provider-Neutral Trusted-Host Input Observer Plan
 
-Status: Core model implemented and reviewed; focused blocker fixes are required
-before acceptance.
+Status: Core model blocker fixes implemented; focused blocker-fix review is
+required before acceptance.
 
 This plan follows:
 
@@ -547,3 +547,18 @@ Core Model Report](../concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REPORT.md)
 It adds no callable observer, host inspection, process execution, provider
 integration, runtime admission, persistence, events, schemas, CLI behavior,
 writes, or authority.
+
+## 26. Core Model Blocker-Fix Record
+
+The seven focused model-review blockers are fixed. The request now binds an
+exact expected producer identity/version and static-discovery completion
+revision. Results bind homogeneous per-fact provenance, enforce exact
+non-proof reasons and posture/method/producer coherence, reject stale
+observations, and use non-echoing deserializers for every nested enum reachable
+through the observer wire boundary.
+
+The fix remains model-only and non-authorizing. See [Trusted-Host Input
+Observer Core Model Blocker Fix
+Report](../concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_BLOCKER_FIX_REPORT.md).
+Focused blocker-fix review is next; no fixture-backed or live observer work is
+authorized yet.

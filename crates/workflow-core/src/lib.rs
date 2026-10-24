@@ -686,9 +686,10 @@ pub use trusted_host_input_observer::{
     TrustedHostInputObservationFactDefinition, TrustedHostInputObservationMethod,
     TrustedHostInputObservationPosture, TrustedHostInputObservationProducer,
     TrustedHostInputObservationProducerAssurance, TrustedHostInputObservationProducerDefinition,
-    TrustedHostInputObservationProducerKind, TrustedHostInputObservationRequest,
-    TrustedHostInputObservationRequestDefinition, TrustedHostInputObservationResult,
-    TrustedHostInputObservationResultDefinition,
+    TrustedHostInputObservationProducerId, TrustedHostInputObservationProducerKind,
+    TrustedHostInputObservationProducerVersion, TrustedHostInputObservationReason,
+    TrustedHostInputObservationRequest, TrustedHostInputObservationRequestDefinition,
+    TrustedHostInputObservationResult, TrustedHostInputObservationResultDefinition,
 };
 pub use trusted_host_live_execution_security::{
     BuildTimeInputCompletenessPosture, BuildTimeInputDiscoveryMethod, BuildTimeInputKind,

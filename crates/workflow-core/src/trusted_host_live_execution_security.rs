@@ -356,7 +356,7 @@ impl fmt::Debug for BuildTimeInputManifest {
 }
 
 /// Typed root roles required by the accepted Cargo clippy boundary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustedHostRootRole {
     /// Immutable repository input.
@@ -373,8 +373,27 @@ pub enum TrustedHostRootRole {
     TemporaryWrite,
 }
 
+impl<'de> Deserialize<'de> for TrustedHostRootRole {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.as_str() {
+            "repository_input" => Ok(Self::RepositoryInput),
+            "toolchain_input" => Ok(Self::ToolchainInput),
+            "dependency_input" => Ok(Self::DependencyInput),
+            "cache_write" => Ok(Self::CacheWrite),
+            "build_output_write" => Ok(Self::BuildOutputWrite),
+            "temporary_write" => Ok(Self::TemporaryWrite),
+            _ => Err(serde::de::Error::custom(
+                "trusted-host root role is invalid",
+            )),
+        }
+    }
+}
+
 /// Required or observed access class for a root.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustedHostRootAccess {
     /// Read access only.
@@ -383,6 +402,22 @@ pub enum TrustedHostRootAccess {
     ReadExecute,
     /// Read and write access.
     ReadWrite,
+}
+
+impl<'de> Deserialize<'de> for TrustedHostRootAccess {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.as_str() {
+            "read_only" => Ok(Self::ReadOnly),
+            "read_execute" => Ok(Self::ReadExecute),
+            "read_write" => Ok(Self::ReadWrite),
+            _ => Err(serde::de::Error::custom(
+                "trusted-host root access is invalid",
+            )),
+        }
+    }
 }
 
 /// Required object-binding assurance.
@@ -396,7 +431,7 @@ pub enum TrustedHostRootBindingRequirement {
 }
 
 /// Observed certainty for a control fact not covered by hosted posture vocabulary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustedHostObservationPosture {
     /// The fact was affirmatively observed.
@@ -411,6 +446,24 @@ pub enum TrustedHostObservationPosture {
     Uncertain,
 }
 
+impl<'de> Deserialize<'de> for TrustedHostObservationPosture {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.as_str() {
+            "proven" => Ok(Self::Proven),
+            "degraded" => Ok(Self::Degraded),
+            "unavailable" => Ok(Self::Unavailable),
+            "unsupported" => Ok(Self::Unsupported),
+            "uncertain" => Ok(Self::Uncertain),
+            _ => Err(serde::de::Error::custom(
+                "trusted-host observation posture is invalid",
+            )),
+        }
+    }
+}
+
 /// Closed affirmation for one independently observed binary security fact.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -422,7 +475,7 @@ pub enum TrustedHostSecurityAffirmation {
 }
 
 /// Provider-neutral method used to observe root identity.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustedHostRootObservationMethod {
     /// Object identity was held through a protected handle.
@@ -435,6 +488,24 @@ pub enum TrustedHostRootObservationMethod {
     Unavailable,
     /// No supported observation method exists.
     Unsupported,
+}
+
+impl<'de> Deserialize<'de> for TrustedHostRootObservationMethod {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.as_str() {
+            "protected_handle" => Ok(Self::ProtectedHandle),
+            "immutable_projection" => Ok(Self::ImmutableProjection),
+            "provider_native_identity" => Ok(Self::ProviderNativeIdentity),
+            "unavailable" => Ok(Self::Unavailable),
+            "unsupported" => Ok(Self::Unsupported),
+            _ => Err(serde::de::Error::custom(
+                "trusted-host root observation method is invalid",
+            )),
+        }
+    }
 }
 
 /// Required posture for one typed root.
