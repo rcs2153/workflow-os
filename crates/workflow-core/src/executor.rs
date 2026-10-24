@@ -13591,7 +13591,14 @@ fn trusted_host_executor_commitment_from_identity(
 fn trusted_host_profile_authority_identities(
     profile: &ResolvedExplicitLocalCheckProfile,
 ) -> Result<(crate::HarnessContractId, crate::CurrentAuthoritySourceId), WorkflowOsError> {
-    match profile.profile_id() {
+    trusted_host_profile_authority_identities_for_id(profile.profile_id())
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_profile_authority_identities_for_id(
+    profile_id: ExplicitLocalCheckProfileId,
+) -> Result<(crate::HarnessContractId, crate::CurrentAuthoritySourceId), WorkflowOsError> {
+    match profile_id {
         ExplicitLocalCheckProfileId::WorkflowOsProjectValidation => Ok((
             crate::HarnessContractId::new("harness/workflow-os-project-validation")?,
             crate::CurrentAuthoritySourceId::new(
@@ -13611,6 +13618,23 @@ fn trusted_host_profile_authority_identities(
             "executor.trusted_host.profile_not_executable",
             "selected trusted-host profile has no accepted production execution authority",
         )),
+    }
+}
+
+#[cfg(all(test, feature = "trusted-host-application-spi"))]
+mod trusted_host_non_executable_profile_tests {
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+
+    #[test]
+    fn cargo_clippy_profile_has_no_trusted_host_execution_authority() {
+        let error = trusted_host_profile_authority_identities_for_id(
+            ExplicitLocalCheckProfileId::CargoClippyWorkspace,
+        )
+        .expect_err("Cargo clippy remains non-executable");
+
+        assert_eq!(error.code(), "executor.trusted_host.profile_not_executable");
     }
 }
 

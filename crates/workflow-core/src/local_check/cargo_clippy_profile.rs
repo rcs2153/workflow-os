@@ -56,9 +56,9 @@ struct CargoClippyWorkspaceHandlerDefinition {
     toolchain_root: PathBuf,
     repository_root: PathBuf,
     dependency_cache_root: PathBuf,
-    dependency_inputs: Vec<PathBuf>,
     build_output_root: PathBuf,
     temporary_root: PathBuf,
+    dependency_inputs: Vec<PathBuf>,
 }
 
 /// Closed Cargo clippy handler proved only through an injected runner.
@@ -78,6 +78,8 @@ struct CargoClippyWorkspaceLocalHandler {
     toolchain_root: PathBuf,
     repository_root: PathBuf,
     dependency_cache_root: PathBuf,
+    build_output_root: PathBuf,
+    temporary_root: PathBuf,
     dependency_inputs: Vec<PathBuf>,
     writable_roots: Vec<CargoClippyWritableRoot>,
     toolchain_commitment: SpecContentHash,
@@ -211,8 +213,14 @@ impl CargoClippyWorkspaceLocalHandler {
                 CargoClippyWritableRootRole::Cache,
                 dependency_cache_root.clone(),
             )?,
-            writable_root(CargoClippyWritableRootRole::BuildOutput, build_output_root)?,
-            writable_root(CargoClippyWritableRootRole::Temporary, temporary_root)?,
+            writable_root(
+                CargoClippyWritableRootRole::BuildOutput,
+                build_output_root.clone(),
+            )?,
+            writable_root(
+                CargoClippyWritableRootRole::Temporary,
+                temporary_root.clone(),
+            )?,
         ];
         validate_writable_root_roles(&writable_roots)?;
 
@@ -247,6 +255,8 @@ impl CargoClippyWorkspaceLocalHandler {
             toolchain_root,
             repository_root,
             dependency_cache_root,
+            build_output_root,
+            temporary_root,
             dependency_inputs,
             writable_roots,
             toolchain_commitment,
@@ -381,12 +391,23 @@ impl CargoClippyWorkspaceLocalHandler {
 
     fn validate_current_identity(&self) -> Result<(), WorkflowOsError> {
         validate_writable_root_roles(&self.writable_roots)?;
+        let current_repository = validate_current_root(&self.repository_root)?;
+        let current_toolchain_root = validate_current_root(&self.toolchain_root)?;
+        let current_dependency_cache = validate_current_root(&self.dependency_cache_root)?;
+        let current_build_output = validate_current_root(&self.build_output_root)?;
+        let current_temporary = validate_current_root(&self.temporary_root)?;
+        if self.writable_roots[0].path != self.dependency_cache_root
+            || self.writable_roots[1].path != self.build_output_root
+            || self.writable_roots[2].path != self.temporary_root
+        {
+            return Err(clippy_root_roles_invalid());
+        }
         validate_disjoint_roots(&[
-            &self.repository_root,
-            &self.toolchain_root,
-            &self.writable_roots[0].path,
-            &self.writable_roots[1].path,
-            &self.writable_roots[2].path,
+            &current_repository,
+            &current_toolchain_root,
+            &current_dependency_cache,
+            &current_build_output,
+            &current_temporary,
         ])?;
         let current_toolchain = toolchain_commitment(
             &self.toolchain_root,
@@ -526,6 +547,20 @@ fn canonical_unlinked_directory(
     }
     path.canonicalize()
         .map_err(|_| clippy_error(WorkflowOsErrorKind::Validation, code, message))
+}
+
+fn validate_current_root(expected: &Path) -> Result<PathBuf, WorkflowOsError> {
+    let metadata = fs::symlink_metadata(expected).map_err(|_| clippy_root_identity_changed())?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(clippy_root_identity_changed());
+    }
+    let current = expected
+        .canonicalize()
+        .map_err(|_| clippy_root_identity_changed())?;
+    if current != expected {
+        return Err(clippy_root_identity_changed());
+    }
+    Ok(current)
 }
 
 fn canonical_clippy_executable(
@@ -819,6 +854,14 @@ fn clippy_root_roles_invalid() -> WorkflowOsError {
     )
 }
 
+fn clippy_root_identity_changed() -> WorkflowOsError {
+    clippy_error(
+        WorkflowOsErrorKind::Security,
+        "local_check.profile.clippy.root_identity_changed",
+        "Cargo clippy root identity changed after resolution",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::assert_is_empty, clippy::expect_used)]
@@ -880,6 +923,29 @@ mod tests {
                 fs::write(path, content).expect("fixture mutation");
             }
             Ok(self.output.clone())
+        }
+    }
+
+    #[cfg(unix)]
+    #[derive(Debug)]
+    struct RootReplacingRunner {
+        root: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl LocalCheckProcessRunner for RootReplacingRunner {
+        fn run(
+            &self,
+            _request: &LocalCheckProcessRequest,
+        ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+            replace_root_with_symlink(&self.root);
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                11,
+                Vec::new(),
+                Vec::new(),
+            ))
         }
     }
 
@@ -1010,6 +1076,15 @@ mod tests {
             permissions.set_mode(0o700);
             fs::set_permissions(path, permissions).expect("permissions");
         }
+    }
+
+    #[cfg(unix)]
+    fn replace_root_with_symlink(path: &Path) {
+        use std::os::unix::fs::symlink;
+
+        let replacement = path.with_extension("resolved-root");
+        fs::rename(path, &replacement).expect("move original root");
+        symlink(&replacement, path).expect("replace root with symlink");
     }
 
     #[test]
@@ -1169,6 +1244,59 @@ mod tests {
     }
 
     #[test]
+    fn empty_and_duplicate_toolchain_and_dependency_inventories_fail_closed() {
+        let fixture = Fixture::new();
+        let runner = Arc::new(FakeRunner::success());
+
+        let mut empty_dependencies = fixture.definition();
+        empty_dependencies.dependency_inputs.clear();
+        let error = CargoClippyWorkspaceLocalHandler::new_with_process_runner(
+            LocalCheckCommandContract::cargo_clippy_workspace_model_only()
+                .expect("canonical contract"),
+            &empty_dependencies,
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect_err("empty dependency inventory fails");
+        assert_eq!(
+            error.code(),
+            "local_check.profile.clippy.dependency_identity_unavailable"
+        );
+
+        let mut duplicate_dependencies = fixture.definition();
+        duplicate_dependencies
+            .dependency_inputs
+            .push(fixture.dependency.clone());
+        let error = CargoClippyWorkspaceLocalHandler::new_with_process_runner(
+            LocalCheckCommandContract::cargo_clippy_workspace_model_only()
+                .expect("canonical contract"),
+            &duplicate_dependencies,
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect_err("duplicate dependency inventory fails");
+        assert_eq!(
+            error.code(),
+            "local_check.profile.clippy.dependency_identity_unavailable"
+        );
+
+        let mut duplicate_tools = fixture.definition();
+        duplicate_tools
+            .additional_toolchain_executables
+            .push(fixture.platform_tool.clone());
+        let error = CargoClippyWorkspaceLocalHandler::new_with_process_runner(
+            LocalCheckCommandContract::cargo_clippy_workspace_model_only()
+                .expect("canonical contract"),
+            &duplicate_tools,
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect_err("duplicate toolchain inventory fails");
+        assert_eq!(
+            error.code(),
+            "local_check.profile.clippy.toolchain_identity_unavailable"
+        );
+        assert!(runner.request.lock().expect("request lock").is_none());
+    }
+
+    #[test]
     fn root_overlap_and_role_substitution_fail_closed() {
         let fixture = Fixture::new();
         let runner = Arc::new(FakeRunner::success());
@@ -1195,6 +1323,94 @@ mod tests {
             "local_check.profile.clippy.writable_root_roles_invalid"
         );
         assert!(runner.request.lock().expect("request lock").is_none());
+    }
+
+    #[test]
+    fn nested_root_overlap_fails_closed_in_both_directions() {
+        for build_contains_temp in [true, false] {
+            let fixture = Fixture::new();
+            let runner = Arc::new(FakeRunner::success());
+            let mut definition = fixture.definition();
+            if build_contains_temp {
+                definition.temporary_root = fixture.target.join("nested-temp");
+                fs::create_dir_all(&definition.temporary_root).expect("nested temp fixture");
+            } else {
+                definition.build_output_root = fixture.temp.join("nested-build");
+                fs::create_dir_all(&definition.build_output_root).expect("nested build fixture");
+            }
+            let error = CargoClippyWorkspaceLocalHandler::new_with_process_runner(
+                LocalCheckCommandContract::cargo_clippy_workspace_model_only()
+                    .expect("canonical contract"),
+                &definition,
+                Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+            )
+            .expect_err("nested roots fail");
+            assert_eq!(error.code(), "local_check.profile.clippy.root_overlap");
+            assert!(runner.request.lock().expect("request lock").is_none());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn every_root_replacement_fails_before_runner_entry() {
+        for root_kind in ["repository", "toolchain", "cache", "build", "temp"] {
+            let fixture = Fixture::new();
+            let runner = Arc::new(FakeRunner::success());
+            let handler = fixture
+                .handler(Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>)
+                .expect("handler resolves");
+            let root = match root_kind {
+                "repository" => fixture.repository.clone(),
+                "toolchain" => fixture.toolchain.clone(),
+                "cache" => fixture.cache.clone(),
+                "build" => fixture.target.clone(),
+                "temp" => fixture.temp.clone(),
+                _ => unreachable!(),
+            };
+            replace_root_with_symlink(&root);
+
+            let error = handler
+                .build_process_request()
+                .expect_err("replaced root fails before runner entry");
+            assert_eq!(
+                error.code(),
+                "local_check.profile.clippy.root_identity_changed"
+            );
+            assert!(!error
+                .to_string()
+                .contains(&fixture.root.to_string_lossy().into_owned()));
+            assert!(runner.request.lock().expect("request lock").is_none());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn every_root_replacement_fails_after_runner_entry() {
+        for root_kind in ["repository", "toolchain", "cache", "build", "temp"] {
+            let fixture = Fixture::new();
+            let root = match root_kind {
+                "repository" => fixture.repository.clone(),
+                "toolchain" => fixture.toolchain.clone(),
+                "cache" => fixture.cache.clone(),
+                "build" => fixture.target.clone(),
+                "temp" => fixture.temp.clone(),
+                _ => unreachable!(),
+            };
+            let handler = fixture
+                .handler(Arc::new(RootReplacingRunner { root }))
+                .expect("handler resolves");
+
+            let error = handler
+                .execute()
+                .expect_err("replaced root fails after runner entry");
+            assert_eq!(
+                error.code(),
+                "local_check.profile.clippy.root_identity_changed"
+            );
+            assert!(!error
+                .to_string()
+                .contains(&fixture.root.to_string_lossy().into_owned()));
+        }
     }
 
     #[test]

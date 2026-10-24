@@ -4,6 +4,12 @@
 
 **Needs blocker fixes.**
 
+Fix-forward status: the bounded changes requested by this review are
+implemented and documented in the [blocker-fix
+report](TRUSTED_HOST_CARGO_CLIPPY_PROFILE_BLOCKER_FIX_REPORT.md). This note
+does not erase the original finding; the fix still requires its focused
+maintainer/security review.
+
 The implementation preserves the most important scope boundary: the Cargo
 clippy handler is crate-private, accepts only an injected process runner, and
 has no standard runner, public production resolver, workflow composition,

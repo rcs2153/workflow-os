@@ -2140,6 +2140,27 @@ fn local_check_registration_explicit_docs_check_profile_exposes_safe_metadata() 
 }
 
 #[test]
+fn local_check_registration_profiles_never_register_cargo_clippy() {
+    let empty = LocalCheckRegistrationProfile::none();
+    let docs = LocalCheckRegistrationProfile::explicit_docs_check(docs_handler_with_runner(
+        Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+            Some(0),
+            true,
+            12,
+            Vec::new(),
+            Vec::new(),
+        ))),
+    ));
+
+    for profile in [&empty, &docs] {
+        assert!(profile
+            .planned_handlers()
+            .iter()
+            .all(|handler| handler.command_kind != LocalCheckCommandKind::CargoClippyWorkspace));
+    }
+}
+
+#[test]
 fn test_only_handler_debug_redacts_local_paths() {
     let contract =
         LocalCheckCommandContract::dogfood_validate_model_only().expect("valid dogfood contract");
