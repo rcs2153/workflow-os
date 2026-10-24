@@ -12,6 +12,9 @@ use workflow_core::{
     TrustedHostLocalApplicationSession,
 };
 
+#[allow(dead_code)]
+mod local_cargo_input_observer;
+
 trait RunOnce {
     fn run_once(
         self,

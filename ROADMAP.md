@@ -86,18 +86,26 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the private local Cargo observer contracts.** Add one canonical
-   selection-bound observation definition, a private observer interface in
-   `workflow-local-host`, an in-memory evidence bundle with exact reference
-   resolution, injected filesystem/process/revision source interfaces, and
-   deterministic process-free tests that enforce every accepted posture
-   ceiling. Do not add a standard process source, live smoke, runtime
-   composition, admission, Cargo execution, OpenShell wiring, persistence,
-   events, schemas, CLI behavior, writes, or broader authority. See the
-   [accepted plan
-   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_PROVIDER_PLAN_REVIEW.md).
+1. **Review the private local Cargo observer contracts.** Verify exact
+   selection, operation, security, producer, repository, revision, and
+   evidence-bundle binding; all nine process-free posture ceilings; injected
+   source closure; deterministic reference derivation; non-leaking output;
+   and preservation of the private non-authorizing boundary. Do not add a
+   standard process source, live smoke, runtime composition, admission, Cargo
+   execution, OpenShell wiring, persistence, events, schemas, CLI behavior,
+   writes, or broader authority. See the [implementation
+   report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Implemented private local Cargo trusted-host observer contracts.** The
+  unpublished local-host crate now contains a selection-bound definition,
+  private observer and injected source interfaces, exact in-memory evidence
+  entries and bundle validation, and deterministic process-free tests. No
+  concrete filesystem or process source exists, and no fact can claim
+  `Observed` before same-call execution continuity is implemented. Focused
+  review is next. See the [implementation
+  report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_CONTRACT_REPORT.md).
 
 - **Accepted local Cargo trusted-host observer provider plan.** Focused
   maintainer/security review accepts `workflow-local-host` ownership, exact
