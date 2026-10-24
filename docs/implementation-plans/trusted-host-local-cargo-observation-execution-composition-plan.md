@@ -1,6 +1,6 @@
 # Trusted-Host Local Cargo Observation And Execution Composition Plan
 
-Status: focused implementation complete; maintainer and security review required.
+Status: observation-binding blocker fixed; focused blocker-fix review required.
 
 Related foundations:
 
@@ -419,3 +419,11 @@ Missing execution-provider observations produce the required
 state-store, event, report-store, or workflow-mutation capability in its input
 surface, so the current slice cannot enter Cargo even if a caller supplies a
 different assessment fixture. Focused maintainer and security review is next.
+
+Focused review found that the first implementation nevertheless accepted an
+optional provider-observation value without committing the exact value into
+the outcome identity. The blocker fix removes that input from the pre-start-
+only local coordinator. It now always passes explicit observation absence to
+the Core SPI. The future SPI may still assess provider-owned observations in a
+separately reviewed provider contract, but this slice cannot accept or collapse
+uncommitted provider claims. Focused blocker-fix review is next.

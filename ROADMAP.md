@@ -86,21 +86,26 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Fix the local Cargo composition observation-binding blocker.** Focused
-   review found that the private coordinator accepts optional provider
-   observations but neither commits the exact observation set nor preserves
-   it in the returned outcome. Distinct provider claims with the same security
-   assessment can collapse to one composition identity. The smallest accepted
-   fix should either remove provider observations from this pre-start-only
-   slice or add one canonical Core-owned observation commitment and bind it
-   into the outcome and composition fingerprint. Preserve reconciliation
-   semantics and add substitution/determinism tests. Do not add a runner, run
-   Cargo, add a live smoke, select or wire OpenShell, change admission,
-   persist outcomes, emit events, add schemas or CLI behavior, enable writes,
-   broaden authority, or change release posture. See the [focused
-   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_REVIEW.md).
+1. **Review the local Cargo composition observation-binding blocker fix.** The
+   pre-start-only coordinator no longer accepts supplied provider observations;
+   it always routes explicit absence through the Core SPI and can therefore
+   return only the honest current pre-start denial. Focused review must verify
+   that no uncommitted provider claim enters this slice, deterministic and
+   changed-input fingerprint coverage is sufficient, the future Core SPI
+   remains non-authorizing, and all execution non-goals remain intact. Do not
+   add a runner, run Cargo, add a live smoke, select or wire OpenShell, change
+   admission, persist outcomes, emit events, add schemas or CLI behavior,
+   enable writes, broaden authority, or change release posture. See the
+   [blocker-fix report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_BINDING_BLOCKER_FIX_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Fixed the local Cargo composition observation-binding blocker.** The
+  private pre-start coordinator no longer accepts provider observations that
+  it cannot commit. It routes explicit absence to the Core assessment SPI,
+  preserves deterministic pre-start denial, and now tests unchanged replay and
+  changed-request fingerprint sensitivity. Focused blocker-fix review is next.
+  See the [fix report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_BINDING_BLOCKER_FIX_REPORT.md).
 
 - **Reviewed the private local Cargo observation/execution composition with one
   blocker.** Immutable execution, observer request/evidence, requirements,

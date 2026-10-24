@@ -35,10 +35,10 @@ use workflow_core::{
     TrustedHostInputObservationReason, TrustedHostInputObservationRequest,
     TrustedHostInputObservationResult, TrustedHostInputObservationResultDefinition,
     TrustedHostLiveExecutionSecurityAssessment, TrustedHostLiveExecutionSecurityDisposition,
-    TrustedHostLiveExecutionSecurityObservations, TrustedHostLiveExecutionSecurityReason,
-    TrustedHostLiveExecutionSecurityRequirements, TrustedHostObservationPosture,
-    TrustedHostRootAccess, TrustedHostRootObservation, TrustedHostRootObservationDefinition,
-    TrustedHostRootObservationMethod, TrustedHostRootRole, WorkflowOsError,
+    TrustedHostLiveExecutionSecurityReason, TrustedHostLiveExecutionSecurityRequirements,
+    TrustedHostObservationPosture, TrustedHostRootAccess, TrustedHostRootObservation,
+    TrustedHostRootObservationDefinition, TrustedHostRootObservationMethod, TrustedHostRootRole,
+    WorkflowOsError,
 };
 
 const REQUIRED_FACT_KINDS: [TrustedHostBuildInputHostObligationKind; 9] = [
@@ -370,7 +370,6 @@ struct LocalCargoObservationExecutionInput<'a> {
     observation_request: &'a TrustedHostInputObservationRequest,
     observation_definition: &'a LocalCargoObservationDefinition,
     security_requirements: &'a TrustedHostLiveExecutionSecurityRequirements,
-    security_observations: Option<&'a TrustedHostLiveExecutionSecurityObservations>,
 }
 
 struct LocalCargoObservationExecutionOutcome {
@@ -587,7 +586,7 @@ where
             input.execution_binding,
             input.observation_request,
             input.security_requirements,
-            input.security_observations,
+            None,
         )?;
         if security_assessment.disposition()
             != TrustedHostLiveExecutionSecurityDisposition::DeniedBeforeStart
@@ -1906,13 +1905,20 @@ mod tests {
     fn composition_request(
         requirements: &TrustedHostLiveExecutionSecurityRequirements,
     ) -> TrustedHostInputObservationRequest {
+        composition_request_with_static(requirements, hash("static-request"))
+    }
+
+    fn composition_request_with_static(
+        requirements: &TrustedHostLiveExecutionSecurityRequirements,
+        static_request: SpecContentHash,
+    ) -> TrustedHostInputObservationRequest {
         let producer = producer();
         let execution = cargo_execution_binding();
         TrustedHostInputObservationRequest::new(TrustedHostInputObservationRequestDefinition {
             version: TrustedHostInputObservationContractVersion::CargoHostInputsV2,
             run_bundle: execution.immutable_run_bundle().root_hash().clone(),
             operation_contract: execution.command_contract_fingerprint().clone(),
-            static_request: hash("static-request"),
+            static_request,
             static_result: hash("static-result"),
             ordering_authority: hash("ordering-authority"),
             static_discovery_completed_revision: 10,
@@ -2015,14 +2021,13 @@ mod tests {
         let requirements = security_requirements();
         let request = composition_request(&requirements);
         let binding = cargo_execution_binding();
-        let definition = definition(&request);
+        let initial_definition = definition(&request);
         let outcome = observer()
             .compose_pre_start(&LocalCargoObservationExecutionInput {
                 execution_binding: &binding,
                 observation_request: &request,
-                observation_definition: &definition,
+                observation_definition: &initial_definition,
                 security_requirements: &requirements,
-                security_observations: None,
             })
             .expect("pre-start denial");
 
@@ -2049,14 +2054,13 @@ mod tests {
         let requirements = security_requirements();
         let other_request = request_with(hash("selection"), hash("repository-tree"));
         // The standalone request carries a different command and security binding.
-        let definition = definition(&other_request);
+        let other_definition = definition(&other_request);
         let error = observer()
             .compose_pre_start(&LocalCargoObservationExecutionInput {
                 execution_binding: &cargo_execution_binding(),
                 observation_request: &other_request,
-                observation_definition: &definition,
+                observation_definition: &other_definition,
                 security_requirements: &requirements,
-                security_observations: None,
             })
             .expect_err("substituted composition must fail");
 
@@ -2074,14 +2078,13 @@ mod tests {
         let requirements = security_requirements();
         let request = composition_request(&requirements);
         let binding = cargo_execution_binding();
-        let definition = definition(&request);
+        let initial_definition = definition(&request);
         let outcome = observer()
             .compose_pre_start(&LocalCargoObservationExecutionInput {
                 execution_binding: &binding,
                 observation_request: &request,
-                observation_definition: &definition,
+                observation_definition: &initial_definition,
                 security_requirements: &requirements,
-                security_observations: None,
             })
             .expect("pre-start denial");
         let debug = format!("{outcome:?}");
@@ -2090,6 +2093,52 @@ mod tests {
         assert!(!debug.contains(binding.binding_fingerprint().as_str()));
         assert!(!debug.contains(request.fingerprint().as_str()));
         assert!(!debug.contains(outcome.composition_fingerprint.as_str()));
+    }
+
+    #[test]
+    fn composition_fingerprint_is_deterministic_and_input_sensitive() {
+        let requirements = security_requirements();
+        let request = composition_request(&requirements);
+        let binding = cargo_execution_binding();
+        let initial_definition = definition(&request);
+        let first = observer()
+            .compose_pre_start(&LocalCargoObservationExecutionInput {
+                execution_binding: &binding,
+                observation_request: &request,
+                observation_definition: &initial_definition,
+                security_requirements: &requirements,
+            })
+            .expect("first composition");
+        let second = observer()
+            .compose_pre_start(&LocalCargoObservationExecutionInput {
+                execution_binding: &binding,
+                observation_request: &request,
+                observation_definition: &initial_definition,
+                security_requirements: &requirements,
+            })
+            .expect("unchanged composition");
+
+        assert_eq!(
+            first.composition_fingerprint,
+            second.composition_fingerprint
+        );
+
+        let changed_request =
+            composition_request_with_static(&requirements, hash("changed-static-request"));
+        let changed_definition = definition(&changed_request);
+        let changed = observer()
+            .compose_pre_start(&LocalCargoObservationExecutionInput {
+                execution_binding: &binding,
+                observation_request: &changed_request,
+                observation_definition: &changed_definition,
+                security_requirements: &requirements,
+            })
+            .expect("changed composition");
+
+        assert_ne!(
+            first.composition_fingerprint,
+            changed.composition_fingerprint
+        );
     }
 
     #[test]

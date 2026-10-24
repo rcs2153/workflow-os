@@ -201,3 +201,12 @@ focused blocker-fix review before any provider suitability re-evaluation.
   authored this review and roadmap queue update; and ran validation. The kernel
   governed scope and approval but did not inspect files, edit documentation,
   execute validation, or perform git and PR operations.
+
+## 16. Fix-Forward Note
+
+The blocker is fixed forward in
+[Trusted-Host Local Cargo Observation Binding Blocker Fix Report](TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_BINDING_BLOCKER_FIX_REPORT.md).
+The private pre-start coordinator no longer accepts provider observations, so
+no uncommitted provider claim can collapse into its composition identity. This
+note does not erase the original finding; focused blocker-fix review remains
+required.
