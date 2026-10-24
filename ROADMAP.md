@@ -86,19 +86,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the provider-neutral trusted-host live-execution security contract
-   core model plan.** The plan composes existing hosted attestation vocabulary
-   with only the missing build-input completeness, root-binding,
-   process-tree-terminal, transient-write, and requirement/observation
-   assessment facts. Review must verify the model remains non-authorizing,
-   does not create a parallel receipt hierarchy, rejects unsafe state
-   combinations, and preserves every live-process blocker. It must not add
-   code, a runner, live Cargo, input discovery, provider selection, OpenShell
-   integration, composition, registration, public surfaces, dependencies,
-   writes, or release changes. See the [core model
-   plan](docs/implementation-plans/trusted-host-live-execution-security-contract-model-plan.md).
+1. **Implement the provider-neutral trusted-host live-execution security
+   contract core model.** Add separate validated requirements and observations,
+   explicit not-started/started/may-have-started posture, exact provider-neutral
+   attempt binding, bounded input and root facts, process-tree and
+   transient-write posture, domain-separated fingerprints, and one pure
+   non-authorizing assessment. Reuse existing hosted vocabulary only where its
+   semantics are exact; do not fabricate a runtime-image digest or create a
+   parallel receipt hierarchy. This phase must not add a runner, live Cargo,
+   input discovery, provider selection, OpenShell integration, composition,
+   registration, persistence, public execution surfaces, dependencies, writes,
+   or release changes. See the [model plan](docs/implementation-plans/trusted-host-live-execution-security-contract-model-plan.md)
+   and its [focused review](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_PLAN_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed provider-neutral trusted-host live-execution security contract model
+  plan review.** The focused review accepts the model-only direction with
+  mandatory constraints: explicit attempt-start posture, exact provider
+  selection binding without provider coupling, no fabricated runtime-image
+  identity, domain-separated canonical fingerprints, hard collection/count
+  bounds, and zero-event observations that are valid only with complete
+  telemetry. The model remains non-authorizing and every live-process blocker
+  remains open. See the [focused review](docs/concepts/TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_PLAN_REVIEW.md).
 
 - **Closed provider-neutral trusted-host live-execution security contract model
   planning.** The model plan separates requirements, observations, and a pure
