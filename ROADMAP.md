@@ -86,18 +86,36 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Plan same-call local Cargo observation and execution composition.** Define
-   how the accepted fixed observer can compose with the existing Cargo clippy
-   local-check boundary while preserving exact request, executable, root,
-   environment, admission, invocation, result, and terminal-report identity.
-   Planning must distinguish preflight evidence from same-call custody and
-   must not promote facts to `Observed` without an accepted continuous owner.
-   Do not implement admission, Cargo execution composition, OpenShell wiring,
-   persistence, events, schemas, CLI behavior, provider writes, or broader
-   authority in the planning phase. See the [accepted source
-   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_SOURCE_REVIEW.md).
+1. **Implement the private injected local Cargo observation/execution
+   composition contract.** Focused maintainer/security review accepts the plan
+   with mandatory constraints. The first slice must bind immutable run,
+   observer, roots, executables, distinct observer/execution environments,
+   Core-owned live-security assessment, invocation, result, and attestation;
+   then prove a stable pre-start denial and zero runner entries for current
+   native observer evidence. Do not add a standard runner, run Cargo, add a
+   live smoke, select or wire OpenShell, change admission, persist outcomes,
+   emit events, add schemas or CLI behavior, enable writes, broaden authority,
+   or change release posture. See the [focused
+   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_PLAN_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted same-call local Cargo observation and execution composition
+  planning.** Review confirms that same-call adjacency is not custody and the
+  native observer cannot unlock Cargo execution. The accepted first
+  implementation is a private injected contract that uses Core-owned security
+  assessment and proves deterministic pre-start denial without entering a
+  runner. See the [focused
+  review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_PLAN_REVIEW.md).
+
+- **Planned same-call local Cargo observation and execution composition.** The
+  plan defines one private local-host coordinator and exact bindings across
+  immutable run, observer, roots, executables, environments, live-security
+  assessment, invocation, result, attestation, and reporting. It preserves the
+  key security conclusion: successful native preflight observation is not
+  admission-to-terminal custody and cannot start Cargo. Focused
+  maintainer/security review is next. See the [planning
+  report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_PLAN_REPORT.md).
 
 - **Accepted the fixed local Cargo source and opt-in smoke.** Focused
   maintainer/security review confirms closed typed selection, fixed probe
