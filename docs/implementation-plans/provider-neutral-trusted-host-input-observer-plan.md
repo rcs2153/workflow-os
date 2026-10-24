@@ -631,3 +631,17 @@ substituted input, and remains process-free and non-authorizing.
 The next phase is separate planning for one live provider implementation and
 its capability/evidence matrix. See [Trusted-Host Input Observer Fixture Proof
 Review](../concepts/TRUSTED_HOST_INPUT_OBSERVER_FIXTURE_PROOF_REVIEW.md).
+
+## 32. First Live Producer Planning Record
+
+The first live producer is planned as a native, read-only local Cargo host
+observer owned by the unpublished `workflow-local-host` boundary. The plan
+maps all nine obligations and the repository root to explicit evidence
+requirements and conservative posture ceilings. It expects the first result
+to remain insufficient for admission rather than promoting preflight facts
+into false execution continuity.
+
+OpenShell remains the preferred future optional containment provider, but its
+accepted v0.0.101 evidence gaps still block wiring. Focused review of the local
+producer plan is next. See [Trusted-Host Local Cargo Input Observer Provider
+Plan](trusted-host-local-cargo-input-observer-provider-plan.md).

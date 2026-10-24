@@ -86,21 +86,36 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Plan one live trusted-host input observer provider and its
-   capability/evidence matrix.** Select exactly one provider candidate and map
-   all nine host-input obligations plus repository-root observation to
-   authoritative provider surfaces, freshness, object continuity, stable
-   evidence references, and explicit unsupported/unavailable outcomes. Keep
-   discovery, observation, assessment, and admission separate. This is
-   planning only: do not inspect a host, execute a process, integrate a live
-   provider, admit runtime execution, persist observations, add events,
-   schemas, CLI behavior, writes, or broader authority. See the [accepted
-   fixture proof
-   review](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_FIXTURE_PROOF_REVIEW.md)
-   and [observer
-   plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
+1. **Implement the private local Cargo observer contracts.** Add one canonical
+   selection-bound observation definition, a private observer interface in
+   `workflow-local-host`, an in-memory evidence bundle with exact reference
+   resolution, injected filesystem/process/revision source interfaces, and
+   deterministic process-free tests that enforce every accepted posture
+   ceiling. Do not add a standard process source, live smoke, runtime
+   composition, admission, Cargo execution, OpenShell wiring, persistence,
+   events, schemas, CLI behavior, writes, or broader authority. See the
+   [accepted plan
+   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_PROVIDER_PLAN_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted local Cargo trusted-host observer provider plan.** Focused
+  maintainer/security review accepts `workflow-local-host` ownership, exact
+  selection and ordering binding, conservative no-`Observed` preflight
+  ceilings, deterministic in-memory evidence resolution, fixed probe and
+  privacy rules, one initial platform, and continued OpenShell deferral. The
+  private injected contract slice is next. See the [focused
+  review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_INPUT_OBSERVER_PROVIDER_PLAN_REVIEW.md).
+
+- **Closed local Cargo trusted-host observer provider planning.** The plan
+  selects one native read-only `workflow-local-host` producer, maps all nine
+  host obligations and repository-root observation to exact evidence needs
+  and conservative posture ceilings, and preserves an intentionally
+  non-authorizing result when preflight cannot prove execution continuity.
+  OpenShell remains a later optional containment provider and its accepted
+  upstream gaps still block wiring. Focused plan review is next. See the
+  [implementation
+  plan](docs/implementation-plans/trusted-host-local-cargo-input-observer-provider-plan.md).
 
 - **Accepted fixture-backed in-memory trusted-host input observer proof.**
   Focused maintainer/security review confirms that the helper accepts only
