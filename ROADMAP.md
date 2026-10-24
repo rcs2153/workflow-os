@@ -86,21 +86,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Re-review the provider-neutral trusted-host input observer planning
-   blocker fix.** Verify that the plan now requires exactly one existing
-   `TrustedHostRootObservation` for the repository input root, binds the exact
-   static repository commitment, enforces read-only and
-   non-invocation-scoped posture, validates method/object/continuity coherence,
-   and includes the required regressions without creating a parallel root
-   model. Keep review documentation-only. Do not implement an observer, inspect
-   a host, execute a process, select a provider, admit runtime work, persist
-   observations, add schemas or CLI behavior, enable writes, or broaden
-   authority. See the [fix-forward observer
-   plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md)
-   and original [focused
-   review](docs/concepts/PROVIDER_NEUTRAL_TRUSTED_HOST_INPUT_OBSERVER_PLAN_REVIEW.md).
+1. **Implement the provider-neutral trusted-host input observer Core model.**
+   Add validated request, result, producer, fact, posture, method, and canonical
+   commitment vocabulary for the closed nine host obligations, plus exact
+   composition of the existing repository-root observation. Keep the model
+   non-authorizing and process-free. Add strict serde, privacy-safe Debug and
+   errors, pinned canonical vectors, substitution/coherence tests, honest docs,
+   and an implementation report. Do not inspect a host, add a callable
+   observer, execute a process, integrate a provider, admit runtime work,
+   persist observations, add schemas or CLI behavior, enable writes, or
+   broaden authority. See the accepted [blocker-fix
+   review](docs/concepts/PROVIDER_NEUTRAL_TRUSTED_HOST_INPUT_OBSERVER_PLAN_BLOCKER_FIX_REVIEW.md)
+   and [implementation
+   plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted provider-neutral trusted-host input observer planning blocker
+  fix.** Focused re-review verified exact reuse of the existing repository-root
+  observation, static repository commitment binding, read-only and
+  non-invocation-scoped posture, coherence failures, planned regressions, and
+  unchanged non-authorizing scope. The Core model may begin. See the [focused
+  blocker-fix
+  review](docs/concepts/PROVIDER_NEUTRAL_TRUSTED_HOST_INPUT_OBSERVER_PLAN_BLOCKER_FIX_REVIEW.md).
 
 - **Closed provider-neutral trusted-host input observer planning blocker fix.**
   The plan now composes exactly one accepted repository-root observation,
