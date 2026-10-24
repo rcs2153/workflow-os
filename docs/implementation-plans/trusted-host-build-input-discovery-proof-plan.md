@@ -1,8 +1,8 @@
 # Trusted-Host Build-Input Discovery Proof Plan
 
 Status: planning and focused review accepted; Core static-discovery model
-implemented; the two focused model-review blockers are fixed; focused re-review
-is required before parser work.
+implemented; the two focused model-review blockers are fixed and accepted;
+fixture-only parser and graph-resolver implementation is next.
 
 Implementation evidence is recorded in the [Trusted-Host Build-Input Discovery
 Core Model Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
@@ -12,6 +12,9 @@ Review](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REVIEW.md).
 Blocker-fix evidence is recorded in the [Trusted-Host Build-Input Discovery
 Core Model Blocker Fix
 Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REPORT.md).
+Focused acceptance is recorded in the [Trusted-Host Build-Input Discovery Core
+Model Blocker Fix
+Review](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REVIEW.md).
 
 Related foundations:
 
@@ -392,10 +395,11 @@ Future implementation tests must cover:
 
 ## 18. Candidate Implementation Sequence
 
-1. Focused maintainer/security review of this plan.
+1. Focused maintainer/security review of this plan. Completed and accepted.
 2. Core static-discovery request/result model and canonicalization only.
-3. Focused model review.
-4. Fixture-only structured metadata parser and graph resolver.
+   Completed.
+3. Focused model review and blocker repair. Completed and accepted.
+4. Fixture-only structured metadata parser and graph resolver. Next.
 5. Focused parser/security review.
 6. Workflow OS workspace proof using the reviewed parser.
 7. Focused proof review.
@@ -428,14 +432,12 @@ one change.
 
 ## 20. Final Recommendation
 
-After focused review, implement the **Core static-discovery request/result model
-and canonicalization only**.
+Implement the **fixture-only structured metadata parser and graph resolver**.
 
-Do not begin with Cargo execution, a provider adapter, a live workspace scan,
-or a handler. The model must first make static completeness, unsupported host
-obligations, exact snapshot binding, bounds, and privacy enforceable. The next
-implementation should still not add live processes, providers, persistence,
-schemas, writes, or release changes.
+Use the accepted model and preserve its static/live completeness, exact
+snapshot binding, bounds, privacy, and non-authorizing posture. Do not combine
+the parser with Cargo execution, a provider adapter, live workspace proof, a
+handler, host observation, persistence, schemas, writes, or release changes.
 
 ## 21. Governed Planning Record
 

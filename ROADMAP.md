@@ -86,16 +86,24 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Re-review the trusted-host static build-input discovery model blocker
-   fix.** Verify fixed-width version-one canonical framing, pinned request and
-   result vectors, strict top-level and nested wire decoding, value-independent
-   errors, unchanged valid serde behavior, and the continued absence of parser,
-   filesystem, process, provider, persistence, schema, CLI, write, or authority
-   behavior. Do not begin fixture parser or workspace discovery before
-   acceptance. See the [blocker-fix
-   report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REPORT.md).
+1. **Implement the fixture-only trusted-host structured metadata parser and
+   graph resolver.** Parse only the accepted closed metadata set from an
+   explicitly supplied immutable fixture root, remain process-free and
+   network-free, fail closed for unsupported or changing inputs, and produce
+   the reviewed non-authorizing request/result model. Do not combine this with
+   live workspace proof, host observation, provider integration, persistence,
+   schemas, runtime execution, or writes. See the [accepted blocker-fix
+   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted trusted-host static build-input discovery Core model blocker
+  fix.** Focused maintainer/security re-review accepted the fixed-width
+  canonical framing, pinned vectors, strict nested wire boundary, non-leaking
+  errors, compatibility posture, and model-only authority boundary. Fixture-only
+  parser implementation may begin; broader workspace and runtime work remains
+  deferred. See the [blocker-fix
+  review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_BLOCKER_FIX_REVIEW.md).
 
 - **Closed trusted-host static build-input discovery Core model blocker fix.**
   Canonical label and value lengths now use checked fixed-width `u64`
