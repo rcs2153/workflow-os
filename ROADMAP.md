@@ -86,19 +86,27 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the local Cargo composition observation-binding blocker fix.** The
-   pre-start-only coordinator no longer accepts supplied provider observations;
-   it always routes explicit absence through the Core SPI and can therefore
-   return only the honest current pre-start denial. Focused review must verify
-   that no uncommitted provider claim enters this slice, deterministic and
-   changed-input fingerprint coverage is sufficient, the future Core SPI
-   remains non-authorizing, and all execution non-goals remain intact. Do not
-   add a runner, run Cargo, add a live smoke, select or wire OpenShell, change
-   admission, persist outcomes, emit events, add schemas or CLI behavior,
-   enable writes, broaden authority, or change release posture. See the
-   [blocker-fix report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_BINDING_BLOCKER_FIX_REPORT.md).
+1. **Re-evaluate trusted-host local Cargo execution-provider suitability.** The
+   observation-binding blocker fix is accepted: the pre-start coordinator
+   cannot receive an uncommitted provider claim, returns only exact
+   absence-driven denial, and retains a future non-authorizing Core SPI.
+   Re-evaluate the native and optional OpenShell boundaries against the already
+   documented effective-control, lifecycle, cleanup, and reconciliation facts.
+   This is a bounded decision phase, not provider wiring. Do not add a runner,
+   run Cargo, add a live smoke, select or wire OpenShell, change admission,
+   persist outcomes, emit events, add schemas or CLI behavior, enable writes,
+   broaden authority, fork OpenShell, or change release posture. See the
+   [blocker-fix review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_BINDING_BLOCKER_FIX_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted the local Cargo composition observation-binding blocker fix.**
+  Focused review verifies that the private coordinator cannot accept provider
+  observations, exact absence produces only `DeniedBeforeStart` with
+  `ObservationUnavailable`, deterministic fingerprints are input-sensitive,
+  and the future Core SPI remains non-authorizing. Provider suitability
+  re-evaluation is next; provider wiring remains blocked. See the [focused
+  review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_BINDING_BLOCKER_FIX_REVIEW.md).
 
 - **Fixed the local Cargo composition observation-binding blocker.** The
   private pre-start coordinator no longer accepts provider observations that

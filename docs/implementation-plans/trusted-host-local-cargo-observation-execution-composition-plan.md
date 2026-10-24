@@ -1,6 +1,7 @@
 # Trusted-Host Local Cargo Observation And Execution Composition Plan
 
-Status: observation-binding blocker fixed; focused blocker-fix review required.
+Status: implementation and observation-binding blocker fix accepted; provider
+suitability re-evaluation is next.
 
 Related foundations:
 

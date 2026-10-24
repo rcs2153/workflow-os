@@ -107,6 +107,9 @@ non-authorizing, fingerprints are deterministic and input-sensitive, the
 pre-start denial is exact, and every execution non-goal remains intact before
 provider suitability is reconsidered.
 
+That review is complete and accepted in
+[Trusted-Host Local Cargo Observation Binding Blocker Fix Review](TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_BINDING_BLOCKER_FIX_REVIEW.md).
+
 ## 12. Governed Phase Evidence
 
 - Workflow ID: `dg/blocker`.
