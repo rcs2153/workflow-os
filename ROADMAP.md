@@ -86,19 +86,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the private injected local Cargo observation/execution
-   composition contract.** Focused maintainer/security review accepts the plan
-   with mandatory constraints. The first slice must bind immutable run,
-   observer, roots, executables, distinct observer/execution environments,
-   Core-owned live-security assessment, invocation, result, and attestation;
-   then prove a stable pre-start denial and zero runner entries for current
-   native observer evidence. Do not add a standard runner, run Cargo, add a
-   live smoke, select or wire OpenShell, change admission, persist outcomes,
-   emit events, add schemas or CLI behavior, enable writes, broaden authority,
-   or change release posture. See the [focused
-   review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_PLAN_REVIEW.md).
+1. **Review the private injected local Cargo observation/execution composition
+   contract.** The first process-free slice now binds immutable local-check
+   execution, observer request and evidence, live-security requirements, and
+   attempt through a narrow Core-owned assessment SPI. Missing provider
+   observations produce a stable pre-start denial, and the private coordinator
+   has no runner or process capability. Focused review must verify exact
+   binding, deterministic denial, privacy, process-free tests, and preserved
+   non-goals before any provider suitability work. Do not add a standard
+   runner, run Cargo, add a live smoke, select or wire OpenShell, change
+   admission, persist outcomes, emit events, add schemas or CLI behavior,
+   enable writes, broaden authority, or change release posture. See the
+   [implementation report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Implemented the private local Cargo observation/execution composition
+  contract.** The process-free coordinator validates exact immutable execution
+  and observation bindings, validates the observer evidence bundle, delegates
+  security assessment to Core, and returns `DeniedBeforeStart` when execution-
+  provider observations are absent. It exposes no runner or process capability
+  and adds no runtime, persistence, event, schema, CLI, provider, or write
+  behavior. Focused maintainer/security review is next. See the
+  [implementation report](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_OBSERVATION_EXECUTION_COMPOSITION_REPORT.md).
 
 - **Accepted same-call local Cargo observation and execution composition
   planning.** Review confirms that same-call adjacency is not custody and the

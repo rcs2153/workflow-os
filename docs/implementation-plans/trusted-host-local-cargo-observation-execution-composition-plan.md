@@ -1,6 +1,6 @@
 # Trusted-Host Local Cargo Observation And Execution Composition Plan
 
-Status: planning complete; focused maintainer and security review required.
+Status: focused implementation complete; maintainer and security review required.
 
 Related foundations:
 
@@ -406,3 +406,16 @@ CLI behavior, enable writes, broaden authority, or change release posture.
   authored this plan and roadmap update; and ran documentation validation. The
   kernel governed scope and approval but did not inspect files, edit documents,
   run validation, or perform git and PR operations.
+
+## 23. Implementation Status
+
+The first implementation is complete as a private, in-memory, process-free
+composition boundary. It binds the immutable local-check execution contract,
+observer request and evidence, live-security requirements, and attempt before
+routing security posture through the Core-owned assessment SPI.
+
+Missing execution-provider observations produce the required
+`DeniedBeforeStart` result. The coordinator has no runner, process, provider,
+state-store, event, report-store, or workflow-mutation capability in its input
+surface, so the current slice cannot enter Cargo even if a caller supplies a
+different assessment fixture. Focused maintainer and security review is next.

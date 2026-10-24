@@ -678,6 +678,12 @@ impl TrustedHostInputObservationRequest {
     pub const fn fingerprint(&self) -> &SpecContentHash {
         &self.fingerprint
     }
+
+    /// Returns the exact immutable run-bundle root bound to this request.
+    #[must_use]
+    pub const fn run_bundle(&self) -> &SpecContentHash {
+        &self.run_bundle
+    }
     /// Returns the required immutable repository-tree commitment.
     #[must_use]
     pub const fn repository_tree(&self) -> &SpecContentHash {
@@ -724,6 +730,12 @@ impl TrustedHostInputObservationRequest {
     #[must_use]
     pub const fn expected_producer_version(&self) -> &TrustedHostInputObservationProducerVersion {
         &self.expected_producer_version
+    }
+
+    /// Returns the exact future-attempt commitment bound to this request.
+    #[must_use]
+    pub const fn attempt(&self) -> &SpecContentHash {
+        &self.attempt
     }
 }
 

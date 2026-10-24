@@ -695,6 +695,8 @@ pub use trusted_host_input_observer::{
 pub use trusted_host_input_observer_fixture::{
     observe_trusted_host_inputs_from_fixture, TrustedHostInputObservationFixture,
 };
+#[cfg(feature = "trusted-host-application-spi")]
+pub use trusted_host_live_execution_security::assess_trusted_host_local_cargo_composition_security;
 pub use trusted_host_live_execution_security::{
     BuildTimeInputCompletenessPosture, BuildTimeInputDiscoveryMethod, BuildTimeInputKind,
     BuildTimeInputKindCount, BuildTimeInputManifest, BuildTimeInputManifestDefinition,

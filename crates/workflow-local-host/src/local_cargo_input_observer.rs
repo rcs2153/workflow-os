@@ -25,7 +25,8 @@ use nix::unistd::Pid;
 use std::os::unix::process::CommandExt;
 
 use workflow_core::{
-    HostedExecutionReference, HostedExecutionReferenceKind, SpecContentHash,
+    assess_trusted_host_local_cargo_composition_security, HostedExecutionReference,
+    HostedExecutionReferenceKind, ImmutableLocalCheckExecutionBinding, SpecContentHash,
     TrustedHostBuildInputHostObligationKind, TrustedHostInputObservationFact,
     TrustedHostInputObservationFactDefinition, TrustedHostInputObservationMethod,
     TrustedHostInputObservationPosture, TrustedHostInputObservationProducer,
@@ -33,9 +34,11 @@ use workflow_core::{
     TrustedHostInputObservationProducerKind, TrustedHostInputObservationProducerVersion,
     TrustedHostInputObservationReason, TrustedHostInputObservationRequest,
     TrustedHostInputObservationResult, TrustedHostInputObservationResultDefinition,
-    TrustedHostObservationPosture, TrustedHostRootAccess, TrustedHostRootObservation,
-    TrustedHostRootObservationDefinition, TrustedHostRootObservationMethod, TrustedHostRootRole,
-    WorkflowOsError,
+    TrustedHostLiveExecutionSecurityAssessment, TrustedHostLiveExecutionSecurityDisposition,
+    TrustedHostLiveExecutionSecurityObservations, TrustedHostLiveExecutionSecurityReason,
+    TrustedHostLiveExecutionSecurityRequirements, TrustedHostObservationPosture,
+    TrustedHostRootAccess, TrustedHostRootObservation, TrustedHostRootObservationDefinition,
+    TrustedHostRootObservationMethod, TrustedHostRootRole, WorkflowOsError,
 };
 
 const REQUIRED_FACT_KINDS: [TrustedHostBuildInputHostObligationKind; 9] = [
@@ -362,6 +365,40 @@ struct LocalCargoObservationOutput {
     evidence: LocalCargoObservationEvidenceBundle,
 }
 
+struct LocalCargoObservationExecutionInput<'a> {
+    execution_binding: &'a ImmutableLocalCheckExecutionBinding,
+    observation_request: &'a TrustedHostInputObservationRequest,
+    observation_definition: &'a LocalCargoObservationDefinition,
+    security_requirements: &'a TrustedHostLiveExecutionSecurityRequirements,
+    security_observations: Option<&'a TrustedHostLiveExecutionSecurityObservations>,
+}
+
+struct LocalCargoObservationExecutionOutcome {
+    observation: LocalCargoObservationOutput,
+    security_assessment: TrustedHostLiveExecutionSecurityAssessment,
+    composition_fingerprint: SpecContentHash,
+}
+
+impl LocalCargoObservationExecutionOutcome {
+    fn disposition(&self) -> TrustedHostLiveExecutionSecurityDisposition {
+        self.security_assessment.disposition()
+    }
+}
+
+impl fmt::Debug for LocalCargoObservationExecutionOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCargoObservationExecutionOutcome")
+            .field("observation", &"[REDACTED]")
+            .field(
+                "security_disposition",
+                &self.security_assessment.disposition(),
+            )
+            .field("composition_fingerprint", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
 struct LocalCargoObservationAssembly {
     producer: TrustedHostInputObservationProducer,
     started_revision: u64,
@@ -537,6 +574,44 @@ where
         .into_output(request)
     }
 
+    fn compose_pre_start(
+        &mut self,
+        input: &LocalCargoObservationExecutionInput<'_>,
+    ) -> Result<LocalCargoObservationExecutionOutcome, WorkflowOsError> {
+        let observation = self.observe(input.observation_request, input.observation_definition)?;
+        observation
+            .evidence
+            .validate(input.observation_request, &observation.result)?;
+
+        let security_assessment = assess_trusted_host_local_cargo_composition_security(
+            input.execution_binding,
+            input.observation_request,
+            input.security_requirements,
+            input.security_observations,
+        )?;
+        if security_assessment.disposition()
+            != TrustedHostLiveExecutionSecurityDisposition::DeniedBeforeStart
+        {
+            return Err(observer_error(
+                "composition.execution_unavailable",
+                "local Cargo execution is unavailable in this composition boundary",
+            ));
+        }
+
+        let composition_fingerprint = local_cargo_composition_fingerprint(
+            input.execution_binding,
+            input.observation_request,
+            &observation,
+            input.security_requirements,
+            &security_assessment,
+        );
+        Ok(LocalCargoObservationExecutionOutcome {
+            observation,
+            security_assessment,
+            composition_fingerprint,
+        })
+    }
+
     fn validate_binding(
         &self,
         request: &TrustedHostInputObservationRequest,
@@ -576,6 +651,98 @@ where
             })
             .collect()
     }
+}
+
+fn local_cargo_composition_fingerprint(
+    execution_binding: &ImmutableLocalCheckExecutionBinding,
+    request: &TrustedHostInputObservationRequest,
+    observation: &LocalCargoObservationOutput,
+    requirements: &TrustedHostLiveExecutionSecurityRequirements,
+    assessment: &TrustedHostLiveExecutionSecurityAssessment,
+) -> SpecContentHash {
+    let mut hasher = Sha256::new();
+    hash_composition_field(
+        &mut hasher,
+        b"domain",
+        b"workflow-os/local-cargo-observation-execution-composition/v1",
+    );
+    hash_composition_field(
+        &mut hasher,
+        b"execution_binding",
+        execution_binding.binding_fingerprint().as_str().as_bytes(),
+    );
+    hash_composition_field(
+        &mut hasher,
+        b"observation_request",
+        request.fingerprint().as_str().as_bytes(),
+    );
+    hash_composition_field(
+        &mut hasher,
+        b"observation_result",
+        observation.result.fingerprint().as_str().as_bytes(),
+    );
+    hash_composition_field(
+        &mut hasher,
+        b"observation_evidence",
+        observation.evidence.result_fingerprint.as_str().as_bytes(),
+    );
+    hash_composition_field(
+        &mut hasher,
+        b"security_requirements",
+        requirements.fingerprint().as_str().as_bytes(),
+    );
+    hash_composition_field(
+        &mut hasher,
+        b"security_disposition",
+        match assessment.disposition() {
+            TrustedHostLiveExecutionSecurityDisposition::DeniedBeforeStart => {
+                b"denied_before_start"
+            }
+            TrustedHostLiveExecutionSecurityDisposition::ReconciliationRequired => {
+                b"reconciliation_required"
+            }
+            TrustedHostLiveExecutionSecurityDisposition::Satisfied => b"satisfied",
+        },
+    );
+    for reason in assessment.reasons() {
+        hash_composition_field(
+            &mut hasher,
+            b"security_reason",
+            live_security_reason_code(*reason),
+        );
+    }
+    SpecContentHash::from_bytes(hasher.finalize())
+}
+
+fn live_security_reason_code(reason: TrustedHostLiveExecutionSecurityReason) -> &'static [u8] {
+    match reason {
+        TrustedHostLiveExecutionSecurityReason::InputClosure => b"input_closure",
+        TrustedHostLiveExecutionSecurityReason::RootBinding => b"root_binding",
+        TrustedHostLiveExecutionSecurityReason::PolicyMismatch => b"policy_mismatch",
+        TrustedHostLiveExecutionSecurityReason::PolicyDrift => b"policy_drift",
+        TrustedHostLiveExecutionSecurityReason::EnforcementMode => b"enforcement_mode",
+        TrustedHostLiveExecutionSecurityReason::FilesystemControl => b"filesystem_control",
+        TrustedHostLiveExecutionSecurityReason::ProcessControl => b"process_control",
+        TrustedHostLiveExecutionSecurityReason::NetworkControl => b"network_control",
+        TrustedHostLiveExecutionSecurityReason::ObservationUnavailable => {
+            b"observation_unavailable"
+        }
+        TrustedHostLiveExecutionSecurityReason::NetworkActivity => b"network_activity",
+        TrustedHostLiveExecutionSecurityReason::EgressProbeMissing => b"egress_probe_missing",
+        TrustedHostLiveExecutionSecurityReason::ProcessTreeNotTerminal => {
+            b"process_tree_not_terminal"
+        }
+        TrustedHostLiveExecutionSecurityReason::ResourceBudget => b"resource_budget",
+        TrustedHostLiveExecutionSecurityReason::TransientWrite => b"transient_write",
+        TrustedHostLiveExecutionSecurityReason::CleanupIncomplete => b"cleanup_incomplete",
+    }
+}
+
+fn hash_composition_field(hasher: &mut Sha256, label: &[u8], value: &[u8]) {
+    hasher.update(u64::try_from(label.len()).unwrap_or(u64::MAX).to_be_bytes());
+    hasher.update(label);
+    hasher.update(u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
+    hasher.update(value);
 }
 
 fn posture_allowed_for_kind(
@@ -1516,9 +1683,14 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
     use workflow_core::{
-        TrustedHostInputObservationContractVersion, TrustedHostInputObservationProducerDefinition,
-        TrustedHostInputObservationProducerId, TrustedHostInputObservationProducerVersion,
-        TrustedHostInputObservationRequestDefinition,
+        ImmutableLocalCheckExecutionBindingDefinition, ImmutableLocalCheckHandlerSelection,
+        ImmutableRunBundleBinding, LocalCheckCommandContract, LocalCheckCommandKind, SkillId,
+        SkillVersion, StepId, Timestamp, TrustedHostInputObservationContractVersion,
+        TrustedHostInputObservationProducerDefinition, TrustedHostInputObservationProducerId,
+        TrustedHostInputObservationProducerVersion, TrustedHostInputObservationRequestDefinition,
+        TrustedHostLiveExecutionBinding, TrustedHostLiveExecutionSecurityProfile,
+        TrustedHostLiveExecutionSecurityRequirementsDefinition, TrustedHostRootBindingRequirement,
+        TrustedHostRootRequirement, WorkflowId, WorkflowRunId,
     };
 
     #[derive(Clone)]
@@ -1636,6 +1808,124 @@ mod tests {
         request_with(hash("selection"), hash("repository-tree"))
     }
 
+    fn run_bundle() -> ImmutableRunBundleBinding {
+        serde_json::from_value(serde_json::json!({
+            "bundle_id": "bundle/local-cargo-composition",
+            "bundle_version": "v1",
+            "root_hash": hash("run-bundle").as_str(),
+        }))
+        .expect("run bundle")
+    }
+
+    fn cargo_execution_binding() -> ImmutableLocalCheckExecutionBinding {
+        let contract = LocalCheckCommandContract::cargo_clippy_workspace_model_only()
+            .expect("Cargo clippy contract");
+        ImmutableLocalCheckExecutionBinding::new(ImmutableLocalCheckExecutionBindingDefinition {
+            immutable_run_bundle: run_bundle(),
+            workflow_id: WorkflowId::new("workflow/local-cargo-composition").expect("workflow"),
+            run_id: WorkflowRunId::new("run-local-cargo-composition").expect("run"),
+            step_id: StepId::new("cargo-clippy").expect("step"),
+            skill_id: SkillId::new("local/check-cargo-clippy").expect("skill"),
+            skill_version: SkillVersion::new("v0").expect("skill version"),
+            command_contract: &contract,
+            handler_selection: ImmutableLocalCheckHandlerSelection::registered_unattested(
+                LocalCheckCommandKind::CargoClippyWorkspace,
+                SkillId::new("local/check-cargo-clippy").expect("skill"),
+                SkillVersion::new("v0").expect("skill version"),
+            ),
+            created_at: Timestamp::parse_rfc3339("2026-10-24T12:00:00Z").expect("timestamp"),
+        })
+        .expect("execution binding")
+    }
+
+    fn root_requirements() -> Vec<TrustedHostRootRequirement> {
+        use TrustedHostRootRole::{
+            BuildOutputWrite, CacheWrite, DependencyInput, RepositoryInput, TemporaryWrite,
+            ToolchainInput,
+        };
+        vec![
+            TrustedHostRootRequirement::new(
+                RepositoryInput,
+                TrustedHostRootAccess::ReadOnly,
+                TrustedHostRootBindingRequirement::ProviderImmutableProjection,
+                false,
+            ),
+            TrustedHostRootRequirement::new(
+                ToolchainInput,
+                TrustedHostRootAccess::ReadExecute,
+                TrustedHostRootBindingRequirement::AdmissionToTerminal,
+                false,
+            ),
+            TrustedHostRootRequirement::new(
+                DependencyInput,
+                TrustedHostRootAccess::ReadOnly,
+                TrustedHostRootBindingRequirement::ProviderImmutableProjection,
+                false,
+            ),
+            TrustedHostRootRequirement::new(
+                CacheWrite,
+                TrustedHostRootAccess::ReadWrite,
+                TrustedHostRootBindingRequirement::AdmissionToTerminal,
+                true,
+            ),
+            TrustedHostRootRequirement::new(
+                BuildOutputWrite,
+                TrustedHostRootAccess::ReadWrite,
+                TrustedHostRootBindingRequirement::AdmissionToTerminal,
+                true,
+            ),
+            TrustedHostRootRequirement::new(
+                TemporaryWrite,
+                TrustedHostRootAccess::ReadWrite,
+                TrustedHostRootBindingRequirement::AdmissionToTerminal,
+                true,
+            ),
+        ]
+    }
+
+    fn security_requirements() -> TrustedHostLiveExecutionSecurityRequirements {
+        let execution = cargo_execution_binding();
+        TrustedHostLiveExecutionSecurityRequirements::new(
+            TrustedHostLiveExecutionSecurityRequirementsDefinition {
+                binding: TrustedHostLiveExecutionBinding::new(
+                    execution.immutable_run_bundle().root_hash().clone(),
+                    execution.command_contract_fingerprint().clone(),
+                    hash("attempt"),
+                    hash("execution-provider-request"),
+                    hash("execution-provider-selection"),
+                ),
+                profile: TrustedHostLiveExecutionSecurityProfile::StrictBuildExecutionV1,
+                requested_policy_hash: hash("policy"),
+                root_requirements: root_requirements(),
+                denied_egress_probe_required: false,
+            },
+        )
+        .expect("security requirements")
+    }
+
+    fn composition_request(
+        requirements: &TrustedHostLiveExecutionSecurityRequirements,
+    ) -> TrustedHostInputObservationRequest {
+        let producer = producer();
+        let execution = cargo_execution_binding();
+        TrustedHostInputObservationRequest::new(TrustedHostInputObservationRequestDefinition {
+            version: TrustedHostInputObservationContractVersion::CargoHostInputsV2,
+            run_bundle: execution.immutable_run_bundle().root_hash().clone(),
+            operation_contract: execution.command_contract_fingerprint().clone(),
+            static_request: hash("static-request"),
+            static_result: hash("static-result"),
+            ordering_authority: hash("ordering-authority"),
+            static_discovery_completed_revision: 10,
+            repository_tree: hash("repository-tree"),
+            security_requirements: requirements.fingerprint().clone(),
+            selection: hash("selection"),
+            attempt: hash("attempt"),
+            expected_producer_id: producer.id().clone(),
+            expected_producer_version: producer.version().clone(),
+        })
+        .expect("composition request")
+    }
+
     fn definition(request: &TrustedHostInputObservationRequest) -> LocalCargoObservationDefinition {
         LocalCargoObservationDefinition::new(
             request,
@@ -1718,6 +2008,88 @@ mod tests {
             .evidence
             .validate(&request, &output.result)
             .expect("evidence bundle");
+    }
+
+    #[test]
+    fn composition_returns_bound_pre_start_denial_without_execution_provider_observations() {
+        let requirements = security_requirements();
+        let request = composition_request(&requirements);
+        let binding = cargo_execution_binding();
+        let definition = definition(&request);
+        let outcome = observer()
+            .compose_pre_start(&LocalCargoObservationExecutionInput {
+                execution_binding: &binding,
+                observation_request: &request,
+                observation_definition: &definition,
+                security_requirements: &requirements,
+                security_observations: None,
+            })
+            .expect("pre-start denial");
+
+        assert_eq!(
+            outcome.disposition(),
+            TrustedHostLiveExecutionSecurityDisposition::DeniedBeforeStart
+        );
+        assert_eq!(
+            outcome.security_assessment.reasons(),
+            &[TrustedHostLiveExecutionSecurityReason::ObservationUnavailable]
+        );
+        assert_eq!(outcome.observation.result.facts().len(), 9);
+        assert!(outcome
+            .observation
+            .result
+            .facts()
+            .iter()
+            .all(|fact| fact.posture() != TrustedHostInputObservationPosture::Observed));
+        assert_ne!(outcome.composition_fingerprint.as_str(), "");
+    }
+
+    #[test]
+    fn composition_rejects_substituted_execution_binding_after_observation() {
+        let requirements = security_requirements();
+        let other_request = request_with(hash("selection"), hash("repository-tree"));
+        // The standalone request carries a different command and security binding.
+        let definition = definition(&other_request);
+        let error = observer()
+            .compose_pre_start(&LocalCargoObservationExecutionInput {
+                execution_binding: &cargo_execution_binding(),
+                observation_request: &other_request,
+                observation_definition: &definition,
+                security_requirements: &requirements,
+                security_observations: None,
+            })
+            .expect_err("substituted composition must fail");
+
+        assert_eq!(
+            error.code(),
+            "trusted_host.live_security.composition.binding.substituted"
+        );
+        assert!(!format!("{error:?}").contains("run-local-cargo-composition"));
+        // Keep the value live through the assertion to make mutation impossible to hide.
+        assert_eq!(other_request.selection(), &hash("selection"));
+    }
+
+    #[test]
+    fn composition_debug_redacts_bound_identity_and_evidence() {
+        let requirements = security_requirements();
+        let request = composition_request(&requirements);
+        let binding = cargo_execution_binding();
+        let definition = definition(&request);
+        let outcome = observer()
+            .compose_pre_start(&LocalCargoObservationExecutionInput {
+                execution_binding: &binding,
+                observation_request: &request,
+                observation_definition: &definition,
+                security_requirements: &requirements,
+                security_observations: None,
+            })
+            .expect("pre-start denial");
+        let debug = format!("{outcome:?}");
+
+        assert!(debug.contains("DeniedBeforeStart"));
+        assert!(!debug.contains(binding.binding_fingerprint().as_str()));
+        assert!(!debug.contains(request.fingerprint().as_str()));
+        assert!(!debug.contains(outcome.composition_fingerprint.as_str()));
     }
 
     #[test]

@@ -16,6 +16,11 @@ use crate::{
     HostedExecutionReference, HostedExecutionReferenceKind, SpecContentHash, WorkflowOsError,
 };
 
+#[cfg(feature = "trusted-host-application-spi")]
+use crate::{
+    ImmutableLocalCheckExecutionBinding, LocalCheckCommandKind, TrustedHostInputObservationRequest,
+};
+
 const ROOT_ROLE_COUNT: usize = 6;
 const INPUT_KIND_MAX_COUNT: usize = 10;
 const INPUT_TOTAL_MAX_COUNT: u32 = 16_384;
@@ -1544,6 +1549,59 @@ pub(crate) fn assess_trusted_host_live_execution_security(
         }
     };
     TrustedHostLiveExecutionSecurityAssessment::new(disposition, reasons)
+}
+
+/// Evaluates the exact Cargo-clippy composition security posture for the
+/// unpublished trusted-host application boundary.
+///
+/// This pure SPI validates immutable-run, command, observation-request,
+/// attempt, and security-requirement coherence before delegating to Core's
+/// canonical live-security assessment. Missing execution-provider
+/// observations produce an explicit pre-start denial; they are never
+/// synthesized from host-observer facts.
+///
+/// The result grants no execution or workflow authority.
+///
+/// # Errors
+///
+/// Returns stable non-leaking errors for substituted or invalid bindings.
+#[cfg(feature = "trusted-host-application-spi")]
+pub fn assess_trusted_host_local_cargo_composition_security(
+    execution_binding: &ImmutableLocalCheckExecutionBinding,
+    observation_request: &TrustedHostInputObservationRequest,
+    requirements: &TrustedHostLiveExecutionSecurityRequirements,
+    observations: Option<&TrustedHostLiveExecutionSecurityObservations>,
+) -> Result<TrustedHostLiveExecutionSecurityAssessment, WorkflowOsError> {
+    execution_binding.validate()?;
+    if execution_binding.command_kind() != LocalCheckCommandKind::CargoClippyWorkspace {
+        return Err(live_security_error(
+            "composition.command.invalid",
+            "trusted-host Cargo composition command is invalid",
+        ));
+    }
+    if execution_binding.immutable_run_bundle().root_hash() != observation_request.run_bundle()
+        || execution_binding.command_contract_fingerprint()
+            != observation_request.operation_contract()
+        || requirements.fingerprint() != observation_request.security_requirements()
+        || requirements.binding.run_bundle != *observation_request.run_bundle()
+        || requirements.binding.command_contract != *observation_request.operation_contract()
+        || requirements.binding.attempt != *observation_request.attempt()
+    {
+        return Err(live_security_error(
+            "composition.binding.substituted",
+            "trusted-host Cargo composition binding does not match",
+        ));
+    }
+
+    match observations {
+        Some(observations) => {
+            assess_trusted_host_live_execution_security(requirements, observations)
+        }
+        None => TrustedHostLiveExecutionSecurityAssessment::new(
+            TrustedHostLiveExecutionSecurityDisposition::DeniedBeforeStart,
+            vec![TrustedHostLiveExecutionSecurityReason::ObservationUnavailable],
+        ),
+    }
 }
 
 #[allow(dead_code)]
