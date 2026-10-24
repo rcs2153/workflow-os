@@ -3,6 +3,14 @@
 Status: focused maintainer/security review complete; one planning blocker
 requires fix-forward before implementation.
 
+Fix-forward note: the documentation-only blocker fix is implemented. The plan
+now requires exactly one existing `TrustedHostRootObservation` for the
+repository input root, exact static repository commitment binding, read-only
+and non-invocation-scoped posture, coherent method/object/continuity facts, and
+the focused regression cases identified below. The original finding is
+preserved for auditability; focused re-review remains required before model
+implementation.
+
 Reviewed plan:
 [Provider-Neutral Trusted-Host Input Observer
 Plan](../implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).

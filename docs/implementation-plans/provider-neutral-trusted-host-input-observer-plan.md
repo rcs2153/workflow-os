@@ -122,6 +122,10 @@ and canonically commit a request and result, likely including:
 - `TrustedHostInputObservationAssessment` or one equivalent pure validation
   result if needed.
 
+The result must compose the existing `TrustedHostRootObservation` for the
+repository input root. It must not add another repository-root identity or
+continuity type merely for observer convenience.
+
 Names may be refined to follow existing Core conventions. Fields remain
 private, constructors validate all invariants, deserialization uses strict
 validated wire definitions, and public exports are limited to future
@@ -147,6 +151,10 @@ mutable repository files are not identity.
 The request fingerprint must use a versioned canonical domain and fixed-width
 framing. Field order, set ordering, and integer encoding must be deterministic
 and covered by pinned vectors.
+
+The repository selection/root value in the request is only a claim to be
+observed. It is not independent evidence and cannot satisfy repository object
+binding by itself.
 
 ## 8. Closed Observation Set
 
@@ -178,7 +186,41 @@ Each fact should contain only:
 - optional stable evidence reference of an accepted kind; and
 - bounded stable reason code when not proven.
 
-## 9. Observation Posture
+The closed nine-obligation set is necessary but not sufficient for a valid
+result. The result also requires exactly one repository-root observation as
+defined below.
+
+## 9. Repository-Root Observation
+
+Every result must compose exactly one existing `TrustedHostRootObservation`
+whose role is `TrustedHostRootRole::RepositoryInput`. That observation must
+bind:
+
+- the exact repository commitment accepted by static discovery;
+- `TrustedHostRootAccess::ReadOnly`;
+- object-binding posture;
+- continuity posture across the relevant observation/admission interval;
+- one closed `TrustedHostRootObservationMethod`;
+- `invocation_scoped = false`; and
+- one valid telemetry reference.
+
+A future satisfied assessment requires proven object binding and proven
+continuity through an accepted method. `Unavailable`, `Unsupported`,
+`Degraded`, or `Uncertain` remains representable but cannot satisfy the later
+live-execution requirement.
+
+The observer result fingerprint must canonically commit the complete
+repository-root observation. Static discovery result substitution, repository
+commitment substitution, duplicate repository roots, a non-repository role,
+writable access, invocation-scoped repository creation, or incoherent
+method/posture combinations fail closed.
+
+The model does not choose how a live implementation proves the root. Protected
+handles, immutable projections, and provider-native stable identities remain
+the accepted vocabulary. Git-specific observation, if later selected, belongs
+behind the provider boundary and requires separate review.
+
+## 10. Observation Posture
 
 The model must distinguish:
 
@@ -195,7 +237,7 @@ Only `Observed` with the required object-binding and continuity posture may
 satisfy a mandatory obligation in a later assessment. `DeclaredOnly` never
 does.
 
-## 10. Per-Obligation Requirements
+## 11. Per-Obligation Requirements
 
 ### Toolchain executable
 
@@ -249,7 +291,7 @@ Bind the host/sandbox/container base that can affect tool and library
 resolution. A provider image tag or host OS label is not an immutable object
 binding.
 
-## 11. Object Binding And TOCTOU
+## 12. Object Binding And TOCTOU
 
 Canonical paths and preflight hashes are not sufficient for live authority.
 Each observed fact must declare how its object identity was retained across
@@ -270,7 +312,7 @@ The contract must separately represent:
 The model must not imply portable inode semantics. Substitution, drift, stale
 facts, or unverifiable transitions fail closed.
 
-## 12. Freshness And Reobservation
+## 13. Freshness And Reobservation
 
 Observation is valid only for the exact request and bounded interval. The
 result should include ordered revisions or bounded timestamps sufficient to
@@ -286,7 +328,7 @@ No result is reusable authority. Cache reuse is allowed only when the cache
 key binds every semantic request input and the underlying objects remain
 immutably bound. Cache hit remains an observation method, not a bypass.
 
-## 13. Provider-Neutral Observer Boundary
+## 14. Provider-Neutral Observer Boundary
 
 A future implementation may expose an internal interface conceptually like:
 
@@ -309,7 +351,7 @@ The interface must:
 The first model phase does not add this callable interface. The fixture proof
 may use a pure constructor-backed fake observer, not host inspection.
 
-## 14. Assessment And Admission Separation
+## 15. Assessment And Admission Separation
 
 Three steps remain distinct:
 
@@ -324,12 +366,14 @@ capability resolution, policy and proportional-governance routing, any
 required approval with presentation proof, durable attempt creation, complete
 static/host input assessment, and containment capability assessment.
 
-## 15. Failure And Ambiguity Semantics
+## 16. Failure And Ambiguity Semantics
 
 Use stable errors and closed reason codes. At minimum fail closed for:
 
 - request, result, static-discovery, operation, attempt, or requirement
   substitution;
+- missing, duplicate, substituted, writable, invocation-scoped, or
+  role-incompatible repository-root observations;
 - missing or duplicate obligation facts;
 - count/commitment inconsistency;
 - unsupported observation method for a proven claim;
@@ -344,7 +388,7 @@ Before any future process start, failure is a pre-start denial. If a later
 provider may have interacted with the host, uncertainty must use the existing
 possibly-started/reconciliation posture and must not be retried blindly.
 
-## 16. Privacy And Redaction
+## 17. Privacy And Redaction
 
 The public model stores commitments, counts, closed postures, bounded stable
 identifiers, and accepted evidence references only. It must not store or emit:
@@ -361,7 +405,7 @@ identifiers, and accepted evidence references only. It must not store or emit:
 Debug output summarizes shape and posture only. Validation and deserialization
 errors never echo rejected values or unknown field names.
 
-## 17. Relationship To OpenShell
+## 18. Relationship To OpenShell
 
 OpenShell remains an optional future execution and observation provider, not a
 dependency of Core and not selected by this plan.
@@ -378,7 +422,7 @@ fork remains out of scope unless a separate ADR demonstrates that upstream
 blocks required governance hooks and that Workflow OS can own the added
 security surface.
 
-## 18. Test Plan
+## 19. Test Plan
 
 The model-only implementation should prove:
 
@@ -386,6 +430,14 @@ The model-only implementation should prove:
 - exact representation of all nine obligations;
 - rejection of missing and duplicate obligations;
 - request/result/static-discovery/attempt substitution rejection;
+- required repository-root observation presence and role uniqueness;
+- exact static repository commitment binding;
+- rejection of writable, invocation-scoped, or wrong-role repository roots;
+- rejection of incoherent root methods and object-binding/continuity postures;
+- unavailable repository binding remains representable but cannot support a
+  future satisfied assessment;
+- reuse of existing `TrustedHostRootObservation` semantics without a parallel
+  root-binding model;
 - declared-only facts cannot satisfy observation posture;
 - observed facts require compatible object binding and continuity;
 - unavailable, unsupported, and uncertain facts remain explicit;
@@ -404,7 +456,7 @@ The later fixture proof should construct the same semantic result twice from
 an explicit synthetic fact source and prove deterministic commitments without
 reading the real host.
 
-## 19. Proposed Implementation Sequence
+## 20. Proposed Implementation Sequence
 
 1. Focused maintainer/security review of this plan.
 2. Core request/result/fact model and canonical commitments only.
@@ -419,7 +471,7 @@ reading the real host.
 Do not combine model, fixture proof, live observation, provider integration,
 assessment, and admission into one phase.
 
-## 20. Open Questions
+## 21. Open Questions
 
 - Should the first contract support only Cargo/Rust host obligations while
   keeping names provider-neutral, or define a cross-language taxonomy now?
@@ -435,10 +487,10 @@ assessment, and admission into one phase.
   without storing variable names?
 - Should dynamic-library completeness be preflight-only or require runtime
   loader observation for the first live profile?
-- What independently reviewable mechanism can bind the repository snapshot
-  without coupling Core to Git?
+- Which future provider method can produce the required
+  `TrustedHostRootObservation` without coupling Core to Git?
 
-## 21. Final Recommendation
+## 22. Final Recommendation
 
 Perform a focused maintainer and security review of this plan. If accepted,
 implement the provider-neutral observer request/result/fact Core model only.
@@ -447,7 +499,24 @@ Do not implement a live observer, inspect a host, execute a process, select or
 integrate a provider, admit runtime execution, persist observations, add
 schemas or CLI behavior, enable writes, or change release posture.
 
-## 22. Governed Planning Record
+## 23. Blocker-Fix Record
+
+- Workflow ID: `dg/blocker`.
+- Run ID: `run-1792833600231944000-2`.
+- Approval ID: `approval/run-1792833600231944000-2/fix-approved`.
+- Approval-presentation ID: `presentation/6372bd71ea78af0f`.
+- Approval-presentation content hash:
+  `6372bd71ea78af0f11fe3b39e9c166f56bb97d44834e32d5428521fa8eef3a78`.
+- Approval outcome: granted under standing delegated-maintainer authority for
+  the exact documentation-only blocker-fix scope.
+- Phase status: `Completed`.
+- Event summary: 39 events, including one approval request, one approval grant,
+  six scheduled steps, six successful skill invocations, zero retries, and zero
+  escalations. Approval presentation enforcement was proof-enforced and its
+  event marker is present.
+- Validation summary: `npm run check:docs` and `git diff --check` passed.
+
+## 24. Governed Planning Record
 
 - Workflow ID: `dg/d`.
 - Run ID: `run-1792833273051217000-2`.

@@ -86,18 +86,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Fix the provider-neutral trusted-host input observer planning blocker.**
-   Require the observer result to bind one independently observed repository
-   input root through the accepted `TrustedHostRootObservation` vocabulary,
-   including the exact static repository commitment, read-only access,
-   object-binding and continuity postures, observation method, and evidence
-   reference. Add the corresponding planned tests. Keep the fix documentation
-   only. Do not implement an observer, inspect a host, execute a process,
-   select a provider, admit runtime work, persist observations, add schemas or
-   CLI behavior, enable writes, or broaden authority. See the [focused plan
+1. **Re-review the provider-neutral trusted-host input observer planning
+   blocker fix.** Verify that the plan now requires exactly one existing
+   `TrustedHostRootObservation` for the repository input root, binds the exact
+   static repository commitment, enforces read-only and
+   non-invocation-scoped posture, validates method/object/continuity coherence,
+   and includes the required regressions without creating a parallel root
+   model. Keep review documentation-only. Do not implement an observer, inspect
+   a host, execute a process, select a provider, admit runtime work, persist
+   observations, add schemas or CLI behavior, enable writes, or broaden
+   authority. See the [fix-forward observer
+   plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md)
+   and original [focused
    review](docs/concepts/PROVIDER_NEUTRAL_TRUSTED_HOST_INPUT_OBSERVER_PLAN_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed provider-neutral trusted-host input observer planning blocker fix.**
+  The plan now composes exactly one accepted repository-root observation,
+  binds it to the static repository commitment, requires read-only and
+  non-invocation-scoped posture, fails closed on substitution or incoherence,
+  and adds focused planned regressions without inventing a parallel root model.
+  Focused re-review is next. See the [fix-forward
+  plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 - **Closed provider-neutral trusted-host input observer plan review with one
   blocker.** The review accepted the closed nine-obligation taxonomy,
