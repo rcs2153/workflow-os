@@ -2,9 +2,9 @@
 
 Status: planning and focused review accepted; Core static-discovery model and
 its blocker fix are accepted; the TOML parser dependency decision is accepted;
-the fixture-only parser and graph resolver are implemented; focused
-maintainer/security review is next. Live Workflow OS workspace proof remains
-unimplemented.
+the fixture-only parser and graph resolver are implemented and reviewed with
+blocker fixes required. Live Workflow OS workspace proof remains unimplemented
+and blocked pending fix and focused re-review.
 
 Implementation evidence is recorded in the [Trusted-Host Build-Input Discovery
 Core Model Report](../concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_MODEL_REPORT.md).
@@ -22,6 +22,8 @@ TOML Parser Dependency
 Decision](trusted-host-build-input-toml-parser-dependency-decision.md).
 Fixture implementation evidence is recorded in the [Trusted-Host Build-Input
 Fixture Parser Report](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REPORT.md).
+The focused verdict is recorded in the [Trusted-Host Build-Input Fixture Parser
+Review](../concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REVIEW.md).
 
 Related foundations:
 
@@ -442,12 +444,12 @@ one change.
 
 ## 20. Final Recommendation
 
-Perform a focused **fixture-parser maintainer/security review**.
+Implement a focused **fixture-parser blocker fix**, then re-review it.
 
-Review the implemented parser against the accepted model and this plan's
-static/live completeness, exact snapshot binding, bounds, privacy,
-determinism, dependency, and non-authorizing requirements. Do not combine that
-review with Cargo execution, a provider adapter, live workspace proof, a
+Fix path containment for every accepted path-bearing Cargo field, aggregate
+feature-expression bounds, dependency feature/default/optional commitment and
+canonical ordering, and optional metadata symlink ambiguity. Do not combine
+the fix with Cargo execution, a provider adapter, live workspace proof, a
 handler, host observation, persistence, schemas, writes, or release changes.
 
 ## 21. Governed Planning Record

@@ -86,16 +86,25 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the fixture-only trusted-host structured metadata parser and graph
-   resolver.** Perform focused maintainer/security review of the closed TOML
-   boundary, root containment, hard limits, lock-graph resolution, semantic
-   graph commitment, unsupported-Cargo fail-closed posture, privacy behavior,
-   dependency surface, and tests. Do not begin live Workflow OS workspace
-   proof, host observation, provider integration, persistence, schemas,
-   runtime execution, or writes before this review closes. See the
-   [implementation report](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REPORT.md).
+1. **Fix the fixture-only trusted-host parser review blockers.** Normalize and
+   root-check every accepted path-bearing Cargo field; enforce aggregate
+   feature-expression bounds; commit dependency feature/default/optional
+   semantics under canonical ordering; and reject ambiguous optional metadata
+   presence including broken symlinks. Add focused adversarial tests, then
+   perform blocker-fix review. Do not begin live Workflow OS workspace proof,
+   host observation, provider integration, persistence, schemas, runtime
+   execution, or writes before acceptance. See the [focused
+   review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed fixture-parser maintainer/security review with blocker findings.**
+  The review accepted the parser dependency, non-authorizing architecture,
+  external-package incompleteness, privacy boundary, and broad fail-closed
+  Cargo subset. It found four narrow blockers in path containment, aggregate
+  feature bounds, feature-semantic commitment/canonicalization, and optional
+  metadata symlink handling. Live workspace proof remains blocked. See the
+  [focused review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_FIXTURE_PARSER_REVIEW.md).
 
 - **Closed fixture-only trusted-host structured metadata parser and graph
   resolver implementation.** Core now parses the accepted exact subset of
