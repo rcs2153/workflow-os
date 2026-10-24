@@ -110,6 +110,14 @@ owns the native observer and any future local execution-provider adapter. Core
 must not depend on `workflow-local-host`, inspect host paths, or start
 processes.
 
+Core must remain the only owner of security-requirement and observation
+assessment. The current assessment function is crate-private, so the first
+implementation may add one narrow `trusted-host-application-spi`-gated Core
+entry point for the unpublished local-host caller. The local-host coordinator
+must not duplicate the matrix, reinterpret posture enums, or infer
+satisfaction from fingerprints. The SPI is a pure assessment boundary and
+does not expose process execution or workflow authority.
+
 The coordinator receives no workflow mutation, policy-decision, approval,
 event-append, state-store, or report-store authority. Its output is evidence
 for a separately reviewed caller, never authority to advance a workflow.
@@ -192,10 +200,14 @@ The coordinator must construct or receive the exact existing
 attempt. It may accept live-security observations only from a separately
 reviewed provider-owned source with Core-valid provenance.
 
-Before process entry it evaluates the existing closed assessment. Any missing,
-unsupported, uncertain, degraded, mismatched, stale, or substituted mandatory
-fact yields a stable pre-start denial. The coordinator must not reinterpret an
-observer posture, requested control, or provider echo as effective control.
+Before process entry it asks Core to evaluate the existing closed assessment
+through the narrow trusted-host application SPI. Any missing, unsupported,
+uncertain, degraded, mismatched, stale, or substituted mandatory fact yields a
+stable pre-start denial. Missing provider observations are represented as an
+explicit composition-level pre-start denial; the coordinator must not invent
+an execution-provider observation merely to call the assessment function. It
+must not reinterpret an observer posture, requested control, or provider echo
+as effective control.
 
 The assessment grants no workflow authority. A satisfied future assessment is
 only one prerequisite for the caller's current policy, approval, capability,
@@ -298,8 +310,9 @@ contract that:
 1. validates and fingerprints all immutable inputs before host interaction;
 2. invokes the accepted observer through an injected source;
 3. validates the result and exact evidence bundle;
-4. evaluates the existing strict live-security requirements against supplied
-   injected observations;
+4. routes any supplied injected live-security observations through the
+   Core-owned assessment SPI, while treating absent provider observations as
+   an explicit pre-start denial;
 5. returns `DeniedBeforeStart` without entering the Cargo runner when the
    current observer evidence is used; and
 6. proves through a runner spy that no process can start on every incomplete,
