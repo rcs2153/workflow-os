@@ -4,6 +4,11 @@
 
 **Needs blocker fixes.**
 
+Fix-forward status: the findings below remain the authoritative record of the
+review. A narrow implementation has since addressed them and is documented in
+the [blocker-fix report](TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_BLOCKER_FIX_REPORT.md).
+Acceptance still requires a focused blocker-fix review.
+
 The implementation is provider neutral, payload free, deterministic, and
 strictly non-authorizing. Its explicit attempt-start posture, process-tree
 coherence, bounded observations, stable reasons, and fail-closed substitution

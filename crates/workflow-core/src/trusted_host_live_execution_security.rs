@@ -22,6 +22,54 @@ const INPUT_TOTAL_MAX_COUNT: u32 = 16_384;
 const SECURITY_EVENT_MAX_COUNT: u32 = 1_000_000;
 const REQUIREMENTS_DOMAIN: &str = "workflow-os/trusted-host-live-security-requirements/v1";
 
+/// Closed, versioned set of Core-owned security requirements.
+///
+/// `StrictBuildExecutionV1` requires enforce mode; enforced filesystem,
+/// process, network, protected-root, and all resource-budget controls;
+/// default-deny filesystem and network policy; exclusion of host home,
+/// credential stores, and ambient temporary paths; complete observation;
+/// zero allowed network events; terminal process-tree proof; quiescent outputs;
+/// a retained-artifact commitment; and completed cleanup.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustedHostLiveExecutionSecurityProfile {
+    /// Strict no-network build execution contract, version one.
+    StrictBuildExecutionV1,
+}
+
+impl<'de> Deserialize<'de> for TrustedHostLiveExecutionSecurityProfile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct SecurityProfileVisitor;
+
+        impl serde::de::Visitor<'_> for SecurityProfileVisitor {
+            type Value = TrustedHostLiveExecutionSecurityProfile;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a supported trusted-host live-execution security profile")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match value {
+                    "strict_build_execution_v1" => {
+                        Ok(TrustedHostLiveExecutionSecurityProfile::StrictBuildExecutionV1)
+                    }
+                    _ => Err(E::custom(
+                        "unsupported trusted-host live-execution security profile",
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_str(SecurityProfileVisitor)
+    }
+}
+
 /// Closed build-time input categories. No path or payload is stored.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -847,13 +895,22 @@ impl fmt::Debug for TrustedHostTransientWriteObservation {
 }
 
 /// Core-owned security requirements for one exact future attempt.
+///
+/// Assessment orchestration remains private until a separately reviewed
+/// composition phase proves an external consumer.
+///
+/// ```compile_fail
+/// use workflow_core::assess_trusted_host_live_execution_security;
+/// ```
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "TrustedHostLiveExecutionSecurityRequirementsDefinition")]
 pub struct TrustedHostLiveExecutionSecurityRequirements {
     binding: TrustedHostLiveExecutionBinding,
+    profile: TrustedHostLiveExecutionSecurityProfile,
     requested_policy_hash: SpecContentHash,
     root_requirements: Vec<TrustedHostRootRequirement>,
     denied_egress_probe_required: bool,
+    #[serde(skip_serializing)]
     fingerprint: SpecContentHash,
 }
 
@@ -862,6 +919,8 @@ pub struct TrustedHostLiveExecutionSecurityRequirements {
 pub struct TrustedHostLiveExecutionSecurityRequirementsDefinition {
     /// Exact future-attempt binding.
     pub binding: TrustedHostLiveExecutionBinding,
+    /// Closed versioned security requirements profile.
+    pub profile: TrustedHostLiveExecutionSecurityProfile,
     /// Requested policy commitment.
     pub requested_policy_hash: SpecContentHash,
     /// Closed typed root requirements.
@@ -883,6 +942,7 @@ impl TrustedHostLiveExecutionSecurityRequirements {
         let fingerprint = requirements_fingerprint(&definition);
         Ok(Self {
             binding: definition.binding,
+            profile: definition.profile,
             requested_policy_hash: definition.requested_policy_hash,
             root_requirements: definition.root_requirements,
             denied_egress_probe_required: definition.denied_egress_probe_required,
@@ -894,6 +954,12 @@ impl TrustedHostLiveExecutionSecurityRequirements {
     /// Returns the domain-separated requirements fingerprint.
     pub const fn fingerprint(&self) -> &SpecContentHash {
         &self.fingerprint
+    }
+
+    #[must_use]
+    /// Returns the complete closed requirements profile.
+    pub const fn profile(&self) -> TrustedHostLiveExecutionSecurityProfile {
+        self.profile
     }
 
     #[must_use]
@@ -920,6 +986,7 @@ impl fmt::Debug for TrustedHostLiveExecutionSecurityRequirements {
         formatter
             .debug_struct("TrustedHostLiveExecutionSecurityRequirements")
             .field("binding", &self.binding)
+            .field("profile", &self.profile)
             .field("requested_policy_hash", &"[REDACTED]")
             .field("root_requirement_count", &self.root_requirements.len())
             .field(
@@ -1247,7 +1314,8 @@ impl TryFrom<TrustedHostLiveExecutionSecurityAssessmentDefinition>
 /// # Errors
 ///
 /// Rejects request, attempt, provider-selection, or requirements substitution.
-pub fn assess_trusted_host_live_execution_security(
+#[allow(dead_code)]
+pub(crate) fn assess_trusted_host_live_execution_security(
     requirements: &TrustedHostLiveExecutionSecurityRequirements,
     observations: &TrustedHostLiveExecutionSecurityObservations,
 ) -> Result<TrustedHostLiveExecutionSecurityAssessment, WorkflowOsError> {
@@ -1262,6 +1330,10 @@ pub fn assess_trusted_host_live_execution_security(
             "assessment.requirements.substituted",
             "trusted-host live-security requirements do not match",
         ));
+    }
+
+    match requirements.profile {
+        TrustedHostLiveExecutionSecurityProfile::StrictBuildExecutionV1 => {}
     }
 
     let mut reasons = BTreeSet::new();
@@ -1346,6 +1418,7 @@ pub fn assess_trusted_host_live_execution_security(
     TrustedHostLiveExecutionSecurityAssessment::new(disposition, reasons)
 }
 
+#[allow(dead_code)]
 fn assess_roots(
     requirements: &TrustedHostLiveExecutionSecurityRequirements,
     observations: &TrustedHostLiveExecutionSecurityObservations,
@@ -1405,7 +1478,13 @@ fn canonicalize_root_observations(
     values: &mut [TrustedHostRootObservation],
 ) -> Result<(), WorkflowOsError> {
     values.sort_by_key(|value| value.role);
-    if values.len() > ROOT_ROLE_COUNT || values.windows(2).any(|pair| pair[0].role == pair[1].role)
+    let unique_commitments: BTreeSet<_> = values
+        .iter()
+        .map(|value| value.commitment.as_str())
+        .collect();
+    if values.len() > ROOT_ROLE_COUNT
+        || values.windows(2).any(|pair| pair[0].role == pair[1].role)
+        || unique_commitments.len() != values.len()
     {
         return Err(live_security_error(
             "observation.root_binding.invalid",
@@ -1421,6 +1500,11 @@ fn requirements_fingerprint(
     let mut hasher = Sha256::new();
     hash_field(&mut hasher, "domain", REQUIREMENTS_DOMAIN);
     hash_hash(&mut hasher, "run_bundle", &definition.binding.run_bundle);
+    hash_field(
+        &mut hasher,
+        "security_profile",
+        security_profile_tag(definition.profile),
+    );
     hash_hash(
         &mut hasher,
         "command_contract",
@@ -1494,6 +1578,14 @@ const fn root_role_tag(value: TrustedHostRootRole) -> &'static str {
     }
 }
 
+const fn security_profile_tag(value: TrustedHostLiveExecutionSecurityProfile) -> &'static str {
+    match value {
+        TrustedHostLiveExecutionSecurityProfile::StrictBuildExecutionV1 => {
+            "strict_build_execution_v1"
+        }
+    }
+}
+
 const fn root_access_tag(value: TrustedHostRootAccess) -> &'static str {
     match value {
         TrustedHostRootAccess::ReadOnly => "read_only",
@@ -1525,3 +1617,7 @@ fn security_counts(summary: &HostedExecutionObservationSummary) -> [u32; 6] {
 fn live_security_error(suffix: &str, message: &'static str) -> WorkflowOsError {
     WorkflowOsError::validation(format!("trusted_host.live_security.{suffix}"), message)
 }
+
+#[cfg(test)]
+#[path = "trusted_host_live_execution_security_tests.rs"]
+mod tests;

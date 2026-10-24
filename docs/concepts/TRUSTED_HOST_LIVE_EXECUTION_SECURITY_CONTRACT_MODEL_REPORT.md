@@ -14,6 +14,12 @@ provider-neutral attempt binding, explicit `NotStarted`, `Started`, and
 domain-separated commitments, and zero-event facts that are meaningful only
 when the observation channel is proven.
 
+Fix-forward status: the subsequent focused review found blockers in complete
+requirements binding, root-commitment uniqueness, and the public assessment
+surface. Those blockers are addressed in the separate
+[blocker-fix report](TRUSTED_HOST_LIVE_EXECUTION_SECURITY_CONTRACT_MODEL_BLOCKER_FIX_REPORT.md).
+This note does not erase the original implementation record or review finding.
+
 ## 2. Scope Completed
 
 - Added one focused Core module and crate exports.
@@ -50,13 +56,17 @@ runtime-image digest.
 
 ## 5. Requirement And Observation Separation
 
-Requirements state what Core expects for one exact future operation.
+Requirements state what Core expects for one exact future operation. The
+accepted contract now includes a closed, versioned strict security profile
+whose documented semantics cover every decision-relevant control evaluated by
+this slice, and that profile participates in the canonical fingerprint.
 Observations state bounded facts reported for one exact future attempt.
 Constructing either value grants no authority and proves no satisfaction.
 
-`assess_trusted_host_live_execution_security` is pure. It verifies exact
-binding and produces only `Satisfied`, `DeniedBeforeStart`, or
-`ReconciliationRequired` plus canonical stable reasons.
+The crate-private assessment function is pure. It verifies exact binding and
+produces only `Satisfied`, `DeniedBeforeStart`, or `ReconciliationRequired`
+plus canonical stable reasons. Assessment orchestration is not part of the
+public crate API.
 
 ## 6. Coherence And Authority Boundaries
 
