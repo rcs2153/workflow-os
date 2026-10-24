@@ -504,6 +504,7 @@ pub struct TrustedHostRootObservation {
 
 /// Deserializable definition for one root observation.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TrustedHostRootObservationDefinition {
     /// Observed root role.
     pub role: TrustedHostRootRole,
@@ -588,6 +589,24 @@ impl TrustedHostRootObservation {
     /// Returns whether the observed root was invocation scoped.
     pub const fn invocation_scoped(&self) -> bool {
         self.invocation_scoped
+    }
+
+    #[must_use]
+    /// Returns the closed observation method.
+    pub const fn method(&self) -> TrustedHostRootObservationMethod {
+        self.method
+    }
+
+    #[must_use]
+    /// Returns the payload-free root commitment.
+    pub const fn commitment(&self) -> &SpecContentHash {
+        &self.commitment
+    }
+
+    #[must_use]
+    /// Returns the stable telemetry reference.
+    pub const fn reference(&self) -> &HostedExecutionReference {
+        &self.reference
     }
 }
 

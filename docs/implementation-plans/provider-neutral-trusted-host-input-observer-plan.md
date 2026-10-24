@@ -1,6 +1,6 @@
 # Provider-Neutral Trusted-Host Input Observer Plan
 
-Status: planning complete; implementation not started.
+Status: Core model implemented; focused maintainer/security review is next.
 
 This plan follows:
 
@@ -538,3 +538,11 @@ schemas or CLI behavior, enable writes, or change release posture.
   authored this plan and roadmap update; and ran documentation validation. The
   kernel governed scope and approval but did not edit files, run validation,
   or perform git or pull-request operations.
+
+## 25. Implementation Record
+
+The model-only implementation is documented in [Trusted-Host Input Observer
+Core Model Report](../concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REPORT.md).
+It adds no callable observer, host inspection, process execution, provider
+integration, runtime admission, persistence, events, schemas, CLI behavior,
+writes, or authority.

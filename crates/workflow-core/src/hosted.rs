@@ -160,6 +160,7 @@ pub struct HostedExecutionReference {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct HostedExecutionReferenceWire {
     kind: HostedExecutionReferenceKind,
     value: String,

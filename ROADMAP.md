@@ -86,21 +86,29 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the provider-neutral trusted-host input observer Core model.**
-   Add validated request, result, producer, fact, posture, method, and canonical
-   commitment vocabulary for the closed nine host obligations, plus exact
-   composition of the existing repository-root observation. Keep the model
-   non-authorizing and process-free. Add strict serde, privacy-safe Debug and
-   errors, pinned canonical vectors, substitution/coherence tests, honest docs,
-   and an implementation report. Do not inspect a host, add a callable
-   observer, execute a process, integrate a provider, admit runtime work,
-   persist observations, add schemas or CLI behavior, enable writes, or
-   broaden authority. See the accepted [blocker-fix
-   review](docs/concepts/PROVIDER_NEUTRAL_TRUSTED_HOST_INPUT_OBSERVER_PLAN_BLOCKER_FIX_REVIEW.md)
-   and [implementation
+1. **Review the provider-neutral trusted-host input observer Core model.**
+   Perform focused maintainer/security review of exact-request binding, the
+   closed nine-obligation result, producer assurance, repository-root
+   composition, canonical commitments, strict serde, privacy-safe Debug and
+   errors, and non-authorizing scope. Do not add a callable observer, inspect a
+   host, execute a process, integrate a provider, admit runtime work, persist
+   observations, add schemas or CLI behavior, enable writes, or broaden
+   authority. See the [implementation
+   report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REPORT.md) and
+   [implementation
    plan](docs/implementation-plans/provider-neutral-trusted-host-input-observer-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed provider-neutral trusted-host input observer Core model
+  implementation.** Core now validates exact observation requests, producer
+  claims, all nine payload-free host-input facts, and one reused read-only
+  repository-root observation. Canonical request/result commitments bind every
+  semantic field with pinned vectors; malformed, incomplete, substituted, or
+  incoherent values fail closed. The model remains process-free and
+  non-authorizing. Focused maintainer/security review is next. See the
+  [implementation
+  report](docs/concepts/TRUSTED_HOST_INPUT_OBSERVER_CORE_MODEL_REPORT.md).
 
 - **Accepted provider-neutral trusted-host input observer planning blocker
   fix.** Focused re-review verified exact reuse of the existing repository-root
