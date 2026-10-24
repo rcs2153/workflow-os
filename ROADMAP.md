@@ -86,16 +86,28 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the deterministic trusted-host build-input discovery proof plan.**
-   Verify that the proposed static Rust/Cargo graph proof is deterministic,
-   bounded, payload free, exact-snapshot bound, honest about unsupported host
-   inputs, and incapable of executing Cargo, build scripts, procedural macros,
-   compilers, linkers, providers, or shell commands. The review must decide
-   whether model-only implementation may begin and must preserve every live
-   execution blocker. See the [discovery proof
-   plan](docs/implementation-plans/trusted-host-build-input-discovery-proof-plan.md).
+1. **Implement the Core trusted-host static build-input discovery model and
+   canonicalization only.** Add non-authorizing request/result vocabulary,
+   exact repository and selection commitments, a static completeness posture
+   distinct from live-input completeness, closed host-obligation states,
+   deterministic domain-separated graph commitments, hard bounds, stable
+   errors, validated serde, redaction-safe Debug, and focused model tests. Do
+   not read repository files, parse TOML, run Cargo or build code, select or
+   integrate a provider, register a handler, add live execution or persistence,
+   expose schemas, enable writes, or change release posture. See the [accepted
+   plan review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_PROOF_PLAN_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed deterministic trusted-host build-input discovery proof plan
+  review.** The focused review accepts the strict separation between static
+  graph completeness and complete live build-input closure, exact snapshot and
+  selection binding, closed unsupported host obligations, payload-free
+  canonicalization, and phased proof strategy. Model-only implementation may
+  begin; parser semantics, filesystem/object binding, workspace discovery, host
+  observation, provider suitability, and live execution remain separately
+  blocked. See the [focused
+  review](docs/concepts/TRUSTED_HOST_BUILD_INPUT_DISCOVERY_PROOF_PLAN_REVIEW.md).
 
 - **Closed deterministic trusted-host build-input discovery proof planning.**
   The plan defines a fixture-backed and Workflow OS workspace-backed static
