@@ -105,6 +105,16 @@ phase` language does not supersede the active queue.
 
 #### Recently Closed Queue Evidence
 
+- **Accepted the trusted-host local Cargo execution-provider suitability
+  re-evaluation.** Focused maintainer/security review confirms that stable
+  OpenShell `v0.1.5` materially closes or narrows former request-identity,
+  workload/fence-evidence, desired-state-operation, and deletion gaps without
+  closing exact exec reconciliation, pending-driver owner loss, complete
+  operation observations, terminal cleanup, or selected-platform proof. The
+  refreshed `v0.1.5` evidence matrix is next; provider wiring and a fork remain
+  unjustified. See the [focused
+  review](docs/concepts/TRUSTED_HOST_LOCAL_CARGO_EXECUTION_PROVIDER_SUITABILITY_REEVALUATION_REVIEW.md).
+
 - **Re-evaluated trusted-host local Cargo execution-provider suitability.**
   Stable OpenShell `v0.1.5` materially improves request identity, observed
   workload/fence evidence, capability negotiation, desired-state operations,
