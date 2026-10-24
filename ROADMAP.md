@@ -86,18 +86,31 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Review the closed trusted-host Cargo clippy profile plan.** The plan binds
-   exactly `cargo clippy --workspace --all-targets -- -D warnings`, explicit
-   build/cache/temp write roots, immutable source/toolchain/dependency inputs,
-   offline and sanitized process posture, bounded output, payload-free results,
-   and existing report/artifact paths. Review must decide whether build-script,
-   procedural-macro, and platform-tool execution are acceptable disclosed
-   trusted-host limitations or blockers. No implementation, live process,
-   arbitrary command, test profile, provider write, default registration,
-   public CLI/config/schema exposure, or hosted execution is authorized before
-   that review. See the [trusted-host Cargo clippy profile plan](docs/implementation-plans/trusted-host-cargo-clippy-profile-plan.md).
+1. **Implement the injected-runner-only closed Cargo clippy profile.** Add the
+   exact `cargo clippy --workspace --all-targets -- -D warnings` profile,
+   typed cache/build/temp root roles, immutable source/toolchain/dependency
+   inputs, offline and sanitized request posture, payload-free result behavior,
+   replay, and focused tests. The runner seam must remain crate-private or
+   explicitly test-only: no standard-process constructor or production
+   resolver may permit live clippy execution. Build-script, procedural-macro,
+   platform-tool, containment, egress, process-group, and transient-write gaps
+   remain blockers for a later live-process phase. No workflow composition,
+   default registration, public CLI/config/schema/SDK exposure, provider
+   access, hosted execution, OpenShell integration, or another profile is
+   authorized. See the [plan](docs/implementation-plans/trusted-host-cargo-clippy-profile-plan.md)
+   and [focused review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_PLAN_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Closed trusted-host Cargo clippy profile plan accepted with mandatory
+  implementation constraints.** The focused review accepts only an
+  injected-runner proof. Because the process-runner trait is public, the first
+  slice must not expose a production clippy resolver or select the standard
+  host runner. Build-time code and platform-tool identity can be modeled in
+  injected tests, but incomplete enumeration, absent OS containment, uncertain
+  process-group termination, transient restored writes, and missing live
+  sandbox attestation remain blockers for real execution. See the [focused
+  review](docs/concepts/TRUSTED_HOST_CARGO_CLIPPY_PROFILE_PLAN_REVIEW.md).
 
 - **Closed trusted-host Cargo clippy profile planned.** The plan selects one
   exact command and a staged injected-runner-first implementation. It treats
