@@ -80,6 +80,7 @@ mod timestamp;
 mod trusted_host_build_input_discovery;
 mod trusted_host_build_input_fixture_discovery;
 mod trusted_host_input_observer;
+mod trusted_host_input_observer_fixture;
 mod trusted_host_live_execution_security;
 #[allow(dead_code)]
 mod trusted_host_supervisor;
@@ -690,6 +691,9 @@ pub use trusted_host_input_observer::{
     TrustedHostInputObservationProducerVersion, TrustedHostInputObservationReason,
     TrustedHostInputObservationRequest, TrustedHostInputObservationRequestDefinition,
     TrustedHostInputObservationResult, TrustedHostInputObservationResultDefinition,
+};
+pub use trusted_host_input_observer_fixture::{
+    observe_trusted_host_inputs_from_fixture, TrustedHostInputObservationFixture,
 };
 pub use trusted_host_live_execution_security::{
     BuildTimeInputCompletenessPosture, BuildTimeInputDiscoveryMethod, BuildTimeInputKind,

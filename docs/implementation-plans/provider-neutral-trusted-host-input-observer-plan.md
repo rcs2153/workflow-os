@@ -1,7 +1,7 @@
 # Provider-Neutral Trusted-Host Input Observer Plan
 
-Status: Core model accepted after freshness-authority blocker repair and
-focused review. Fixture-backed in-memory observer proof is next.
+Status: Core model accepted and fixture-backed in-memory observer proof
+implemented. Focused proof review is next.
 
 This plan follows:
 
@@ -606,3 +606,15 @@ The next phase is the already-planned fixture-backed in-memory observer proof,
 with no host inspection or process access. See [Trusted-Host Input Observer
 Freshness Authority Fix
 Review](../concepts/TRUSTED_HOST_INPUT_OBSERVER_FRESHNESS_AUTHORITY_FIX_REVIEW.md).
+
+## 30. Fixture Proof Record
+
+The process-free fixture proof is implemented. One explicit synthetic source
+now constructs an exact-request-bound result through the accepted Core
+constructor and validator. Repeated construction is deterministic; stale,
+incomplete, substituted, or non-fixture input fails closed.
+
+No host access, process, provider, persistence, admission, event, schema, CLI,
+write, or authority behavior was added. Focused proof review is next. See
+[Trusted-Host Input Observer Fixture Proof
+Report](../concepts/TRUSTED_HOST_INPUT_OBSERVER_FIXTURE_PROOF_REPORT.md).
