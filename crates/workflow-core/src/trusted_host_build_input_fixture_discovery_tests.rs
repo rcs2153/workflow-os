@@ -282,10 +282,10 @@ fn workflow_os_workspace_snapshot_is_repeatable_and_honestly_incomplete() {
         count(&first, BuildTimeInputKind::ManifestOrConfiguration),
         6
     );
-    assert_eq!(count(&first, BuildTimeInputKind::DependencyPackage), 208);
+    assert_eq!(count(&first, BuildTimeInputKind::DependencyPackage), 210);
     assert_eq!(count(&first, BuildTimeInputKind::BuildScript), 0);
     assert_eq!(count(&first, BuildTimeInputKind::ProceduralMacro), 0);
-    assert_eq!(first.result().total_count(), 215);
+    assert_eq!(first.result().total_count(), 217);
     assert!(first
         .result()
         .host_obligations()
