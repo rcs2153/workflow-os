@@ -86,13 +86,37 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-No roadmap implementation item is open. The `0.3.0-preview.1` governed-execution
-and continuity release package is prepared and locally validated. Merge and
-required GitHub checks remain release-preparation gates; tagging, GitHub
-Release publication, package publication, provider broadening, and a new
-runtime lane require separate authorization.
+The next authorized lane is **capability-gated GitHub read-only public adoption
+and recovery planning**. The existing crate-private executor composition already
+proves one exact repository-metadata read through immutable run identity,
+current source-backed authority, durable continuity, one-time continuation,
+policy evaluation, bounded telemetry, and a payload-free receipt. It is not yet
+a user-selectable runtime path, and its claim-only and invocation-started
+ambiguous states do not yet have an accepted recovery contract.
+
+The next phase is planning-only. It must define one coherent adoption boundary
+covering exact authored operation selection, explicit configuration and
+credential injection, current-authority and immutable-run binding, recovery for
+both ambiguous states, bounded evidence and operator disclosure, compatibility,
+and an opt-in local surface. The plan must preserve the existing no-write,
+single-operation boundary. It must not add a second provider operation,
+provider mutation, ambient credential discovery, automatic execution, generic
+connector registration, nested harness execution, OpenShell wiring, hosted
+identity, schema or CLI changes in the planning phase, or release publication.
+See the [post-0.3 roadmap queue selection
+report](docs/concepts/POST_0_3_ROADMAP_QUEUE_SELECTION_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Selected the post-`0.3.0-preview.1` no-write adoption lane.** Current main
+  has enough accepted governance and executor composition to stop adding
+  disconnected primitives and make one existing read-only operation safely
+  adoptable. OpenShell provider wiring remains blocked on upstream evidence;
+  provider mutation broadening and nested harness runtime remain premature.
+  Planning the exact public-adoption and recovery boundary is therefore the
+  highest-value next step. No implementation, schema, CLI, provider, release,
+  or package behavior changed during queue selection. See the [selection
+  report](docs/concepts/POST_0_3_ROADMAP_QUEUE_SELECTION_REPORT.md).
 
 - **Prepared and locally validated `0.3.0-preview.1`.** Aligned Rust and npm
   package versions, lockfiles, CLI identity, changelog, current product
