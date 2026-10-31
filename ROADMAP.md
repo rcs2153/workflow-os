@@ -86,9 +86,9 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Plan and review an explicit first-run governed WorkReport artifact
-   vertical slice.** Preserve ordinary `workflow-os first-run` as
-   non-mutating. Define one explicit opt-in path that binds the exact same-call
+1. **Implement the reviewed first-run governed WorkReport artifact vertical
+   slice.** Preserve ordinary `workflow-os first-run` as non-mutating. Add one
+   explicit opt-in path that binds the exact same-call
    bounded repository posture analysis to a truthful validated WorkReport and
    idempotent local artifact. The plan must specify immutable analysis
    identity, repository/manifest drift rejection, approval and proportional-
@@ -97,11 +97,24 @@ phase` language does not supersede the active queue.
    repository proof. It must not execute repository commands, treat mock output
    as evidence, call providers, access the network, mutate external state,
    integrate OpenShell, add hosted behavior, or make default first-run
-   mutating. Focused maintainer/security review is mandatory before
-   implementation. See the [queue-selection
-   report](docs/concepts/FIRST_RUN_GOVERNED_WORK_REPORT_ARTIFACT_QUEUE_SELECTION_REPORT.md).
+   mutating. Focused maintainer/security review accepted implementation only
+   after requiring a pre-approval immutable analysis commitment, exact versioned
+   generated-contract fingerprints, and commitment-gated missing-artifact
+   recovery. Runtime implementation remains separately governed. See the
+   [queue-selection report](docs/concepts/FIRST_RUN_GOVERNED_WORK_REPORT_ARTIFACT_QUEUE_SELECTION_REPORT.md)
+   and [implementation
+   plan](docs/implementation-plans/first-run-governed-work-report-artifact-plan.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted the first-run governed WorkReport artifact implementation plan.**
+  Focused maintainer/security review rejected post-approval-only analysis and
+  a nonrecoverable artifact crash gap. The accepted design binds a versioned
+  bounded analysis commitment into the immutable run before approval, permits
+  only exact allowlisted generated contracts to receive the trusted local
+  handler, and allows missing-artifact recovery only when current bounded
+  analysis exactly matches the immutable commitment. See the [implementation
+  plan](docs/implementation-plans/first-run-governed-work-report-artifact-plan.md).
 
 - **Selected the first-run governed WorkReport artifact planning lane.** The
   accepted next move composes existing real first-run posture analysis with
