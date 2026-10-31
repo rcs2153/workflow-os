@@ -94,19 +94,51 @@ policy evaluation, bounded telemetry, and a payload-free receipt. It is not yet
 a user-selectable runtime path, and its claim-only and invocation-started
 ambiguous states do not yet have an accepted recovery contract.
 
-The next phase is planning-only. It must define one coherent adoption boundary
-covering exact authored operation selection, explicit configuration and
-credential injection, current-authority and immutable-run binding, recovery for
-both ambiguous states, bounded evidence and operator disclosure, compatibility,
-and an opt-in local surface. The plan must preserve the existing no-write,
-single-operation boundary. It must not add a second provider operation,
-provider mutation, ambient credential discovery, automatic execution, generic
-connector registration, nested harness execution, OpenShell wiring, hosted
-identity, schema or CLI changes in the planning phase, or release publication.
-See the [post-0.3 roadmap queue selection
-report](docs/concepts/POST_0_3_ROADMAP_QUEUE_SELECTION_REPORT.md).
+The complete public-adoption and recovery boundary is now documented in the
+[Capability-Gated GitHub Read-Only Public Adoption And Recovery
+Plan](docs/implementation-plans/capability-gated-github-read-only-public-adoption-recovery-plan.md).
+It requires exact immutable operation declaration, an explicit project-level
+resource allowlist and access reference, Core-owned run-scoped authority
+derivation, migration from the private consumed idempotency claim to accepted
+atomic authorized-execution continuity, truthful ambiguity recovery, bounded
+disclosure, and ordinary governed `run` semantics. It also records the stale
+read-only adapter user-agent identity as a baseline compatibility defect that
+must be fixed before public live use.
+
+Focused maintainer/security review is accepted after correcting three blocking
+ambiguities: provider activation now requires existing authoritative execution,
+transient credential delivery is separate from current-authority facts, and
+provider dispatch must reuse the complete operational-window and attempt
+lifecycle rather than reservation alone. See the [plan
+review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_PUBLIC_ADOPTION_RECOVERY_PLAN_REVIEW.md).
+
+The next phase is the first dark implementation slice: exact operation and
+subordinate project activation contracts, immutable binding, schema/SDK parity,
+compatibility behavior, and focused validation. It must not expose public
+runtime selection, read access material, call GitHub, or change CLI execution.
+See the
+[post-0.3 queue selection
+report](docs/concepts/POST_0_3_ROADMAP_QUEUE_SELECTION_REPORT.md) and the
+[planning report](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_PUBLIC_ADOPTION_RECOVERY_PLAN_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted the capability-gated GitHub read-only public-adoption plan after
+  security corrections.** Review made authoritative execution a prerequisite,
+  separated transient credential delivery from authority state, required the
+  complete authorized-execution lifecycle, and split implementation into four
+  governed phases so partial contracts cannot expose a provider path. See the
+  [review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_PUBLIC_ADOPTION_RECOVERY_PLAN_REVIEW.md).
+
+- **Planned capability-gated GitHub read-only public adoption and recovery.**
+  The plan turns the existing private repository-metadata proof into one
+  coherent prospective user path without treating activation as authority or
+  adding a one-off provider command. It defines exact authored selection,
+  reviewed project constraints, Core-owned current facts, atomic dispatch,
+  claim-only and invocation-started recovery, disclosure, compatibility, and a
+  complete acceptance matrix. Focused plan review is next; no runtime or
+  public contract changed in planning. See the [plan](docs/implementation-plans/capability-gated-github-read-only-public-adoption-recovery-plan.md)
+  and [planning report](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_PUBLIC_ADOPTION_RECOVERY_PLAN_REPORT.md).
 
 - **Selected the post-`0.3.0-preview.1` no-write adoption lane.** Current main
   has enough accepted governance and executor composition to stop adding
