@@ -86,12 +86,25 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-No roadmap implementation item is open. The accepted first-run quiet-success
-artifact composition is ready for release packaging; release preparation does
-not authorize publication, tagging, provider broadening, or a new runtime
-lane.
+No roadmap implementation item is open. The `0.3.0-preview.1` governed-execution
+and continuity release package is prepared and locally validated. Merge and
+required GitHub checks remain release-preparation gates; tagging, GitHub
+Release publication, package publication, provider broadening, and a new
+runtime lane require separate authorization.
 
 #### Recently Closed Queue Evidence
+
+- **Prepared and locally validated `0.3.0-preview.1`.** Aligned Rust and npm
+  package versions, lockfiles, CLI identity, changelog, current product
+  contract, security posture, known limitations, release notes, GitHub release
+  draft, checklist, and final review around the governed-execution and
+  continuity preview. The required Rust, Node, contract, integration,
+  documentation, and dependency-audit gates pass. Six vulnerable or yanked
+  transitive dependencies were updated to fixed compatible versions; the
+  already documented `serde_yaml` / `unsafe-libyaml` maintenance warning
+  remains accepted for trusted local specs. No tag, GitHub Release, package
+  publication, provider broadening, production claim, or new runtime lane is
+  authorized by this preparation.
 
 - **Implemented and accepted the first-run quiet-success artifact
   composition.** Added the separately identified generated artifact workflow,

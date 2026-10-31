@@ -34,6 +34,15 @@ The first local-kernel-preview version is `0.1.0-preview.1`, applied consistentl
 
 The first public read-only integration preview version is `0.2.0-preview.1`. It is a separate public preview posture layered on the local kernel. It must remain read-only, opt-in for live providers, fixture-first in normal CI, and explicit that it is not production-ready, not write-capable, not hosted, not distributed-runtime-ready, and not Level 3/4 autonomy-ready.
 
+The first governed-execution and continuity preview version is
+`0.3.0-preview.1`. It composes local governed execution, immutable run and
+approval-resume integrity, proportional governance, evidence/report artifacts,
+continuity models, shared-state previews, and bounded alpha/proof execution
+paths. It must remain explicit that these paths do not establish production
+hosting, a general agent runtime, broad provider writes, arbitrary command
+execution, an autonomous scheduler, enterprise administration, or Level 3/4
+autonomy.
+
 A local-kernel-preview release is acceptable when:
 
 - the release is clearly labeled as a local kernel preview
@@ -69,6 +78,21 @@ A read-only-integration-preview release must be blocked when:
 - normal CI requires live credentials
 - provider credentials appear in specs, fixtures, docs, release notes, or recorded evidence
 - adapter telemetry is presented as production SIEM/OpenTelemetry export
+
+A governed-execution-and-continuity preview is acceptable when:
+
+- exact current product capabilities and path-specific enforcement are
+  documented;
+- immutable run, approval, report, and continuation tests pass;
+- quiet-success paths prove they create no fabricated approval evidence;
+- alpha/proof surfaces remain labeled and disabled by default; and
+- state migration, experimental JSON, Rust API, parser, and production-hosting
+  limitations remain visible.
+
+It must be blocked when model vocabulary is described as automatically
+enforced behavior, bounded write proofs are described as general write
+support, private trusted-host helpers are described as arbitrary command
+execution, or hosted/shared-state previews are described as production-ready.
 
 ## Future Public Release Candidates
 

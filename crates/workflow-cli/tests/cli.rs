@@ -7127,7 +7127,7 @@ fn version_json_is_bounded_without_project() {
     assert!(out.contains(r#""name":"workflow-os""#));
     assert!(out.contains(&format!(r#""version":"{}""#, env!("CARGO_PKG_VERSION"))));
     assert!(out.contains(r#""schema_version":"workflowos.dev/v0""#));
-    assert!(out.contains(r#""release_posture":"local_kernel_preview""#));
+    assert!(out.contains(r#""release_posture":"governed_execution_continuity_preview""#));
 }
 
 #[test]

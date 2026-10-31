@@ -1,13 +1,15 @@
 # v0 Release Readiness
 
 This document records the current v0 readiness assessment for Workflow OS as a
-public local kernel preview with a narrow read-only integration preview.
+public governed-execution and continuity preview layered on the local kernel
+and read-only integration previews.
 
 ## Release Position
 
-Workflow OS v0 is ready to be described as a **public local kernel preview**.
+Workflow OS v0 is ready to be described as a **public governed-execution and
+continuity preview**.
 
-Current preview version: `0.2.0-preview.1`.
+Current preview version: `0.3.0-preview.1`.
 
 That means the project is suitable for public evaluation of the local-first
 kernel: specs, validation, sequential local execution, event-sourced state,
@@ -16,13 +18,15 @@ TypeScript spec-generation helpers, read-only adapter contracts, selected
 evidence-reference attachment paths, and early work-report model/helper APIs.
 
 The `0.1.0-preview.1` layer established the local kernel preview. The
-`0.2.0-preview.1` posture adds a narrow public read-only integration preview
-for GitHub, Jira, and GitHub Actions / CI.
+`0.2.0-preview.1` posture added narrow public read-only integrations.
+`0.3.0-preview.1` composes governed execution, immutable run and approval
+integrity, proportional governance, reporting, continuity, and bounded
+alpha/proof host and provider paths.
 
-It must not be described as a production deployment platform, hosted service,
-production distributed runtime, adapter-complete framework, enterprise
-deployment system, UI product, write-capable integration layer, or Level 3/4
-autonomy system.
+It must not be described as a production deployment platform, production
+hosted service, production distributed runtime, adapter-complete framework,
+enterprise deployment system, UI product, broad write-capable integration
+layer, autonomous scheduler, or Level 3/4 autonomy system.
 
 ## v0 Feature List
 
@@ -63,6 +67,13 @@ autonomy system.
 - Explicit local work-report artifact storage API.
 - Self-governance dogfood project for kernel-governed planning/docs work.
 - Agent harness documentation scaffold for local coding-agent adoption.
+- Immutable run bundle, approval presentation proof, current-authority,
+  capability, required-context, and proportional-governance foundations.
+- Explicit first-run quiet-success WorkReport artifact path.
+- SQLite continuity operations and explicit migration/activation.
+- PostgreSQL shared-state preview and single-tenant no-write hosted alpha.
+- Private trusted-host fixed no-write execution compositions.
+- Narrow GitHub PR-comment and managed draft-PR sandbox proof paths.
 
 ## Preview Scope
 
@@ -71,13 +82,14 @@ architecture, run local examples, exercise the validator and CLI, review runtime
 invariants, evaluate fixture-backed read-only integrations, and understand the
 governed-work roadmap.
 
-The preview supports local kernel and read-only integration evaluation only. It
+The preview supports governed local execution and bounded alpha/proof
+evaluation. It
 does not imply:
 
 - production deployment readiness
 - production distributed worker readiness
 - hosted service readiness
-- write-capable GitHub, Jira, CI, SaaS, or HTTP adapter readiness
+- broad write-capable GitHub, Jira, CI, SaaS, or HTTP adapter readiness
 - generic live adapter execution from arbitrary workflow specs
 - enterprise RBAC, IdP, or secret-provider readiness
 - UI, marketplace, or package registry behavior
@@ -86,24 +98,24 @@ does not imply:
 
 ## v0 Non-Goals
 
-- Write-capable GitHub, Jira, CI, generic HTTP, or SaaS adapters.
+- Broad write-capable GitHub, Jira, CI, generic HTTP, or SaaS adapters.
 - CI rerun, workflow dispatch, cancellation, artifact mutation, or check
   mutation.
 - Generic live adapter execution.
 - OAuth, webhook, or external trigger ingestion services.
 - Distributed workers.
-- Production database backend.
+- Production database backend, production hosted service, or HA/SLO posture.
 - Enterprise RBAC or IdP integration.
 - Real secret provider integration.
 - UI.
 - Marketplace or package registry behavior.
 - Automatic runtime report generation for every run.
-- Automatic report artifact writing from executor paths.
+- Automatic report artifact writing for every executor path.
 - CLI report rendering or report export.
 - EvidenceReference persistence or broad automatic attachment.
 - Reasoning Lineage / Claim Graph implementation.
 - Composable Harness Contract runtime execution.
-- Side-effect boundary execution or write behavior.
+- General side-effect execution or write behavior beyond narrow sandbox proofs.
 - Level 3/4 autonomy by default.
 
 ## Quality Gates
@@ -171,7 +183,8 @@ Current posture:
 - Specs reject secret-like keys and values.
 - Redaction wrappers exist for sensitive values.
 - Conservative policy denies unknown actions and capabilities.
-- External write and adapter write behavior are denied in v0.
+- External writes remain denied by default; only narrow explicit sandbox proof
+  paths exist.
 - Level 3/4 execution is denied by default.
 - Audit/log paths use summaries and references rather than raw sensitive
   payloads.
@@ -205,12 +218,12 @@ Before public promotion of the current v0 preview:
 - Security review is current.
 - Dependency audits pass or exceptions are documented.
 - Vertical-slice and read-only fixture-backed examples validate and run locally.
-- No documentation implies write-capable adapters, generic live adapter
+- No documentation implies broad write-capable adapters, generic live adapter
   execution, hosted production operation, distributed workers, production
   backends, CLI report rendering, or Level 3/4 autonomy exist.
 - CLI examples that use mock skills show `--mock-all-local-skills` explicitly.
-- Release notes call the release a public local kernel/read-only integration
-  preview, not a production runtime or broad release candidate.
+- Release notes call the release a governed-execution and continuity preview,
+  not a production runtime or broad release candidate.
 - Maintainer and vulnerability-reporting contact paths are valid.
 - GitHub branch/ruleset protection for `main` is configured and verified.
 - Jira sandbox API token rotation is confirmed or tracked as an explicit
@@ -231,6 +244,7 @@ Ready for:
 
 - public local kernel preview
 - public read-only integration preview
+- public governed-execution and continuity preview
 - local kernel development
 - contributor onboarding
 - core primitive modeling

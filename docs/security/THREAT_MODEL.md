@@ -1,8 +1,8 @@
 # Threat Model
 
-This threat model covers the v0 local-first Workflow OS kernel and the Phase 2 GitHub/Jira/GitHub Actions read-only adapter boundary. The `0.1.0-preview.1` local kernel release does not include real provider adapters in its release contract. The `0.2.0-preview.1` posture adds a narrow public read-only integration preview with fixture-first CI and opt-in live providers.
+This threat model covers the v0 local-first Workflow OS kernel, the Phase 2 GitHub/Jira/GitHub Actions read-only adapter boundary, and the bounded governed-execution and continuity surfaces included in `0.3.0-preview.1`. Those later surfaces include immutable run and approval context, proportional-governance decisions, report and continuation foundations, optional shared-state and trusted-host alpha paths, OpenShell containment evidence, and narrow allowlisted GitHub sandbox proofs.
 
-This threat model does not cover hosted SaaS, distributed workers, production database backends, production integrations, write-capable external adapters, OAuth, webhook ingestion, or UI because those are not implemented in v0.
+This threat model does not claim production hosted SaaS, general distributed workers, production database backends, production integrations, broad write-capable external adapters, OAuth, webhook ingestion, or UI. Selected alpha and sandbox proof paths remain bounded evaluation surfaces, not production security boundaries.
 
 ## Assets
 
@@ -42,7 +42,7 @@ Secrets are not valid spec assets. They must not be stored in specs or audit pay
 - The Jira read-only adapter crosses a network and credential boundary but must not mutate Jira state.
 - The GitHub Actions read-only adapter crosses a network and credential boundary but must not mutate workflow runs, jobs, checks, logs, or artifacts.
 
-v0 YAML specs are trusted local project files, expected to be authored and reviewed in Git by project contributors. They are not treated as untrusted remote input, webhook payloads, uploaded SaaS content, or adversarial documents. The parser posture through `0.2.0-preview.1` is preview-only: `serde_yaml` is accepted with documented risk, and Workflow OS must not claim hardened malicious-spec parsing.
+v0 YAML specs are trusted local project files, expected to be authored and reviewed in Git by project contributors. They are not treated as untrusted remote input, webhook payloads, uploaded SaaS content, or adversarial documents. The parser posture through `0.3.0-preview.1` is preview-only: `serde_yaml` is accepted with documented risk, and Workflow OS must not claim hardened malicious-spec parsing.
 
 ## Primary Threats
 
