@@ -357,6 +357,47 @@ pub struct LocalExecutionWithImmutableRunBundleRequest {
     pub bundle: LocalExecutionImmutableRunBundleInputs,
 }
 
+/// Explicit immutable-bundle execution with one caller-owned resolved-context commitment.
+///
+/// The supplemental commitment is folded into the existing resolved execution-context hash.
+/// It does not create a second durable hash or preserve caller payloads in the immutable bundle.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithResolvedContextCommitmentRequest {
+    /// Existing immutable-bundle execution request.
+    pub execution: LocalExecutionWithImmutableRunBundleRequest,
+    /// Bounded caller-owned commitment to additional resolved execution context.
+    pub resolved_context_commitment: crate::SpecContentHash,
+}
+
+impl fmt::Debug for LocalExecutionWithResolvedContextCommitmentRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithResolvedContextCommitmentRequest")
+            .field("execution", &"[REDACTED]")
+            .field("resolved_context_commitment", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Proof-enforced approval decision bound to one caller-owned resolved-context commitment.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalApprovalPresentationResolvedContextDecisionRequest {
+    /// Existing proof-enforced approval decision request.
+    pub approval: LocalApprovalPresentationDecisionRequest,
+    /// Fresh commitment that must reproduce the context approved by the run.
+    pub resolved_context_commitment: crate::SpecContentHash,
+}
+
+impl fmt::Debug for LocalApprovalPresentationResolvedContextDecisionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalApprovalPresentationResolvedContextDecisionRequest")
+            .field("approval", &"[REDACTED]")
+            .field("resolved_context_commitment", &"[REDACTED]")
+            .finish()
+    }
+}
+
 impl fmt::Debug for LocalExecutionWithImmutableRunBundleRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -2154,6 +2195,25 @@ pub struct LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest {
     pub expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
     /// Required project-declared activation committed into the immutable run posture.
     pub project_authoritative_execution: crate::AuthoritativeExecutionConfiguration,
+}
+
+/// Selected project-validation execution bound to caller-owned resolved context.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalSelectedProjectValidationResolvedContextRequest {
+    /// Existing fact-free selected project-validation request.
+    pub execution: LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+    /// Bounded commitment that must become the immutable resolved execution context.
+    pub resolved_context_commitment: crate::SpecContentHash,
+}
+
+impl fmt::Debug for LocalSelectedProjectValidationResolvedContextRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalSelectedProjectValidationResolvedContextRequest")
+            .field("execution", &"[REDACTED]")
+            .field("resolved_context_commitment", &"[REDACTED]")
+            .finish()
+    }
 }
 
 /// Explicit request for the selected source-backed local project-validation consumer.
@@ -4922,6 +4982,132 @@ pub struct LocalSelectedProjectValidationApprovalEnvelopeInput {
     pub report: LocalExecutionReportInputs,
     /// Metadata for the exact decision-time local-check reference.
     pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
+}
+
+/// Proof-enforced selected project-validation approval bound to resolved context.
+pub struct LocalSelectedProjectValidationResolvedContextApprovalInput {
+    /// Existing proof-enforced approval request.
+    pub approval: LocalApprovalPresentationDecisionRequest,
+    /// Existing fact-free selected project-validation execution request.
+    pub execution: LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+    /// Fresh bounded commitment that must reproduce the approved immutable context.
+    pub resolved_context_commitment: crate::SpecContentHash,
+    /// Metadata for the exact decision-time local-check reference.
+    pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
+}
+
+impl fmt::Debug for LocalSelectedProjectValidationResolvedContextApprovalInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalSelectedProjectValidationResolvedContextApprovalInput")
+            .field("approval", &"[REDACTED]")
+            .field("execution", &"[REDACTED]")
+            .field("resolved_context_commitment", &"[REDACTED]")
+            .field("local_check_reference", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Result of one resolved-context project-validation approval decision.
+pub struct LocalSelectedProjectValidationResolvedContextApprovalResult {
+    run: WorkflowRun,
+    local_check_result_reference: Option<crate::LocalCheckResultReference>,
+}
+
+/// Explicit input for terminal project-validation reassessment with resolved context.
+pub struct LocalSelectedProjectValidationResolvedContextReassessmentInput {
+    /// Existing fact-free selected project-validation execution request.
+    pub execution: LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+    /// Fresh bounded commitment that must reproduce the immutable run context.
+    pub resolved_context_commitment: crate::SpecContentHash,
+    /// Metadata for the exact reassessment-time local-check reference.
+    pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
+}
+
+impl fmt::Debug for LocalSelectedProjectValidationResolvedContextReassessmentInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalSelectedProjectValidationResolvedContextReassessmentInput")
+            .field("execution", &"[REDACTED]")
+            .field("resolved_context_commitment", &"[REDACTED]")
+            .field("local_check_reference", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Fresh check evidence for one existing terminal resolved-context run.
+pub struct LocalSelectedProjectValidationResolvedContextReassessmentResult {
+    route: LocalExecutionWithAuthoritativeGovernanceRouteResult,
+    local_check_result_reference: crate::LocalCheckResultReference,
+}
+
+impl LocalSelectedProjectValidationResolvedContextReassessmentResult {
+    /// Returns the revalidated terminal route.
+    #[must_use]
+    pub const fn route(&self) -> &LocalExecutionWithAuthoritativeGovernanceRouteResult {
+        &self.route
+    }
+
+    /// Returns the exact reassessment-time local-check reference.
+    #[must_use]
+    pub const fn local_check_result_reference(&self) -> &crate::LocalCheckResultReference {
+        &self.local_check_result_reference
+    }
+
+    /// Consumes the result into its terminal route and exact check reference.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        LocalExecutionWithAuthoritativeGovernanceRouteResult,
+        crate::LocalCheckResultReference,
+    ) {
+        (self.route, self.local_check_result_reference)
+    }
+}
+
+impl fmt::Debug for LocalSelectedProjectValidationResolvedContextReassessmentResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalSelectedProjectValidationResolvedContextReassessmentResult")
+            .field("route", &self.route)
+            .field("local_check_result_reference", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl LocalSelectedProjectValidationResolvedContextApprovalResult {
+    /// Returns the resulting governed run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the exact decision-time local-check reference for a grant.
+    #[must_use]
+    pub const fn local_check_result_reference(&self) -> Option<&crate::LocalCheckResultReference> {
+        self.local_check_result_reference.as_ref()
+    }
+
+    /// Consumes the result into its governed decision and optional check reference.
+    #[must_use]
+    pub fn into_parts(self) -> (WorkflowRun, Option<crate::LocalCheckResultReference>) {
+        (self.run, self.local_check_result_reference)
+    }
+}
+
+impl fmt::Debug for LocalSelectedProjectValidationResolvedContextApprovalResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalSelectedProjectValidationResolvedContextApprovalResult")
+            .field("run_status", &self.run().snapshot.status)
+            .field("run_event_count", &self.run().events.len())
+            .field(
+                "local_check_result_reference_present",
+                &self.local_check_result_reference.is_some(),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 impl fmt::Debug for LocalSelectedProjectValidationApprovalEnvelopeInput {
@@ -7924,6 +8110,53 @@ where
         self.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
     }
 
+    /// Applies a proof-enforced approval decision only when caller-owned resolved context still
+    /// reproduces the commitment bound before approval.
+    ///
+    /// This additive path is intended for trusted compositions that resolve bounded context
+    /// outside Core while retaining Core-owned immutable-run and approval-resume enforcement.
+    /// The commitment is folded into the existing resolved execution-context hash; its source
+    /// payload is never accepted or persisted by this API.
+    ///
+    /// # Errors
+    ///
+    /// Returns the existing presentation-proof or approval-resume errors when proof is missing,
+    /// stale, or the fresh resolved-context commitment differs from the approved run.
+    pub fn decide_approval_with_presentation_and_resolved_context(
+        &self,
+        request: LocalApprovalPresentationResolvedContextDecisionRequest,
+    ) -> Result<WorkflowRun, WorkflowOsError> {
+        let LocalApprovalPresentationResolvedContextDecisionRequest {
+            approval:
+                LocalApprovalPresentationDecisionRequest {
+                    approval: approval_request,
+                    proof,
+                    max_presentation_age,
+                },
+            resolved_context_commitment,
+        } = request;
+        let (run, approval, decision) = self.prepare_approval_decision(&approval_request)?;
+        let decision = self.approval_decision_with_presentation_proof(
+            &approval,
+            decision,
+            &proof,
+            max_presentation_age,
+        )?;
+        let LocalApprovalDecisionRequest {
+            project_root,
+            correlation_id,
+            ..
+        } = approval_request;
+        self.apply_approval_decision_with_resolved_context(
+            &project_root,
+            &correlation_id,
+            &run,
+            &approval,
+            decision,
+            &resolved_context_commitment,
+        )
+    }
+
     /// Applies a local approval decision through an explicit
     /// approval-presentation default-enforcement policy.
     ///
@@ -8296,6 +8529,28 @@ where
         .map(|(run, _)| run)
     }
 
+    fn apply_approval_decision_with_resolved_context(
+        &self,
+        project_root: &std::path::Path,
+        correlation_id: &CorrelationId,
+        run: &WorkflowRun,
+        approval: &ApprovalRequest,
+        decision: ApprovalDecision,
+        resolved_context_commitment: &crate::SpecContentHash,
+    ) -> Result<WorkflowRun, WorkflowOsError> {
+        self.apply_approval_decision_with_grant_precondition_and_capability(
+            project_root,
+            correlation_id,
+            run,
+            approval,
+            decision,
+            &ProjectValidationCapability::Default,
+            Some(resolved_context_commitment),
+            || Ok(()),
+        )
+        .map(|(run, _)| run)
+    }
+
     fn apply_approval_decision_with_grant_precondition<T, F>(
         &self,
         project_root: &std::path::Path,
@@ -8315,6 +8570,7 @@ where
             approval,
             decision,
             &ProjectValidationCapability::Default,
+            None,
             grant_precondition,
         )
     }
@@ -8328,6 +8584,7 @@ where
         approval: &ApprovalRequest,
         decision: ApprovalDecision,
         validation_capability: &ProjectValidationCapability,
+        resolved_context_commitment: Option<&crate::SpecContentHash>,
         grant_precondition: F,
     ) -> Result<(WorkflowRun, Option<T>), WorkflowOsError>
     where
@@ -8345,6 +8602,7 @@ where
                     &builder,
                     approval,
                     validation_capability,
+                    resolved_context_commitment,
                 )?;
                 plan.immutable_run_bundle
                     .clone_from(&run.snapshot.identity.immutable_run_bundle);
@@ -8583,11 +8841,42 @@ where
         )
     }
 
+    fn prepare_execution_with_capability_and_resolved_context(
+        request: &LocalExecutionRequest,
+        run_id: WorkflowRunId,
+        validation_capability: &ProjectValidationCapability,
+        resolved_context_commitment: Option<&crate::SpecContentHash>,
+    ) -> Result<ExecutionPlan, WorkflowOsError> {
+        Self::prepare_execution_with_capability_artifact_policy_and_resolved_context(
+            request,
+            run_id,
+            validation_capability,
+            None,
+            resolved_context_commitment,
+        )
+    }
+
     fn prepare_execution_with_capability_and_artifact_policy(
         request: &LocalExecutionRequest,
         run_id: WorkflowRunId,
         validation_capability: &ProjectValidationCapability,
         caller_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+    ) -> Result<ExecutionPlan, WorkflowOsError> {
+        Self::prepare_execution_with_capability_artifact_policy_and_resolved_context(
+            request,
+            run_id,
+            validation_capability,
+            caller_proof_marker_policy,
+            None,
+        )
+    }
+
+    fn prepare_execution_with_capability_artifact_policy_and_resolved_context(
+        request: &LocalExecutionRequest,
+        run_id: WorkflowRunId,
+        validation_capability: &ProjectValidationCapability,
+        caller_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+        resolved_context_commitment: Option<&crate::SpecContentHash>,
     ) -> Result<ExecutionPlan, WorkflowOsError> {
         let checkpoint_inputs = before_skill_invocation_checkpoint_inputs(request)?;
         let bundle =
@@ -8643,6 +8932,7 @@ where
             &checkpoint_inputs,
             request,
             workflow_report_artifact_policies,
+            resolved_context_commitment,
         )?;
 
         Ok(ExecutionPlan {
@@ -8939,6 +9229,7 @@ where
         builder: &EventBuilder,
         approval: &ApprovalRequest,
         validation_capability: &ProjectValidationCapability,
+        resolved_context_commitment: Option<&crate::SpecContentHash>,
     ) -> Result<ExecutionPlan, WorkflowOsError> {
         let request = LocalExecutionRequest {
             project_root: project_root.to_path_buf(),
@@ -8952,10 +9243,11 @@ where
             side_effect_events: Vec::new(),
             side_effect_lifecycle_events: Vec::new(),
         };
-        let mut plan = Self::prepare_execution_with_capability(
+        let mut plan = Self::prepare_execution_with_capability_and_resolved_context(
             &request,
             builder.run_id.clone(),
             validation_capability,
+            resolved_context_commitment,
         )
         .map_err(|_| {
             executor_error(
@@ -13669,6 +13961,45 @@ where
     B: StateBackend,
     S: crate::immutable_run_bundle_store::ImmutableRunBundleStore + ?Sized,
 {
+    execute_with_immutable_run_bundle_internal(executor, store, request, None)
+}
+
+/// Executes one immutable-bundle-backed run with a caller-owned resolved-context commitment.
+///
+/// The commitment is incorporated into the existing immutable bundle's resolved
+/// execution-context hash. Exact retries and approval resumes must supply the same commitment.
+///
+/// # Errors
+///
+/// Returns the existing immutable-run errors when the commitment or any other immutable input
+/// does not reproduce the stored bundle.
+pub fn execute_with_immutable_run_bundle_and_resolved_context<B, S>(
+    executor: &LocalExecutor<'_, B>,
+    store: &S,
+    request: &LocalExecutionWithResolvedContextCommitmentRequest,
+) -> Result<LocalExecutionWithImmutableRunBundleResult, WorkflowOsError>
+where
+    B: StateBackend,
+    S: crate::immutable_run_bundle_store::ImmutableRunBundleStore + ?Sized,
+{
+    execute_with_immutable_run_bundle_internal(
+        executor,
+        store,
+        &request.execution,
+        Some(&request.resolved_context_commitment),
+    )
+}
+
+fn execute_with_immutable_run_bundle_internal<B, S>(
+    executor: &LocalExecutor<'_, B>,
+    store: &S,
+    request: &LocalExecutionWithImmutableRunBundleRequest,
+    resolved_context_commitment: Option<&crate::SpecContentHash>,
+) -> Result<LocalExecutionWithImmutableRunBundleResult, WorkflowOsError>
+where
+    B: StateBackend,
+    S: crate::immutable_run_bundle_store::ImmutableRunBundleStore + ?Sized,
+{
     let run_id = request
         .execution
         .run_id
@@ -13694,6 +14025,12 @@ where
             return Err(immutable_run_bundle_binding_error());
         }
         let stored = store.read_exact_bundle(&run_id, binding.bundle_id())?;
+        let plan = LocalExecutor::<B>::prepare_execution_with_capability_and_resolved_context(
+            &request.execution,
+            run_id.clone(),
+            &ProjectValidationCapability::Default,
+            resolved_context_commitment,
+        )?;
         if stored.manifest().run_binding() != binding
             || !existing_immutable_run_bundle_request_matches(
                 stored.manifest(),
@@ -13701,6 +14038,7 @@ where
                 &request.bundle,
                 None,
             )?
+            || validate_immutable_run_bundle_matches_plan(stored.manifest(), &plan).is_err()
         {
             return Err(immutable_run_bundle_binding_error());
         }
@@ -13710,7 +14048,12 @@ where
         });
     }
 
-    let mut plan = LocalExecutor::<B>::prepare_execution(&request.execution, run_id.clone())?;
+    let mut plan = LocalExecutor::<B>::prepare_execution_with_capability_and_resolved_context(
+        &request.execution,
+        run_id.clone(),
+        &ProjectValidationCapability::Default,
+        resolved_context_commitment,
+    )?;
     executor.evaluate_pre_run_policy(
         &plan,
         &request.execution.actor,
@@ -14099,6 +14442,7 @@ pub fn decide_hosted_dispatch_approval_with_presentation(
                 &builder,
                 &approval,
                 &ProjectValidationCapability::Default,
+                None,
             )?;
             validate_hosted_no_write_plan(&plan)?;
             executor.append(
@@ -14216,6 +14560,7 @@ where
                 &builder,
                 &approval,
                 &ProjectValidationCapability::Default,
+                None,
             )?;
             plan.immutable_run_bundle
                 .clone_from(&run.snapshot.identity.immutable_run_bundle);
@@ -14405,6 +14750,7 @@ where
                     &builder,
                     approval,
                     &ProjectValidationCapability::Default,
+                    None,
                 )?;
                 plan.immutable_run_bundle
                     .clone_from(&run.snapshot.identity.immutable_run_bundle);
@@ -14884,6 +15230,7 @@ where
         visible_dependencies,
         request,
         AuthoritativeRouteOptions::EXPLICIT_FACTS,
+        None,
     )
 }
 
@@ -14918,6 +15265,7 @@ where
         visible_dependencies,
         &request,
         AuthoritativeRouteOptions::CORE_OWNED_ONE_STEP,
+        None,
     )
 }
 
@@ -14950,6 +15298,123 @@ where
         visible_dependencies,
         &execution,
         AuthoritativeRouteOptions::core_owned_runtime_fact_source(evaluated_at),
+        None,
+    )
+}
+
+/// Routes selected project validation while binding caller-owned resolved context.
+///
+/// This preserves the accepted authoritative local-check and proportional-governance path while
+/// making one bounded caller commitment part of immutable run identity.
+///
+/// # Errors
+///
+/// Returns the existing selected project-validation or immutable-context errors.
+pub fn route_selected_project_validation_governance_with_resolved_context<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalSelectedProjectValidationResolvedContextRequest,
+) -> Result<LocalExecutionWithAuthoritativeGovernanceRouteResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let execution = request.execution.explicit_request();
+    let evaluated_at = Timestamp::now_utc();
+    route_authoritative_local_check_governance(
+        executor,
+        store,
+        profile.handler(),
+        visible_dependencies,
+        &execution,
+        AuthoritativeRouteOptions::core_owned_runtime_fact_source(evaluated_at),
+        Some(&request.resolved_context_commitment),
+    )
+}
+
+/// Reassesses one existing terminal project-validation run with resolved context.
+///
+/// This path reruns only the canonical bounded project-validation check. It does
+/// not execute workflow skills, append workflow events, deliver disclosures, or
+/// create artifacts. The returned reference is derived from that same-call
+/// check result for truthful recovery reporting.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the run is not terminal, the
+/// immutable execution request or resolved context has drifted, the governance
+/// binding cannot be reproduced, or the exact check reference cannot be built.
+pub fn reassess_selected_project_validation_governance_with_resolved_context<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    input: LocalSelectedProjectValidationResolvedContextReassessmentInput,
+) -> Result<LocalSelectedProjectValidationResolvedContextReassessmentResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalSelectedProjectValidationResolvedContextReassessmentInput {
+        execution,
+        resolved_context_commitment,
+        local_check_reference,
+    } = input;
+    let request = execution.explicit_request();
+    let route = route_authoritative_report_request(
+        executor,
+        store,
+        profile.handler(),
+        None,
+        &request,
+        AuthoritativeRouteOptions::core_owned_runtime_fact_source(Timestamp::now_utc()),
+        Some(&resolved_context_commitment),
+    )?;
+    if !matches!(
+        route,
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::ExistingTerminal(_)
+    ) {
+        return Err(selected_project_validation_consumer_error(
+            "existing_terminal_required",
+        ));
+    }
+    let [local_check_result] = route.local_check_results() else {
+        return Err(selected_project_validation_consumer_error(
+            "result_ambiguous",
+        ));
+    };
+    let bundle_binding = route
+        .run()
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| selected_project_validation_consumer_error("bundle_binding_missing"))?;
+    let stored = store.read_bundle(
+        &route.run().snapshot.identity.run_id,
+        bundle_binding.bundle_id(),
+    )?;
+    let (_, identities) = authoritative_docs_check_preflight_material(
+        &stored,
+        &execution.selected_step_id,
+        profile.handler(),
+    )?;
+    let reference = crate::LocalCheckResultReference::from_result(
+        identities.result_id,
+        local_check_result,
+        route.run().snapshot.identity.workflow_id.clone(),
+        route.run().snapshot.identity.run_id.clone(),
+        local_check_reference.workflow_event_id,
+        local_check_reference.audit_event_id,
+        local_check_reference.output_reference,
+        local_check_reference.redaction,
+        local_check_reference.sensitivity,
+    )
+    .map_err(|_| selected_project_validation_consumer_error("reference_invalid"))?;
+    Ok(
+        LocalSelectedProjectValidationResolvedContextReassessmentResult {
+            route,
+            local_check_result_reference: reference,
+        },
     )
 }
 
@@ -14960,12 +15425,19 @@ fn route_authoritative_local_check_governance<B>(
     visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
     options: AuthoritativeRouteOptions,
+    resolved_context_commitment: Option<&crate::SpecContentHash>,
 ) -> Result<LocalExecutionWithAuthoritativeGovernanceRouteResult, WorkflowOsError>
 where
     B: StateBackend,
 {
-    let prepared =
-        prepare_authoritative_docs_check_governance(executor, store, handler, request, options)?;
+    let prepared = prepare_authoritative_docs_check_governance(
+        executor,
+        store,
+        handler,
+        request,
+        options,
+        resolved_context_commitment,
+    )?;
     if prepared.governance_binding.completeness()
         != crate::GovernanceAssessmentCompleteness::Complete
         || !authoritative_governance_source_is_bound(&prepared.governance_binding)
@@ -15131,6 +15603,7 @@ where
         visible_dependencies,
         &execution,
         AuthoritativeRouteOptions::core_owned_runtime_fact_source(evaluated_at),
+        None,
     )?;
     let bundle_binding = route
         .run()
@@ -15190,6 +15663,7 @@ fn route_authoritative_report_request<B>(
     visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
     options: AuthoritativeRouteOptions,
+    resolved_context_commitment: Option<&crate::SpecContentHash>,
 ) -> Result<LocalExecutionWithAuthoritativeGovernanceRouteResult, WorkflowOsError>
 where
     B: StateBackend,
@@ -15208,6 +15682,7 @@ where
             visible_dependencies,
             request,
             options,
+            resolved_context_commitment,
         );
     }
 
@@ -15220,7 +15695,12 @@ where
         ));
     }
     let reassessment = reassess_authoritative_local_check_governance_binding(
-        store, handler, &run, request, options,
+        store,
+        handler,
+        &run,
+        request,
+        options,
+        resolved_context_commitment,
     )?;
     let bundle_binding = run
         .snapshot
@@ -15269,6 +15749,7 @@ where
         visible_dependencies,
         &request.execution,
         options,
+        None,
     )?;
 
     Ok(compose_authoritative_local_check_governance_report(
@@ -15614,6 +16095,7 @@ fn prepare_authoritative_docs_check_governance<B>(
     docs_check_handler: &dyn AuthoritativeLocalCheckHandler,
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
     options: AuthoritativeRouteOptions,
+    resolved_context_commitment: Option<&crate::SpecContentHash>,
 ) -> Result<PreparedAuthoritativeDocsCheckGovernance, WorkflowOsError>
 where
     B: StateBackend,
@@ -15640,10 +16122,11 @@ where
     } else {
         ProjectValidationCapability::Default
     };
-    let plan = LocalExecutor::<B>::prepare_execution_with_capability(
+    let plan = LocalExecutor::<B>::prepare_execution_with_capability_and_resolved_context(
         execution,
         run_id.clone(),
         &validation_capability,
+        resolved_context_commitment,
     )?;
     executor.evaluate_pre_run_policy(&plan, &execution.actor, &execution.correlation_id)?;
     let project =
@@ -16219,6 +16702,7 @@ where
         evaluated_at,
         expected_aggregate_fingerprint.as_ref(),
         &ProjectValidationCapability::Default,
+        None,
         |_, decision| Ok(decision),
     )
 }
@@ -16272,6 +16756,7 @@ where
         evaluated_at,
         expected_aggregate_fingerprint.as_ref(),
         &ProjectValidationCapability::Default,
+        None,
         |approval, decision| {
             executor.approval_decision_with_presentation_proof(
                 approval,
@@ -16350,6 +16835,7 @@ where
         evaluated_at,
         expected_aggregate_fingerprint.as_ref(),
         validation_capability,
+        None,
         |approval, decision| {
             executor.approval_decision_with_presentation_proof(
                 approval,
@@ -16467,6 +16953,7 @@ fn decide_current_runtime_facts_governance_approval<B, F>(
     evaluated_at: Timestamp,
     expected_aggregate_fingerprint: Option<&crate::SpecContentHash>,
     validation_capability: &ProjectValidationCapability,
+    resolved_context_commitment: Option<&crate::SpecContentHash>,
     prepare_decision: F,
 ) -> Result<LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult, WorkflowOsError>
 where
@@ -16483,6 +16970,7 @@ where
             &approval,
             decision,
             validation_capability,
+            resolved_context_commitment,
             || {
                 reassess_current_runtime_fact_approval_binding(
                     store,
@@ -16729,7 +17217,7 @@ where
     } = request;
     let (run, approval, decision) = executor.prepare_approval_decision(&approval_request)?;
     let reassessment = reassess_authoritative_local_check_governance_binding(
-        store, handler, &run, &execution, options,
+        store, handler, &run, &execution, options, None,
     )?;
     let approval_binding = approval
         .governance_approval_binding
@@ -16786,6 +17274,7 @@ fn reassess_authoritative_local_check_governance_binding(
     run: &WorkflowRun,
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
     options: AuthoritativeRouteOptions,
+    resolved_context_commitment: Option<&crate::SpecContentHash>,
 ) -> Result<AuthoritativeLocalCheckApprovalReassessment, WorkflowOsError> {
     let validation_capability = if options.report_artifact_capable {
         ProjectValidationCapability::ReportArtifactCapable {
@@ -16814,6 +17303,13 @@ fn reassess_authoritative_local_check_governance_binding(
             )
         })?;
     let stored = store.read_bundle(&run.snapshot.identity.run_id, bundle_binding.bundle_id())?;
+    if resolved_context_commitment
+        .is_some_and(|commitment| stored.manifest().resolved_execution_context_hash() != commitment)
+    {
+        return Err(selected_project_validation_consumer_error(
+            "current_bundle_context_mismatch",
+        ));
+    }
     if request.execution.execution.run_id.as_ref() != Some(&run.snapshot.identity.run_id)
         || stored.manifest().run_binding() != *bundle_binding
         || !existing_immutable_run_bundle_request_matches(
@@ -17856,6 +18352,7 @@ where
         profile.handler(),
         &execution,
         evaluated_at,
+        None,
     )?;
     let stable_reference =
         WorkReportStableReference::new(material.result_id.as_str().to_owned())
@@ -17891,6 +18388,184 @@ where
             require_approval_references_for_requires_approval,
             require_decision_for_approved_or_denied,
             high_assurance_disclosure_policy,
+        },
+    )
+}
+
+/// Decides one selected project-validation approval with fresh check evidence and resolved context.
+///
+/// Presentation proof is validated before source access. A grant reruns the canonical project
+/// validation check, reproduces the durable governance binding, and requires the supplied bounded
+/// context commitment to match the immutable run before any approval or skill event is appended.
+/// A denial invokes no check handler and returns no check reference.
+///
+/// # Errors
+///
+/// Returns the existing proof, current-fact reassessment, immutable-context, or approval errors.
+#[allow(clippy::too_many_lines)]
+pub fn decide_selected_project_validation_approval_with_resolved_context<B>(
+    executor: &LocalExecutor<'_, B>,
+    immutable_bundle_store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    input: LocalSelectedProjectValidationResolvedContextApprovalInput,
+) -> Result<LocalSelectedProjectValidationResolvedContextApprovalResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalSelectedProjectValidationResolvedContextApprovalInput {
+        approval,
+        execution,
+        resolved_context_commitment,
+        local_check_reference,
+    } = input;
+    let gate_kind = selected_project_validation_approval_gate_kind(executor, &approval)?;
+    preflight_selected_project_validation_approval_presentation(executor, &approval)?;
+    let run = executor.backend.rehydrate_run(&approval.approval.run_id)?;
+    let validation_capability = ProjectValidationCapability::ReportArtifactCapable {
+        workflow_id: run.snapshot.identity.workflow_id.clone(),
+        approval_proof_marker_capable: true,
+    };
+
+    if gate_kind == LocalSelectedProjectValidationApprovalGateKind::AuthoredWorkflowStep {
+        let local_check_result_reference =
+            if approval.approval.decision == ApprovalDecisionKind::Granted {
+                let evaluated_at = Timestamp::now_utc();
+                let material = reassess_selected_project_validation_runtime_fact_source(
+                    executor,
+                    immutable_bundle_store,
+                    profile.handler(),
+                    &execution,
+                    evaluated_at,
+                    Some(&resolved_context_commitment),
+                )?;
+                let [result] = material.bridge.results() else {
+                    return Err(selected_project_validation_consumer_error(
+                        "result_ambiguous",
+                    ));
+                };
+                Some(
+                    crate::LocalCheckResultReference::from_result(
+                        material.result_id,
+                        result,
+                        run.snapshot.identity.workflow_id.clone(),
+                        run.snapshot.identity.run_id.clone(),
+                        local_check_reference.workflow_event_id,
+                        local_check_reference.audit_event_id,
+                        local_check_reference.output_reference,
+                        local_check_reference.redaction,
+                        local_check_reference.sensitivity,
+                    )
+                    .map_err(|_| selected_project_validation_consumer_error("reference_invalid"))?,
+                )
+            } else {
+                None
+            };
+        let run = executor.decide_approval_with_presentation_and_resolved_context(
+            LocalApprovalPresentationResolvedContextDecisionRequest {
+                approval,
+                resolved_context_commitment,
+            },
+        )?;
+        return Ok(
+            LocalSelectedProjectValidationResolvedContextApprovalResult {
+                run,
+                local_check_result_reference,
+            },
+        );
+    }
+
+    if approval.approval.decision == ApprovalDecisionKind::Denied {
+        let registration = core_owned_authoritative_local_check_runtime_fact_source_registration()?;
+        let LocalApprovalPresentationDecisionRequest {
+            approval: approval_request,
+            proof,
+            max_presentation_age,
+        } = approval;
+        let decision = decide_current_runtime_facts_governance_approval(
+            executor,
+            immutable_bundle_store,
+            &UnavailableSelectedProjectValidationRuntimeFactSource,
+            &approval_request,
+            execution.profile,
+            &registration,
+            Timestamp::now_utc(),
+            execution.expected_aggregate_fingerprint.as_ref(),
+            &validation_capability,
+            Some(&resolved_context_commitment),
+            |approval, decision| {
+                executor.approval_decision_with_presentation_proof(
+                    approval,
+                    decision,
+                    &proof,
+                    max_presentation_age,
+                )
+            },
+        )?;
+        return Ok(
+            LocalSelectedProjectValidationResolvedContextApprovalResult {
+                run: decision.run().clone(),
+                local_check_result_reference: None,
+            },
+        );
+    }
+
+    let evaluated_at = Timestamp::now_utc();
+    let material = reassess_selected_project_validation_runtime_fact_source(
+        executor,
+        immutable_bundle_store,
+        profile.handler(),
+        &execution,
+        evaluated_at,
+        Some(&resolved_context_commitment),
+    )?;
+    let [result] = material.bridge.results() else {
+        return Err(selected_project_validation_consumer_error(
+            "result_ambiguous",
+        ));
+    };
+    let reference = crate::LocalCheckResultReference::from_result(
+        material.result_id.clone(),
+        result,
+        run.snapshot.identity.workflow_id.clone(),
+        run.snapshot.identity.run_id.clone(),
+        local_check_reference.workflow_event_id,
+        local_check_reference.audit_event_id,
+        local_check_reference.output_reference,
+        local_check_reference.redaction,
+        local_check_reference.sensitivity,
+    )
+    .map_err(|_| selected_project_validation_consumer_error("reference_invalid"))?;
+    let registration = material.bridge.registration().clone();
+    let source = material.bridge.source().clone();
+    let LocalApprovalPresentationDecisionRequest {
+        approval: approval_request,
+        proof,
+        max_presentation_age,
+    } = approval;
+    let decision = decide_current_runtime_facts_governance_approval(
+        executor,
+        immutable_bundle_store,
+        &source,
+        &approval_request,
+        execution.profile,
+        &registration,
+        evaluated_at,
+        execution.expected_aggregate_fingerprint.as_ref(),
+        &validation_capability,
+        Some(&resolved_context_commitment),
+        |approval, decision| {
+            executor.approval_decision_with_presentation_proof(
+                approval,
+                decision,
+                &proof,
+                max_presentation_age,
+            )
+        },
+    )?;
+    Ok(
+        LocalSelectedProjectValidationResolvedContextApprovalResult {
+            run: decision.run().clone(),
+            local_check_result_reference: Some(reference),
         },
     )
 }
@@ -17973,6 +18648,7 @@ where
             profile.handler(),
             &execution,
             evaluated_at,
+            None,
         )?;
         let result = material
             .bridge
@@ -18411,6 +19087,7 @@ fn reassess_selected_project_validation_runtime_fact_source<B>(
     handler: &dyn AuthoritativeLocalCheckHandler,
     request: &LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
     evaluated_at: Timestamp,
+    resolved_context_commitment: Option<&crate::SpecContentHash>,
 ) -> Result<SelectedProjectValidationDecisionMaterial, WorkflowOsError>
 where
     B: StateBackend,
@@ -18448,12 +19125,15 @@ where
             activation.clone(),
         )?
     {
-        return Err(immutable_run_bundle_binding_error());
+        return Err(selected_project_validation_consumer_error(
+            "immutable_request_mismatch",
+        ));
     }
-    let plan = LocalExecutor::<B>::prepare_execution_with_capability(
+    let plan = LocalExecutor::<B>::prepare_execution_with_capability_and_resolved_context(
         &execution.execution.execution,
         run_id.clone(),
         &validation_capability,
+        resolved_context_commitment,
     )?;
     let execution_posture =
         immutable_run_bundle_execution_posture(&execution.execution.execution, activation)?;
@@ -18478,9 +19158,35 @@ where
         &inventory,
         validation_capability,
     )?;
-    validate_immutable_run_bundle_matches_plan(current_bundle.manifest(), &plan)?;
-    if current_bundle.manifest() != stored.manifest() {
-        return Err(immutable_run_bundle_binding_error());
+    validate_immutable_run_bundle_matches_plan(current_bundle.manifest(), &plan)
+        .map_err(|_| selected_project_validation_consumer_error("prepared_plan_mismatch"))?;
+    let current_manifest = current_bundle.manifest();
+    let stored_manifest = stored.manifest();
+    let mismatch = if current_manifest.resolved_execution_context_hash()
+        != stored_manifest.resolved_execution_context_hash()
+    {
+        Some("current_bundle_context_mismatch")
+    } else if current_manifest.definitions() != stored_manifest.definitions() {
+        Some("current_bundle_definitions_mismatch")
+    } else if current_manifest.local_check_declaration_sets()
+        != stored_manifest.local_check_declaration_sets()
+    {
+        Some("current_bundle_check_declarations_mismatch")
+    } else if current_manifest.execution_posture() != stored_manifest.execution_posture() {
+        Some("current_bundle_execution_posture_mismatch")
+    } else if current_manifest.handlers() != stored_manifest.handlers() {
+        Some("current_bundle_handlers_mismatch")
+    } else if current_manifest.created_at() != stored_manifest.created_at() {
+        Some("current_bundle_created_at_mismatch")
+    } else if current_manifest.created_by() != stored_manifest.created_by() {
+        Some("current_bundle_created_by_mismatch")
+    } else if current_manifest.root_hash() != stored_manifest.root_hash() {
+        Some("current_bundle_root_mismatch")
+    } else {
+        None
+    };
+    if let Some(code) = mismatch {
+        return Err(selected_project_validation_consumer_error(code));
     }
     preflight_core_owned_authoritative_workflow_shape(&stored, &execution.selected_step_id)?;
     let durable_binding = store.read_governance_assessment_binding(run_id)?;
@@ -19162,7 +19868,11 @@ fn resolved_execution_context_hash(
     checkpoint_inputs: &LocalExecutionBeforeSkillInvocationCheckpointInputs,
     request: &LocalExecutionRequest,
     artifact_policies: WorkflowReportArtifactPolicies,
+    resolved_context_commitment: Option<&crate::SpecContentHash>,
 ) -> Result<crate::SpecContentHash, WorkflowOsError> {
+    if let Some(commitment) = resolved_context_commitment {
+        return Ok(commitment.clone());
+    }
     let mut hasher = Sha256::new();
     update_idempotency_hash(
         &mut hasher,
@@ -19258,7 +19968,6 @@ fn resolved_execution_context_hash(
         "artifact_policies",
         &format!("{artifact_policies:?}"),
     );
-
     Ok(crate::SpecContentHash::from_bytes(hasher.finalize()))
 }
 

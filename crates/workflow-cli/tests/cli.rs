@@ -11,7 +11,8 @@ use sha2::{Digest, Sha256};
 
 use workflow_core::{
     AuditEvent, EventLogStore, LocalStateBackend, SqliteStateBackend, StateBackend,
-    WorkReportArtifactStore, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
+    WorkReportArtifactStore, WorkReportCitationKind, WorkReportCitationTarget, WorkReportId,
+    WorkReportSectionKind, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -1540,6 +1541,288 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
     assert!(!out.contains("workflow_discovery_recommendations:"));
     assert!(!out.contains("run_id:"));
     assert!(!out.contains("approval_id:"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn first_run_explicit_artifact_path_pauses_then_persists_and_replays_exactly() {
+    let project = TestProject::new("first-run-governed-artifact");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let run_id = "run-first-run-governed-artifact";
+
+    let start = workflow_os(
+        &project,
+        &["first-run", "--write-report-artifact", "--run-id", run_id],
+    );
+    assert!(start.status.success(), "{}", stderr(&start));
+    let start_out = stdout(&start);
+    assert!(start_out.contains("mode: first_run_governed_report_artifact"));
+    assert!(start_out.contains("status: waiting_for_approval"));
+    assert!(start_out.contains("route: blocking_approval"));
+    assert!(start_out.contains("approval_handoff_required: true"));
+    assert!(start_out.contains("No arbitrary source reads"));
+    assert!(!start_out.contains("report_id:"));
+
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let waiting = backend
+        .rehydrate_run(&WorkflowRunId::new(run_id).expect("run id"))
+        .expect("waiting run rehydrates");
+    let approval_id = waiting.snapshot.approval_requests[0].approval_id.clone();
+    assert!(backend
+        .read_work_report_artifact(
+            &WorkflowRunId::new(run_id).expect("run id"),
+            &WorkReportId::new(format!("report/{run_id}")).expect("report id"),
+        )
+        .expect("artifact read")
+        .is_none());
+
+    let aggregate_approve = workflow_os(
+        &project,
+        &[
+            "approve",
+            run_id,
+            approval_id.as_str(),
+            "--actor",
+            "user/test-maintainer",
+            "--reason",
+            "reviewed-bounded-first-run-analysis",
+        ],
+    );
+    assert!(
+        aggregate_approve.status.success(),
+        "{}",
+        stderr(&aggregate_approve)
+    );
+    assert!(stdout(&aggregate_approve).contains("status: waiting_for_approval"));
+    let step_waiting = backend
+        .rehydrate_run(&WorkflowRunId::new(run_id).expect("run id"))
+        .expect("step approval run rehydrates");
+    let step_approval_id = step_waiting
+        .snapshot
+        .approval_requests
+        .last()
+        .expect("step approval exists")
+        .approval_id
+        .clone();
+    let approve = workflow_os(
+        &project,
+        &[
+            "approve",
+            run_id,
+            step_approval_id.as_str(),
+            "--actor",
+            "user/test-maintainer",
+            "--reason",
+            "reviewed-bounded-first-run-report-step",
+        ],
+    );
+    assert!(approve.status.success(), "{}", stderr(&approve));
+    let approve_out = stdout(&approve);
+    assert!(approve_out.contains("status: Completed"));
+    assert!(approve_out.contains("report_artifact_posture: persisted"));
+    assert!(approve_out.contains(&format!("report_id: report/{run_id}")));
+    assert!(approve_out.contains("external_side_effects: none"));
+
+    let artifact = backend
+        .read_work_report_artifact(
+            &WorkflowRunId::new(run_id).expect("run id"),
+            &WorkReportId::new(format!("report/{run_id}")).expect("report id"),
+        )
+        .expect("artifact read")
+        .expect("artifact persisted");
+    assert_eq!(artifact.report_id().as_str(), format!("report/{run_id}"));
+
+    let retry = workflow_os(
+        &project,
+        &["first-run", "--write-report-artifact", "--run-id", run_id],
+    );
+    assert!(retry.status.success(), "{}", stderr(&retry));
+    assert!(stdout(&retry).contains("report_artifact_posture: already_persisted"));
+
+    let json_retry = workflow_os(
+        &project,
+        &[
+            "--json",
+            "first-run",
+            "--write-report-artifact",
+            "--run-id",
+            run_id,
+        ],
+    );
+    assert!(json_retry.status.success(), "{}", stderr(&json_retry));
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&json_retry).trim()).expect("bounded JSON output");
+    assert_eq!(json["mode"], "first_run_governed_report_artifact");
+    assert_eq!(json["status"], "completed");
+    assert_eq!(json["report_artifact_posture"], "already_persisted");
+    assert!(json.get("report_body").is_none());
+    assert!(json.get("sections").is_none());
+
+    let artifact_path = first_json_file_under(&project.state_root().join("work_reports"))
+        .expect("artifact file exists");
+    fs::remove_file(&artifact_path).expect("controlled crash-gap artifact removal");
+    let recovered = workflow_os(
+        &project,
+        &["first-run", "--write-report-artifact", "--run-id", run_id],
+    );
+    assert!(recovered.status.success(), "{}", stderr(&recovered));
+    assert!(stdout(&recovered).contains("report_artifact_posture: persisted"));
+    let recovered_artifact = backend
+        .read_work_report_artifact(
+            &WorkflowRunId::new(run_id).expect("run id"),
+            &WorkReportId::new(format!("report/{run_id}")).expect("report id"),
+        )
+        .expect("recovered artifact read")
+        .expect("recovered artifact persisted");
+    let validation = recovered_artifact
+        .work_report()
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation section");
+    assert!(validation.citations().iter().any(|citation| {
+        citation.citation_kind() == WorkReportCitationKind::LocalCheckResult
+            && matches!(
+                citation.target(),
+                WorkReportCitationTarget::LocalCheckResult { .. }
+            )
+    }));
+
+    let recovered_artifact_path = first_json_file_under(&project.state_root().join("work_reports"))
+        .expect("recovered artifact exists");
+    fs::remove_file(recovered_artifact_path).expect("second controlled crash-gap removal");
+    project.write("package.json", r#"{"scripts":{"build":"tsc"}}"#);
+    let drifted_recovery = workflow_os(
+        &project,
+        &["first-run", "--write-report-artifact", "--run-id", run_id],
+    );
+    assert!(!drifted_recovery.status.success());
+    assert!(stderr(&drifted_recovery)
+        .contains("cli.first_run.artifact.terminal_artifact_recovery_drift"));
+}
+
+#[test]
+fn first_run_artifact_approval_fails_closed_when_bounded_metadata_drifts() {
+    let project = TestProject::new("first-run-artifact-drift");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let run_id = "run-first-run-artifact-drift";
+    let start = workflow_os(
+        &project,
+        &["first-run", "--write-report-artifact", "--run-id", run_id],
+    );
+    assert!(start.status.success(), "{}", stderr(&start));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let waiting = backend
+        .rehydrate_run(&WorkflowRunId::new(run_id).expect("run id"))
+        .expect("waiting run rehydrates");
+    let approval_id = waiting.snapshot.approval_requests[0].approval_id.clone();
+    project.write("package.json", r#"{"scripts":{"test":"node --test"}}"#);
+
+    let approve = workflow_os(
+        &project,
+        &[
+            "approve",
+            run_id,
+            approval_id.as_str(),
+            "--actor",
+            "user/test-maintainer",
+            "--reason",
+            "reviewed-before-drift",
+        ],
+    );
+    assert!(!approve.status.success());
+    assert!(
+        stderr(&approve).contains("cli.first_run.artifact.approval_analysis_drift"),
+        "{}",
+        stderr(&approve)
+    );
+    let run = backend
+        .rehydrate_run(&WorkflowRunId::new(run_id).expect("run id"))
+        .expect("run rehydrates");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::WaitingForApproval);
+    assert!(backend
+        .read_work_report_artifact(
+            &WorkflowRunId::new(run_id).expect("run id"),
+            &WorkReportId::new(format!("report/{run_id}")).expect("report id"),
+        )
+        .expect("artifact read")
+        .is_none());
+
+    let deny = workflow_os(
+        &project,
+        &[
+            "approve",
+            run_id,
+            approval_id.as_str(),
+            "--actor",
+            "user/test-maintainer",
+            "--reason",
+            "deny-stale-first-run-analysis",
+            "--deny",
+        ],
+    );
+    assert!(deny.status.success(), "{}", stderr(&deny));
+    assert!(stdout(&deny).contains("decision: denied"));
+    let denied_run = backend
+        .rehydrate_run(&WorkflowRunId::new(run_id).expect("run id"))
+        .expect("denied run rehydrates");
+    assert_eq!(denied_run.snapshot.status, WorkflowRunStatus::Failed);
+    assert!(backend
+        .read_work_report_artifact(
+            &WorkflowRunId::new(run_id).expect("run id"),
+            &WorkReportId::new(format!("report/{run_id}")).expect("report id"),
+        )
+        .expect("artifact read")
+        .is_none());
+}
+
+#[test]
+fn first_run_artifact_rejects_mock_mode_and_customized_generated_contract() {
+    let project = TestProject::new("first-run-artifact-contract");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let mock = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "first-run",
+            "--write-report-artifact",
+        ],
+    );
+    assert!(!mock.status.success());
+    assert!(stderr(&mock).contains("cli.first_run.artifact.mock_mode_rejected"));
+    assert!(!project.state_root().exists());
+
+    let legacy = TestProject::new("first-run-artifact-legacy-contract");
+    let legacy_init = workflow_os(
+        &legacy,
+        &["init-repo-governance", "--no-authoritative-governance"],
+    );
+    assert!(legacy_init.status.success(), "{}", stderr(&legacy_init));
+    let legacy_artifact = workflow_os(&legacy, &["first-run", "--write-report-artifact"]);
+    assert!(!legacy_artifact.status.success());
+    assert!(stderr(&legacy_artifact).contains("cli.first_run.artifact.unsupported_contract"));
+    assert!(!legacy.state_root().exists());
+
+    let workflow_path = project
+        .path()
+        .join("workflows/first-run-governance.workflow.yml");
+    let source = fs::read_to_string(&workflow_path).expect("workflow source");
+    fs::write(
+        workflow_path,
+        source.replace(
+            "display_name: First-Run Governed Work",
+            "display_name: Customized First-Run Governed Work",
+        ),
+    )
+    .expect("customized workflow write");
+    let customized = workflow_os(&project, &["first-run", "--write-report-artifact"]);
+    assert!(!customized.status.success());
+    assert!(stderr(&customized).contains("cli.first_run.artifact.unsupported_contract"));
     assert!(!project.state_root().exists());
 }
 
@@ -5515,7 +5798,12 @@ fn project_manifest_identity_drift_fails_closed_on_approval_resume() {
     );
 
     assert!(!approved.status.success());
-    assert!(stderr(&approved).contains("executor.immutable_run_bundle.binding_mismatch"));
+    assert!(
+        stderr(&approved)
+            .contains("executor.selected_project_validation.immutable_request_mismatch"),
+        "{}",
+        stderr(&approved)
+    );
 }
 
 #[test]

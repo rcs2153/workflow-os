@@ -25,7 +25,9 @@ scaffold is implemented as documented in [Existing Repo Governance Onboarding
 Plan](../implementation-plans/existing-repo-governance-onboarding-plan.md).
 First-run Governed Work Pattern reporting posture is implemented as
 `workflow-os first-run`, which emits a bounded report-ready context without
-running workflows or writing artifacts.
+running workflows or writing artifacts. One separate explicit opt-in command,
+`workflow-os first-run --write-report-artifact`, runs the exact generated
+first-run contract and persists a governed local `WorkReport` artifact.
 
 ## When To Use This
 
@@ -56,10 +58,21 @@ For a normal existing repository that is not already a Workflow OS project, init
 target/debug/workflow-os init-repo-governance
 target/debug/workflow-os validate
 target/debug/workflow-os first-run
+target/debug/workflow-os first-run --write-report-artifact
 target/debug/workflow-os --mock-all-local-skills run local/first-run-governance
 ```
 
 The `first-run` command produces the immediate ledger/report posture: missing evidence, skipped checks, unsupported side effects, bounded risks, and review-only workflow recommendations. The explicit `run` command remains separate and pauses for approval. The generated skill is a mockable placeholder until a real local handler is implemented, registered, and reviewed.
+
+`first-run --write-report-artifact` is different from both commands. It is an
+explicit local artifact path for the exact generated scaffold only. It binds
+the same bounded first-run analysis to the immutable run, executes the
+declared authoritative project-validation profile, pauses at both the
+aggregate governance approval and generated workflow-step approval, and then
+persists one create-only report artifact. Approval resume fails closed if the
+bounded repository posture changes. It does not run repository build, test,
+lint, or typecheck commands; read arbitrary source; use mock output as
+evidence; call providers; or create external side effects.
 
 The scaffold now includes the existing fixed project-validation and
 authoritative observe-and-report path by default. The positive compatibility

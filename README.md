@@ -80,6 +80,21 @@ contents, execute project commands, call providers, or invent evidence.
 and side-effect decisions. It also recommends candidate workflows. A candidate
 does not become active until it is authored, reviewed, and promoted.
 
+To opt into one real governed local `WorkReport` artifact for the bounded
+first-run analysis:
+
+```sh
+/path/to/workflow-os first-run --write-report-artifact
+```
+
+This explicit path validates the exact generated contract, binds the bounded
+analysis to immutable run identity, executes the declared authoritative
+project-validation check, pauses at the required governance and workflow-step
+approvals, and writes one create-only local report artifact after completion.
+It does not execute repository build/test commands, read arbitrary source,
+call providers, access the network, or create external side effects. Ordinary
+`first-run` remains non-mutating.
+
 To exercise the approval and event-log path with a deterministic mock handler:
 
 ```sh
