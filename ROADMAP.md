@@ -86,22 +86,38 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Plan and review one authoritative first-run quiet-success artifact
-   composition.** Preserve ordinary `workflow-os first-run` as non-mutating and
-   preserve the current approval-gated mock workflow as an explicit audit demo.
-   Define a separate exact-contract path in which the explicit local artifact
-   request may complete without a human interruption only when Core derives
-   `Proceed` from complete current facts and no workflow, policy, profile,
-   authority, evidence/check, sensitivity, SideEffect, or steward minimum
-   requires approval. The plan must specify declaration and contract identity,
-   current-fact derivation, local-write posture, disclosure delivery, monotonic
-   escalation, replay/recovery, report truth, compatibility, and focused
-   maintainer/security acceptance criteria. It must not auto-approve the
-   existing gated contract, let callers choose the route, broaden profiles or
-   providers, or make default first-run mutating. See the [queue-selection
-   report](docs/concepts/FIRST_RUN_QUIET_SUCCESS_ARTIFACT_QUEUE_SELECTION_REPORT.md).
+1. **Implement the accepted first-run quiet-success artifact composition.** Add
+   the separately identified generated artifact workflow, low-sensitivity
+   artifact skill, enforced observe-and-report policy, and additive scaffold
+   upgrade. Bind a CLI-private one-use local artifact request into immutable run
+   context, keep Core authoritative for route selection, create no approval
+   proof on proceed routes, preserve proof-backed escalation and denial, and
+   retain legacy run replay/recovery. Ordinary first-run and the existing
+   approval/audit demo remain unchanged. Execute the closed acceptance matrix
+   and disposable-repository proof before focused runtime review. No arbitrary
+   command, provider, network, external SideEffect, schema, SDK, hosted, or
+   release broadening is authorized. See the accepted [plan](docs/implementation-plans/first-run-quiet-success-artifact-composition-plan.md)
+   and [review](docs/concepts/FIRST_RUN_QUIET_SUCCESS_ARTIFACT_COMPOSITION_PLAN_REVIEW.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted the first-run quiet-success artifact composition plan after two
+  corrections.** The artifact path now has a separate exact low-sensitivity
+  skill rather than reusing the medium-sensitivity demo skill. A CLI-private,
+  one-use local artifact request supplies narrowly scoped request authority and
+  is committed into immutable run context without becoming approval, reusable
+  capability, or an authority receipt. The enforced `allow_local` policy,
+  Core-owned routing, monotonic escalation, compatibility, and proof-free
+  proceed-route artifact gates are accepted. See the [focused review](docs/concepts/FIRST_RUN_QUIET_SUCCESS_ARTIFACT_COMPOSITION_PLAN_REVIEW.md).
+
+- **Planned the first-run quiet-success artifact composition.** New starts use
+  a distinct exact generated artifact workflow and observe-and-report policy;
+  the existing approval-gated workflow remains the mock audit demo. Core alone
+  derives quiet, visible, approval-required, or denied posture from complete
+  current facts. Existing in-flight artifact runs retain their durable legacy
+  contract, and missing new scaffold files produce an additive-upgrade next
+  action rather than fallback or force replacement. Focused plan review is
+  required before implementation. See the [plan](docs/implementation-plans/first-run-quiet-success-artifact-composition-plan.md).
 
 - **Selected the first-run quiet-success artifact planning lane.** The accepted
   next move composes the newly accepted first-run governed artifact path with
