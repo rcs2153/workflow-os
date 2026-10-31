@@ -10,9 +10,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use sha2::{Digest, Sha256};
 
 use workflow_core::{
-    AuditEvent, EventLogStore, LocalStateBackend, SqliteStateBackend, StateBackend,
-    WorkReportArtifactStore, WorkReportCitationKind, WorkReportCitationTarget, WorkReportId,
-    WorkReportSectionKind, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
+    ApprovalPresentationRecordStore, AuditEvent, EventLogStore, LocalStateBackend,
+    SqliteStateBackend, StateBackend, WorkReportArtifactStore, WorkReportCitationKind,
+    WorkReportCitationTarget, WorkReportId, WorkReportSectionKind, WorkflowRunEventKind,
+    WorkflowRunId, WorkflowRunStatus,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -1546,7 +1547,7 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn first_run_explicit_artifact_path_pauses_then_persists_and_replays_exactly() {
+fn first_run_explicit_artifact_path_quietly_persists_and_replays_exactly() {
     let project = TestProject::new("first-run-governed-artifact");
     let init = workflow_os(&project, &["init-repo-governance"]);
     assert!(init.status.success(), "{}", stderr(&init));
@@ -1559,71 +1560,29 @@ fn first_run_explicit_artifact_path_pauses_then_persists_and_replays_exactly() {
     assert!(start.status.success(), "{}", stderr(&start));
     let start_out = stdout(&start);
     assert!(start_out.contains("mode: first_run_governed_report_artifact"));
-    assert!(start_out.contains("status: waiting_for_approval"));
-    assert!(start_out.contains("route: blocking_approval"));
-    assert!(start_out.contains("approval_handoff_required: true"));
-    assert!(start_out.contains("No arbitrary source reads"));
-    assert!(!start_out.contains("report_id:"));
+    assert!(start_out.contains("status: completed"));
+    assert!(start_out.contains("route: quiet_proceed"));
+    assert!(start_out.contains(&format!("report_id: report/{run_id}")));
+    assert!(!start_out.contains("approval_handoff_required: true"));
 
     let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
-    let waiting = backend
+    let completed = backend
         .rehydrate_run(&WorkflowRunId::new(run_id).expect("run id"))
-        .expect("waiting run rehydrates");
-    let approval_id = waiting.snapshot.approval_requests[0].approval_id.clone();
-    assert!(backend
-        .read_work_report_artifact(
-            &WorkflowRunId::new(run_id).expect("run id"),
-            &WorkReportId::new(format!("report/{run_id}")).expect("report id"),
-        )
-        .expect("artifact read")
-        .is_none());
-
-    let aggregate_approve = workflow_os(
-        &project,
-        &[
-            "approve",
-            run_id,
-            approval_id.as_str(),
-            "--actor",
-            "user/test-maintainer",
-            "--reason",
-            "reviewed-bounded-first-run-analysis",
-        ],
+        .expect("completed run rehydrates");
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(completed.snapshot.approval_requests.len(), 0);
+    assert!(!completed.events.iter().any(|event| matches!(
+        event.kind,
+        workflow_core::WorkflowRunEventKind::ApprovalRequested(..)
+            | workflow_core::WorkflowRunEventKind::ApprovalGranted(..)
+    )));
+    assert_eq!(
+        backend
+            .list_approval_presentation_records(&WorkflowRunId::new(run_id).expect("run id"))
+            .expect("presentation records")
+            .len(),
+        0
     );
-    assert!(
-        aggregate_approve.status.success(),
-        "{}",
-        stderr(&aggregate_approve)
-    );
-    assert!(stdout(&aggregate_approve).contains("status: waiting_for_approval"));
-    let step_waiting = backend
-        .rehydrate_run(&WorkflowRunId::new(run_id).expect("run id"))
-        .expect("step approval run rehydrates");
-    let step_approval_id = step_waiting
-        .snapshot
-        .approval_requests
-        .last()
-        .expect("step approval exists")
-        .approval_id
-        .clone();
-    let approve = workflow_os(
-        &project,
-        &[
-            "approve",
-            run_id,
-            step_approval_id.as_str(),
-            "--actor",
-            "user/test-maintainer",
-            "--reason",
-            "reviewed-bounded-first-run-report-step",
-        ],
-    );
-    assert!(approve.status.success(), "{}", stderr(&approve));
-    let approve_out = stdout(&approve);
-    assert!(approve_out.contains("status: Completed"));
-    assert!(approve_out.contains("report_artifact_posture: persisted"));
-    assert!(approve_out.contains(&format!("report_id: report/{run_id}")));
-    assert!(approve_out.contains("external_side_effects: none"));
 
     let artifact = backend
         .read_work_report_artifact(
@@ -1704,79 +1663,36 @@ fn first_run_explicit_artifact_path_pauses_then_persists_and_replays_exactly() {
 }
 
 #[test]
-fn first_run_artifact_approval_fails_closed_when_bounded_metadata_drifts() {
-    let project = TestProject::new("first-run-artifact-drift");
+fn first_run_artifact_requires_and_additively_installs_complete_contract() {
+    let project = TestProject::new("first-run-artifact-additive-upgrade");
     let init = workflow_os(&project, &["init-repo-governance"]);
     assert!(init.status.success(), "{}", stderr(&init));
-    let run_id = "run-first-run-artifact-drift";
-    let start = workflow_os(
-        &project,
-        &["first-run", "--write-report-artifact", "--run-id", run_id],
-    );
-    assert!(start.status.success(), "{}", stderr(&start));
-    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
-    let waiting = backend
-        .rehydrate_run(&WorkflowRunId::new(run_id).expect("run id"))
-        .expect("waiting run rehydrates");
-    let approval_id = waiting.snapshot.approval_requests[0].approval_id.clone();
-    project.write("package.json", r#"{"scripts":{"test":"node --test"}}"#);
+    for relative in [
+        "workflows/first-run-report-artifact.workflow.yml",
+        "skills/first-run-report-artifact.skill.yml",
+        "policies/observe-and-report.policy.yml",
+        "tests/first-run-report-artifact.test.yml",
+    ] {
+        fs::remove_file(project.path().join(relative)).expect("new contract file removed");
+    }
 
-    let approve = workflow_os(
-        &project,
-        &[
-            "approve",
-            run_id,
-            approval_id.as_str(),
-            "--actor",
-            "user/test-maintainer",
-            "--reason",
-            "reviewed-before-drift",
-        ],
-    );
-    assert!(!approve.status.success());
-    assert!(
-        stderr(&approve).contains("cli.first_run.artifact.approval_analysis_drift"),
-        "{}",
-        stderr(&approve)
-    );
-    let run = backend
-        .rehydrate_run(&WorkflowRunId::new(run_id).expect("run id"))
-        .expect("run rehydrates");
-    assert_eq!(run.snapshot.status, WorkflowRunStatus::WaitingForApproval);
-    assert!(backend
-        .read_work_report_artifact(
-            &WorkflowRunId::new(run_id).expect("run id"),
-            &WorkReportId::new(format!("report/{run_id}")).expect("report id"),
-        )
-        .expect("artifact read")
-        .is_none());
+    let missing = workflow_os(&project, &["first-run", "--write-report-artifact"]);
+    assert!(!missing.status.success());
+    assert!(stderr(&missing).contains("cli.first_run.artifact.contract_upgrade_required"));
+    assert!(stderr(&missing).contains("workflow-os init-repo-governance"));
+    assert!(!project.state_root().exists());
 
-    let deny = workflow_os(
-        &project,
-        &[
-            "approve",
-            run_id,
-            approval_id.as_str(),
-            "--actor",
-            "user/test-maintainer",
-            "--reason",
-            "deny-stale-first-run-analysis",
-            "--deny",
-        ],
-    );
-    assert!(deny.status.success(), "{}", stderr(&deny));
-    assert!(stdout(&deny).contains("decision: denied"));
-    let denied_run = backend
-        .rehydrate_run(&WorkflowRunId::new(run_id).expect("run id"))
-        .expect("denied run rehydrates");
-    assert_eq!(denied_run.snapshot.status, WorkflowRunStatus::Failed);
-    assert!(backend
-        .read_work_report_artifact(
-            &WorkflowRunId::new(run_id).expect("run id"),
-            &WorkReportId::new(format!("report/{run_id}")).expect("report id"),
-        )
-        .expect("artifact read")
-        .is_none());
+    let upgrade = workflow_os(&project, &["init-repo-governance"]);
+    assert!(upgrade.status.success(), "{}", stderr(&upgrade));
+    assert!(project
+        .path()
+        .join("workflows/first-run-report-artifact.workflow.yml")
+        .exists());
+    let validate = workflow_os(&project, &["validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+    let artifact = workflow_os(&project, &["first-run", "--write-report-artifact"]);
+    assert!(artifact.status.success(), "{}", stderr(&artifact));
+    assert!(stdout(&artifact).contains("route: quiet_proceed"));
 }
 
 #[test]
@@ -1810,13 +1726,13 @@ fn first_run_artifact_rejects_mock_mode_and_customized_generated_contract() {
 
     let workflow_path = project
         .path()
-        .join("workflows/first-run-governance.workflow.yml");
+        .join("workflows/first-run-report-artifact.workflow.yml");
     let source = fs::read_to_string(&workflow_path).expect("workflow source");
     fs::write(
         workflow_path,
         source.replace(
-            "display_name: First-Run Governed Work",
-            "display_name: Customized First-Run Governed Work",
+            "display_name: First-Run Governed Report Artifact",
+            "display_name: Customized First-Run Governed Report Artifact",
         ),
     )
     .expect("customized workflow write");
@@ -1852,7 +1768,7 @@ fn first_run_verbose_outputs_full_posture_matrix() {
     assert!(out.contains("side_effects: none_skipped_unsupported"));
     assert!(out.contains("governance_profile: observe_and_report"));
     assert!(out.contains("profile_posture: disclosed_not_enforced"));
-    assert!(out.contains("proportional_governance_assessments: 1"));
+    assert!(out.contains("proportional_governance_assessments: 2"));
     assert!(out.contains(
         "proportional_governance_posture: review_only_assessed_not_enforced_not_persisted"
     ));
@@ -1874,9 +1790,9 @@ fn first_run_verbose_outputs_full_posture_matrix() {
     assert!(out.contains("ownership_escalation_check: warnings"));
     assert!(out.contains("ownership_escalation_findings:"));
     assert!(out.contains("ownership_missing_owner: 0"));
-    assert!(out.contains("ownership_placeholder_owner: 2"));
+    assert!(out.contains("ownership_placeholder_owner: 4"));
     assert!(out.contains("escalation_missing_contact: 0"));
-    assert!(out.contains("escalation_placeholder_contact: 2"));
+    assert!(out.contains("escalation_placeholder_contact: 4"));
     assert!(out.contains("ownership_escalation_finding: target=workflow#1 code=ownership.placeholder_owner severity=warning"));
     assert!(out.contains("ownership_escalation_finding: target=skill#1 code=escalation.placeholder_contact severity=warning"));
     assert!(out.contains("spec_field_coverage_check: warnings"));
@@ -1930,7 +1846,7 @@ fn first_run_json_is_bounded_and_report_ready() {
     assert!(out.contains(r#""governance_profile":"observe_and_report""#));
     assert!(out.contains(r#""profile_posture":"disclosed_not_enforced""#));
     assert!(
-        out.contains(r#""proportional_governance_assessments":{"status":"review_only","count":1"#)
+        out.contains(r#""proportional_governance_assessments":{"status":"review_only","count":2"#)
     );
     assert!(out.contains(r#""workflow_id":"local/first-run-governance","step_id":"first-run-report","execution":"require_approval","disclosure":"visible","completeness":"incomplete","unknown_facts":["authority","evidence_and_checks"]"#));
     assert!(out.contains(r#""decision_posture":"assessed_not_enforced""#));
@@ -1941,8 +1857,8 @@ fn first_run_json_is_bounded_and_report_ready() {
     assert!(out.contains(r#""policy_gates":"declared_not_evaluated""#));
     assert!(out.contains(r#""deferred_fields":["triggers_declared_not_background_executed""#));
     assert!(out.contains(r#""ownership_escalation_check":{"status":"warnings""#));
-    assert!(out.contains(r#""placeholder_owner":2"#));
-    assert!(out.contains(r#""placeholder_escalation":2"#));
+    assert!(out.contains(r#""placeholder_owner":4"#));
+    assert!(out.contains(r#""placeholder_escalation":4"#));
     assert!(out.contains(r#""code":"ownership.placeholder_owner""#));
     assert!(out.contains(r#""spec_field_coverage_check":{"status":"warnings""#));
     assert!(out.contains(r#""surface":"workflow","field":"triggers","category":"validated","posture":"validated_deferred_execution","code":"spec_field.triggers.not_background_executed""#));
@@ -2895,13 +2811,13 @@ fn author_workflow_catalog_status_reports_inventory_without_store_or_mutation() 
     assert!(out.contains("mode: workflow_catalog_status"));
     assert!(out.contains("status: catalog_status_ready"));
     assert!(out.contains("catalog_store: not_available"));
-    assert!(out.contains("active_workflows: 1"));
+    assert!(out.contains("active_workflows: 2"));
     assert!(out.contains("drafts: 1"));
     assert!(out.contains("catalog_records: 0"));
     assert!(out.contains("stewardship_records: 0"));
     assert!(out.contains("archive_records: 0"));
     assert!(out.contains("blocker_conflicts: 0"));
-    assert!(out.contains("warning_conflicts: 1"));
+    assert!(out.contains("warning_conflicts: 2"));
     assert!(out.contains("kind=active_workflow_missing_catalog_record"));
     assert!(out.contains("files_written: false"));
     assert!(out.contains("catalog_records_written: false"));
@@ -2928,9 +2844,9 @@ fn author_workflow_catalog_status_json_is_bounded_and_deterministic() {
     assert!(out.contains(r#""mode":"workflow_catalog_status""#));
     assert!(out.contains(r#""status":"catalog_status_ready""#));
     assert!(out.contains(r#""catalog_store":"not_available""#));
-    assert!(out.contains(r#""active_workflows":1"#));
+    assert!(out.contains(r#""active_workflows":2"#));
     assert!(out.contains(r#""blocker_conflicts":0"#));
-    assert!(out.contains(r#""warning_conflicts":1"#));
+    assert!(out.contains(r#""warning_conflicts":2"#));
     assert!(out.contains(r#""kind":"active_workflow_missing_catalog_record""#));
     assert!(out.contains(r#""files_written":false"#));
     assert!(out.contains(r#""catalog_records_written":false"#));
@@ -2982,7 +2898,7 @@ fn author_workflow_catalog_status_strict_coverage_blocks_missing_catalog_record(
     let out = stdout(&status);
     assert!(out.contains("status: catalog_status_blocked"));
     assert!(out.contains("strict_catalog_coverage: true"));
-    assert!(out.contains("blocker_conflicts: 1"));
+    assert!(out.contains("blocker_conflicts: 2"));
     assert!(out.contains("kind=active_workflow_missing_catalog_record"));
     assert!(stderr(&status).contains("cli.workflow_catalog.status_blocked"));
     assert!(!stderr(&status).contains("first-run-governance"));
@@ -3030,7 +2946,7 @@ fn author_workflow_catalog_repair_dry_run_reports_proposals_without_mutation() {
     assert!(out.contains("mode: workflow_catalog_repair_dry_run"));
     assert!(out.contains("status: catalog_repair_proposals_ready"));
     assert!(out.contains("catalog_store: not_available"));
-    assert!(out.contains("proposals: 1"));
+    assert!(out.contains("proposals: 2"));
     assert!(out.contains("proposal: proposal_id=catalog-repair/proposal-0001"));
     assert!(out.contains("action=create_missing_catalog_record"));
     assert!(out.contains("conflict=active_workflow_missing_catalog_record"));
@@ -3122,8 +3038,8 @@ fn author_workflow_catalog_repair_strict_coverage_reports_proposals_without_stat
     let out = stdout(&repair);
     assert!(out.contains("status: catalog_repair_proposals_ready"));
     assert!(out.contains("strict_catalog_coverage: true"));
-    assert!(out.contains("conflicts: 1"));
-    assert!(out.contains("proposals: 1"));
+    assert!(out.contains("conflicts: 2"));
+    assert!(out.contains("proposals: 2"));
     assert!(out.contains("conflict=active_workflow_missing_catalog_record"));
     assert!(!project.path().join(".workflow-os/catalog").exists());
     assert!(!project.state_root().exists());
@@ -5335,6 +5251,17 @@ fn first_run_discloses_configured_owner_without_printing_owner_values() {
         .replace("local-maintainers", "platform-governance")
         .replace("local-maintainer", "platform-owner");
     fs::write(&skill_path, skill).expect("skill owner is updated");
+    for relative_path in [
+        "workflows/first-run-report-artifact.workflow.yml",
+        "skills/first-run-report-artifact.skill.yml",
+    ] {
+        let path = project.path().join(relative_path);
+        let content = fs::read_to_string(&path)
+            .expect("artifact scaffold exists")
+            .replace("local-maintainers", "platform-governance")
+            .replace("local-maintainer", "platform-owner");
+        fs::write(path, content).expect("artifact owner is updated");
+    }
 
     let output = workflow_os(&project, &["first-run", "--verbose"]);
 
@@ -5371,6 +5298,18 @@ fn first_run_ownership_escalation_check_reports_missing_metadata_without_leaking
         .replace("  maintainer: local-maintainer\n", "")
         .replace("  escalation_contact: local-maintainer\n", "");
     fs::write(&skill_path, skill).expect("skill owner metadata is updated");
+    for relative_path in [
+        "workflows/first-run-report-artifact.workflow.yml",
+        "skills/first-run-report-artifact.skill.yml",
+    ] {
+        let path = project.path().join(relative_path);
+        let content = fs::read_to_string(&path)
+            .expect("artifact scaffold exists")
+            .replace("  owning_team: local-maintainers\n", "")
+            .replace("  maintainer: local-maintainer\n", "")
+            .replace("  escalation_contact: local-maintainer\n", "");
+        fs::write(path, content).expect("artifact owner metadata is updated");
+    }
 
     let output = workflow_os(&project, &["first-run", "--verbose"]);
 
@@ -5379,8 +5318,8 @@ fn first_run_ownership_escalation_check_reports_missing_metadata_without_leaking
     assert!(out.contains("ownership: missing"));
     assert!(out.contains("escalation: missing"));
     assert!(out.contains("ownership_escalation_check: warnings"));
-    assert!(out.contains("ownership_missing_owner: 2"));
-    assert!(out.contains("escalation_missing_contact: 2"));
+    assert!(out.contains("ownership_missing_owner: 4"));
+    assert!(out.contains("escalation_missing_contact: 4"));
     assert!(out.contains(
         "ownership_escalation_finding: target=workflow#1 code=ownership.missing_owner severity=warning"
     ));

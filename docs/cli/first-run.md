@@ -51,18 +51,22 @@ workflow-os first-run --write-report-artifact --run-id <run-id>
 
 This opt-in path:
 
-- accepts only the exact versioned generated first-run workflow, skill, and
-  policy fingerprints;
+- accepts only the exact versioned generated artifact workflow, low-sensitivity
+  artifact skill, observe-and-report policy, local policy, and test
+  fingerprints;
 - computes one bounded deterministic first-run analysis commitment before run
   creation;
-- binds that commitment as the immutable run's resolved execution context;
+- binds a CLI-private one-use request commitment covering actor, project,
+  workflow, run, analysis, artifact-store root, and operation version into the
+  immutable run's resolved execution context;
 - executes the declared authoritative Workflow OS project-validation profile;
 - applies Core-derived proportional-governance routing;
-- persists and requires complete approval-presentation proof;
-- pauses separately for aggregate governance approval and the generated
-  workflow step's authored approval;
-- recomputes the bounded analysis and reruns project validation at approval
-  time before either grant can authorize execution;
+- completes without approval records when exact complete low-risk facts select
+  quiet or visible proceed;
+- persists complete approval-presentation proof and pauses before handler
+  invocation if current facts require approval;
+- recomputes the bounded analysis and reruns project validation before an
+  escalated grant can authorize execution;
 - registers one trusted handler only for the exact generated first-run skill;
 - builds a truthful terminal report from the same owned analysis snapshot;
 - cites the exact decision-time project-validation result in the report;
@@ -102,8 +106,9 @@ Ordinary `first-run` without `--write-report-artifact` does not:
   recommendations; activation requires the explicit validated project
   declaration.
 
-The explicit artifact path creates local run, immutable-bundle, approval,
-event, governance-assessment, and report-artifact state. It still does not
+The explicit artifact path creates local run, immutable-bundle, event,
+governance-assessment, and report-artifact state. Approval state is created
+only when Core selects an approval-required route. The path still does not
 execute repository build/test/lint/typecheck commands, read arbitrary source,
 call providers, access the network, publish reports, activate recommendations,
 or create external side effects.

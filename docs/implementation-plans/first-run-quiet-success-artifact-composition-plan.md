@@ -1,7 +1,12 @@
 # First-Run Quiet-Success Artifact Composition Plan
 
-Status: Accepted after focused maintainer/security review and two required
-corrections. Runtime implementation remains separately governed.
+Status: Implemented and accepted after focused maintainer/security review, two
+plan corrections, and one narrow legacy-resume compatibility fix. Runtime
+implementation is documented in
+[First-Run Quiet-Success Artifact Implementation Report](../concepts/FIRST_RUN_QUIET_SUCCESS_ARTIFACT_IMPLEMENTATION_REPORT.md)
+and focused implementation review accepted the corrected compatibility
+boundary in [First-Run Quiet-Success Artifact Implementation
+Review](../concepts/FIRST_RUN_QUIET_SUCCESS_ARTIFACT_IMPLEMENTATION_REVIEW.md).
 
 Related foundations:
 
