@@ -2,8 +2,13 @@
 
 Status: original body submitted exactly once as
 [OpenShell Design Discussion #2661](https://github.com/NVIDIA/OpenShell/discussions/2661)
-after focused maintainer review; one stable `v0.1.5` follow-up comment draft is
-accepted by focused review but not submitted.
+after focused maintainer review. The stable `v0.1.5` follow-up was subsequently
+submitted exactly once as
+[discussioncomment-19310244](https://github.com/NVIDIA/OpenShell/discussions/2661#discussioncomment-19310244)
+after separate focused review and a governed external-action phase. Its raw
+GitHub body uses CRLF line endings; canonical LF content exactly matches the
+accepted 4,503-byte body commitment recorded in the
+[submission report](../concepts/OPENSHELL_V0_1_5_FOLLOW_UP_SUBMISSION_REPORT.md).
 
 Source currency was re-verified on 2026-08-09. Official upstream `main` at
 commit `4cb77a900ebd6b789d2b68daaba4830866833b1c` has the same public protobuf and
@@ -16,11 +21,15 @@ Source currency was refreshed again on 2026-10-24. Stable OpenShell `v0.1.5`
 at `bdb956f2cd65a635f1294fccf1d138d263bf650f` materially advances the original
 request, while the selected Docker implementation and public contracts retain
 mandatory gaps. The original submitted body remains immutable historical
-evidence. The new follow-up draft in section 4 is separate and unsubmitted.
+evidence. The follow-up in section 4 was submitted separately without changing
+the original discussion body.
 
-Discussion #2661 currently has two comments from an external researcher and
-no recorded response from an OpenShell maintainer. Those comments do not
-constitute upstream acceptance or authorize Workflow OS provider work.
+Before the follow-up submission, Discussion #2661 had two comments from an
+external researcher and no recorded response from an OpenShell maintainer. It
+now also contains the Workflow OS follow-up linked above. No OpenShell
+maintainer response has been evaluated, and neither third-party comments nor
+the Workflow OS comment constitute upstream acceptance or authorize provider
+work.
 
 ## 1. Purpose And Use
 
@@ -166,9 +175,10 @@ progress that addresses these gaps.
 
 ## 4. Stable v0.1.5 Follow-Up Comment Draft
 
-This is an accepted follow-up comment on the existing discussion, not a second
-discussion, issue, or pull request. A separately governed external-action gate
-remains required before submission.
+This is the accepted source for the follow-up comment on the existing
+discussion, not a second discussion, issue, or pull request. The separately
+governed external-action gate is complete, and the stable submission identity
+and content comparison are recorded in the submission report.
 
 ### 4.1 Copy-Ready Follow-Up Comment
 
