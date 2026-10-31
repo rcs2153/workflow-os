@@ -86,18 +86,31 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Select the next executable runtime lane after closing the OpenShell
-   external-engagement phase.** Run one governed queue-selection review over
-   current accepted evidence. OpenShell provider wiring remains blocked while
-   awaiting authoritative upstream contract changes or maintainer guidance;
-   the comment does not authorize a transport, smoke, provider, Cargo
-   execution, access material, fork, or another mutation. Select one bounded
-   phase from a mature non-blocked runtime lane, state its exact entry and exit
-   criteria, and update this queue before implementation. Do not use stale
-   historical `next phase` prose as authority. See the [follow-up submission
-   report](docs/concepts/OPENSHELL_V0_1_5_FOLLOW_UP_SUBMISSION_REPORT.md).
+1. **Plan and review an explicit first-run governed WorkReport artifact
+   vertical slice.** Preserve ordinary `workflow-os first-run` as
+   non-mutating. Define one explicit opt-in path that binds the exact same-call
+   bounded repository posture analysis to a truthful validated WorkReport and
+   idempotent local artifact. The plan must specify immutable analysis
+   identity, repository/manifest drift rejection, approval and proportional-
+   governance posture, local artifact-write disclosure, exact replay and
+   conflict handling, bounded output, compatibility, and disposable external-
+   repository proof. It must not execute repository commands, treat mock output
+   as evidence, call providers, access the network, mutate external state,
+   integrate OpenShell, add hosted behavior, or make default first-run
+   mutating. Focused maintainer/security review is mandatory before
+   implementation. See the [queue-selection
+   report](docs/concepts/FIRST_RUN_GOVERNED_WORK_REPORT_ARTIFACT_QUEUE_SELECTION_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Selected the first-run governed WorkReport artifact planning lane.** The
+  accepted next move composes existing real first-run posture analysis with
+  existing report and local artifact foundations instead of adding another
+  model family or crossing a blocked provider boundary. Default first-run
+  remains non-mutating, and the generated mock workflow remains explicitly an
+  approval/audit demonstration. Entry conditions, exit criteria,
+  alternatives, and strict non-goals are recorded in the [queue-selection
+  report](docs/concepts/FIRST_RUN_GOVERNED_WORK_REPORT_ARTIFACT_QUEUE_SELECTION_REPORT.md).
 
 - **Posted and verified the accepted OpenShell `v0.1.5` follow-up comment
   exactly once.** Existing Discussion #2661 now contains one stable comment at
