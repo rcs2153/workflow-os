@@ -1,6 +1,6 @@
 [package]
 name = "workflow-local-host"
-version = "0.2.0-preview.1"
+version = "0.3.0-preview.1"
 description = "Unpublished local trusted-host composition boundary for Workflow OS."
 edition.workspace = true
 license.workspace = true

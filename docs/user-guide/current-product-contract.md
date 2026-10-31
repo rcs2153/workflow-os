@@ -21,9 +21,8 @@ what may happen next from durable state.
 
 ## Maturity
 
-- **Release identity:** `0.2.0-preview.1`.
-- **Repository maturity:** active preview with substantial post-release kernel
-  work on `main`.
+- **Release identity:** `0.3.0-preview.1`.
+- **Repository maturity:** active governed-execution and continuity preview.
 - **Strongest supported posture:** local governed execution and evaluation.
 - **Hosted posture:** reviewed single-tenant, no-write alpha; not production or
   multi-tenant.

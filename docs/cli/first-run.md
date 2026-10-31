@@ -225,7 +225,7 @@ recommendation_next_actions:
   - closure_candidate: first_run.report_handoff_obligations
 ```
 
-`--json` emits preview JSON only. CLI JSON remains experimental through `0.2.0-preview.1`. JSON output continues to include the bounded detailed posture fields even when default human text is concise.
+`--json` emits preview JSON only. CLI JSON remains experimental through `0.3.0-preview.1`. JSON output continues to include the bounded detailed posture fields even when default human text is concise.
 
 The posture summary, ownership/escalation check, spec-field coverage check, and workflow discovery recommendations classify fields without printing raw owner, maintainer, escalation-contact, config, mapping, file, command, provider, parser, or source-content values. Findings use bounded target ordinals such as `workflow#1`, stable issue codes such as `ownership.placeholder_owner`, known schema vocabulary such as `surface=workflow field=triggers`, and review-only recommendation identifiers such as `first_run.repo_implementation`; they do not print raw ownership values or caller-supplied field values. This is a disclosure and recommendation surface, not RBAC, paging, hosted policy enforcement, workflow auto-generation, command execution, background trigger execution, local check execution, provider calls, write-capable adapters, or enterprise admin control.
 

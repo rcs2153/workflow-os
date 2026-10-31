@@ -137,6 +137,6 @@ Errors are bounded and do not echo unsafe recommendation ids, unsafe output path
 
 ## Compatibility
 
-The JSON output is preview-only through `0.2.0-preview.1`. It is intended for local tooling and tests, not as a stable integration contract.
+The JSON output is preview-only through `0.3.0-preview.1`. It is intended for local tooling and tests, not as a stable integration contract.
 
 The draft file format is also preview-only. Draft output is a repository authoring aid, not a stable workflow-generation contract.

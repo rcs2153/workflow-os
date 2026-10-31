@@ -20,9 +20,10 @@ durable answer to:
 Workflow OS puts those facts in a deterministic kernel instead of leaving them
 inside prompts, chat history, or agent memory.
 
-The project is an Apache-2.0 preview. It is useful today for local governed
-workflows and engineering evaluation. It is not yet a production enterprise
-control plane.
+The current release is **Workflow OS `0.3.0-preview.1` — Governed Execution
+and Continuity Preview**. It is an Apache-2.0 preview useful today for local
+governed workflows and engineering evaluation. It is not yet a production
+enterprise control plane.
 
 ## How It Works
 

@@ -12362,7 +12362,7 @@ fn flag_present(args: &[String], flag: &str) -> bool {
 fn version_command(invocation: &Invocation) {
     if invocation.json {
         println!(
-            "{{\"name\":\"workflow-os\",\"version\":\"{}\",\"schema_version\":\"workflowos.dev/v0\",\"release_posture\":\"local_kernel_preview\"}}",
+            "{{\"name\":\"workflow-os\",\"version\":\"{}\",\"schema_version\":\"workflowos.dev/v0\",\"release_posture\":\"governed_execution_continuity_preview\"}}",
             env!("CARGO_PKG_VERSION")
         );
     } else {

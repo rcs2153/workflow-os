@@ -6,6 +6,75 @@ This project follows the versioning policy in [docs/release/SEMVER.md](docs/rele
 
 ## Unreleased
 
+## 0.3.0-preview.1 - Governed Execution And Continuity Preview
+
+This release advances Workflow OS from a local/read-only foundation into a
+composed governed-execution preview. It remains intended for evaluation and
+development, not production deployment.
+
+### Added
+
+- Governed sequential multi-step execution with immutable run bundles,
+  restart-safe event history, bounded retry/escalation, and fail-closed
+  approval resume.
+- Proof-bound approval presentation, current-authority reassessment, scoped
+  capability and required-context models, and proportional-governance routing
+  across quiet capture, visible disclosure, blocking approval, and denial.
+- EvidenceReference, SideEffect, WorkReport, report-artifact, authority-receipt,
+  and referential-integrity foundations with explicit report-bearing paths.
+- Existing-repository onboarding, bounded first-run analysis, workflow
+  recommendations, inactive draft authoring, stewardship, promotion, catalog,
+  archive, and repair-preview commands.
+- A distinct first-run quiet-success report-artifact workflow that performs a
+  real bounded analysis and authoritative project-validation check without
+  fabricating approval proof.
+- Local filesystem state inspection, explicit SQLite migration/activation,
+  PostgreSQL shared-state conformance, and durable execution-continuity models.
+- Reviewed private trusted-host no-write execution compositions, fixed local
+  check profiles, typed waits, execution windows, yields, and bounded
+  redispatch helpers.
+- Single-tenant no-write hosted alpha surfaces and optional OpenShell no-write
+  provider contracts.
+- Narrow, explicit GitHub sandbox proofs for pull-request comments and managed
+  draft pull requests; these are not general write-capable adapters.
+
+### Changed
+
+- The public product framing now centers the kernel contract: agent executes;
+  Workflow OS governs identity, policy, authority, evidence, checks,
+  approvals, side effects, events, reports, and lawful continuation.
+- Approval and continuation paths increasingly derive decisions from durable
+  kernel state instead of conversation memory or caller-selected posture.
+- First-run onboarding preserves existing agent guidance by default and
+  separates real bounded posture analysis from the mock approval/audit demo.
+- Rust crate, CLI, local-host, hosted-alpha, and TypeScript package versions
+  move together to `0.3.0-preview.1`.
+
+### Compatibility And Migration
+
+- This is a v0 minor preview with intentional Rust API and experimental CLI
+  JSON evolution since `0.2.0-preview.1`; consumers must review the current
+  product contract and rebuild against this release.
+- No automatic persisted-state migration is claimed. Preserve old preview
+  state as evidence and prefer fresh state for evaluation. Filesystem-to-SQLite
+  migration is explicit, staged, verified, and separately activated.
+- Existing generated repository scaffolds can be upgraded additively with
+  `workflow-os init-repo-governance`; conflicting customized files still fail
+  closed rather than being overwritten.
+
+### Limitations And Non-Goals
+
+- No production multi-tenant service, HA/SLO posture, enterprise identity,
+  broad scheduler, recursive agents, agent swarms, or Level 3/4 autonomy.
+- No arbitrary repository command execution by default and no general
+  write-capable GitHub, Jira, CI, SaaS, or HTTP adapter product.
+- Hosted, OpenShell, trusted-host, PostgreSQL, and provider-write surfaces are
+  bounded alpha/proof paths, not production support claims.
+- CLI JSON, local state layouts, public Rust construction surfaces, schemas,
+  and TypeScript ergonomics remain preview contracts.
+- `serde_yaml` remains accepted only for trusted local specs; malicious remote
+  YAML hardening is not claimed.
+
 ## 0.2.0-preview.1 - Public Read-Only Integration Preview
 
 This release posture adds a narrow public preview for read-only GitHub, Jira, and GitHub Actions / CI integration capability.

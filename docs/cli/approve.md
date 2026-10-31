@@ -43,6 +43,6 @@ for `approve` and fails before approval state is changed. Authoritative resume
 is selected only from the immutable activation captured when the declared
 project run started.
 
-`--json` includes the approval decision and resulting run status. JSON output remains experimental through `0.2.0-preview.1`; it is useful for preview automation, but it is not yet a versioned stable machine-output contract.
+`--json` includes the approval decision and resulting run status. JSON output remains experimental through `0.3.0-preview.1`; it is useful for preview automation, but it is not yet a versioned stable machine-output contract.
 
 v0 supports local approval only. It does not integrate with an identity provider, UI, or external approval system.
