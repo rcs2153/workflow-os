@@ -2046,12 +2046,19 @@ const FIRST_RUN_ARTIFACT_REQUESTED_ACTION: &str =
     "approve the immutable first-run analysis run and its local report artifact write";
 const FIRST_RUN_ARTIFACT_WORK_SUMMARY: &str =
     "Run bounded first-run repository governance analysis and persist its terminal WorkReport artifact.";
+const FIRST_RUN_DEMO_WORKFLOW_ID: &str = "local/first-run-governance";
+const FIRST_RUN_DEMO_SKILL_ID: &str = "local/first-run-report";
+const FIRST_RUN_ARTIFACT_WORKFLOW_ID: &str = "local/first-run-report-artifact";
+const FIRST_RUN_ARTIFACT_SKILL_ID: &str = "local/first-run-report-artifact";
 
 fn is_first_run_artifact_run(
     backend: &LocalStateBackend,
     run: &WorkflowRun,
 ) -> Result<bool, WorkflowOsError> {
-    if run.snapshot.identity.workflow_id.as_str() != "local/first-run-governance" {
+    if !matches!(
+        run.snapshot.identity.workflow_id.as_str(),
+        FIRST_RUN_DEMO_WORKFLOW_ID | FIRST_RUN_ARTIFACT_WORKFLOW_ID
+    ) {
         return Ok(false);
     }
     Ok(backend
@@ -2084,12 +2091,16 @@ fn decide_first_run_artifact_approval(
             reason,
         );
     }
-    let bundle = load_valid_first_run_project(invocation)?;
-    let workflow = validate_first_run_generated_contract(&bundle)?;
-    let snapshot = Arc::new(FirstRunAnalysisSnapshot::new(
+    let workflow_id = waiting_run.snapshot.identity.workflow_id.as_str();
+    let bundle = load_valid_first_run_project(invocation, workflow_id)?;
+    let workflow = first_run_workflow_for_identity(&bundle, workflow_id)?;
+    let snapshot = Arc::new(FirstRunAnalysisSnapshot::new_artifact(
         FirstRunReportReadyContext::new(invocation, &bundle)?,
         &bundle,
-    ));
+        invocation,
+        &waiting_run.snapshot.identity.run_id,
+        workflow_id,
+    )?);
     let stored_commitment = first_run_stored_analysis_commitment(invocation, waiting_run)?;
     if stored_commitment != snapshot.commitment {
         return Err(first_run_artifact_error(
@@ -2098,7 +2109,7 @@ fn decide_first_run_artifact_approval(
         ));
     }
     let mut registry = LocalSkillRegistry::new();
-    register_first_run_report_handler(&bundle, &mut registry, Arc::clone(&snapshot))?;
+    register_first_run_report_handler(&bundle, &mut registry, Arc::clone(&snapshot), workflow_id)?;
     let executor = LocalExecutor::new(backend, &registry);
     let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation().resolve(
         env::current_exe().map_err(|_| {
@@ -2111,7 +2122,7 @@ fn decide_first_run_artifact_approval(
     )?;
     let inputs = authoritative_governance_cli_inputs(
         invocation,
-        WorkflowId::new("local/first-run-governance")?,
+        WorkflowId::new(workflow_id)?,
         &waiting_run.snapshot.identity.run_id,
         Some(waiting_run),
         current_project_authoritative_execution(invocation),
@@ -2733,17 +2744,36 @@ fn first_run_report_artifact_command(
     run_id: Option<&str>,
     verbose: bool,
 ) -> Result<(), WorkflowOsError> {
-    let workflow = validate_first_run_generated_contract(bundle)?;
     let run_id = run_id
         .map(WorkflowRunId::new)
         .transpose()?
         .unwrap_or_else(WorkflowRunId::generate);
-    let backend = local_backend(invocation)?;
-    let existing_run = if backend.read_events(&run_id)?.is_empty() {
-        None
+    let existing_run = if invocation.state_dir().exists() {
+        let existing_backend = local_backend(invocation)?;
+        if existing_backend.read_events(&run_id)?.is_empty() {
+            None
+        } else {
+            Some(existing_backend.rehydrate_run(&run_id)?)
+        }
     } else {
-        Some(backend.rehydrate_run(&run_id)?)
+        None
     };
+    let workflow_id = existing_run
+        .as_ref()
+        .map_or(FIRST_RUN_ARTIFACT_WORKFLOW_ID, |run| {
+            run.snapshot.identity.workflow_id.as_str()
+        });
+    let workflow = match workflow_id {
+        FIRST_RUN_DEMO_WORKFLOW_ID => validate_first_run_legacy_generated_contract(bundle)?,
+        FIRST_RUN_ARTIFACT_WORKFLOW_ID => validate_first_run_generated_contract(bundle)?,
+        _ => {
+            return Err(first_run_artifact_error(
+                "identity_conflict",
+                "requested run id belongs to a different workflow",
+            ));
+        }
+    };
+    let backend = local_backend(invocation)?;
     if let Some(existing_run) = existing_run.as_ref() {
         if existing_run.snapshot.status.is_terminal() {
             let report_id = WorkReportId::new(format!("report/{run_id}"))?;
@@ -2762,10 +2792,13 @@ fn first_run_report_artifact_command(
         }
     }
 
-    let snapshot = Arc::new(FirstRunAnalysisSnapshot::new(
+    let snapshot = Arc::new(FirstRunAnalysisSnapshot::new_artifact(
         FirstRunReportReadyContext::new(invocation, bundle)?,
         bundle,
-    ));
+        invocation,
+        &run_id,
+        workflow_id,
+    )?);
     if let Some(existing_run) = existing_run
         .as_ref()
         .filter(|run| run.snapshot.status.is_terminal())
@@ -2801,7 +2834,7 @@ fn first_run_report_artifact_command(
         );
     }
     let mut registry = LocalSkillRegistry::new();
-    register_first_run_report_handler(bundle, &mut registry, Arc::clone(&snapshot))?;
+    register_first_run_report_handler(bundle, &mut registry, Arc::clone(&snapshot), workflow_id)?;
     let executor = LocalExecutor::new(&backend, &registry);
     let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation().resolve(
         env::current_exe().map_err(|_| {
@@ -2814,7 +2847,7 @@ fn first_run_report_artifact_command(
     )?;
     let inputs = authoritative_governance_cli_inputs(
         invocation,
-        WorkflowId::new("local/first-run-governance")?,
+        WorkflowId::new(workflow_id)?,
         &run_id,
         existing_run.as_ref(),
         current_project_authoritative_execution(invocation),
@@ -2871,15 +2904,26 @@ fn reassess_first_run_terminal_artifact(
     snapshot: &FirstRunAnalysisSnapshot,
 ) -> Result<LocalCheckResultReference, WorkflowOsError> {
     let mut registry = LocalSkillRegistry::new();
-    let handler_snapshot =
-        FirstRunAnalysisSnapshot::new(FirstRunReportReadyContext::new(invocation, bundle)?, bundle);
+    let workflow_id = run.snapshot.identity.workflow_id.as_str();
+    let handler_snapshot = FirstRunAnalysisSnapshot::new_artifact(
+        FirstRunReportReadyContext::new(invocation, bundle)?,
+        bundle,
+        invocation,
+        &run.snapshot.identity.run_id,
+        workflow_id,
+    )?;
     if handler_snapshot.commitment != snapshot.commitment {
         return Err(first_run_artifact_error(
             "terminal_artifact_recovery_drift",
             "terminal first-run artifact recovery rejected changed bounded analysis",
         ));
     }
-    register_first_run_report_handler(bundle, &mut registry, Arc::new(handler_snapshot))?;
+    register_first_run_report_handler(
+        bundle,
+        &mut registry,
+        Arc::new(handler_snapshot),
+        workflow_id,
+    )?;
     let executor = LocalExecutor::new(backend, &registry);
     let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation().resolve(
         env::current_exe().map_err(|_| {
@@ -2892,7 +2936,7 @@ fn reassess_first_run_terminal_artifact(
     )?;
     let inputs = authoritative_governance_cli_inputs(
         invocation,
-        WorkflowId::new("local/first-run-governance")?,
+        WorkflowId::new(workflow_id)?,
         &run.snapshot.identity.run_id,
         Some(run),
         current_project_authoritative_execution(invocation),
@@ -2915,11 +2959,22 @@ fn register_first_run_report_handler(
     bundle: &workflow_core::ProjectBundle,
     registry: &mut LocalSkillRegistry,
     snapshot: Arc<FirstRunAnalysisSnapshot>,
+    workflow_id: &str,
 ) -> Result<(), WorkflowOsError> {
+    let skill_id = if workflow_id == FIRST_RUN_DEMO_WORKFLOW_ID {
+        FIRST_RUN_DEMO_SKILL_ID
+    } else if workflow_id == FIRST_RUN_ARTIFACT_WORKFLOW_ID {
+        FIRST_RUN_ARTIFACT_SKILL_ID
+    } else {
+        return Err(first_run_artifact_error(
+            "identity_conflict",
+            "first-run artifact handler rejected an unknown workflow",
+        ));
+    };
     let skill = bundle
         .skills
         .iter()
-        .find(|skill| skill.definition.id.as_str() == "local/first-run-report")
+        .find(|skill| skill.definition.id.as_str() == skill_id)
         .ok_or_else(|| {
             first_run_artifact_error(
                 "unsupported_contract",
@@ -2966,11 +3021,15 @@ fn persist_first_run_report_artifact(
     local_check_result_reference: Option<&LocalCheckResultReference>,
     verbose: bool,
 ) -> Result<(), WorkflowOsError> {
-    let current_bundle = load_valid_first_run_project(invocation)?;
-    let current = FirstRunAnalysisSnapshot::new(
+    let current_bundle =
+        load_valid_first_run_project(invocation, run.snapshot.identity.workflow_id.as_str())?;
+    let current = FirstRunAnalysisSnapshot::new_artifact(
         FirstRunReportReadyContext::new(invocation, &current_bundle)?,
         &current_bundle,
-    );
+        invocation,
+        &run.snapshot.identity.run_id,
+        run.snapshot.identity.workflow_id.as_str(),
+    )?;
     let immutable_commitment = first_run_stored_analysis_commitment(invocation, run)?;
     if current.commitment != snapshot.commitment || immutable_commitment != snapshot.commitment {
         return Err(first_run_artifact_error(
@@ -3001,6 +3060,7 @@ fn persist_first_run_report_artifact(
 
 fn load_valid_first_run_project(
     invocation: &Invocation,
+    workflow_id: &str,
 ) -> Result<workflow_core::ProjectBundle, WorkflowOsError> {
     let load = load_project(&invocation.project_dir);
     let validation = validate_loaded_project(&load);
@@ -3017,8 +3077,22 @@ fn load_valid_first_run_project(
             "first-run project became unavailable during bounded analysis",
         )
     })?;
-    validate_first_run_generated_contract(&bundle)?;
+    first_run_workflow_for_identity(&bundle, workflow_id)?;
     Ok(bundle)
+}
+
+fn first_run_workflow_for_identity(
+    bundle: &workflow_core::ProjectBundle,
+    workflow_id: &str,
+) -> Result<WorkflowDefinition, WorkflowOsError> {
+    match workflow_id {
+        FIRST_RUN_DEMO_WORKFLOW_ID => validate_first_run_legacy_generated_contract(bundle),
+        FIRST_RUN_ARTIFACT_WORKFLOW_ID => validate_first_run_generated_contract(bundle),
+        _ => Err(first_run_artifact_error(
+            "identity_conflict",
+            "first-run report artifact rejected an unknown durable workflow identity",
+        )),
+    }
 }
 
 fn first_run_work_report(
@@ -3093,15 +3167,21 @@ fn first_run_artifact_sections(
 ) -> Result<Vec<WorkReportSection>, WorkflowOsError> {
     let context = &snapshot.context;
     let commitment = &snapshot.commitment;
-    let approval_summary = if run.snapshot.approval_requests.iter().any(|approval| {
+    let approval_granted = run.snapshot.approval_requests.iter().any(|approval| {
         approval
             .decision
             .as_ref()
             .is_some_and(|decision| decision.decision == ApprovalDecisionKind::Granted)
-    }) {
+    });
+    let approval_summary = if approval_granted {
         "The durable first-run approval request was granted with approval-presentation proof before the trusted analysis handler ran."
     } else {
         "No approval grant was required by the selected governed route."
+    };
+    let local_state_summary = if approval_granted {
+        "Wrote durable local run, immutable-bundle, approval-presentation, event, and WorkReport artifact state; no external SideEffect occurred."
+    } else {
+        "Wrote durable local run, immutable-bundle, event, and WorkReport artifact state; no approval record or external SideEffect occurred."
     };
     let definitions = [
         (
@@ -3143,7 +3223,7 @@ fn first_run_artifact_sections(
         ),
         (
             WorkReportSectionKind::SideEffects,
-            "Wrote durable local run, immutable-bundle, approval-presentation, event, and WorkReport artifact state; no external SideEffect occurred.".to_owned(),
+            local_state_summary.to_owned(),
         ),
         (
             WorkReportSectionKind::IncompleteOrDeferredWork,
@@ -5580,12 +5660,73 @@ struct FirstRunAnalysisSnapshot {
 }
 
 impl FirstRunAnalysisSnapshot {
-    fn new(context: FirstRunReportReadyContext, bundle: &workflow_core::ProjectBundle) -> Self {
-        let commitment = first_run_analysis_commitment(&context, bundle);
-        Self {
+    fn new_artifact(
+        context: FirstRunReportReadyContext,
+        bundle: &workflow_core::ProjectBundle,
+        invocation: &Invocation,
+        run_id: &WorkflowRunId,
+        workflow_id: &str,
+    ) -> Result<Self, WorkflowOsError> {
+        let analysis_commitment = first_run_analysis_commitment(&context, bundle);
+        let request = ExplicitLocalArtifactRequest::new(
+            invocation,
+            run_id,
+            workflow_id,
+            &analysis_commitment,
+        )?;
+        Ok(Self {
             context,
-            commitment,
-        }
+            commitment: request.commitment,
+        })
+    }
+}
+
+struct ExplicitLocalArtifactRequest {
+    commitment: SpecContentHash,
+}
+
+impl ExplicitLocalArtifactRequest {
+    fn new(
+        invocation: &Invocation,
+        run_id: &WorkflowRunId,
+        workflow_id: &str,
+        analysis_commitment: &SpecContentHash,
+    ) -> Result<Self, WorkflowOsError> {
+        let project_root = invocation.project_dir.canonicalize().map_err(|_| {
+            first_run_artifact_error(
+                "request_context_invalid",
+                "explicit local artifact request could not resolve the project root",
+            )
+        })?;
+        let artifact_store_root = invocation.state_dir().join("work_reports");
+        let mut canonical = String::new();
+        append_first_run_commitment_field(
+            &mut canonical,
+            "domain",
+            "workflow-os/explicit-local-first-run-artifact-request/v1",
+        );
+        append_first_run_commitment_field(&mut canonical, "actor", "system/workflow-os-cli");
+        append_first_run_commitment_field(
+            &mut canonical,
+            "project_root",
+            &project_root.to_string_lossy(),
+        );
+        append_first_run_commitment_field(&mut canonical, "workflow_id", workflow_id);
+        append_first_run_commitment_field(&mut canonical, "run_id", run_id.as_str());
+        append_first_run_commitment_field(
+            &mut canonical,
+            "analysis_commitment",
+            analysis_commitment.as_str(),
+        );
+        append_first_run_commitment_field(
+            &mut canonical,
+            "artifact_store_root",
+            &artifact_store_root.to_string_lossy(),
+        );
+        append_first_run_commitment_field(&mut canonical, "operation_version", "v1");
+        Ok(Self {
+            commitment: SpecContentHash::from_text(&canonical),
+        })
     }
 }
 
@@ -5659,7 +5800,7 @@ fn append_first_run_commitment_field(target: &mut String, label: &str, value: &s
     );
 }
 
-fn validate_first_run_generated_contract(
+fn validate_first_run_legacy_generated_contract(
     bundle: &workflow_core::ProjectBundle,
 ) -> Result<WorkflowDefinition, WorkflowOsError> {
     let workflows = bundle
@@ -5709,6 +5850,68 @@ fn validate_first_run_generated_contract(
             .map(|spec| &spec.content_hash),
         &canonical_yaml_content_hash(&repo_governance_local_policy())?,
         "local policy",
+    )?;
+    Ok(workflow.definition.clone())
+}
+
+fn validate_first_run_generated_contract(
+    bundle: &workflow_core::ProjectBundle,
+) -> Result<WorkflowDefinition, WorkflowOsError> {
+    let workflows = bundle
+        .workflows
+        .iter()
+        .filter(|spec| spec.definition.id.as_str() == FIRST_RUN_ARTIFACT_WORKFLOW_ID)
+        .collect::<Vec<_>>();
+    let [workflow] = workflows.as_slice() else {
+        return Err(first_run_artifact_error(
+            "contract_upgrade_required",
+            "first-run report artifact contract is missing; rerun `workflow-os init-repo-governance` to add canonical files",
+        ));
+    };
+    let accepted_workflow_hash = canonical_yaml_content_hash(&repo_governance_artifact_workflow(
+        AuthoritativeGovernanceScaffoldSelection::Enabled,
+    ))?;
+    if workflow.content_hash != accepted_workflow_hash {
+        return Err(first_run_artifact_error(
+            "unsupported_contract",
+            "first-run artifact workflow does not match the allowlisted generated fingerprint",
+        ));
+    }
+    require_first_run_loaded_spec_hash(
+        bundle
+            .skills
+            .iter()
+            .filter(|spec| spec.definition.id.as_str() == FIRST_RUN_ARTIFACT_SKILL_ID)
+            .map(|spec| &spec.content_hash),
+        &canonical_yaml_content_hash(&repo_governance_artifact_skill())?,
+        "artifact skill",
+    )?;
+    require_first_run_loaded_spec_hash(
+        bundle
+            .policies
+            .iter()
+            .filter(|spec| spec.definition.id.as_str() == "default/observe-and-report")
+            .map(|spec| &spec.content_hash),
+        &canonical_yaml_content_hash(&repo_governance_observe_policy())?,
+        "observe-and-report policy",
+    )?;
+    require_first_run_loaded_spec_hash(
+        bundle
+            .policies
+            .iter()
+            .filter(|spec| spec.definition.id.as_str() == "local/allow")
+            .map(|spec| &spec.content_hash),
+        &canonical_yaml_content_hash(&repo_governance_local_policy())?,
+        "local policy",
+    )?;
+    require_first_run_loaded_spec_hash(
+        bundle
+            .tests
+            .iter()
+            .filter(|spec| spec.definition.id.as_str() == "local/first-run-report-artifact-basic")
+            .map(|spec| &spec.content_hash),
+        &canonical_yaml_content_hash(&repo_governance_artifact_test())?,
+        "artifact test",
     )?;
     Ok(workflow.definition.clone())
 }
@@ -6002,7 +6205,14 @@ fn present_dirs(
 
 fn workflow_os_scaffold_dirs(project_dir: &Path) -> Vec<&'static str> {
     let mut dirs = Vec::new();
-    if scaffold_only_dir(project_dir, "tests", &["first-run-governance.test.yml"]) {
+    if scaffold_only_dir(
+        project_dir,
+        "tests",
+        &[
+            "first-run-governance.test.yml",
+            "first-run-report-artifact.test.yml",
+        ],
+    ) {
         dirs.push("tests");
     }
     dirs
@@ -10015,8 +10225,18 @@ fn repo_governance_scaffold_files(
             ScaffoldKind::Plain,
         ),
         (
+            "workflows/first-run-report-artifact.workflow.yml",
+            repo_governance_artifact_workflow(authoritative_governance),
+            ScaffoldKind::Plain,
+        ),
+        (
             "skills/first-run-report.skill.yml",
             repo_governance_skill(),
+            ScaffoldKind::Plain,
+        ),
+        (
+            "skills/first-run-report-artifact.skill.yml",
+            repo_governance_artifact_skill(),
             ScaffoldKind::Plain,
         ),
         (
@@ -10030,8 +10250,18 @@ fn repo_governance_scaffold_files(
             ScaffoldKind::Plain,
         ),
         (
+            "policies/observe-and-report.policy.yml",
+            repo_governance_observe_policy(),
+            ScaffoldKind::Plain,
+        ),
+        (
             "tests/first-run-governance.test.yml",
             repo_governance_test(),
+            ScaffoldKind::Plain,
+        ),
+        (
+            "tests/first-run-report-artifact.test.yml",
+            repo_governance_artifact_test(),
             ScaffoldKind::Plain,
         ),
         (
@@ -10060,6 +10290,16 @@ fn plain_scaffold_file_content(
 ) -> Result<String, WorkflowOsError> {
     if !path.exists() || force {
         return Ok(generated.to_owned());
+    }
+    let existing = fs::read_to_string(path).map_err(|_| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::InvalidState,
+            "cli.init_repo_governance.read_failed",
+            format!("failed to read existing {label}"),
+        )
+    })?;
+    if existing == generated {
+        return Ok(existing);
     }
     Err(WorkflowOsError::new(
         WorkflowOsErrorKind::InvalidState,
@@ -10261,6 +10501,144 @@ tags:
     .to_owned()
 }
 
+fn repo_governance_artifact_workflow(
+    authoritative_governance: AuthoritativeGovernanceScaffoldSelection,
+) -> String {
+    let workflow = r"schema_version: workflowos.dev/v0
+id: local/first-run-report-artifact
+version: v0
+display_name: First-Run Governed Report Artifact
+description: Produce one bounded local first-run WorkReport artifact under Core-derived proportional governance.
+owner:
+  owning_team: local-maintainers
+  maintainer: local-maintainer
+  escalation_contact: local-maintainer
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: explicit-local-artifact-request
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - scoped
+    - reported
+steps:
+  - id: first-run-report
+    skill_ref:
+      id: local/first-run-report-artifact
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: first-run-governed-report-artifact
+        to: task
+    policy_requirements:
+      - id: default/observe-and-report
+      - id: local/allow
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - first-run
+  - governed-report-artifact
+  - local-first
+";
+    if !authoritative_governance.is_enabled() {
+        return workflow.to_owned();
+    }
+    workflow.replace(
+        "    idempotency_key_strategy:\n      type: derived\n",
+        r"    local_check_requirements:
+      - id: project-validation
+        command_id: local-check/workflow-os-validate
+        requirement_level: required
+        minimum_assurance: kernel_observed_local_process
+        accepted_statuses: [passed]
+        freshness:
+          mode: no_reuse
+        exact_immutable_run_binding_required: true
+        truncation_allowed: false
+        network_maximum: disabled
+        side_effect_maximum: no_source_writes
+    idempotency_key_strategy:
+      type: derived
+",
+    )
+}
+
+fn repo_governance_artifact_skill() -> String {
+    r"schema_version: workflowos.dev/v0
+id: local/first-run-report-artifact
+version: v0
+display_name: First-Run Governed Report Artifact
+description: Bounded trusted local analyzer used only by the explicit first-run artifact command.
+owner:
+  owning_team: local-maintainers
+  maintainer: local-maintainer
+  escalation_contact: local-maintainer
+  lifecycle_status: stable
+input_contract:
+  fields:
+    - name: task
+      field_type: string
+      description: Non-secret governed-work task label.
+  required:
+    - task
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+      description: Bounded first-run governance summary.
+  required:
+    - summary
+allowed_capabilities:
+  - name: local.read
+failure_modes:
+  - code: insufficient_context
+    description: Required non-secret context is missing.
+    retryable: false
+evaluation_criteria:
+  - name: governed_work_pattern_posture
+    description: Summary discloses bounded analysis, validation, local artifact posture, and deferred work.
+retry_compatibility: requires_policy
+approval_sensitivity: low
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - first-run
+  - governed-report-artifact
+  - local-first
+"
+    .to_owned()
+}
+
 fn repo_governance_policy() -> String {
     r"schema_version: workflowos.dev/v0
 id: default/governed-work
@@ -10285,6 +10663,18 @@ rules:
     .to_owned()
 }
 
+fn repo_governance_observe_policy() -> String {
+    r"schema_version: workflowos.dev/v0
+id: default/observe-and-report
+name: Observe And Report Policy
+description: Allow the exact bounded local report operation while Core derives proportional governance from current facts.
+rules:
+  - id: allow-bounded-local-report
+    effect: allow_local
+"
+    .to_owned()
+}
+
 fn repo_governance_test() -> String {
     r"schema_version: workflowos.dev/v0
 id: local/first-run-governance-basic
@@ -10299,6 +10689,26 @@ assertions:
     description: The generated project uses a mockable local skill placeholder and does not enable arbitrary command execution.
   - id: report-posture
     description: The generated workflow tees up evidence, checks, side-effect disclosure, risks, and workflow recommendation posture.
+"
+    .to_owned()
+}
+
+fn repo_governance_artifact_test() -> String {
+    r"schema_version: workflowos.dev/v0
+id: local/first-run-report-artifact-basic
+name: First-run report artifact remains bounded and proportionally governed
+target:
+  id: local/first-run-report-artifact
+  version: v0
+assertions:
+  - id: no-declared-human-gate
+    description: The artifact contract declares no human approval minimum; Core derives the route from current facts.
+  - id: authoritative-project-validation
+    description: The artifact contract requires fresh authoritative Workflow OS project validation.
+  - id: no-external-capability
+    description: The bounded analyzer declares no provider, network, command, or external write capability.
+  - id: local-report-only
+    description: The explicit command may create durable local run state and one create-only WorkReport artifact.
 "
     .to_owned()
 }
@@ -12484,6 +12894,56 @@ fn usage(message: impl Into<String>) -> WorkflowOsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_run_project_reload_honors_durable_contract_identity(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = env::temp_dir().join(format!(
+            "workflow-os-first-run-contract-reload-{}",
+            WorkflowRunId::generate().as_str()
+        ));
+        for (relative_path, content, _) in repo_governance_scaffold_files(
+            AgentHarnessFlavor::Codex,
+            AuthoritativeGovernanceScaffoldSelection::Enabled,
+        ) {
+            let path = root.join(relative_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(path, content)?;
+        }
+        for relative_path in [
+            "workflows/first-run-report-artifact.workflow.yml",
+            "skills/first-run-report-artifact.skill.yml",
+            "policies/observe-and-report.policy.yml",
+            "tests/first-run-report-artifact.test.yml",
+        ] {
+            fs::remove_file(root.join(relative_path))?;
+        }
+        let invocation = Invocation::parse(&[
+            "--project-dir".to_owned(),
+            root.display().to_string(),
+            "validate".to_owned(),
+        ])?;
+
+        let legacy = load_valid_first_run_project(&invocation, FIRST_RUN_DEMO_WORKFLOW_ID)?;
+        assert!(legacy
+            .workflows
+            .iter()
+            .any(|workflow| workflow.definition.id.as_str() == FIRST_RUN_DEMO_WORKFLOW_ID));
+
+        let Err(error) = load_valid_first_run_project(&invocation, FIRST_RUN_ARTIFACT_WORKFLOW_ID)
+        else {
+            return Err("new-contract identity accepted a pre-upgrade scaffold".into());
+        };
+        assert_eq!(
+            error.code(),
+            "cli.first_run.artifact.contract_upgrade_required"
+        );
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
 
     fn continuation_preview_fixture() -> serde_json::Result<GovernedContinuationBrief> {
         let root_hash = workflow_core::SpecContentHash::from_bytes("preview bundle");

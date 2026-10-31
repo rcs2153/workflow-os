@@ -66,13 +66,14 @@ The `first-run` command produces the immediate ledger/report posture: missing ev
 
 `first-run --write-report-artifact` is different from both commands. It is an
 explicit local artifact path for the exact generated scaffold only. It binds
-the same bounded first-run analysis to the immutable run, executes the
-declared authoritative project-validation profile, pauses at both the
-aggregate governance approval and generated workflow-step approval, and then
-persists one create-only report artifact. Approval resume fails closed if the
-bounded repository posture changes. It does not run repository build, test,
-lint, or typecheck commands; read arbitrary source; use mock output as
-evidence; call providers; or create external side effects.
+the same bounded first-run analysis and one-use local request to the immutable
+run, executes the declared authoritative project-validation profile, and lets
+Core select quiet, visible, approval-required, or denied posture. Exact
+complete low-risk facts can persist one create-only report artifact without a
+human interruption or approval records. Any approval minimum or incomplete,
+changed, or unsafe fact remains blocking or denied. It does not run repository
+build, test, lint, or typecheck commands; read arbitrary source; use mock
+output as evidence; call providers; or create external side effects.
 
 The scaffold now includes the existing fixed project-validation and
 authoritative observe-and-report path by default. The positive compatibility

@@ -89,8 +89,10 @@ first-run analysis:
 
 This explicit path validates the exact generated contract, binds the bounded
 analysis to immutable run identity, executes the declared authoritative
-project-validation check, pauses at the required governance and workflow-step
-approvals, and writes one create-only local report artifact after completion.
+project-validation check, lets Core derive the proportional-governance route,
+and writes one create-only local report artifact after completion. Exact
+complete low-risk facts proceed without approval records; escalated routes
+remain proof-backed and blocking.
 It does not execute repository build/test commands, read arbitrary source,
 call providers, access the network, or create external side effects. Ordinary
 `first-run` remains non-mutating.

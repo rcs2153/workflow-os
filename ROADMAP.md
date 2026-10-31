@@ -86,20 +86,31 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the accepted first-run quiet-success artifact composition.** Add
-   the separately identified generated artifact workflow, low-sensitivity
-   artifact skill, enforced observe-and-report policy, and additive scaffold
-   upgrade. Bind a CLI-private one-use local artifact request into immutable run
-   context, keep Core authoritative for route selection, create no approval
-   proof on proceed routes, preserve proof-backed escalation and denial, and
-   retain legacy run replay/recovery. Ordinary first-run and the existing
-   approval/audit demo remain unchanged. Execute the closed acceptance matrix
-   and disposable-repository proof before focused runtime review. No arbitrary
-   command, provider, network, external SideEffect, schema, SDK, hosted, or
-   release broadening is authorized. See the accepted [plan](docs/implementation-plans/first-run-quiet-success-artifact-composition-plan.md)
-   and [review](docs/concepts/FIRST_RUN_QUIET_SUCCESS_ARTIFACT_COMPOSITION_PLAN_REVIEW.md).
+No roadmap implementation item is open. The accepted first-run quiet-success
+artifact composition is ready for release packaging; release preparation does
+not authorize publication, tagging, provider broadening, or a new runtime
+lane.
 
 #### Recently Closed Queue Evidence
+
+- **Implemented and accepted the first-run quiet-success artifact
+  composition.** Added the separately identified generated artifact workflow,
+  low-sensitivity artifact skill, enforced observe-and-report policy, and
+  additive scaffold upgrade. Bound a CLI-private one-use local artifact
+  request into immutable run context, kept Core authoritative for route
+  selection, created no approval proof on proceed routes, preserved
+  proof-backed escalation and denial, and retained legacy run replay/recovery.
+  Ordinary first-run and the existing approval/audit demo remain unchanged.
+  The closed acceptance matrix, full workspace suite, and
+  disposable-repository proof pass. No arbitrary command, provider, network,
+  external SideEffect, schema, SDK, hosted, or release broadening was added.
+  See the accepted [plan](docs/implementation-plans/first-run-quiet-success-artifact-composition-plan.md),
+  [implementation report](docs/concepts/FIRST_RUN_QUIET_SUCCESS_ARTIFACT_IMPLEMENTATION_REPORT.md),
+  and [focused review](docs/concepts/FIRST_RUN_QUIET_SUCCESS_ARTIFACT_IMPLEMENTATION_REVIEW.md).
+  Review found and resolved one compatibility blocker: shared project reload
+  now validates the exact contract selected by durable run identity, so legacy
+  pre-upgrade runs remain admissible while a new artifact identity still fails
+  closed without the complete new contract.
 
 - **Accepted the first-run quiet-success artifact composition plan after two
   corrections.** The artifact path now has a separate exact low-sensitivity
