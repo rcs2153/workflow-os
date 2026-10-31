@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-10-24.
+Status date: 2026-10-31.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -86,19 +86,30 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Post the accepted OpenShell `v0.1.5` follow-up comment exactly once.** The
-   focused review accepts one 4,503-byte body for existing Discussion #2661 at
-   SHA-256
-   `4541ea7d05380112d86e45f78c225fd98ddf278531031452eb928289a6f700a8`.
-   Run one separately governed external-engagement phase that verifies the
-   target, detects an existing identical comment, submits the exact body,
-   compares the returned content, and records the stable comment identity.
-   Do not open a second discussion, issue, or pull request; add a compatibility
-   transport; run a live smoke; wire a provider; execute Cargo; add access
-   material; fork; or change release posture. See the
-   [focused review](docs/concepts/OPENSHELL_V0_1_5_UPSTREAM_GAP_REFRESH_REVIEW.md).
+1. **Select the next executable runtime lane after closing the OpenShell
+   external-engagement phase.** Run one governed queue-selection review over
+   current accepted evidence. OpenShell provider wiring remains blocked while
+   awaiting authoritative upstream contract changes or maintainer guidance;
+   the comment does not authorize a transport, smoke, provider, Cargo
+   execution, access material, fork, or another mutation. Select one bounded
+   phase from a mature non-blocked runtime lane, state its exact entry and exit
+   criteria, and update this queue before implementation. Do not use stale
+   historical `next phase` prose as authority. See the [follow-up submission
+   report](docs/concepts/OPENSHELL_V0_1_5_FOLLOW_UP_SUBMISSION_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Posted and verified the accepted OpenShell `v0.1.5` follow-up comment
+  exactly once.** Existing Discussion #2661 now contains one stable comment at
+  [discussioncomment-19310244](https://github.com/NVIDIA/OpenShell/discussions/2661#discussioncomment-19310244).
+  Its raw GitHub body uses CRLF line endings; after explicit LF
+  canonicalization, the 4,503-byte content exactly matches accepted SHA-256
+  `4541ea7d05380112d86e45f78c225fd98ddf278531031452eb928289a6f700a8`.
+  Exact verification caught one rich-paste transformation, and the same
+  comment was corrected in place without creating a duplicate. Provider
+  wiring remains blocked and no OpenShell maintainer response has been
+  evaluated. See the [submission
+  report](docs/concepts/OPENSHELL_V0_1_5_FOLLOW_UP_SUBMISSION_REPORT.md).
 
 - **Accepted the OpenShell `v0.1.5` upstream gap refresh and follow-up draft.**
   Focused maintainer/security review verifies source fidelity, selected Docker
