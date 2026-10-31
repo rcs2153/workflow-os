@@ -86,18 +86,33 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Select the next bounded delivery lane from current runtime and product
-   evidence.** The selection must not reopen completed primitive families or
-   broaden provider mutations by momentum. Prefer a composition that reduces
-   real user ceremony while preserving authoritative policy/check execution,
-   evidence, approval, immutable identity, truthful reports, and explicit side
-   effects. Treat current first-run artifact acceptance, external user
-   feedback, unresolved runtime boundaries, and existing implementation plans
-   as evidence. Queue selection is planning only and must define entry
-   conditions, exit criteria, strict non-goals, and the required focused review
-   before implementation.
+1. **Plan and review one authoritative first-run quiet-success artifact
+   composition.** Preserve ordinary `workflow-os first-run` as non-mutating and
+   preserve the current approval-gated mock workflow as an explicit audit demo.
+   Define a separate exact-contract path in which the explicit local artifact
+   request may complete without a human interruption only when Core derives
+   `Proceed` from complete current facts and no workflow, policy, profile,
+   authority, evidence/check, sensitivity, SideEffect, or steward minimum
+   requires approval. The plan must specify declaration and contract identity,
+   current-fact derivation, local-write posture, disclosure delivery, monotonic
+   escalation, replay/recovery, report truth, compatibility, and focused
+   maintainer/security acceptance criteria. It must not auto-approve the
+   existing gated contract, let callers choose the route, broaden profiles or
+   providers, or make default first-run mutating. See the [queue-selection
+   report](docs/concepts/FIRST_RUN_QUIET_SUCCESS_ARTIFACT_QUEUE_SELECTION_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Selected the first-run quiet-success artifact planning lane.** The accepted
+  next move composes the newly accepted first-run governed artifact path with
+  existing proportional-governance and quiet-success foundations. Explicit
+  invocation expresses intent to request the local artifact but is not itself
+  approval or authority. Human interruption may be omitted only for a distinct
+  exact contract whose complete authoritative inputs produce `Proceed`; any
+  explicit approval minimum, incomplete fact, drift, or escalation remains
+  blocking or denied. The existing approval/audit demo and ordinary
+  non-mutating first-run command remain unchanged. See the [queue-selection
+  report](docs/concepts/FIRST_RUN_QUIET_SUCCESS_ARTIFACT_QUEUE_SELECTION_REPORT.md).
 
 - **Accepted the first-run governed WorkReport artifact implementation.**
   Focused maintainer/security review found and fixed one blocker: current
