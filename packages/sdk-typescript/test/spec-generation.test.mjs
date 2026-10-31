@@ -177,6 +177,82 @@ test("project manifest emits the closed authoritative governance declaration", (
   });
 });
 
+test("project manifest emits subordinate GitHub repository metadata constraints", () => {
+  const manifest = projectManifest({
+    project: { id: "acme/sdk", name: "SDK Project" },
+    governance: {
+      authoritative_execution: {
+        profile: "observe_and_report",
+        local_check_profile: "workflow_os_project_validation"
+      },
+      provider_reads: {
+        github_repository_metadata: {
+          enabled: true,
+          endpoint: "github.com",
+          access_reference: "env/WORKFLOW_OS_GITHUB_TOKEN",
+          resources: [{ owner: "rcs2153", repository: "workflow-os" }]
+        }
+      }
+    }
+  });
+
+  assert.equal(
+    manifest.governance.provider_reads.github_repository_metadata.resources[0].repository,
+    "workflow-os"
+  );
+});
+
+test("project manifest rejects provider reads without authoritative execution", () => {
+  assert.throws(() =>
+    projectManifest({
+      project: { id: "acme/sdk", name: "SDK Project" },
+      governance: {
+        provider_reads: {
+          github_repository_metadata: {
+            enabled: true,
+            endpoint: "github.com",
+            access_reference: "env/WORKFLOW_OS_GITHUB_TOKEN",
+            resources: [{ owner: "rcs2153", repository: "workflow-os" }]
+          }
+        }
+      }
+    })
+  );
+});
+
+test("skill definitions preserve exact adapter operation declarations", () => {
+  const skill = skillDefinition({
+    ...baseSkill(),
+    input_contract: {
+      fields: [
+        { name: "owner", field_type: "string" },
+        { name: "repo", field_type: "string" }
+      ],
+      required: ["owner", "repo"]
+    },
+    allowed_capabilities: [{ name: "external.read" }, { name: "adapter.invoke" }],
+    adapter_requirements: [{
+      adapter_id: "symbolic/github-read-only",
+      operation: "github.repository.metadata",
+      capabilities: ["external.read"]
+    }]
+  });
+
+  assert.equal(skill.adapter_requirements[0].operation, "github.repository.metadata");
+});
+
+test("skill definitions reject incomplete exact adapter operation contracts", () => {
+  assert.throws(() => skillDefinition({
+    ...baseSkill(),
+    allowed_capabilities: [{ name: "external.read" }, { name: "adapter.invoke" }],
+    adapter_requirements: [{
+      adapter_id: "symbolic/github-read-only",
+      operation: "github.repository.metadata",
+      capabilities: ["external.read"]
+    }]
+  }));
+});
+
 test("helper APIs reject secret-like literals", () => {
   assert.throws(() => literal("password-value"));
   assert.throws(() =>

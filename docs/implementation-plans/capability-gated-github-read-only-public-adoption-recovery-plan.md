@@ -1,7 +1,9 @@
 # Capability-Gated GitHub Read-Only Public Adoption And Recovery Plan
 
 Status: Focused maintainer/security plan review accepted after required
-boundary corrections. Implementation remains phased and opt-in.
+boundary corrections. Phase 1 dark contract implementation and focused review
+are accepted. Phase 2 Core-private authority, transient-access, continuity, and
+recovery work is next. Later phases remain unimplemented, phased, and opt-in.
 
 Related foundations:
 
@@ -491,6 +493,19 @@ cannot represent provider-read lifecycle truthfully, stop and return to plan
 review. Do not silently retain the generic consumed claim or invent a parallel
 state machine.
 
+Phase 1 is implemented as a dark contract only. The implementation adds the
+exact operation identifier, closed subordinate project declaration, Rust and
+TypeScript validation, schema parity, and immutable run-bundle binding while
+preserving legacy projects and bundles. It does not expose runtime selection,
+read access material, authority derivation, provider calls, CLI behavior, or
+recovery behavior. See the [Phase 1 implementation
+report](../concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CONTRACT_FOUNDATION_REPORT.md).
+Focused implementation review found and corrected one contract-closure defect:
+the exact operation now requires the complete accepted skill capability and
+input shape, not only the adapter tuple. The corrected dark contract is
+accepted. See the [Phase 1 implementation
+review](../concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CONTRACT_FOUNDATION_REVIEW.md).
+
 ## 15. Required Test Matrix
 
 ### Contract and compatibility
@@ -610,11 +625,13 @@ blocking ambiguities:
 The review also split implementation into four governed phases so the public
 path cannot be exposed with only contracts or partial recovery semantics.
 
-The next phase is Phase 1: implement the exact operation and subordinate
-project activation contracts, immutable binding, schema/SDK parity,
-compatibility behavior, and focused validation. It must remain dark: no public
-runtime selection, provider call, credential read, or CLI activation is
-authorized in that phase.
+Phase 1 now implements the exact operation and subordinate project activation
+contracts, immutable binding, schema/SDK parity, compatibility behavior, and
+focused validation while remaining dark. Focused implementation review found
+and corrected an incomplete skill-shape closure, then accepted the corrected
+contract. The required next phase is Phase 2 Core-owned authority,
+transient-access, continuity, and recovery work. It must remain Core-private
+and cannot expose provider selection or access material through the CLI.
 
 See [Capability-Gated GitHub Read-Only Public Adoption And Recovery Plan
 Review](../concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_PUBLIC_ADOPTION_RECOVERY_PLAN_REVIEW.md).

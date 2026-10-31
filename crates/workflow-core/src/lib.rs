@@ -420,9 +420,9 @@ pub use governed_context_access::{
     GovernedContextReferenceKind, GovernedContextReferenceTarget,
 };
 pub use identifiers::{
-    ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, OrganizationId,
-    PolicyId, ProjectId, SchemaVersion, SkillAttemptId, SkillId, SkillInvocationId, SkillVersion,
-    SpecContentHash, StepId, WorkflowId, WorkflowRunId, WorkflowVersion,
+    ActorId, AdapterId, AdapterOperationId, CorrelationId, EventId, IdempotencyKey, IntegrationId,
+    OrganizationId, PolicyId, ProjectId, SchemaVersion, SkillAttemptId, SkillId, SkillInvocationId,
+    SkillVersion, SpecContentHash, StepId, WorkflowId, WorkflowRunId, WorkflowVersion,
 };
 pub use immutable_run_bundle::{
     ImmutableRunBundleAuthoritativeExecutionActivation, ImmutableRunBundleBinding,
@@ -473,10 +473,11 @@ pub use postgres_state::{
 pub use project::{
     canonical_yaml_content_hash, parse_policy_spec_yaml, parse_project_manifest_yaml,
     parse_skill_spec_yaml, parse_test_spec_yaml, parse_workflow_spec_yaml,
-    AuthoritativeExecutionConfiguration, ConfigOverlay, ConfigVar, EnvironmentRef, PolicyRuleShell,
+    AuthoritativeExecutionConfiguration, ConfigOverlay, ConfigVar, EnvironmentRef,
+    GitHubRepositoryMetadataReadConfiguration, GitHubRepositoryMetadataResource, PolicyRuleShell,
     PolicySpecDocument, ProjectGovernanceConfiguration, ProjectLayout, ProjectManifest,
-    ProjectMetadata, ReferenceResolutionRules, SpecReference, TestAssertionShell, TestSpecDocument,
-    SUPPORTED_SCHEMA_VERSION,
+    ProjectMetadata, ProviderReadConfiguration, ReferenceResolutionRules, SpecReference,
+    TestAssertionShell, TestSpecDocument, SUPPORTED_SCHEMA_VERSION,
 };
 pub use project_approval_route_composition::{
     compose_authenticated_project_approval_route, HostedProjectResourceBindingReader,

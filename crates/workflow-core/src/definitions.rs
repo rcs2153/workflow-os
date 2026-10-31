@@ -6,8 +6,8 @@ use crate::work_report::{
     WorkReportArtifactApprovalProofMarkerRequirement, WorkReportArtifactHighAssuranceRequirement,
 };
 use crate::{
-    ActorId, AdapterId, IntegrationId, PolicyId, RedactedValue, SchemaVersion, SkillId,
-    SkillVersion, SourceLocation, SpecContentHash, StepId, WorkflowId, WorkflowVersion,
+    ActorId, AdapterId, AdapterOperationId, IntegrationId, PolicyId, RedactedValue, SchemaVersion,
+    SkillId, SkillVersion, SourceLocation, SpecContentHash, StepId, WorkflowId, WorkflowVersion,
 };
 
 /// Lifecycle status for public workflow and skill definitions.
@@ -579,6 +579,9 @@ pub struct CapabilityRequirement {
 pub struct AdapterRequirement {
     /// Required adapter identifier.
     pub adapter_id: AdapterId,
+    /// Optional exact operation selected within the adapter boundary.
+    #[serde(default)]
+    pub operation: Option<AdapterOperationId>,
     /// Optional integration identifier.
     #[serde(default)]
     pub integration_id: Option<IntegrationId>,

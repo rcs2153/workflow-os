@@ -70,6 +70,102 @@ governance:
 }
 
 #[test]
+fn parses_subordinate_github_repository_metadata_read_declaration() {
+    let manifest = parse_project_manifest_yaml(&format!(
+        r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+project:
+  id: acme/authoritative
+  name: Authoritative Project
+governance:
+  authoritative_execution:
+    profile: observe_and_report
+    local_check_profile: workflow_os_project_validation
+  provider_reads:
+    github_repository_metadata:
+      enabled: true
+      endpoint: github.com
+      access_reference: env/WORKFLOW_OS_GITHUB_TOKEN
+      resources:
+        - owner: rcs2153
+          repository: workflow-os
+"
+    ))
+    .expect("supported provider-read declaration parses");
+
+    let declaration = manifest
+        .governance
+        .and_then(|governance| governance.provider_reads)
+        .expect("provider reads are declared")
+        .github_repository_metadata;
+    assert!(declaration.enabled());
+    assert_eq!(declaration.endpoint(), "github.com");
+    assert_eq!(
+        declaration.access_reference(),
+        "env/WORKFLOW_OS_GITHUB_TOKEN"
+    );
+    assert_eq!(declaration.resources()[0].owner(), "rcs2153");
+    assert_eq!(declaration.resources()[0].repository(), "workflow-os");
+}
+
+#[test]
+fn rejects_provider_read_without_authoritative_execution() {
+    let error = parse_project_manifest_yaml(&format!(
+        r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+project:
+  id: acme/authoritative
+  name: Authoritative Project
+governance:
+  provider_reads:
+    github_repository_metadata:
+      enabled: true
+      endpoint: github.com
+      access_reference: env/WORKFLOW_OS_GITHUB_TOKEN
+      resources:
+        - owner: rcs2153
+          repository: workflow-os
+"
+    ))
+    .expect_err("provider reads cannot create a parallel activation path");
+
+    assert_eq!(error.kind(), WorkflowOsErrorKind::Validation);
+    assert_eq!(
+        error.code(),
+        "project.governance.provider_reads.authoritative_execution_required"
+    );
+}
+
+#[test]
+fn rejects_unsupported_or_duplicate_provider_read_constraints() {
+    for declaration in [
+        "endpoint: github.example.com\n      access_reference: env/WORKFLOW_OS_GITHUB_TOKEN\n      resources:\n        - owner: rcs2153\n          repository: workflow-os",
+        "endpoint: github.com\n      access_reference: env/WORKFLOW_OS_GITHUB_TOKEN\n      resources:\n        - owner: rcs2153\n          repository: workflow-os\n        - owner: rcs2153\n          repository: workflow-os",
+        "endpoint: github.com\n      access_reference: env/WORKFLOW_OS_GITHUB_TOKEN\n      resources:\n        - owner: RCS2153\n          repository: workflow-os",
+    ] {
+        let error = parse_project_manifest_yaml(&format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+project:
+  id: acme/authoritative
+  name: Authoritative Project
+governance:
+  authoritative_execution:
+    profile: observe_and_report
+    local_check_profile: workflow_os_project_validation
+  provider_reads:
+    github_repository_metadata:
+      enabled: true
+      {declaration}
+"
+        ))
+        .expect_err("unsupported provider-read declaration is rejected");
+        assert_eq!(error.kind(), WorkflowOsErrorKind::Validation);
+        assert!(!error.to_string().contains("github.example.com"));
+    }
+}
+
+#[test]
 fn rejects_incomplete_or_unsupported_authoritative_execution_declaration() {
     for declaration in [
         "profile: observe_and_report",

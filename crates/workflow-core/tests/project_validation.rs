@@ -224,6 +224,67 @@ observability_requirements:
         );
     }
 
+    fn write_github_operation_skill(
+        &self,
+        adapter_id: &str,
+        operation: &str,
+        extra_capability: Option<&str>,
+    ) {
+        let extra_capability = extra_capability
+            .map(|capability| format!("\n  - name: {capability}"))
+            .unwrap_or_default();
+        self.write(
+            "skills/external.skill.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: external/action
+version: v0
+display_name: External Action
+owner:
+  lifecycle_status: stable
+input_contract:
+  fields:
+    - name: owner
+      field_type: string
+    - name: repo
+      field_type: string
+  required:
+    - owner
+    - repo
+output_contract:
+  fields:
+    - name: result
+      field_type: string
+  required:
+    - result
+allowed_capabilities:
+  - name: external.read
+  - name: adapter.invoke{extra_capability}
+adapter_requirements:
+  - adapter_id: {adapter_id}
+    operation: {operation}
+    capabilities:
+      - external.read
+failure_modes:
+  - code: failed
+    description: External action failed.
+evaluation_criteria:
+  - name: reviewed
+    description: External action is reviewed.
+approval_sensitivity: high
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationPlanned
+observability_requirements:
+  metrics:
+    - skill_latency
+"
+            ),
+        );
+    }
+
     fn write_valid_workflow(&self, skill_id: &str, autonomy_level: &str) {
         self.write(
             "workflows/main.workflow.yml",
@@ -568,6 +629,68 @@ fn valid_read_only_adapter_project_passes() {
     let codes = validate(&project);
 
     assert!(!codes.iter().any(|code| code.starts_with("validation.")));
+}
+
+#[test]
+fn exact_github_repository_metadata_operation_contract_passes() {
+    let project = TestProject::new("valid-github-operation");
+    project.write_manifest();
+    project.write_policy_set();
+    project.write_external_read_policy();
+    project.write_github_operation_skill(
+        "symbolic/github-read-only",
+        "github.repository.metadata",
+        None,
+    );
+    project.write_valid_external_read_workflow();
+
+    let codes = validate(&project);
+
+    assert!(!codes.contains(&"validation.adapter.operation_unsupported".to_owned()));
+    assert!(!codes.contains(&"validation.adapter.operation_contract_invalid".to_owned()));
+}
+
+#[test]
+fn unsupported_or_mismatched_adapter_operation_is_reported() {
+    for (adapter_id, operation, expected) in [
+        (
+            "symbolic/github-read-only",
+            "github.repository.contents",
+            "validation.adapter.operation_unsupported",
+        ),
+        (
+            "symbolic/external",
+            "github.repository.metadata",
+            "validation.adapter.operation_contract_invalid",
+        ),
+    ] {
+        let project = TestProject::new("invalid-github-operation");
+        project.write_manifest();
+        project.write_policy_set();
+        project.write_external_read_policy();
+        project.write_github_operation_skill(adapter_id, operation, None);
+        project.write_valid_external_read_workflow();
+
+        assert!(validate(&project).contains(&expected.to_owned()));
+    }
+}
+
+#[test]
+fn incomplete_github_repository_metadata_skill_contract_is_reported() {
+    let project = TestProject::new("incomplete-github-operation");
+    project.write_manifest();
+    project.write_policy_set();
+    project.write_external_read_policy();
+    project.write_github_operation_skill(
+        "symbolic/github-read-only",
+        "github.repository.metadata",
+        Some("local.read"),
+    );
+    project.write_valid_external_read_workflow();
+
+    assert!(
+        validate(&project).contains(&"validation.adapter.operation_contract_invalid".to_owned())
+    );
 }
 
 #[test]

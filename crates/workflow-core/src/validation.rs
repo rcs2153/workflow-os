@@ -3,12 +3,12 @@ use std::path::Path;
 
 use crate::work_report::WorkReportArtifactApprovalProofMarkerRequirement;
 use crate::{
-    with_spec_file_evidence_from_source_location, ApprovalSensitivity, AutonomyLevel, Diagnostic,
-    DiagnosticSeverity, IdempotencyKeyStrategy, LifecycleStatus, LoadedSpec, PolicyEffect,
-    PolicyEffectSet, PolicyReference, PolicySpecDocument, ProjectBundle, ProjectLoadResult,
-    RedactionBehavior, SkillDefinition, SourceLocation, StepDefinition, TerminalBehavior,
-    WorkReportArtifactHighAssuranceRequirement, WorkflowDefinition, WorkflowId,
-    SUPPORTED_SCHEMA_VERSION,
+    with_spec_file_evidence_from_source_location, AdapterRequirement, ApprovalSensitivity,
+    AutonomyLevel, ContractFieldType, Diagnostic, DiagnosticSeverity, IdempotencyKeyStrategy,
+    LifecycleStatus, LoadedSpec, PolicyEffect, PolicyEffectSet, PolicyReference,
+    PolicySpecDocument, ProjectBundle, ProjectLoadResult, RedactionBehavior, SkillDefinition,
+    SourceLocation, StepDefinition, TerminalBehavior, WorkReportArtifactHighAssuranceRequirement,
+    WorkflowDefinition, WorkflowId, SUPPORTED_SCHEMA_VERSION,
 };
 
 /// Result of deterministic project validation.
@@ -269,6 +269,23 @@ impl<'a> Validator<'a> {
                     &skill.path,
                     "$.adapter_requirements",
                 );
+            }
+            if let Some(operation) = adapter.operation.as_ref() {
+                if operation.as_str() != "github.repository.metadata" {
+                    self.error(
+                        "validation.adapter.operation_unsupported",
+                        "adapter operation is not supported by the v0 contract",
+                        &skill.path,
+                        "$.adapter_requirements",
+                    );
+                } else if !github_repository_metadata_skill_contract_is_exact(definition, adapter) {
+                    self.error(
+                        "validation.adapter.operation_contract_invalid",
+                        "adapter operation does not match its exact v0 adapter contract",
+                        &skill.path,
+                        "$.adapter_requirements",
+                    );
+                }
             }
             for capability in &adapter.capabilities {
                 if !allowed.contains(capability.as_str()) {
@@ -938,6 +955,53 @@ impl<'a> Validator<'a> {
             self.diagnostics.push(diagnostic);
         }
     }
+}
+
+fn github_repository_metadata_skill_contract_is_exact(
+    skill: &SkillDefinition,
+    adapter: &AdapterRequirement,
+) -> bool {
+    if skill.adapter_requirements.len() != 1
+        || adapter.adapter_id.as_str() != "symbolic/github-read-only"
+        || adapter.integration_id.is_some()
+        || adapter.capabilities.as_slice() != ["external.read"]
+        || !skill.input_contract.examples.is_empty()
+        || skill.input_contract.fields.len() != 2
+        || skill.input_contract.required.len() != 2
+    {
+        return false;
+    }
+
+    let allowed = skill
+        .allowed_capabilities
+        .iter()
+        .map(|capability| capability.name.as_str())
+        .collect::<BTreeSet<_>>();
+    if skill.allowed_capabilities.len() != 2
+        || allowed != BTreeSet::from(["adapter.invoke", "external.read"])
+    {
+        return false;
+    }
+
+    let fields = skill
+        .input_contract
+        .fields
+        .iter()
+        .map(|field| (field.name.as_str(), field))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    fields.len() == 2
+        && ["owner", "repo"].into_iter().all(|name| {
+            fields.get(name).is_some_and(|field| {
+                field.field_type == ContractFieldType::String && !field.sensitive
+            })
+        })
+        && skill
+            .input_contract
+            .required
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>()
+            == BTreeSet::from(["owner", "repo"])
 }
 
 fn report_duplicates<T>(

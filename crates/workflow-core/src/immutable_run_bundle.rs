@@ -311,6 +311,8 @@ pub struct ImmutableRunBundleExecutionPosture {
 pub struct ImmutableRunBundleAuthoritativeExecutionActivation {
     configuration: crate::AuthoritativeExecutionConfiguration,
     project_manifest_content_hash: SpecContentHash,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_reads: Option<crate::ProviderReadConfiguration>,
 }
 
 impl ImmutableRunBundleAuthoritativeExecutionActivation {
@@ -323,7 +325,15 @@ impl ImmutableRunBundleAuthoritativeExecutionActivation {
         Self {
             configuration,
             project_manifest_content_hash,
+            provider_reads: None,
         }
+    }
+
+    /// Binds the validated subordinate provider-read declaration.
+    #[must_use]
+    pub fn with_provider_reads(mut self, provider_reads: crate::ProviderReadConfiguration) -> Self {
+        self.provider_reads = Some(provider_reads);
+        self
     }
 
     /// Returns the validated project declaration.
@@ -337,6 +347,12 @@ impl ImmutableRunBundleAuthoritativeExecutionActivation {
     pub const fn project_manifest_content_hash(&self) -> &SpecContentHash {
         &self.project_manifest_content_hash
     }
+
+    /// Returns the subordinate provider-read declaration, when present.
+    #[must_use]
+    pub const fn provider_reads(&self) -> Option<&crate::ProviderReadConfiguration> {
+        self.provider_reads.as_ref()
+    }
 }
 
 impl fmt::Debug for ImmutableRunBundleAuthoritativeExecutionActivation {
@@ -345,6 +361,7 @@ impl fmt::Debug for ImmutableRunBundleAuthoritativeExecutionActivation {
             .debug_struct("ImmutableRunBundleAuthoritativeExecutionActivation")
             .field("configuration", &self.configuration)
             .field("project_manifest_content_hash", &"[REDACTED]")
+            .field("provider_reads_present", &self.provider_reads.is_some())
             .finish()
     }
 }
@@ -1010,6 +1027,44 @@ fn compute_root_hash(input: &BundleHashInput<'_>) -> SpecContentHash {
             "authoritative_execution_project_manifest_hash",
             configuration.project_manifest_content_hash().as_str(),
         );
+        if let Some(provider_reads) = configuration.provider_reads() {
+            let declaration = &provider_reads.github_repository_metadata;
+            hash_field(
+                &mut hasher,
+                "provider_read_github_repository_metadata_enabled",
+                if declaration.enabled() {
+                    "true"
+                } else {
+                    "false"
+                },
+            );
+            hash_field(
+                &mut hasher,
+                "provider_read_github_repository_metadata_endpoint",
+                declaration.endpoint(),
+            );
+            hash_field(
+                &mut hasher,
+                "provider_read_github_repository_metadata_access_reference",
+                declaration.access_reference(),
+            );
+            let mut resources = declaration.resources().iter().collect::<Vec<_>>();
+            resources.sort_by(|left, right| {
+                (left.owner(), left.repository()).cmp(&(right.owner(), right.repository()))
+            });
+            for resource in resources {
+                hash_field(
+                    &mut hasher,
+                    "provider_read_github_repository_metadata_owner",
+                    resource.owner(),
+                );
+                hash_field(
+                    &mut hasher,
+                    "provider_read_github_repository_metadata_repository",
+                    resource.repository(),
+                );
+            }
+        }
     }
     for handler in input.handlers {
         hash_field(&mut hasher, "handler_skill", handler.skill_id.as_str());

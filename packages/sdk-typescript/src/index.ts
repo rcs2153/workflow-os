@@ -62,11 +62,28 @@ export interface ConfigVar {
 
 export interface ProjectGovernanceConfiguration {
   authoritative_execution?: AuthoritativeExecutionConfiguration;
+  provider_reads?: ProviderReadConfiguration;
 }
 
 export interface AuthoritativeExecutionConfiguration {
   profile: "observe_and_report";
   local_check_profile: ExplicitLocalCheckProfileId;
+}
+
+export interface ProviderReadConfiguration {
+  github_repository_metadata: GitHubRepositoryMetadataReadConfiguration;
+}
+
+export interface GitHubRepositoryMetadataReadConfiguration {
+  enabled: true;
+  endpoint: "github.com";
+  access_reference: "env/WORKFLOW_OS_GITHUB_TOKEN";
+  resources: GitHubRepositoryMetadataResource[];
+}
+
+export interface GitHubRepositoryMetadataResource {
+  owner: string;
+  repository: string;
 }
 
 export interface ProjectManifest {
@@ -168,6 +185,7 @@ export interface CapabilityRequirement {
 
 export interface AdapterRequirement {
   adapter_id: string;
+  operation?: string;
   integration_id?: string;
   capabilities: string[];
 }
@@ -336,6 +354,34 @@ export function projectManifest(input: ProjectManifestInput): ProjectManifest {
       checkNoSecretsInText(variable.value);
     }
   }
+  const providerReads = input.governance?.provider_reads;
+  if (providerReads && !input.governance?.authoritative_execution) {
+    throw new Error("provider reads require authoritative execution");
+  }
+  if (providerReads) {
+    const declaration = providerReads.github_repository_metadata;
+    if (
+      declaration.enabled !== true ||
+      declaration.endpoint !== "github.com" ||
+      declaration.access_reference !== "env/WORKFLOW_OS_GITHUB_TOKEN" ||
+      declaration.resources.length === 0 ||
+      declaration.resources.length > 32
+    ) {
+      throw new Error("GitHub repository metadata declaration is invalid");
+    }
+    const resources = new Set<string>();
+    for (const resource of declaration.resources) {
+      const ownerValid = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(resource.owner)
+        && resource.owner.length <= 39;
+      const repositoryValid = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/.test(resource.repository)
+        && resource.repository.length <= 100;
+      const key = `${resource.owner}/${resource.repository}`;
+      if (!ownerValid || !repositoryValid || resources.has(key)) {
+        throw new Error("GitHub repository metadata resource is invalid");
+      }
+      resources.add(key);
+    }
+  }
   return {
     schema_version: schemaVersion,
     project: input.project,
@@ -351,12 +397,51 @@ export function projectManifest(input: ProjectManifestInput): ProjectManifest {
 }
 
 export function skillDefinition(input: SkillDefinitionInput): SkillDefinition {
+  validateExactAdapterOperations(input);
   return {
     schema_version: schemaVersion,
     ...input,
     input_contract: dataContract(input.input_contract),
     output_contract: dataContract(input.output_contract)
   };
+}
+
+function validateExactAdapterOperations(input: SkillDefinitionInput): void {
+  for (const adapter of input.adapter_requirements ?? []) {
+    if (adapter.operation === undefined) {
+      continue;
+    }
+    if (adapter.operation !== "github.repository.metadata") {
+      throw new Error("adapter operation is not supported by the v0 contract");
+    }
+    const allowed = new Set((input.allowed_capabilities ?? []).map(capability => capability.name));
+    const required = new Set(input.input_contract.required ?? []);
+    const fields = new Map(input.input_contract.fields.map(field => [field.name, field]));
+    const owner = fields.get("owner");
+    const repo = fields.get("repo");
+    const exact = (input.adapter_requirements?.length ?? 0) === 1
+      && adapter.adapter_id === "symbolic/github-read-only"
+      && adapter.integration_id === undefined
+      && adapter.capabilities.length === 1
+      && adapter.capabilities[0] === "external.read"
+      && allowed.size === 2
+      && allowed.has("external.read")
+      && allowed.has("adapter.invoke")
+      && (input.allowed_capabilities?.length ?? 0) === 2
+      && fields.size === 2
+      && owner?.field_type === "string"
+      && owner.sensitive !== true
+      && repo?.field_type === "string"
+      && repo.sensitive !== true
+      && required.size === 2
+      && required.has("owner")
+      && required.has("repo")
+      && (input.input_contract.required?.length ?? 0) === 2
+      && (input.input_contract.examples?.length ?? 0) === 0;
+    if (!exact) {
+      throw new Error("adapter operation does not match its exact v0 skill contract");
+    }
+  }
 }
 
 export function workflowDefinition(input: WorkflowDefinitionInput): WorkflowDefinition {
