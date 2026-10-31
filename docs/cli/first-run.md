@@ -12,6 +12,10 @@ workflow-os first-run
 
 Use `workflow-os first-run --verbose` when you want the full posture matrix in human-readable text.
 
+Use `workflow-os first-run --write-report-artifact` only when you explicitly
+want the same bounded analysis to run through the generated governed workflow
+and persist one local `WorkReport` artifact.
+
 ## Behavior
 
 The command:
@@ -34,11 +38,49 @@ The command:
   project-controlled authoritative execution declaration is absent or
   declared, supported, and enforced.
 
-The command does not fabricate a terminal `WorkReport`, because no workflow run has occurred. It emits a report-ready context instead.
+Without `--write-report-artifact`, the command does not fabricate a terminal
+`WorkReport`, because no workflow run has occurred. It emits a report-ready
+context instead.
+
+## Explicit Governed Artifact Path
+
+```sh
+workflow-os first-run --write-report-artifact
+workflow-os first-run --write-report-artifact --run-id <run-id>
+```
+
+This opt-in path:
+
+- accepts only the exact versioned generated first-run workflow, skill, and
+  policy fingerprints;
+- computes one bounded deterministic first-run analysis commitment before run
+  creation;
+- binds that commitment as the immutable run's resolved execution context;
+- executes the declared authoritative Workflow OS project-validation profile;
+- applies Core-derived proportional-governance routing;
+- persists and requires complete approval-presentation proof;
+- pauses separately for aggregate governance approval and the generated
+  workflow step's authored approval;
+- recomputes the bounded analysis and reruns project validation at approval
+  time before either grant can authorize execution;
+- registers one trusted handler only for the exact generated first-run skill;
+- builds a truthful terminal report from the same owned analysis snapshot;
+- cites the exact decision-time project-validation result in the report;
+- persists one create-only local report artifact through existing artifact
+  gates; and
+- reconciles exact terminal replay and commitment-gated missing-artifact
+  recovery without rerunning the skill.
+
+The command prints bounded run, approval, route, report, commitment, artifact,
+and inspection metadata. It does not print the report body by default.
+
+`--recommendation` is incompatible with `--write-report-artifact`.
+`--run-id` requires `--write-report-artifact`. Mock local skills are rejected
+on this path because mock output cannot become report evidence.
 
 ## Boundaries
 
-`first-run` does not:
+Ordinary `first-run` without `--write-report-artifact` does not:
 
 - run workflows;
 - approve checkpoints;
@@ -59,6 +101,12 @@ The command does not fabricate a terminal `WorkReport`, because no workflow run 
 - infer or activate authoritative execution from repository metadata or
   recommendations; activation requires the explicit validated project
   declaration.
+
+The explicit artifact path creates local run, immutable-bundle, approval,
+event, governance-assessment, and report-artifact state. It still does not
+execute repository build/test/lint/typecheck commands, read arbitrary source,
+call providers, access the network, publish reports, activate recommendations,
+or create external side effects.
 
 ## Output
 
@@ -230,6 +278,12 @@ workflow-os author workflow --from-recommendation first_run.repo_implementation 
 The authoring dry-run output is still inactive and non-mutating. It makes the same required decisions and validation expectations easier to review before any future file-writing or promotion flow exists.
 
 The optional approval/audit demo command is deliberately separate from the recommended next action. `workflow-os first-run` is the real bounded posture analysis. `workflow-os --mock-all-local-skills run local/first-run-governance` is an optional local demo of approval checkpoints, durable event history, and inspectable runtime state using mock local skill behavior.
+
+The governed artifact path is not that mock demo. It uses a Workflow OS-owned
+trusted handler for the bounded analysis, and only for an exact allowlisted
+generated contract. The artifact proves governance posture analysis and the
+declared Workflow OS project-validation check; it does not prove repository
+correctness or that project-specific commands ran.
 
 ## Failure Behavior
 

@@ -40,6 +40,7 @@ use workflow_core::{
     execute_with_github_pr_comment_provider_write,
     execute_with_github_pr_comment_provider_write_presentation_gate,
     execute_with_governance_assessment_binding, execute_with_immutable_run_bundle,
+    execute_with_immutable_run_bundle_and_resolved_context,
     execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_projected_proof_markers,
     execute_with_report_artifact_and_proof_marker_gates,
@@ -133,7 +134,8 @@ use workflow_core::{
     ImmutableRunBundleHandlerPosture, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
     ImmutableRunBundleVersion, IntegrationId, LocalApprovalDecisionRequest,
     LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationDefaultDecisionRequest,
-    LocalApprovalPresentationProof, LocalApprovalProofMarkerAuditProjectionStore,
+    LocalApprovalPresentationProof, LocalApprovalPresentationResolvedContextDecisionRequest,
+    LocalApprovalProofMarkerAuditProjectionStore,
     LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalAuditSink,
     LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
@@ -162,8 +164,8 @@ use workflow_core::{
     LocalExecutionWithGovernanceAssessmentRequest, LocalExecutionWithImmutableRunBundleRequest,
     LocalExecutionWithProjectedProofMarkerArtifactResult,
     LocalExecutionWithReportAndSideEffectDiscoveryRequest, LocalExecutionWithReportArtifactRequest,
-    LocalExecutionWithReportRequest, LocalExecutor,
-    LocalGovernanceAssessmentApprovalDecisionRequest,
+    LocalExecutionWithReportRequest, LocalExecutionWithResolvedContextCommitmentRequest,
+    LocalExecutor, LocalGovernanceAssessmentApprovalDecisionRequest,
     LocalGovernanceAuthorityReceiptArtifactDecisionInput,
     LocalGovernanceAuthorityReceiptArtifactWriteInput,
     LocalGovernanceAuthorityReceiptArtifactWritePosture,
@@ -6954,7 +6956,7 @@ fn selected_project_validation_composition_rejects_changed_definition_before_rec
 
     assert_eq!(
         error.code(),
-        "executor.immutable_run_bundle.binding_mismatch"
+        "executor.selected_project_validation.current_bundle_context_mismatch"
     );
     assert_eq!(runner.call_count(), 1);
     assert_eq!(skill_calls.get(), 0);
@@ -9158,6 +9160,137 @@ fn immutable_bundle_execution_retry_rehydrates_without_duplicate_invocation() {
 
     assert_eq!(calls.get(), 1);
     assert_eq!(first, second);
+}
+
+#[test]
+fn resolved_context_commitment_is_the_immutable_bundle_context_and_rejects_retry_drift() {
+    let project = TestProject::new("immutable-bundle-resolved-context");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-resolved-context").expect("run id");
+    let commitment = SpecContentHash::from_text("bounded analysis v1");
+    let request = LocalExecutionWithResolvedContextCommitmentRequest {
+        execution: project.immutable_bundle_request(run_id.clone(), "bundle/run-resolved-context"),
+        resolved_context_commitment: commitment.clone(),
+    };
+
+    let first = execute_with_immutable_run_bundle_and_resolved_context(&executor, &store, &request)
+        .expect("first execution succeeds");
+    let retry = execute_with_immutable_run_bundle_and_resolved_context(&executor, &store, &request)
+        .expect("exact retry rehydrates");
+    let stored = store
+        .read_bundle(&run_id, first.bundle_binding().bundle_id())
+        .expect("bundle exists");
+
+    assert_eq!(calls.get(), 1);
+    assert_eq!(first, retry);
+    assert_eq!(
+        stored.manifest().resolved_execution_context_hash(),
+        &commitment
+    );
+
+    let changed = LocalExecutionWithResolvedContextCommitmentRequest {
+        execution: request.execution,
+        resolved_context_commitment: SpecContentHash::from_text("bounded analysis v2"),
+    };
+    let error = execute_with_immutable_run_bundle_and_resolved_context(&executor, &store, &changed)
+        .expect_err("changed context fails closed");
+    assert_eq!(
+        error.code(),
+        "executor.immutable_run_bundle.binding_mismatch"
+    );
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn proof_enforced_approval_resume_requires_the_exact_resolved_context_commitment() {
+    let project = TestProject::new("approval-resolved-context");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-approval-resolved-context").expect("run id");
+    let commitment = SpecContentHash::from_text("approved bounded analysis");
+    let request = LocalExecutionWithResolvedContextCommitmentRequest {
+        execution: project
+            .immutable_bundle_request(run_id.clone(), "bundle/run-approval-resolved-context"),
+        resolved_context_commitment: commitment.clone(),
+    };
+    let paused =
+        execute_with_immutable_run_bundle_and_resolved_context(&executor, &store, &request)
+            .expect("run pauses for approval");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/resolved-context",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+
+    let changed_error = executor
+        .decide_approval_with_presentation_and_resolved_context(
+            LocalApprovalPresentationResolvedContextDecisionRequest {
+                approval: LocalApprovalPresentationDecisionRequest {
+                    approval: project.approval_request(
+                        run_id.clone(),
+                        approval.approval_id.clone(),
+                        ApprovalDecisionKind::Granted,
+                    ),
+                    proof: LocalApprovalPresentationProof::PresentationId(
+                        presentation.presentation_id().clone(),
+                    ),
+                    max_presentation_age: None,
+                },
+                resolved_context_commitment: SpecContentHash::from_text("changed bounded analysis"),
+            },
+        )
+        .expect_err("changed commitment fails before grant");
+    assert_eq!(
+        changed_error.code(),
+        "executor.approval.resume_context_mismatch"
+    );
+    assert_eq!(calls.get(), 0);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("run rehydrates")
+            .snapshot
+            .status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+
+    let completed = executor
+        .decide_approval_with_presentation_and_resolved_context(
+            LocalApprovalPresentationResolvedContextDecisionRequest {
+                approval: LocalApprovalPresentationDecisionRequest {
+                    approval: project.approval_request(
+                        run_id,
+                        approval.approval_id,
+                        ApprovalDecisionKind::Granted,
+                    ),
+                    proof: LocalApprovalPresentationProof::PresentationId(
+                        presentation.presentation_id().clone(),
+                    ),
+                    max_presentation_age: None,
+                },
+                resolved_context_commitment: commitment,
+            },
+        )
+        .expect("exact commitment resumes");
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 1);
 }
 
 #[test]

@@ -86,26 +86,41 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-1. **Implement the reviewed first-run governed WorkReport artifact vertical
-   slice.** Preserve ordinary `workflow-os first-run` as non-mutating. Add one
-   explicit opt-in path that binds the exact same-call
-   bounded repository posture analysis to a truthful validated WorkReport and
-   idempotent local artifact. The plan must specify immutable analysis
-   identity, repository/manifest drift rejection, approval and proportional-
-   governance posture, local artifact-write disclosure, exact replay and
-   conflict handling, bounded output, compatibility, and disposable external-
-   repository proof. It must not execute repository commands, treat mock output
-   as evidence, call providers, access the network, mutate external state,
-   integrate OpenShell, add hosted behavior, or make default first-run
-   mutating. Focused maintainer/security review accepted implementation only
-   after requiring a pre-approval immutable analysis commitment, exact versioned
-   generated-contract fingerprints, and commitment-gated missing-artifact
-   recovery. Runtime implementation remains separately governed. See the
-   [queue-selection report](docs/concepts/FIRST_RUN_GOVERNED_WORK_REPORT_ARTIFACT_QUEUE_SELECTION_REPORT.md)
-   and [implementation
-   plan](docs/implementation-plans/first-run-governed-work-report-artifact-plan.md).
+1. **Select the next bounded delivery lane from current runtime and product
+   evidence.** The selection must not reopen completed primitive families or
+   broaden provider mutations by momentum. Prefer a composition that reduces
+   real user ceremony while preserving authoritative policy/check execution,
+   evidence, approval, immutable identity, truthful reports, and explicit side
+   effects. Treat current first-run artifact acceptance, external user
+   feedback, unresolved runtime boundaries, and existing implementation plans
+   as evidence. Queue selection is planning only and must define entry
+   conditions, exit criteria, strict non-goals, and the required focused review
+   before implementation.
 
 #### Recently Closed Queue Evidence
+
+- **Accepted the first-run governed WorkReport artifact implementation.**
+  Focused maintainer/security review found and fixed one blocker: current
+  repository drift could prevent a proof-backed denial. Denial is now
+  source-free and artifact-free while grants still require exact current
+  analysis and fresh authoritative check evidence. The review accepts immutable
+  context binding, exact contract admission, two distinct approval gates,
+  decision-time check citation, create-only persistence, exact replay, and
+  check-citing crash recovery. No provider, network, repository-command,
+  hosted, publication, or default-mutation behavior was added. See the
+  [review](docs/concepts/FIRST_RUN_GOVERNED_WORK_REPORT_ARTIFACT_REVIEW.md).
+
+- **Implemented the first-run governed WorkReport artifact vertical slice.**
+  Ordinary `workflow-os first-run` remains non-mutating. The explicit
+  `--write-report-artifact` path accepts only the exact generated contract,
+  binds the bounded analysis commitment into immutable run identity, executes
+  the declared authoritative project-validation check, routes through
+  proportional governance, requires proof-backed aggregate and authored-step
+  approvals, cites the decision-time check result, and persists one create-only
+  local artifact. Exact replay and commitment-gated missing-artifact recovery
+  are implemented. No repository command, provider, network, external write,
+  OpenShell, hosted, or default-mutation behavior was added. See the
+  [implementation report](docs/concepts/FIRST_RUN_GOVERNED_WORK_REPORT_ARTIFACT_IMPLEMENTATION_REPORT.md).
 
 - **Accepted the first-run governed WorkReport artifact implementation plan.**
   Focused maintainer/security review rejected post-approval-only analysis and
