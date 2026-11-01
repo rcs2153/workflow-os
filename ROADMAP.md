@@ -172,13 +172,21 @@ Before broader provider mutation families, nested harness work, or claims of
 continuous delegated-maintainer autonomy, complete the P0 [Delegated Authority
 Projection Into External Connectors
 Plan](docs/implementation-plans/delegated-authority-external-connector-projection-plan.md).
+Focused maintainer/security review accepted the plan after correcting six
+security boundaries: immutable projection is separate from mutable transition
+state, serialized projections are non-authorizing claims, draft creation
+derives one exact PR successor binding, ref updates are distinct from PR
+transitions, evidence and payload commitments are exact, and ambiguous provider
+outcomes block redispatch. See the [focused
+review](docs/concepts/DELEGATED_AUTHORITY_EXTERNAL_CONNECTOR_PROJECTION_PLAN_REVIEW.md).
 The plan integrates existing scoped runtime authority, approval-presentation
-proof, authoritative continuation, proportional governance, and durable wait
-conditions. It requires a closed connector capability projection, explicit PR
-transition vocabulary, exact head and evidence verification, durable
-consumption/revocation posture, and resumable connector refusal. It does not
-weaken platform permissions, authorize broad repository mutation, or create a
-parallel permission system.
+proof, same-call current-authority resolution, authorized-execution
+continuity, provider reconciliation, proportional governance, and durable wait
+conditions. The next phase is model-only: immutable external-action projection,
+closed PR transition vocabulary, successor-resource binding, deterministic
+commitment, and validation. It must not add connector execution, credentials,
+live GitHub behavior, provider writes, scheduler claims, or a parallel
+permission system.
 See the
 [post-0.3 queue selection
 report](docs/concepts/POST_0_3_ROADMAP_QUEUE_SELECTION_REPORT.md) and the
