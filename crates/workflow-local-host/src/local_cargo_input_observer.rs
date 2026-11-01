@@ -1680,6 +1680,7 @@ fn observer_error(suffix: &str, message: &str) -> WorkflowOsError {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
     use workflow_core::{
         ImmutableLocalCheckExecutionBindingDefinition, ImmutableLocalCheckHandlerSelection,
@@ -1691,6 +1692,8 @@ mod tests {
         TrustedHostLiveExecutionSecurityRequirementsDefinition, TrustedHostRootBindingRequirement,
         TrustedHostRootRequirement, WorkflowId, WorkflowRunId,
     };
+
+    static NEXT_TEMP_FIXTURE: AtomicU64 = AtomicU64::new(1);
 
     #[derive(Clone)]
     struct FakeFilesystem {
@@ -2332,14 +2335,16 @@ mod tests {
 
     impl TempFixture {
         fn new() -> Self {
+            let fixture_id = NEXT_TEMP_FIXTURE.fetch_add(1, Ordering::Relaxed);
             let nonce = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("clock")
                 .as_nanos();
             let root = std::env::temp_dir().join(format!(
-                "workflow-os-local-cargo-source-{}-{nonce}",
-                std::process::id()
+                "workflow-os-local-cargo-source-{}-{nonce}-{fixture_id}",
+                std::process::id(),
             ));
+            fs::create_dir(&root).expect("unique fixture root");
             fs::create_dir_all(root.join("repository/src")).expect("repository");
             fs::create_dir_all(root.join("cargo-home")).expect("cargo home");
             fs::create_dir_all(root.join("bin")).expect("bin");

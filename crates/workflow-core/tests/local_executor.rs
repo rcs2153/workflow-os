@@ -15488,7 +15488,7 @@ fn assert_high_assurance_projected_artifact_success(
         .expect("approval section");
     assert_eq!(
         approvals.summary(),
-        Some("High-assurance approval validation was used and passed before approval disclosure; stable approval references are cited when supplied.")
+        Some("The terminal run recorded 1 approval request and 1 grant (0 denied, 0 undecided); stable approval references were supplied. High-assurance approval validation was used and passed before approval disclosure.")
     );
     assert!(result
         .artifact_result()
@@ -20824,7 +20824,7 @@ fn high_assurance_disclosure_result_can_feed_explicit_report_input() {
 
     assert_eq!(
         approvals.summary(),
-        Some("High-assurance approval validation was used and passed before approval disclosure; stable approval references are cited when supplied.")
+        Some("The terminal run recorded 1 approval request and 1 grant (0 denied, 0 undecided); stable approval references were supplied. High-assurance approval validation was used and passed before approval disclosure.")
     );
 }
 
