@@ -126,8 +126,15 @@ where
             .ok_or_else(|| composition_error("step_unresolved", "immutable step is unavailable"))?;
         let skill = immutable_continuation_skill(&stored, step)?;
         let policy_effects = immutable_continuation_policy_effects(&stored, step)?;
-        let operation_binding =
-            derive_operation_binding(&stored, workflow, step, skill, &policy_effects, input)?;
+        let operation_binding = derive_operation_binding(
+            &stored,
+            workflow,
+            step,
+            skill,
+            &policy_effects,
+            input.expected_owner,
+            input.expected_repository,
+        )?;
 
         let approval_already_granted = approval_granted_for_step(&run, &step_id);
         if policy_effects.requires_approval() && !approval_already_granted {
@@ -492,13 +499,14 @@ fn validate_stored_bundle_binding<C>(
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)]
-fn derive_operation_binding<C>(
+pub(super) fn derive_operation_binding(
     stored: &crate::StoredImmutableRunBundle,
     workflow: &WorkflowDefinition,
     step: &StepDefinition,
     skill: &SkillDefinition,
     policy_effects: &PolicyEffectSet,
-    input: &ExecutorGitHubRepositoryMetadataReadInput<'_, C>,
+    expected_owner: &str,
+    expected_repository: &str,
 ) -> Result<SpecContentHash, WorkflowOsError> {
     if workflow.steps.len() != 1
         || matches!(step.terminal_behavior, Some(TerminalBehavior::Continue))
@@ -515,6 +523,11 @@ fn derive_operation_binding<C>(
     }
     let adapter = &skill.adapter_requirements[0];
     if adapter.adapter_id.as_str() != SYMBOLIC_ADAPTER_ID
+        || adapter
+            .operation
+            .as_ref()
+            .map(crate::AdapterOperationId::as_str)
+            != Some(OPERATION_CODE)
         || adapter.integration_id.is_some()
         || adapter.capabilities.as_slice() != ["external.read"]
     {
@@ -577,8 +590,8 @@ fn derive_operation_binding<C>(
         }
     }
     if mapped.len() != 2
-        || mapped.get("owner") != Some(&input.expected_owner)
-        || mapped.get("repo") != Some(&input.expected_repository)
+        || mapped.get("owner") != Some(&expected_owner)
+        || mapped.get("repo") != Some(&expected_repository)
     {
         return Err(composition_error(
             "target_mismatch",
@@ -601,8 +614,8 @@ fn derive_operation_binding<C>(
     update_idempotency_hash(&mut hasher, "step", step.id.as_str());
     update_idempotency_hash(&mut hasher, "skill", skill.id.as_str());
     update_idempotency_hash(&mut hasher, "skill-version", skill.version.as_str());
-    update_idempotency_hash(&mut hasher, "owner", input.expected_owner);
-    update_idempotency_hash(&mut hasher, "repository", input.expected_repository);
+    update_idempotency_hash(&mut hasher, "owner", expected_owner);
+    update_idempotency_hash(&mut hasher, "repository", expected_repository);
     Ok(SpecContentHash::from_bytes(hasher.finalize()))
 }
 
@@ -1152,7 +1165,23 @@ mod tests {
     fn write_project(root: &Path) {
         fs::write(
             root.join("workflow-os.yml"),
-            "schema_version: workflowos.dev/v0\nproject:\n  id: executor/github-read\n  name: Executor GitHub Read\n",
+            r"schema_version: workflowos.dev/v0
+project:
+  id: executor/github-read
+  name: Executor GitHub Read
+governance:
+  authoritative_execution:
+    profile: observe_and_report
+    local_check_profile: workflow_os_project_validation
+  provider_reads:
+    github_repository_metadata:
+      enabled: true
+      endpoint: github.com
+      access_reference: env/WORKFLOW_OS_GITHUB_TOKEN
+      resources:
+        - owner: acme
+          repository: widgets
+",
         )
         .expect("manifest");
         fs::write(
@@ -1235,6 +1264,7 @@ evaluation_criteria:
     description: The operation reads only repository metadata for the immutable target.
 adapter_requirements:
   - adapter_id: symbolic/github-read-only
+    operation: github.repository.metadata
     capabilities: [external.read]
 approval_sensitivity: low
 audit_requirements:

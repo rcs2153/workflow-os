@@ -3,7 +3,8 @@
 Status: Focused maintainer/security plan review accepted after required
 boundary corrections. Phase 1 dark contract implementation and focused review
 are accepted. Phase 2 Core-private authority, transient-access, continuity, and
-recovery work is next. Later phases remain unimplemented, phased, and opt-in.
+recovery composition is implemented and accepted after blocker correction. Later phases
+remain unimplemented, phased, and opt-in.
 
 Related foundations:
 
@@ -629,9 +630,16 @@ Phase 1 now implements the exact operation and subordinate project activation
 contracts, immutable binding, schema/SDK parity, compatibility behavior, and
 focused validation while remaining dark. Focused implementation review found
 and corrected an incomplete skill-shape closure, then accepted the corrected
-contract. The required next phase is Phase 2 Core-owned authority,
-transient-access, continuity, and recovery work. It must remain Core-private
-and cannot expose provider selection or access material through the CLI.
+contract. Phase 2 Core-owned authority, transient-access, continuity, and
+recovery composition is implemented and accepted after blocker correction.
+The wrapper reloads the exact immutable bundle, derives operation, target,
+input, and the operation commitment inside Core, and has exact SQLite lifecycle
+evidence. It remains Core-private and does not expose provider selection or
+access material through the CLI. Phase 3 public fixture activation requires a
+new governed scope.
+
+See the [Phase 2 implementation
+report](../concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CORE_PRIVATE_AUTHORITY_LIFECYCLE_REPORT.md).
 
 See [Capability-Gated GitHub Read-Only Public Adoption And Recovery Plan
 Review](../concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_PUBLIC_ADOPTION_RECOVERY_PLAN_REVIEW.md).
