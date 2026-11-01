@@ -11,6 +11,15 @@ use sha2::{Digest, Sha256};
 #[allow(dead_code)]
 #[cfg(feature = "trusted-host-application-spi")]
 mod github_repository_atomic_lifecycle;
+#[cfg(feature = "trusted-host-application-spi")]
+mod github_repository_fixture_execution;
+#[cfg(feature = "trusted-host-application-spi")]
+pub use github_repository_fixture_execution::{
+    decide_github_repository_metadata_fixture_approval, execute_github_repository_metadata_fixture,
+    GitHubRepositoryMetadataFixtureExecutionPosture,
+    GitHubRepositoryMetadataFixtureExecutionRequest,
+    GitHubRepositoryMetadataFixtureExecutionResult,
+};
 #[allow(dead_code)]
 mod github_repository_read_composition;
 #[allow(dead_code)]

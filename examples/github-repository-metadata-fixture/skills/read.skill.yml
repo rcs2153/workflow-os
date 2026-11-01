@@ -1,0 +1,29 @@
+schema_version: workflowos.dev/v0
+id: adapter/github-repository-metadata
+version: v1
+display_name: GitHub Repository Metadata Read
+allowed_capabilities: [{ name: external.read }, { name: adapter.invoke }]
+input_contract:
+  fields:
+    - { name: owner, field_type: string }
+    - { name: repo, field_type: string }
+  required: [owner, repo]
+output_contract:
+  fields: [{ name: summary, field_type: string }]
+failure_modes:
+  - { code: github_read_failed, description: GitHub read failed., retryable: false }
+evaluation_criteria:
+  - { name: bounded_read, description: Reads immutable repository metadata. }
+adapter_requirements:
+  - adapter_id: symbolic/github-read-only
+    operation: github.repository.metadata
+    capabilities: [external.read]
+approval_sensitivity: low
+audit_requirements:
+  required: true
+  events: [SkillInvocationRequested]
+  store_references_only: true
+observability_requirements:
+  metrics: [skill_latency]
+  tracing: true
+  latency_tracking: true

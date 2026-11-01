@@ -1,0 +1,6 @@
+schema_version: workflowos.dev/v0
+id: external/read
+name: External Read
+rules:
+  - id: allow
+    effect: allow_external_read

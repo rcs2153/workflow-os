@@ -392,6 +392,14 @@ pub use executor::{
     LocalSelectedProjectValidationResolvedContextRequest, LocalSkillRegistry, LocalTimeoutPolicy,
     SkillHandler, SkillInput, SkillOutput,
 };
+#[cfg(feature = "trusted-host-application-spi")]
+#[doc(hidden)]
+pub use executor::{
+    decide_github_repository_metadata_fixture_approval, execute_github_repository_metadata_fixture,
+    GitHubRepositoryMetadataFixtureExecutionPosture,
+    GitHubRepositoryMetadataFixtureExecutionRequest,
+    GitHubRepositoryMetadataFixtureExecutionResult,
+};
 pub use governance_decision_authority_receipt::{
     GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptClaimVerificationPosture,
     GovernanceDecisionAuthorityReceiptEffect, GovernanceDecisionAuthorityReceiptFreshnessPosture,

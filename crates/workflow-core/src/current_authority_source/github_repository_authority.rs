@@ -5,12 +5,13 @@ use super::{
     CurrentAuthoritySourceContractVersion, CurrentAuthoritySourceId,
 };
 use crate::{
-    ActorId, CapabilityAvailability, CapabilityAvailabilityRecord, CapabilityDelegationPosture,
-    CapabilityGrant, CapabilityGrantDefinition, CapabilityGrantId, CapabilityGrantLifecycle,
-    CapabilityGrantRequirements, CapabilityGrantScope, CapabilityReference, CapabilityResourceKind,
-    CapabilityResourceScope, GitHubRepositoryMetadataReadConfiguration,
-    GitHubRepositoryMetadataResource, HarnessContractId, RedactionMetadata, SpecContentHash,
-    StepId, Timestamp, WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowRunId,
+    ActorId, AdapterOperationMode, CapabilityAvailability, CapabilityAvailabilityRecord,
+    CapabilityDelegationPosture, CapabilityGrant, CapabilityGrantDefinition, CapabilityGrantId,
+    CapabilityGrantLifecycle, CapabilityGrantRequirements, CapabilityGrantScope,
+    CapabilityReference, CapabilityResourceKind, CapabilityResourceScope,
+    GitHubRepositoryMetadataReadConfiguration, GitHubRepositoryMetadataResource, HarnessContractId,
+    RedactionMetadata, SpecContentHash, StepId, Timestamp, WorkReportSensitivity, WorkflowId,
+    WorkflowOsError, WorkflowRunId,
 };
 
 use super::registered_in_memory_source::RegisteredInMemoryCurrentAuthoritySource;
@@ -47,6 +48,7 @@ pub(crate) struct GitHubRepositoryAuthorityInput<'a> {
     pub(crate) sensitivity: WorkReportSensitivity,
     pub(crate) evaluated_at: Timestamp,
     pub(crate) expires_at: Timestamp,
+    pub(crate) operation_mode: AdapterOperationMode,
     pub(crate) access_presence: GitHubRepositoryAccessPresence,
 }
 
@@ -64,6 +66,7 @@ struct AuthorityCommitmentInput<'a> {
     sensitivity: WorkReportSensitivity,
     evaluated_at: Timestamp,
     expires_at: Timestamp,
+    operation_mode: AdapterOperationMode,
     access_presence: GitHubRepositoryAccessPresence,
 }
 
@@ -123,6 +126,7 @@ fn derive_authority_material(
             sensitivity: input.sensitivity,
             evaluated_at: input.evaluated_at,
             expires_at: input.expires_at,
+            operation_mode: input.operation_mode,
             access_presence: input.access_presence,
         },
     )?;
@@ -158,9 +162,13 @@ fn derive_authority_material(
     let availability = CapabilityAvailabilityRecord::new(
         capability,
         resource,
-        match input.access_presence {
-            GitHubRepositoryAccessPresence::Present => CapabilityAvailability::Available,
-            GitHubRepositoryAccessPresence::Missing => CapabilityAvailability::DeclaredNotConnected,
+        match (input.operation_mode, input.access_presence) {
+            (AdapterOperationMode::Fixture, _) | (_, GitHubRepositoryAccessPresence::Present) => {
+                CapabilityAvailability::Available
+            }
+            (_, GitHubRepositoryAccessPresence::Missing) => {
+                CapabilityAvailability::DeclaredNotConnected
+            }
         },
         input.evaluated_at,
         RedactionMetadata::empty(),
@@ -174,6 +182,15 @@ fn derive_authority_material(
 }
 
 fn validate_input(input: &GitHubRepositoryAuthorityInput<'_>) -> Result<(), WorkflowOsError> {
+    if !matches!(
+        input.operation_mode,
+        AdapterOperationMode::Fixture | AdapterOperationMode::LiveReadOnly
+    ) {
+        return Err(authority_error(
+            "operation_mode_unsupported",
+            "GitHub repository authority requires fixture or live read-only mode",
+        ));
+    }
     if input.sensitivity == WorkReportSensitivity::Unknown {
         return Err(authority_error(
             "sensitivity_unknown",
@@ -271,6 +288,7 @@ mod tests {
                 sensitivity: WorkReportSensitivity::Internal,
                 evaluated_at: evaluated_at(),
                 expires_at: Timestamp::parse_rfc3339("2026-10-31T12:05:00Z").expect("expiry"),
+                operation_mode: AdapterOperationMode::LiveReadOnly,
                 access_presence,
             }
         }
@@ -363,6 +381,7 @@ mod tests {
             sensitivity: WorkReportSensitivity::Internal,
             evaluated_at: evaluated_at(),
             expires_at: Timestamp::parse_rfc3339("2026-10-31T12:05:00Z").expect("expiry"),
+            operation_mode: AdapterOperationMode::LiveReadOnly,
             access_presence: GitHubRepositoryAccessPresence::Present,
         })
         .expect("commitment serialization");
