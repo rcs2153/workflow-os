@@ -7,12 +7,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use workflow_core::{
     build_immutable_run_bundle, build_immutable_run_bundle_with_local_check_declarations,
-    load_project, validate_project_bundle, ActorId, ImmutableRunBundleBuildRequest,
+    load_project, validate_project_bundle, ActorId, AuthoritativeExecutionConfiguration,
+    GitHubRepositoryMetadataReadConfiguration, GitHubRepositoryMetadataResource,
+    ImmutableRunBundleAuthoritativeExecutionActivation, ImmutableRunBundleBuildRequest,
     ImmutableRunBundleDefinitionKind, ImmutableRunBundleExecutionPosture,
     ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
     ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
-    LocalCheckCommandContract, LocalCheckCommandContractInventory, SkillId, SkillVersion,
-    SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowRunId, SUPPORTED_SCHEMA_VERSION,
+    LocalCheckCommandContract, LocalCheckCommandContractInventory, ProviderReadConfiguration,
+    SkillId, SkillVersion, SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowRunId,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -227,6 +230,26 @@ fn build<'a>(
     workflow_id: &'a WorkflowId,
     handlers: Vec<ImmutableRunBundleHandlerReference>,
 ) -> Result<workflow_core::ImmutableRunBundleBuildResult, workflow_core::WorkflowOsError> {
+    build_with_posture(
+        project,
+        workflow_id,
+        handlers,
+        ImmutableRunBundleExecutionPosture::new(
+            vec![StepId::new("inspect").expect("step id")],
+            ImmutableRunBundleReferencePosture::NotSupplied,
+            ImmutableRunBundleReferencePosture::NotSupplied,
+            ImmutableRunBundleReferencePosture::CommittedReference,
+        )
+        .expect("execution posture"),
+    )
+}
+
+fn build_with_posture<'a>(
+    project: &'a workflow_core::ProjectBundle,
+    workflow_id: &'a WorkflowId,
+    handlers: Vec<ImmutableRunBundleHandlerReference>,
+    execution_posture: ImmutableRunBundleExecutionPosture,
+) -> Result<workflow_core::ImmutableRunBundleBuildResult, workflow_core::WorkflowOsError> {
     build_immutable_run_bundle(ImmutableRunBundleBuildRequest {
         project,
         workflow_id,
@@ -234,13 +257,7 @@ fn build<'a>(
         bundle_version: ImmutableRunBundleVersion::new("v1").expect("bundle version"),
         run_id: WorkflowRunId::new("run-1").expect("run id"),
         resolved_execution_context_hash: SpecContentHash::from_text("resolved context"),
-        execution_posture: ImmutableRunBundleExecutionPosture::new(
-            vec![StepId::new("inspect").expect("step id")],
-            ImmutableRunBundleReferencePosture::NotSupplied,
-            ImmutableRunBundleReferencePosture::NotSupplied,
-            ImmutableRunBundleReferencePosture::CommittedReference,
-        )
-        .expect("execution posture"),
+        execution_posture,
         handlers,
         created_at: Timestamp::parse_rfc3339("2026-07-13T12:00:00Z").expect("timestamp"),
         created_by: ActorId::new("system/kernel").expect("actor"),
@@ -342,6 +359,74 @@ fn identical_explicit_inputs_produce_identical_root_hashes() {
     let second = build(&bundle, &workflow_id, vec![handler()]).expect("second bundle");
 
     assert_eq!(first.manifest().root_hash(), second.manifest().root_hash());
+}
+
+#[test]
+fn provider_read_constraints_change_the_immutable_root_and_round_trip() {
+    let (_project, bundle) = loaded_project();
+    let workflow_id = WorkflowId::new("bundle/build").expect("workflow id");
+    let base_posture = ImmutableRunBundleExecutionPosture::new(
+        vec![StepId::new("inspect").expect("step id")],
+        ImmutableRunBundleReferencePosture::NotSupplied,
+        ImmutableRunBundleReferencePosture::NotSupplied,
+        ImmutableRunBundleReferencePosture::CommittedReference,
+    )
+    .expect("execution posture");
+    let authoritative = ImmutableRunBundleAuthoritativeExecutionActivation::new(
+        AuthoritativeExecutionConfiguration::new(
+            workflow_core::GovernanceStrictnessProfile::ObserveAndReport,
+            workflow_core::ExplicitLocalCheckProfileId::WorkflowOsProjectValidation,
+        )
+        .expect("authoritative execution"),
+        bundle.manifest.content_hash.clone(),
+    );
+    let without_provider = build_with_posture(
+        &bundle,
+        &workflow_id,
+        vec![handler()],
+        base_posture
+            .clone()
+            .with_authoritative_execution(authoritative.clone())
+            .expect("authoritative posture"),
+    )
+    .expect("bundle without provider reads");
+    let provider_reads = ProviderReadConfiguration {
+        github_repository_metadata: GitHubRepositoryMetadataReadConfiguration::new(
+            true,
+            GitHubRepositoryMetadataReadConfiguration::ENDPOINT,
+            GitHubRepositoryMetadataReadConfiguration::ACCESS_REFERENCE,
+            vec![
+                GitHubRepositoryMetadataResource::new("rcs2153", "workflow-os").expect("resource"),
+            ],
+        )
+        .expect("provider reads"),
+    };
+    let with_provider = build_with_posture(
+        &bundle,
+        &workflow_id,
+        vec![handler()],
+        base_posture
+            .with_authoritative_execution(authoritative.with_provider_reads(provider_reads))
+            .expect("provider posture"),
+    )
+    .expect("bundle with provider reads");
+
+    assert_ne!(
+        without_provider.manifest().root_hash(),
+        with_provider.manifest().root_hash()
+    );
+    let encoded = serde_json::to_string(with_provider.manifest()).expect("manifest serializes");
+    let decoded: workflow_core::ImmutableRunBundleManifest =
+        serde_json::from_str(&encoded).expect("manifest deserializes");
+    let declaration = decoded
+        .execution_posture()
+        .authoritative_execution()
+        .and_then(ImmutableRunBundleAuthoritativeExecutionActivation::provider_reads)
+        .expect("provider reads round trip");
+    assert_eq!(
+        declaration.github_repository_metadata.resources()[0].repository(),
+        "workflow-os"
+    );
 }
 
 #[test]

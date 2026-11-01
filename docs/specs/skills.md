@@ -58,7 +58,34 @@ Semantic validation requires every sensitive field to declare redaction. Sensiti
 
 `allowed_capabilities` declares capability names the skill may request through future policy.
 
-`adapter_requirements` declares adapter boundaries without making adapters part of the skill model. A skill may declare `adapter_id`, optional `integration_id`, and required capability names. This does not imply write support, live credentials, or CLI execution for any concrete integration.
+`adapter_requirements` declares adapter boundaries without making adapters part
+of the skill model. A skill may declare `adapter_id`, optional exact
+`operation`, optional `integration_id`, and required capability names. This
+does not imply write support, live credentials, or CLI execution for any
+concrete integration.
+
+The first exact operation vocabulary is deliberately closed:
+
+```yaml
+adapter_requirements:
+  - adapter_id: symbolic/github-read-only
+    operation: github.repository.metadata
+    capabilities:
+      - external.read
+```
+
+When `operation` is present in v0, only the exact combination above is
+accepted. It may not name an integration or add capabilities. The enclosing
+skill must also declare exactly the `external.read` and `adapter.invoke`
+capabilities and exactly two required, nonsensitive string inputs named `owner`
+and `repo`, with no input examples or additional adapter requirements. This
+closed shape prevents an unrelated skill from selecting the operation through
+an otherwise valid adapter tuple.
+
+Skills that omit `operation` preserve their existing declaration-only or
+fixture-handler behavior. The operation field is a dark contract in this
+phase: it does not select a live provider handler, load access material, or
+call GitHub.
 
 ## Failure And Evaluation
 

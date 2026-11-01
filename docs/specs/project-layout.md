@@ -38,6 +38,8 @@ Optional fields:
 - `layout.policies`
 - `layout.tests`
 - `config`
+- `governance.authoritative_execution`
+- `governance.provider_reads`
 
 Example:
 
@@ -57,6 +59,37 @@ config:
       - name: approval_timeout
         value: 1h
 ```
+
+### Provider-Read Declarations
+
+The first provider-read contract is an additive, inactive declaration for one
+GitHub repository-metadata operation. It is subordinate to the supported
+authoritative-execution declaration:
+
+```yaml
+governance:
+  authoritative_execution:
+    profile: observe_and_report
+    local_check_profile: workflow_os_project_validation
+  provider_reads:
+    github_repository_metadata:
+      enabled: true
+      endpoint: github.com
+      access_reference: env/WORKFLOW_OS_GITHUB_TOKEN
+      resources:
+        - owner: rcs2153
+          repository: workflow-os
+```
+
+The declaration is a reviewed maximum scope, not runtime authority. The v0
+contract accepts only the exact endpoint and access reference above, one to 32
+unique lowercase owner/repository pairs, and a simultaneously declared
+supported `authoritative_execution` posture. It stores no credential value.
+
+This contract participates in immutable run-bundle hashing when authoritative
+execution is selected. It does not read the environment, derive a capability
+grant, select a provider handler, call GitHub, or enable a live CLI path. Those
+behaviors require separately reviewed runtime phases.
 
 ## Workflow Specs
 
@@ -130,7 +163,10 @@ Optional fields:
 - `observability_requirements`
 - `tags`
 
-Real adapter behavior is deferred. `adapter_requirements` only declare the boundary a future runtime and policy layer must enforce.
+Real adapter behavior is deferred by default. `adapter_requirements` declare
+the boundary a runtime and policy layer must enforce. The optional exact
+`operation` field is validated for the first GitHub repository-metadata
+contract, but declaration alone does not activate that operation.
 
 ## Policy Specs
 

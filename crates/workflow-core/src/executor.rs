@@ -17668,12 +17668,8 @@ fn authoritative_execution_activation(
     project: &ProjectBundle,
     expected: Option<crate::AuthoritativeExecutionConfiguration>,
 ) -> Result<Option<crate::ImmutableRunBundleAuthoritativeExecutionActivation>, WorkflowOsError> {
-    let current = project
-        .manifest
-        .definition
-        .governance
-        .as_ref()
-        .and_then(|governance| governance.authoritative_execution);
+    let governance = project.manifest.definition.governance.as_ref();
+    let current = governance.and_then(|governance| governance.authoritative_execution);
     if current != expected {
         return Err(authoritative_docs_check_executor_error(
             "activation_mismatch",
@@ -17681,10 +17677,14 @@ fn authoritative_execution_activation(
         ));
     }
     Ok(current.map(|configuration| {
-        crate::ImmutableRunBundleAuthoritativeExecutionActivation::new(
+        let activation = crate::ImmutableRunBundleAuthoritativeExecutionActivation::new(
             configuration,
             project.manifest.content_hash.clone(),
-        )
+        );
+        match governance.and_then(|governance| governance.provider_reads.clone()) {
+            Some(provider_reads) => activation.with_provider_reads(provider_reads),
+            None => activation,
+        }
     }))
 }
 

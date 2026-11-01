@@ -112,16 +112,33 @@ provider dispatch must reuse the complete operational-window and attempt
 lifecycle rather than reservation alone. See the [plan
 review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_PUBLIC_ADOPTION_RECOVERY_PLAN_REVIEW.md).
 
-The next phase is the first dark implementation slice: exact operation and
+The first dark implementation slice and focused maintainer/security review are
+accepted. Review found and corrected an incomplete contract closure: the exact
+operation now requires the complete accepted skill capability and input shape,
+not only the adapter tuple. The implementation adds exact operation and
 subordinate project activation contracts, immutable binding, schema/SDK parity,
-compatibility behavior, and focused validation. It must not expose public
+compatibility behavior, and focused validation. It does not expose public
 runtime selection, read access material, call GitHub, or change CLI execution.
+See the [implementation
+report](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CONTRACT_FOUNDATION_REPORT.md)
+and [focused
+review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CONTRACT_FOUNDATION_REVIEW.md).
+The next phase is Phase 2 Core-private authority derivation, separate
+transient-access resolution, and complete continuity and ambiguity recovery.
+It must remain non-public and no-write.
 See the
 [post-0.3 queue selection
 report](docs/concepts/POST_0_3_ROADMAP_QUEUE_SELECTION_REPORT.md) and the
 [planning report](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_PUBLIC_ADOPTION_RECOVERY_PLAN_REPORT.md).
 
 #### Recently Closed Queue Evidence
+
+- **Accepted the capability-gated GitHub read-only contract foundation after
+  one security correction.** Review found that a valid adapter tuple could be
+  attached to an unrelated skill shape. Rust and TypeScript validation now
+  require the complete exact capability and input contract before recognizing
+  the operation. The slice remains dark, local, and no-write. See the [focused
+  review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CONTRACT_FOUNDATION_REVIEW.md).
 
 - **Accepted the capability-gated GitHub read-only public-adoption plan after
   security corrections.** Review made authoritative execution a prerequisite,

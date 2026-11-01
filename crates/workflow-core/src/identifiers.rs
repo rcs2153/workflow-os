@@ -247,6 +247,10 @@ string_id!(
     AdapterId
 );
 string_id!(
+    /// Exact operation selected within an adapter boundary.
+    AdapterOperationId
+);
+string_id!(
     /// Identifier for a configured external integration.
     IntegrationId
 );

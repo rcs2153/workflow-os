@@ -157,6 +157,7 @@
       "required": ["adapter_id"],
       "properties": {
         "adapter_id": { "$ref": "#/$defs/identifier" },
+        "operation": { "$ref": "#/$defs/identifier" },
         "integration_id": { "$ref": "#/$defs/identifier" },
         "capabilities": {
           "type": "array",

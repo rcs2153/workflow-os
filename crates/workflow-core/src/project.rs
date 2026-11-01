@@ -98,6 +98,259 @@ pub struct ProjectGovernanceConfiguration {
     /// Explicit activation of the closed authoritative local execution path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authoritative_execution: Option<AuthoritativeExecutionConfiguration>,
+    /// Optional, subordinate provider-read declarations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_reads: Option<ProviderReadConfiguration>,
+}
+
+/// Closed provider-read declarations supported by the v0 project manifest.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderReadConfiguration {
+    /// Exact GitHub repository-metadata read declaration.
+    pub github_repository_metadata: GitHubRepositoryMetadataReadConfiguration,
+}
+
+/// One exact canonical GitHub repository resource.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct GitHubRepositoryMetadataResource {
+    owner: String,
+    repository: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GitHubRepositoryMetadataResourceWire {
+    owner: String,
+    repository: String,
+}
+
+impl GitHubRepositoryMetadataResource {
+    /// Creates one bounded lowercase GitHub repository resource.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error when either component is malformed or not canonical.
+    pub fn new(
+        owner: impl Into<String>,
+        repository: impl Into<String>,
+    ) -> Result<Self, WorkflowOsError> {
+        let value = Self {
+            owner: owner.into(),
+            repository: repository.into(),
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    /// Returns the canonical repository owner.
+    #[must_use]
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// Returns the canonical repository name.
+    #[must_use]
+    pub fn repository(&self) -> &str {
+        &self.repository
+    }
+
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_github_resource_component("owner", &self.owner, 39, false)?;
+        validate_github_resource_component("repository", &self.repository, 100, true)
+    }
+}
+
+impl std::fmt::Debug for GitHubRepositoryMetadataResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GitHubRepositoryMetadataResource")
+            .field("owner", &"[REDACTED]")
+            .field("repository", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl TryFrom<GitHubRepositoryMetadataResourceWire> for GitHubRepositoryMetadataResource {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: GitHubRepositoryMetadataResourceWire) -> Result<Self, Self::Error> {
+        Self::new(value.owner, value.repository)
+    }
+}
+
+/// Exact, inactive project declaration for the first GitHub provider read.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "GitHubRepositoryMetadataReadConfigurationWire")]
+pub struct GitHubRepositoryMetadataReadConfiguration {
+    enabled: bool,
+    endpoint: String,
+    access_reference: String,
+    resources: Vec<GitHubRepositoryMetadataResource>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GitHubRepositoryMetadataReadConfigurationWire {
+    enabled: bool,
+    endpoint: String,
+    access_reference: String,
+    resources: Vec<GitHubRepositoryMetadataResourceWire>,
+}
+
+impl GitHubRepositoryMetadataReadConfiguration {
+    /// Fixed endpoint accepted by the first provider-read contract.
+    pub const ENDPOINT: &'static str = "github.com";
+    /// Fixed non-secret environment reference accepted by the contract.
+    pub const ACCESS_REFERENCE: &'static str = "env/WORKFLOW_OS_GITHUB_TOKEN";
+    const MAX_RESOURCES: usize = 32;
+
+    /// Creates one validated, inactive provider-read declaration.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error for disabled, unsupported, empty, excessive, or duplicate input.
+    pub fn new(
+        enabled: bool,
+        endpoint: impl Into<String>,
+        access_reference: impl Into<String>,
+        resources: Vec<GitHubRepositoryMetadataResource>,
+    ) -> Result<Self, WorkflowOsError> {
+        let value = Self {
+            enabled,
+            endpoint: endpoint.into(),
+            access_reference: access_reference.into(),
+            resources,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    /// Returns whether this exact declaration is enabled.
+    #[must_use]
+    pub const fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Returns the fixed provider endpoint.
+    #[must_use]
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    /// Returns the non-secret access reference.
+    #[must_use]
+    pub fn access_reference(&self) -> &str {
+        &self.access_reference
+    }
+
+    /// Returns exact allowed resources.
+    #[must_use]
+    pub fn resources(&self) -> &[GitHubRepositoryMetadataResource] {
+        &self.resources
+    }
+
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        if !self.enabled {
+            return Err(WorkflowOsError::validation(
+                "project.governance.provider_reads.github_repository_metadata.disabled",
+                "GitHub repository metadata read declaration must be explicitly enabled",
+            ));
+        }
+        if self.endpoint != Self::ENDPOINT {
+            return Err(WorkflowOsError::validation(
+                "project.governance.provider_reads.github_repository_metadata.endpoint_unsupported",
+                "GitHub repository metadata read endpoint is unsupported",
+            ));
+        }
+        if self.access_reference != Self::ACCESS_REFERENCE {
+            return Err(WorkflowOsError::validation(
+                "project.governance.provider_reads.github_repository_metadata.access_reference_unsupported",
+                "GitHub repository metadata access reference is unsupported",
+            ));
+        }
+        if self.resources.is_empty() || self.resources.len() > Self::MAX_RESOURCES {
+            return Err(WorkflowOsError::validation(
+                "project.governance.provider_reads.github_repository_metadata.resources_invalid",
+                "GitHub repository metadata resources must use the supported bounded count",
+            ));
+        }
+        let unique = self
+            .resources
+            .iter()
+            .map(|resource| (resource.owner(), resource.repository()))
+            .collect::<std::collections::BTreeSet<_>>();
+        if unique.len() != self.resources.len() {
+            return Err(WorkflowOsError::validation(
+                "project.governance.provider_reads.github_repository_metadata.resource_duplicate",
+                "GitHub repository metadata resources must be unique",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for GitHubRepositoryMetadataReadConfiguration {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GitHubRepositoryMetadataReadConfiguration")
+            .field("enabled", &self.enabled)
+            .field("endpoint", &self.endpoint)
+            .field("access_reference", &"[REDACTED]")
+            .field("resource_count", &self.resources.len())
+            .finish()
+    }
+}
+
+impl TryFrom<GitHubRepositoryMetadataReadConfigurationWire>
+    for GitHubRepositoryMetadataReadConfiguration
+{
+    type Error = WorkflowOsError;
+
+    fn try_from(value: GitHubRepositoryMetadataReadConfigurationWire) -> Result<Self, Self::Error> {
+        Self::new(
+            value.enabled,
+            value.endpoint,
+            value.access_reference,
+            value
+                .resources
+                .into_iter()
+                .map(GitHubRepositoryMetadataResource::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+    }
+}
+
+fn validate_github_resource_component(
+    label: &'static str,
+    value: &str,
+    max_bytes: usize,
+    allow_dot_and_underscore: bool,
+) -> Result<(), WorkflowOsError> {
+    let characters_valid = value.bytes().all(|byte| {
+        byte.is_ascii_lowercase()
+            || byte.is_ascii_digit()
+            || byte == b'-'
+            || (allow_dot_and_underscore && matches!(byte, b'.' | b'_'))
+    });
+    if value.is_empty()
+        || value.len() > max_bytes
+        || !characters_valid
+        || !value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        || !value
+            .as_bytes()
+            .last()
+            .is_some_and(u8::is_ascii_alphanumeric)
+    {
+        return Err(WorkflowOsError::validation(
+            format!("project.governance.provider_reads.github_repository_metadata.{label}_invalid"),
+            format!("GitHub repository metadata {label} is invalid"),
+        ));
+    }
+    Ok(())
 }
 
 /// Validated project declaration for authoritative local execution.
@@ -345,10 +598,18 @@ fn validate_project_governance_yaml(value: &YamlValue) -> Result<(), WorkflowOsE
     else {
         return Ok(());
     };
-    let Some(authoritative_execution) = governance
-        .as_mapping()
-        .and_then(|mapping| mapping.get(YamlValue::String("authoritative_execution".to_owned())))
-    else {
+    let governance = governance.as_mapping();
+    let authoritative_execution = governance
+        .and_then(|mapping| mapping.get(YamlValue::String("authoritative_execution".to_owned())));
+    let provider_reads =
+        governance.and_then(|mapping| mapping.get(YamlValue::String("provider_reads".to_owned())));
+    if provider_reads.is_some() && authoritative_execution.is_none() {
+        return Err(WorkflowOsError::validation(
+            "project.governance.provider_reads.authoritative_execution_required",
+            "provider reads require the supported authoritative execution declaration",
+        ));
+    }
+    let Some(authoritative_execution) = authoritative_execution else {
         return Ok(());
     };
     let Some(configuration) = authoritative_execution.as_mapping() else {
@@ -383,6 +644,32 @@ fn validate_project_governance_yaml(value: &YamlValue) -> Result<(), WorkflowOsE
             "project.governance.authoritative_execution.local_check_profile_unsupported",
             "authoritative execution local-check profile is unsupported",
         ));
+    }
+    if let Some(provider_reads) = provider_reads {
+        let github_repository_metadata = provider_reads
+            .as_mapping()
+            .and_then(|mapping| {
+                mapping.get(YamlValue::String("github_repository_metadata".to_owned()))
+            })
+            .ok_or_else(|| {
+                WorkflowOsError::validation(
+                    "project.governance.provider_reads.github_repository_metadata.missing",
+                    "provider reads require the GitHub repository metadata declaration",
+                )
+            })?;
+        let wire: GitHubRepositoryMetadataReadConfigurationWire =
+            serde_yaml::from_value(github_repository_metadata.clone()).map_err(|error| {
+                WorkflowOsError::new(
+                    WorkflowOsErrorKind::Parse,
+                    "project.governance.provider_reads.parse",
+                    "failed to parse provider-read declaration",
+                )
+                .with_diagnostic(Diagnostic::error(
+                    "project.governance.provider_reads.parse",
+                    error.to_string(),
+                ))
+            })?;
+        GitHubRepositoryMetadataReadConfiguration::try_from(wire)?;
     }
     Ok(())
 }
