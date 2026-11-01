@@ -86,21 +86,17 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-A P0 governed-phase kernel-freshness blocker preempts all additional roadmap
-execution. Every live material `phase-start` must rebuild the Workflow OS CLI
+A P0 governed-phase kernel-freshness blocker is accepted and merged. Every live
+material `phase-start` now rebuilds the Workflow OS CLI
 from the exact current checkout before validation, run creation, approval
 creation, or phase-state persistence. Existing binaries, timestamps, and
 version strings are not freshness evidence. Live material phase starts reject
 `--no-build`, and build failure must leave no governed run or approval state.
 Dry-run and non-phase helper behavior remain unchanged. See the [P0
-report](docs/concepts/GOVERNED_PHASE_KERNEL_FRESHNESS_P0_REPORT.md).
+report](docs/concepts/GOVERNED_PHASE_KERNEL_FRESHNESS_P0_REPORT.md) and
+[focused review](docs/concepts/GOVERNED_PHASE_KERNEL_FRESHNESS_P0_REVIEW.md).
 
-After focused review and terminal-green acceptance of this blocker, resume the
-preserved Phase 2 Core-private GitHub read-only authority, transient-access,
-continuity, and ambiguity-recovery implementation. No provider access or public
-runtime exposure is authorized by this preemption.
-
-A P0 acceptance-hardening blocker preempts Phase 2 after independent fresh-pull
+A P0 acceptance-hardening blocker is accepted and merged after independent fresh-pull
 evaluation reproduced five defects on current `main`: parallel local-host test
 fixtures could collide, a two-gate first-run WorkReport described one approval,
 generated agent guidance contradicted the explicit first-run artifact path, the
@@ -110,15 +106,9 @@ The accepted fix is intentionally narrow: make fixture identity deterministic,
 make reports enumerate all approval requests and decisions, emit a valid
 copy-safe inspection command, align generated guidance with the bounded
 artifact capability, and key approval presentation scope to the actual approval
-subject. Required CI must be terminal-green for the exact reviewed commit
-before the blocker is accepted. See the [P0 implementation
+subject. Required CI was terminal-green for the exact reviewed commit. See the [P0 implementation
 report](docs/concepts/FIRST_RUN_REPORT_TRUTH_AND_TEST_STABILITY_P0_REPORT.md)
 and [focused review](docs/concepts/FIRST_RUN_REPORT_TRUTH_AND_TEST_STABILITY_P0_REVIEW.md).
-
-After independent maintainer/security review accepts that blocker, resume the
-preserved Phase 2 Core-private GitHub read-only authority, transient-access,
-continuity, and ambiguity-recovery implementation. No Phase 2 provider access
-or public runtime exposure is authorized by this preemption.
 
 The next authorized lane is **capability-gated GitHub read-only public adoption
 and recovery planning**. The existing crate-private executor composition already
@@ -157,9 +147,19 @@ See the [implementation
 report](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CONTRACT_FOUNDATION_REPORT.md)
 and [focused
 review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CONTRACT_FOUNDATION_REVIEW.md).
-The next phase is Phase 2 Core-private authority derivation, separate
-transient-access resolution, and complete continuity and ambiguity recovery.
-It must remain non-public and no-write.
+Phase 2 Core-private authority derivation, separate transient-access resolution,
+and atomic continuity/ambiguity composition is implemented and accepted after
+blocker correction. The corrected boundary reloads the exact bundle inside
+Core, derives the authored operation, literal target, project allowlist, skill
+input, and operation commitment from immutable records, and rejects caller
+substitution before lifecycle preparation. Exact SQLite tests prove one-call
+success, ambiguity without blind redispatch, terminal replay without provider
+re-entry, and access-marker absence from durable bytes. The implementation
+remains non-public and no-write. See the [Phase 2 implementation
+report](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CORE_PRIVATE_AUTHORITY_LIFECYCLE_REPORT.md).
+Phase 3 public fixture activation remains a separate governed phase; Phase 2
+acceptance does not activate provider selection or network access. See the [focused
+review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CORE_PRIVATE_AUTHORITY_LIFECYCLE_REVIEW.md).
 See the
 [post-0.3 queue selection
 report](docs/concepts/POST_0_3_ROADMAP_QUEUE_SELECTION_REPORT.md) and the

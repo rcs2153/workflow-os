@@ -9,7 +9,12 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 #[allow(dead_code)]
+#[cfg(feature = "trusted-host-application-spi")]
+mod github_repository_atomic_lifecycle;
+#[allow(dead_code)]
 mod github_repository_read_composition;
+#[allow(dead_code)]
+mod github_repository_transient_access;
 
 #[cfg(feature = "trusted-host-application-spi")]
 use crate::local_check::ExplicitLocalCheckProfileId;

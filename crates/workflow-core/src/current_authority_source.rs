@@ -10,9 +10,16 @@ use crate::{
     SpecContentHash, Timestamp, WorkReportSensitivity, WorkflowOsError,
 };
 
+#[cfg(feature = "trusted-host-application-spi")]
+mod github_repository_authority;
 #[allow(dead_code)]
 mod registered_in_memory_source;
 
+#[cfg(feature = "trusted-host-application-spi")]
+pub(crate) use github_repository_authority::{
+    derive_github_repository_authority, GitHubRepositoryAccessPresence,
+    GitHubRepositoryAuthorityInput,
+};
 #[cfg(feature = "trusted-host-application-spi")]
 pub(crate) use registered_in_memory_source::RegisteredExplicitZeroLocalCheckSourceInput;
 #[cfg(test)]
