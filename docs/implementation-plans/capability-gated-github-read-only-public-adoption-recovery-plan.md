@@ -635,8 +635,17 @@ recovery composition is implemented and accepted after blocker correction.
 The wrapper reloads the exact immutable bundle, derives operation, target,
 input, and the operation commitment inside Core, and has exact SQLite lifecycle
 evidence. It remains Core-private and does not expose provider selection or
-access material through the CLI. Phase 3 public fixture activation requires a
-new governed scope.
+access material through the CLI. Phase 3 public fixture activation is
+implemented and accepted after focused maintainer/security review corrected
+the denial path. The ordinary CLI
+selects the exact fixture-only operation, binds fixture content into the
+immutable approved context, requires durable approval-presentation proof,
+persists bounded adapter telemetry, and supports provider-backed status,
+inspect, recovery disclosure, and terminal replay without network access. See
+the [Phase 3 implementation
+report](../concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_FIXTURE_ACTIVATION_REPORT.md)
+and [focused
+review](../concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_FIXTURE_ACTIVATION_REVIEW.md).
 
 See the [Phase 2 implementation
 report](../concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CORE_PRIVATE_AUTHORITY_LIFECYCLE_REPORT.md).

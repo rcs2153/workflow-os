@@ -23,6 +23,14 @@ fn example_root() -> PathBuf {
         .join("github-read-only-review-context")
 }
 
+fn repository_metadata_fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("examples")
+        .join("github-repository-metadata-fixture")
+}
+
 fn state_root(name: &str) -> PathBuf {
     let id = NEXT_STATE.fetch_add(1, Ordering::Relaxed);
     let root = std::env::temp_dir().join(format!(
@@ -82,6 +90,158 @@ fn copy_dir(source: &Path, destination: &Path) {
             fs::copy(&source_path, &destination_path).expect("file copied");
         }
     }
+}
+
+#[test]
+fn repository_metadata_fixture_completes_through_public_cli_without_network() {
+    let state = state_root("repository-metadata-fixture");
+    let project = repository_metadata_fixture_root();
+    let waiting = workflow_os(
+        &project,
+        &state,
+        &["run", "example/github-repository-metadata-fixture"],
+    );
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let waiting_output = stdout(&waiting);
+    assert!(waiting_output.contains("status: WaitingForApproval"));
+    assert!(waiting_output.contains("provider_mode: fixture"));
+    assert!(waiting_output.contains("live_transport: disabled"));
+    assert!(waiting_output.contains("approval_handoff:"));
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+
+    let approved = workflow_os(
+        &project,
+        &state,
+        &[
+            "approve",
+            &run_id,
+            &approval_id,
+            "--actor",
+            "user/example-reviewer",
+            "--reason",
+            "reviewed exact fixture read",
+        ],
+    );
+    assert!(approved.status.success(), "{}", stderr(&approved));
+    assert!(stdout(&approved).contains("status: Running"));
+
+    let completed = workflow_os(
+        &project,
+        &state,
+        &[
+            "run",
+            "example/github-repository-metadata-fixture",
+            "--run-id",
+            &run_id,
+        ],
+    );
+    assert!(completed.status.success(), "{}", stderr(&completed));
+    assert!(stdout(&completed).contains("status: Completed"));
+    assert!(stdout(&completed).contains("provider_posture: completed"));
+
+    let status = workflow_os(&project, &state, &["status", &run_id]);
+    assert!(status.status.success(), "{}", stderr(&status));
+    assert!(stdout(&status).contains("provider_operation: github.repository.metadata"));
+    assert!(stdout(&status).contains("terminal: true"));
+
+    let inspect = workflow_os(&project, &state, &["inspect", &run_id]);
+    assert!(inspect.status.success(), "{}", stderr(&inspect));
+    let inspect_output = stdout(&inspect);
+    assert!(inspect_output.contains("provider_mode: fixture"));
+    assert!(inspect_output.contains("live_transport: disabled"));
+    assert!(inspect_output.contains("adapter_telemetry: 1"));
+
+    let replay = workflow_os(
+        &project,
+        &state,
+        &[
+            "run",
+            "example/github-repository-metadata-fixture",
+            "--run-id",
+            &run_id,
+        ],
+    );
+    assert!(replay.status.success(), "{}", stderr(&replay));
+    assert!(stdout(&replay).contains("provider_posture: terminal_replay"));
+}
+
+#[test]
+fn repository_metadata_fixture_change_after_presentation_fails_closed() {
+    let state = state_root("repository-metadata-fixture-drift");
+    let project = state_root("repository-metadata-fixture-project");
+    copy_dir(&repository_metadata_fixture_root(), &project);
+    let waiting = workflow_os(
+        &project,
+        &state,
+        &["run", "example/github-repository-metadata-fixture"],
+    );
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+    fs::write(
+        project.join("fixtures/github/repository.json"),
+        r#"{"full_name":"acme/changed","default_branch":"main","private":true,"html_url":"https://github.com/acme/changed"}"#,
+    )
+    .expect("fixture drift written");
+
+    let approved = workflow_os(
+        &project,
+        &state,
+        &[
+            "approve",
+            &run_id,
+            &approval_id,
+            "--actor",
+            "user/example-reviewer",
+            "--reason",
+            "attempt approval after fixture drift",
+        ],
+    );
+    assert!(!approved.status.success());
+    assert!(stderr(&approved).contains("executor.approval.resume_context_mismatch"));
+}
+
+#[test]
+fn repository_metadata_fixture_can_be_denied_after_fixture_is_removed() {
+    let state = state_root("repository-metadata-fixture-denial");
+    let project = state_root("repository-metadata-fixture-denial-project");
+    copy_dir(&repository_metadata_fixture_root(), &project);
+    let waiting = workflow_os(
+        &project,
+        &state,
+        &["run", "example/github-repository-metadata-fixture"],
+    );
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+    fs::remove_file(project.join("fixtures/github/repository.json"))
+        .expect("fixture removed after presentation");
+
+    let denied = workflow_os(
+        &project,
+        &state,
+        &[
+            "approve",
+            &run_id,
+            &approval_id,
+            "--deny",
+            "--actor",
+            "user/example-reviewer",
+            "--reason",
+            "fixture unavailable; deny without provider entry",
+        ],
+    );
+    assert!(denied.status.success(), "{}", stderr(&denied));
+    assert!(stdout(&denied).contains("decision: denied"));
+    assert!(stdout(&denied).contains("status: Failed"));
+
+    let inspect = workflow_os(&project, &state, &["inspect", &run_id]);
+    assert!(inspect.status.success(), "{}", stderr(&inspect));
+    let inspect_output = stdout(&inspect);
+    assert!(inspect_output.contains("ApprovalDenied"));
+    assert!(!inspect_output.contains("SkillInvocationRequested"));
+    assert!(!inspect_output.contains("adapter_telemetry:"));
 }
 
 #[test]

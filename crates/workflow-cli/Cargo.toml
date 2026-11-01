@@ -14,7 +14,8 @@ path = "src/main.rs"
 
 [dependencies]
 serde_json = "1"
-workflow-core = { path = "../workflow-core" }
+time = "0.3"
+workflow-core = { path = "../workflow-core", features = ["trusted-host-application-spi"] }
 
 [dev-dependencies]
 sha2 = "0.10"

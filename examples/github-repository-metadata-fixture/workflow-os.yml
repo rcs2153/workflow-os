@@ -1,0 +1,21 @@
+schema_version: workflowos.dev/v0
+project:
+  id: examples/github-repository-metadata-fixture
+  name: GitHub Repository Metadata Fixture
+  description: Governed fixture-only repository metadata read with no network or writes.
+layout:
+  workflows: workflows
+  skills: skills
+  policies: policies
+governance:
+  authoritative_execution:
+    profile: observe_and_report
+    local_check_profile: workflow_os_project_validation
+  provider_reads:
+    github_repository_metadata:
+      enabled: true
+      endpoint: github.com
+      access_reference: env/WORKFLOW_OS_GITHUB_TOKEN
+      resources:
+        - owner: acme
+          repository: widgets

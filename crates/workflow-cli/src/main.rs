@@ -14,9 +14,10 @@ use std::time::Duration;
 use workflow_core::{
     assess_proportional_governance_workload, build_workflow_catalog_index,
     canonical_yaml_content_hash, ci_actions, compute_approval_presentation_content_hash,
+    decide_github_repository_metadata_fixture_approval,
     decide_selected_project_validation_approval_envelope,
     decide_selected_project_validation_approval_with_resolved_context,
-    derive_workflow_step_governance_assessment_input,
+    derive_workflow_step_governance_assessment_input, execute_github_repository_metadata_fixture,
     execute_selected_project_validation_governance_report, github_actions,
     github_actions_read_request, github_read_request, jira_actions, jira_read_request,
     load_project, parse_workflow_spec_yaml, persist_authoritative_governance_report_artifact,
@@ -25,11 +26,11 @@ use workflow_core::{
     review_workflow_catalog_repair_proposal, review_workflow_draft_for_promotion,
     route_selected_project_validation_governance_with_resolved_context, validate_loaded_project,
     validate_project_bundle, ActorId, AdapterOperationMode, AdapterPolicyPrecheck, AdapterRunScope,
-    AdapterTelemetryRecord, AdapterTelemetryStore, ApprovalDecisionKind,
-    ApprovalPresentationChannel, ApprovalPresentationId, ApprovalPresentationRecord,
-    ApprovalPresentationRecordDefinition, ApprovalPresentationRecordStore,
-    ApprovalPresentationSensitivity, AuthoritativeDocsCheckReportReferenceInputs,
-    AuthoritativeExecutionConfiguration, AuthoritativeGovernanceArtifactPersistenceInput,
+    AdapterTelemetryRecord, ApprovalDecisionKind, ApprovalPresentationChannel,
+    ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
+    ApprovalPresentationRecordStore, ApprovalPresentationSensitivity,
+    AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeExecutionConfiguration,
+    AuthoritativeGovernanceArtifactPersistenceInput,
     AuthoritativeGovernanceArtifactPersistenceResult, AuthoritativeGovernanceArtifactPosture,
     AuthoritativeGovernanceReportPosture, BackendHealthCheck, CorrelationId, Diagnostic,
     DiagnosticSeverity, EventLogStore, ExplicitLocalCheckProfileSelection,
@@ -39,15 +40,17 @@ use workflow_core::{
     GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction,
     GitHubPullRequestCommentProviderLookupOperatorRecoverySummary,
     GitHubPullRequestCommentProviderLookupReconciliationPosture, GitHubReadOnlyAdapter,
-    GitHubReadOnlyConfig, GovernanceAssessmentCompleteness, GovernanceAssessmentUnknownFact,
-    GovernanceDisclosureDeliveryHandler, GovernanceDisclosureDeliveryId,
-    GovernanceDisclosureDeliveryRequest, GovernanceDisclosureRequirement,
-    GovernanceDisclosureSensitivity, GovernanceDisclosureSurface, GovernanceDisclosureSurfaceKind,
-    GovernanceExecutionDisposition, GovernanceStrictnessProfile, GovernedContinuationBrief,
-    ImmutableRunBundleId, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
-    JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
-    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
-    LocalApprovalPresentationProof, LocalApprovalPresentationResolvedContextDecisionRequest,
+    GitHubReadOnlyConfig, GitHubRepositoryMetadataFixtureExecutionPosture,
+    GitHubRepositoryMetadataFixtureExecutionRequest, GovernanceAssessmentCompleteness,
+    GovernanceAssessmentUnknownFact, GovernanceDisclosureDeliveryHandler,
+    GovernanceDisclosureDeliveryId, GovernanceDisclosureDeliveryRequest,
+    GovernanceDisclosureRequirement, GovernanceDisclosureSensitivity, GovernanceDisclosureSurface,
+    GovernanceDisclosureSurfaceKind, GovernanceExecutionDisposition, GovernanceStrictnessProfile,
+    GovernedContinuationBrief, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
+    ImmutableRunBundleVersion, JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig,
+    LifecycleStatus, LoadedSpec, LocalApprovalDecisionRequest,
+    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
+    LocalApprovalPresentationResolvedContextDecisionRequest,
     LocalApprovalProofMarkerAuditProjectionStore, LocalCheckResultId, LocalCheckResultReference,
     LocalExecutionAuthoritativeVisibleGovernanceDependencies,
     LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionHookCheckpointInputs,
@@ -223,6 +226,14 @@ fn run_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> 
     else {
         return Err(usage("run dispatch requires a run command"));
     };
+    if let Some(step_id) = github_repository_metadata_fixture_step(invocation, workflow_id)? {
+        return github_repository_metadata_fixture_run_command(
+            invocation,
+            workflow_id,
+            run_id.as_deref(),
+            step_id,
+        );
+    }
     let project_authoritative_execution = current_project_authoritative_execution(invocation);
     if project_authoritative_execution.is_some() {
         authoritative_governance_run_command(
@@ -253,6 +264,55 @@ fn approve_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsErr
         return Err(usage("approve dispatch requires an approve command"));
     };
     let run_id_value = WorkflowRunId::new(run_id)?;
+    if github_repository_metadata_database_path(invocation).is_file() {
+        let provider_backend = github_repository_metadata_backend(invocation)?;
+        if !provider_backend.read_events(&run_id_value)?.is_empty() {
+            let decision = if *deny {
+                ApprovalDecisionKind::Denied
+            } else {
+                ApprovalDecisionKind::Granted
+            };
+            let fixture_json = if *deny {
+                None
+            } else {
+                Some(read_github_repository_metadata_fixture(invocation)?)
+            };
+            let run = decide_github_repository_metadata_fixture_approval(
+                &provider_backend,
+                LocalApprovalPresentationDecisionRequest {
+                    approval: LocalApprovalDecisionRequest {
+                        project_root: invocation.project_dir.clone(),
+                        run_id: run_id_value,
+                        approval_id: approval_id.clone(),
+                        decision,
+                        actor: ActorId::new(actor.as_deref().unwrap_or("user/local-approver"))?,
+                        reason: reason
+                            .clone()
+                            .unwrap_or_else(|| "approved through workflow-os CLI".to_owned()),
+                        correlation_id: CorrelationId::generate(),
+                    },
+                    proof: LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                    max_presentation_age: Some(AUTHORITATIVE_GOVERNANCE_PRESENTATION_MAX_AGE),
+                },
+                fixture_json.as_deref(),
+            )?;
+            if invocation.json {
+                println!(
+                    "{}",
+                    github_repository_metadata_run_json(&run, Some(decision))
+                );
+            } else {
+                print_approval_summary(invocation, &run, decision);
+                println!("provider_operation: github.repository.metadata");
+                println!("provider_mode: fixture");
+                println!(
+                    "next_action: workflow-os run {} --run-id {}",
+                    run.snapshot.identity.workflow_id, run.snapshot.identity.run_id
+                );
+            }
+            return Ok(());
+        }
+    }
     let backend = local_backend(invocation)?;
     let waiting_run = backend.rehydrate_run(&run_id_value)?;
     if is_first_run_artifact_run(&backend, &waiting_run)? {
@@ -853,6 +913,336 @@ fn run_command(
         ));
     }
     Ok(())
+}
+
+fn github_repository_metadata_fixture_run_command(
+    invocation: &Invocation,
+    workflow_id: &str,
+    run_id: Option<&str>,
+    selected_step_id: workflow_core::StepId,
+) -> Result<(), WorkflowOsError> {
+    let workflow_id = WorkflowId::new(workflow_id)?;
+    let run_id = run_id
+        .map(WorkflowRunId::new)
+        .transpose()?
+        .unwrap_or_else(WorkflowRunId::generate);
+    let backend = github_repository_metadata_backend(invocation)?;
+    let existing = if backend.read_events(&run_id)?.is_empty() {
+        None
+    } else {
+        Some(backend.rehydrate_run(&run_id)?)
+    };
+    let bundle = github_repository_metadata_bundle_inputs(&backend, &run_id, existing.as_ref())?;
+    let fixture_json = read_github_repository_metadata_fixture(invocation)?;
+    let observed_at = Timestamp::now_utc();
+    let expires_at = Timestamp::from_offset_date_time(
+        observed_at.as_offset_date_time() + time::Duration::minutes(5),
+    );
+    let request = GitHubRepositoryMetadataFixtureExecutionRequest {
+        execution: LocalExecutionWithImmutableRunBundleRequest {
+            execution: LocalExecutionRequest {
+                project_root: invocation.project_dir.clone(),
+                workflow_id,
+                run_id: Some(run_id),
+                correlation_id: CorrelationId::generate(),
+                actor: ActorId::new("system/workflow-os-cli")?,
+                before_skill_invocation_checkpoints:
+                    LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+                before_skill_invocation_hook: None,
+                side_effect_events: Vec::new(),
+                side_effect_lifecycle_events: Vec::new(),
+            },
+            bundle,
+        },
+        selected_step_id,
+        fixture_json,
+        observed_at,
+        expires_at,
+    };
+    let result = execute_github_repository_metadata_fixture(&backend, &request)?;
+    let presentation = if result.posture()
+        == GitHubRepositoryMetadataFixtureExecutionPosture::WaitingForApproval
+    {
+        Some(persist_github_repository_metadata_approval_presentation(
+            &backend,
+            result.run(),
+        )?)
+    } else {
+        None
+    };
+    if invocation.json {
+        println!(
+            "{}",
+            github_repository_metadata_run_json(result.run(), None)
+        );
+    } else {
+        print_run_summary(invocation, result.run());
+        println!("provider_operation: {}", result.operation_code());
+        println!("provider_mode: fixture");
+        println!(
+            "provider_posture: {}",
+            github_repository_metadata_posture_label(result.posture())
+        );
+        println!("live_transport: disabled");
+        println!("report_posture: bounded_terminal_event_reference");
+        if result.posture() == GitHubRepositoryMetadataFixtureExecutionPosture::RecoveryRequired {
+            println!("next_action: inspect the exact run; automatic retry is prohibited");
+        }
+        if let Some(presentation) = presentation.as_ref() {
+            print_authoritative_approval_handoff(presentation);
+        }
+    }
+    if result.run().snapshot.status == WorkflowRunStatus::Failed {
+        return Err(authoritative_cli_error(
+            "github_fixture_run_failed",
+            "GitHub repository metadata fixture run failed; inspect the exact run",
+        ));
+    }
+    Ok(())
+}
+
+fn github_repository_metadata_bundle_inputs(
+    backend: &SqliteStateBackend,
+    run_id: &WorkflowRunId,
+    existing: Option<&WorkflowRun>,
+) -> Result<LocalExecutionImmutableRunBundleInputs, WorkflowOsError> {
+    let Some(run) = existing else {
+        return Ok(LocalExecutionImmutableRunBundleInputs {
+            bundle_id: ImmutableRunBundleId::new(format!("bundle/{run_id}"))?,
+            bundle_version: ImmutableRunBundleVersion::new("v1")?,
+            created_at: Timestamp::now_utc(),
+            sensitivity: ImmutableRunBundleSensitivity::Internal,
+            redaction_required: true,
+        });
+    };
+    let binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| {
+            authoritative_cli_error(
+                "immutable_bundle_missing",
+                "GitHub fixture run requires an immutable run bundle",
+            )
+        })?;
+    let stored = workflow_core::ImmutableRunBundleStore::read_exact_bundle(
+        backend,
+        run_id,
+        binding.bundle_id(),
+    )?;
+    Ok(LocalExecutionImmutableRunBundleInputs {
+        bundle_id: stored.manifest().bundle_id().clone(),
+        bundle_version: stored.manifest().bundle_version().clone(),
+        created_at: *stored.manifest().created_at(),
+        sensitivity: stored.manifest().sensitivity(),
+        redaction_required: stored.manifest().redaction_required(),
+    })
+}
+
+fn github_repository_metadata_posture_label(
+    posture: GitHubRepositoryMetadataFixtureExecutionPosture,
+) -> &'static str {
+    match posture {
+        GitHubRepositoryMetadataFixtureExecutionPosture::WaitingForApproval => {
+            "waiting_for_approval"
+        }
+        GitHubRepositoryMetadataFixtureExecutionPosture::Completed => "completed",
+        GitHubRepositoryMetadataFixtureExecutionPosture::ExistingTerminal => "terminal_replay",
+        GitHubRepositoryMetadataFixtureExecutionPosture::RecoveryRequired => "recovery_required",
+        GitHubRepositoryMetadataFixtureExecutionPosture::Blocked => "blocked",
+    }
+}
+
+fn github_repository_metadata_run_json(
+    run: &WorkflowRun,
+    decision: Option<ApprovalDecisionKind>,
+) -> String {
+    format!(
+        "{{\"run_id\":\"{}\",\"workflow_id\":\"{}\",\"schema_version\":\"{}\",\"status\":\"{:?}\",\"current_step\":{},\"terminal\":{},\"decision\":{},\"provider_operation\":\"github.repository.metadata\",\"provider_mode\":\"fixture\",\"live_transport\":\"disabled\",\"report_posture\":\"bounded_terminal_event_reference\"}}",
+        json_escape(run.snapshot.identity.run_id.as_str()),
+        json_escape(run.snapshot.identity.workflow_id.as_str()),
+        json_escape(run.snapshot.identity.schema_version.as_str()),
+        run.snapshot.status,
+        json_string_option(current_step(run).as_deref()),
+        run.snapshot.status.is_terminal(),
+        json_string_option(decision.map(approval_decision_label)),
+    )
+}
+
+fn github_repository_metadata_backend(
+    invocation: &Invocation,
+) -> Result<SqliteStateBackend, WorkflowOsError> {
+    SqliteStateBackend::open(github_repository_metadata_database_path(invocation))
+}
+
+fn github_repository_metadata_database_path(invocation: &Invocation) -> PathBuf {
+    invocation
+        .state_dir()
+        .join("github-repository-metadata.sqlite3")
+}
+
+fn read_github_repository_metadata_fixture(
+    invocation: &Invocation,
+) -> Result<String, WorkflowOsError> {
+    fs::read_to_string(
+        invocation
+            .project_dir
+            .join("fixtures")
+            .join("github")
+            .join("repository.json"),
+    )
+    .map_err(|_| {
+        authoritative_cli_error(
+            "github_fixture_missing",
+            "GitHub repository metadata fixture is missing or unreadable",
+        )
+    })
+}
+
+fn persist_github_repository_metadata_approval_presentation(
+    backend: &SqliteStateBackend,
+    run: &WorkflowRun,
+) -> Result<ApprovalPresentationRecord, WorkflowOsError> {
+    let approval = run.snapshot.approval_requests.last().ok_or_else(|| {
+        authoritative_cli_error(
+            "github_fixture_approval_missing",
+            "GitHub repository metadata fixture run lacks its waiting approval request",
+        )
+    })?;
+    let existing = backend.list_approval_presentation_records_for_approval(
+        &run.snapshot.identity.run_id,
+        &approval.approval_id,
+    )?;
+    match existing.as_slice() {
+        [record] => return Ok(record.clone()),
+        [] => {}
+        _ => {
+            return Err(authoritative_cli_error(
+                "github_fixture_approval_ambiguous",
+                "GitHub repository metadata fixture approval has multiple presentation records",
+            ));
+        }
+    }
+    let requested_action =
+        "approve the exact fixture-backed GitHub repository metadata read".to_owned();
+    let work_summary = "Read one declared repository metadata fixture through the GitHub read-only adapter and persist bounded audit, telemetry, receipt, and terminal run evidence.";
+    let approved_scope = "Resume only this immutable run, exact workflow step, declared repository resource, and fixture payload commitment for github.repository.metadata.";
+    let strict_non_goals = vec![
+        "No live network transport, ambient credential lookup, provider mutation, repository write, second GitHub operation, OpenShell execution, hosted runtime, release, or publication.".to_owned(),
+    ];
+    let expected_touched_surfaces = vec![
+        "Dedicated local SQLite provider-run state containing immutable run, approval-presentation, adapter audit, observability, authority receipt, and bounded event records.".to_owned(),
+    ];
+    let validation_expectations = vec![
+        "The current project, exact workflow and skill contracts, declared GitHub repository resource, and fixture content commitment must still match before approval is accepted and again before provider admission.".to_owned(),
+    ];
+    let why_now = "This is the first public fixture-only vertical slice for the exact GitHub repository metadata operation; approval demonstrates fail-closed governance before any provider handler entry.";
+    let next_action = format!(
+        "workflow-os approve {} {} --actor user/<approver> --reason <bounded-reason>",
+        run.snapshot.identity.run_id, approval.approval_id
+    );
+    let channel = ApprovalPresentationChannel::Terminal;
+    let sensitivity = ApprovalPresentationSensitivity::Internal;
+    let content_hash = compute_approval_presentation_content_hash(
+        &run.snapshot.identity.run_id,
+        &approval.approval_id,
+        &approval.workflow_id,
+        Some(&approval.workflow_version),
+        Some(&approval.schema_version),
+        approval.step_id.as_ref(),
+        &requested_action,
+        work_summary,
+        approved_scope,
+        &strict_non_goals,
+        &expected_touched_surfaces,
+        &validation_expectations,
+        why_now,
+        &next_action,
+        &channel,
+        sensitivity,
+    )?;
+    let record = ApprovalPresentationRecord::new(ApprovalPresentationRecordDefinition {
+        presentation_id: ApprovalPresentationId::new(format!(
+            "presentation/{}",
+            &content_hash.as_str()[..16]
+        ))?,
+        run_id: run.snapshot.identity.run_id.clone(),
+        approval_id: approval.approval_id.clone(),
+        workflow_id: approval.workflow_id.clone(),
+        workflow_version: Some(approval.workflow_version.clone()),
+        schema_version: Some(approval.schema_version.clone()),
+        step_id: approval.step_id.clone(),
+        requested_action,
+        work_summary: work_summary.to_owned(),
+        approved_scope: approved_scope.to_owned(),
+        strict_non_goals,
+        expected_touched_surfaces,
+        validation_expectations,
+        why_now: why_now.to_owned(),
+        next_action,
+        presented_at: Timestamp::now_utc(),
+        presented_by: ActorId::new("system/workflow-os-cli")?,
+        channel,
+        content_hash,
+        redaction: RedactionMetadata::empty(),
+        sensitivity,
+    })?;
+    backend.write_approval_presentation_record(&record)?;
+    Ok(record)
+}
+
+fn github_repository_metadata_fixture_step(
+    invocation: &Invocation,
+    workflow_id: &str,
+) -> Result<Option<workflow_core::StepId>, WorkflowOsError> {
+    let load = load_project(&invocation.project_dir);
+    let validation = validate_loaded_project(&load);
+    if validation.has_errors() {
+        return Ok(None);
+    }
+    let Some(bundle) = load.bundle else {
+        return Ok(None);
+    };
+    let provider_enabled = bundle
+        .manifest
+        .definition
+        .governance
+        .as_ref()
+        .and_then(|governance| governance.provider_reads.as_ref())
+        .is_some_and(|reads| reads.github_repository_metadata.enabled());
+    if !provider_enabled {
+        return Ok(None);
+    }
+    let workflow_id = WorkflowId::new(workflow_id)?;
+    let Some(workflow) = bundle
+        .workflows
+        .iter()
+        .find(|candidate| candidate.definition.id == workflow_id)
+    else {
+        return Ok(None);
+    };
+    let [step] = workflow.definition.steps.as_slice() else {
+        return Ok(None);
+    };
+    let Some(skill) = bundle.skills.iter().find(|candidate| {
+        candidate.definition.id == step.skill_ref.id
+            && step
+                .skill_ref
+                .version
+                .as_ref()
+                .map_or(true, |version| &candidate.definition.version == version)
+    }) else {
+        return Ok(None);
+    };
+    let exact = skill.definition.adapter_requirements.len() == 1
+        && skill.definition.adapter_requirements[0].adapter_id.as_str()
+            == "symbolic/github-read-only"
+        && skill.definition.adapter_requirements[0]
+            .operation
+            .as_ref()
+            .is_some_and(|operation| operation.as_str() == "github.repository.metadata");
+    Ok(exact.then(|| step.id.clone()))
 }
 
 const AUTHORITATIVE_GOVERNANCE_PRESENTATION_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -1916,10 +2306,29 @@ fn workflow_run_status_label(status: WorkflowRunStatus) -> &'static str {
 
 fn status_command(invocation: &Invocation, run_id: &str) -> Result<(), WorkflowOsError> {
     let run_id = WorkflowRunId::new(run_id)?;
+    if github_repository_metadata_database_path(invocation).is_file() {
+        let backend = github_repository_metadata_backend(invocation)?;
+        if !backend.read_events(&run_id)?.is_empty() {
+            return status_from_backend(invocation, &backend, &run_id, true);
+        }
+    }
     let backend = local_backend(invocation)?;
-    let run = backend.rehydrate_run(&run_id)?;
+    status_from_backend(invocation, &backend, &run_id, false)
+}
+
+fn status_from_backend<B: StateBackend>(
+    invocation: &Invocation,
+    backend: &B,
+    run_id: &WorkflowRunId,
+    provider_fixture: bool,
+) -> Result<(), WorkflowOsError> {
+    let run = backend.rehydrate_run(run_id)?;
     if invocation.json {
-        println!("{}", run_status_json(&run));
+        if provider_fixture {
+            println!("{}", github_repository_metadata_run_json(&run, None));
+        } else {
+            println!("{}", run_status_json(&run));
+        }
     } else {
         println!("run_id: {}", run.snapshot.identity.run_id);
         println!("schema_version: {}", run.snapshot.identity.schema_version);
@@ -1933,6 +2342,11 @@ fn status_command(invocation: &Invocation, run_id: &str) -> Result<(), WorkflowO
         println!("last_event_id: {}", run.snapshot.last_event_id);
         if let Some(last) = run.events.last() {
             println!("last_event_at: {}", last.timestamp);
+        }
+        if provider_fixture {
+            println!("provider_operation: github.repository.metadata");
+            println!("provider_mode: fixture");
+            println!("live_transport: disabled");
         }
     }
     Ok(())
@@ -2296,21 +2710,41 @@ fn dogfood_approval_presentation_approve_command(
 
 fn inspect_command(invocation: &Invocation, run_id: &str) -> Result<(), WorkflowOsError> {
     let run_id = WorkflowRunId::new(run_id)?;
+    if github_repository_metadata_database_path(invocation).is_file() {
+        let backend = github_repository_metadata_backend(invocation)?;
+        if !backend.read_events(&run_id)?.is_empty() {
+            return inspect_from_backend(invocation, &backend, &run_id, true);
+        }
+    }
     let backend = local_backend(invocation)?;
-    let run = backend.rehydrate_run(&run_id)?;
-    let adapter_audit = backend.read_adapter_audit_records(&run_id)?;
-    let adapter_observability = backend.read_adapter_observability_records(&run_id)?;
-    let report_artifacts = backend.list_work_report_artifacts(&run_id)?;
+    inspect_from_backend(invocation, &backend, &run_id, false)
+}
+
+fn inspect_from_backend<B: StateBackend + WorkReportArtifactStore>(
+    invocation: &Invocation,
+    backend: &B,
+    run_id: &WorkflowRunId,
+    provider_fixture: bool,
+) -> Result<(), WorkflowOsError> {
+    let run = backend.rehydrate_run(run_id)?;
+    let adapter_audit = backend.read_adapter_audit_records(run_id)?;
+    let adapter_observability = backend.read_adapter_observability_records(run_id)?;
+    let report_artifacts = backend.list_work_report_artifacts(run_id)?;
     if invocation.json {
-        println!(
-            "{}",
-            inspect_json(
-                &run,
-                &adapter_audit,
-                &adapter_observability,
-                &report_artifacts
-            )
+        let rendered = inspect_json(
+            &run,
+            &adapter_audit,
+            &adapter_observability,
+            &report_artifacts,
         );
+        if provider_fixture {
+            println!(
+                "{}",
+                append_github_repository_metadata_json_fields(&rendered)
+            );
+        } else {
+            println!("{rendered}");
+        }
     } else {
         println!("run_id: {}", run.snapshot.identity.run_id);
         println!("workflow_id: {}", run.snapshot.identity.workflow_id);
@@ -2372,6 +2806,16 @@ fn inspect_command(invocation: &Invocation, run_id: &str) -> Result<(), Workflow
                     metadata.generated_at(),
                     metadata.sensitivity()
                 );
+            }
+        }
+        if provider_fixture {
+            println!("provider_operation: github.repository.metadata");
+            println!("provider_mode: fixture");
+            println!("live_transport: disabled");
+            println!("report_posture: bounded_terminal_event_reference");
+            if run.snapshot.status == WorkflowRunStatus::WaitingForExternalEvent {
+                println!("recovery_posture: explicit_operator_reassessment_required");
+                println!("automatic_retry: prohibited");
             }
         }
     }
@@ -12611,6 +13055,15 @@ fn run_status_json(run: &WorkflowRun) -> String {
         run.snapshot.status,
         json_string_option(current_step(run).as_deref()),
         run.snapshot.status.is_terminal()
+    )
+}
+
+fn append_github_repository_metadata_json_fields(rendered: &str) -> String {
+    let Some(prefix) = rendered.strip_suffix('}') else {
+        return rendered.to_owned();
+    };
+    format!(
+        "{prefix},\"provider_operation\":\"github.repository.metadata\",\"provider_mode\":\"fixture\",\"live_transport\":\"disabled\",\"report_posture\":\"bounded_terminal_event_reference\"}}"
     )
 }
 

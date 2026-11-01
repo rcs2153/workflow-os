@@ -1,0 +1,38 @@
+schema_version: workflowos.dev/v0
+id: example/github-repository-metadata-fixture
+version: v1
+display_name: GitHub Repository Metadata Fixture Read
+owner:
+  lifecycle_status: stable
+autonomy_level: level_2
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: read
+    skill_ref:
+      id: adapter/github-repository-metadata
+      version: v1
+    input_mapping:
+      - from: { type: literal, value: acme }
+        to: owner
+      - from: { type: literal, value: widgets }
+        to: repo
+    policy_requirements: [{ id: external/read }]
+    approval_policy:
+      policy: { id: approval/github-read }
+    timeout: { duration: 5m }
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: repository-read
+    reason: Approval is required before the fixture-backed repository metadata read.
+    expires_after: { duration: 30m }
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events: [RunCreated, ApprovalRequested]
+  store_references_only: true
+observability_requirements:
+  metrics: [workflow_latency]
+  tracing: true
+  latency_tracking: true

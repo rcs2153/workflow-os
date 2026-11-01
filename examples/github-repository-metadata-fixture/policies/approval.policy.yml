@@ -1,0 +1,6 @@
+schema_version: workflowos.dev/v0
+id: approval/github-read
+name: Repository Read Approval
+rules:
+  - id: approve
+    effect: require_approval

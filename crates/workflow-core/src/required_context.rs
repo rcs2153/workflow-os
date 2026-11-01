@@ -257,6 +257,22 @@ impl RequiredContextContractBinding {
         Ok(binding)
     }
 
+    pub(crate) fn explicit_none_for_github_repository_metadata(
+        contract_id: HarnessContractId,
+        contract_version: HarnessContractVersion,
+    ) -> Result<Self, WorkflowOsError> {
+        let content_hash = compute_explicit_none_contract_hash(&contract_id, &contract_version);
+        let binding = Self {
+            contract_id,
+            contract_version,
+            content_hash,
+            requirements: Vec::new(),
+            requirement_posture: RequiredContextRequirementPosture::ExplicitNone,
+        };
+        binding.validate()?;
+        Ok(binding)
+    }
+
     fn validate(&self) -> Result<(), WorkflowOsError> {
         let expected = match self.requirement_posture {
             RequiredContextRequirementPosture::DeclaredRequirements => {

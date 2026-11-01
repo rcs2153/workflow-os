@@ -157,9 +157,28 @@ success, ambiguity without blind redispatch, terminal replay without provider
 re-entry, and access-marker absence from durable bytes. The implementation
 remains non-public and no-write. See the [Phase 2 implementation
 report](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CORE_PRIVATE_AUTHORITY_LIFECYCLE_REPORT.md).
-Phase 3 public fixture activation remains a separate governed phase; Phase 2
-acceptance does not activate provider selection or network access. See the [focused
+Phase 3 public fixture activation is implemented and accepted after focused
+maintainer/security review corrected the denial path. The ordinary CLI now selects only the exact
+fixture-backed repository metadata operation, binds fixture content into the
+approved immutable context, requires durable approval-presentation proof,
+persists bounded telemetry, and exposes provider-backed status, inspect,
+recovery disclosure, and terminal replay without live transport. See the
+[implementation report](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_FIXTURE_ACTIVATION_REPORT.md),
+[focused review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_FIXTURE_ACTIVATION_REVIEW.md),
+and the preceding [Phase 2 focused
 review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CORE_PRIVATE_AUTHORITY_LIFECYCLE_REVIEW.md).
+
+Before broader provider mutation families, nested harness work, or claims of
+continuous delegated-maintainer autonomy, complete the P0 [Delegated Authority
+Projection Into External Connectors
+Plan](docs/implementation-plans/delegated-authority-external-connector-projection-plan.md).
+The plan integrates existing scoped runtime authority, approval-presentation
+proof, authoritative continuation, proportional governance, and durable wait
+conditions. It requires a closed connector capability projection, explicit PR
+transition vocabulary, exact head and evidence verification, durable
+consumption/revocation posture, and resumable connector refusal. It does not
+weaken platform permissions, authorize broad repository mutation, or create a
+parallel permission system.
 See the
 [post-0.3 queue selection
 report](docs/concepts/POST_0_3_ROADMAP_QUEUE_SELECTION_REPORT.md) and the

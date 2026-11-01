@@ -14,7 +14,7 @@ use crate::trusted_host_supervisor::{
     TrustedHostAttemptExecutor, TrustedHostSupervisorPersistenceInput,
 };
 use crate::{
-    AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId, CorrelationId,
+    AdapterOperationMode, AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId, CorrelationId,
     GitHubRepositoryMetadataReadConfiguration, GitHubRepositoryMetadataResource,
     OperationalExecutionWindowOpeningOperationId, OperationalExecutionWindowOpeningReceiptId,
     RedactionMetadata, RequiredContextContractBinding, RequiredContextExecutionBinding, SkillInput,
@@ -34,12 +34,23 @@ pub(super) enum GitHubRepositoryMetadataAttemptResult {
 /// The access value is borrowed only for the call. Implementations must not
 /// retain it or include it in outputs, errors, telemetry, or debug text.
 pub(super) trait GitHubRepositoryMetadataAttemptOperation {
-    fn execute(&self, access: &str) -> GitHubRepositoryMetadataAttemptResult;
+    fn execute(
+        &self,
+        input: &SkillInput,
+        access: Option<&str>,
+    ) -> GitHubRepositoryMetadataAttemptResult;
+}
+
+enum GitHubRepositoryMetadataAccessMode<R> {
+    Fixture,
+    Live {
+        reference: GitHubRepositoryMetadataAccessReference,
+        resolver: GitHubRepositoryTransientAccessResolver<R>,
+    },
 }
 
 struct GitHubRepositoryMetadataAttemptExecutor<R, O> {
-    access_reference: GitHubRepositoryMetadataAccessReference,
-    access_resolver: GitHubRepositoryTransientAccessResolver<R>,
+    access: GitHubRepositoryMetadataAccessMode<R>,
     binding_commitment: SpecContentHash,
     operation: O,
     workflow_lifecycle:
@@ -51,12 +62,17 @@ where
     R: GitHubRepositoryEnvironmentReader,
     O: GitHubRepositoryMetadataAttemptOperation,
 {
-    fn execute_with_access(&self) -> TrustedHostAttemptExecutionResult {
-        match self
-            .access_resolver
-            .with_access(&self.access_reference, |access| {
-                self.operation.execute(access)
-            }) {
+    fn execute_with_access(&self, input: &SkillInput) -> TrustedHostAttemptExecutionResult {
+        let result = match &self.access {
+            GitHubRepositoryMetadataAccessMode::Fixture => Ok(self.operation.execute(input, None)),
+            GitHubRepositoryMetadataAccessMode::Live {
+                reference,
+                resolver,
+            } => resolver.with_access(reference, |access| {
+                self.operation.execute(input, Some(access))
+            }),
+        };
+        match result {
             Ok(GitHubRepositoryMetadataAttemptResult::Succeeded(output)) => {
                 TrustedHostAttemptExecutionResult::Succeeded(output)
             }
@@ -87,9 +103,9 @@ where
 
     fn execute(
         &self,
-        _context: &TrustedHostAttemptExecutionContext<'_>,
+        context: &TrustedHostAttemptExecutionContext<'_>,
     ) -> TrustedHostAttemptExecutionResult {
-        self.execute_with_access()
+        self.execute_with_access(context.skill_input())
     }
 }
 
@@ -124,6 +140,7 @@ pub(super) struct GitHubRepositoryAtomicLifecycleInput<'a, R, O> {
     pub(super) evaluated_at: Timestamp,
     pub(super) redaction: RedactionMetadata,
     pub(super) persistence: TrustedHostSupervisorPersistenceInput,
+    pub(super) operation_mode: AdapterOperationMode,
     pub(super) environment: R,
     pub(super) operation: O,
 }
@@ -147,15 +164,33 @@ where
         &input.execution_binding,
         &input.correlation_id,
     )?;
-    let access_reference =
-        GitHubRepositoryMetadataAccessReference::parse(resolved.configuration.access_reference())?;
-    let access_resolver = GitHubRepositoryTransientAccessResolver::new(input.environment);
-    let access_presence = match access_resolver.presence(&access_reference) {
-        super::github_repository_transient_access::GitHubRepositoryMetadataAccessPresence::Present => {
-            GitHubRepositoryAccessPresence::Present
+    let (access, access_presence) = match input.operation_mode {
+        AdapterOperationMode::Fixture => (
+            GitHubRepositoryMetadataAccessMode::Fixture,
+            GitHubRepositoryAccessPresence::Missing,
+        ),
+        AdapterOperationMode::LiveReadOnly => {
+            let reference = GitHubRepositoryMetadataAccessReference::parse(
+                resolved.configuration.access_reference(),
+            )?;
+            let access_resolver = GitHubRepositoryTransientAccessResolver::new(input.environment);
+            let presence = match access_resolver.presence(&reference) {
+                super::github_repository_transient_access::GitHubRepositoryMetadataAccessPresence::Present => GitHubRepositoryAccessPresence::Present,
+                super::github_repository_transient_access::GitHubRepositoryMetadataAccessPresence::Missing => GitHubRepositoryAccessPresence::Missing,
+            };
+            (
+                GitHubRepositoryMetadataAccessMode::Live {
+                    reference,
+                    resolver: access_resolver,
+                },
+                presence,
+            )
         }
-        super::github_repository_transient_access::GitHubRepositoryMetadataAccessPresence::Missing => {
-            GitHubRepositoryAccessPresence::Missing
+        _ => {
+            return Err(atomic_lifecycle_error(
+                "operation_mode_unsupported",
+                "GitHub repository metadata atomic lifecycle requires fixture or live read-only mode",
+            ));
         }
     };
     let source = derive_github_repository_authority(&GitHubRepositoryAuthorityInput {
@@ -169,6 +204,7 @@ where
         sensitivity: input.execution_binding.maximum_sensitivity(),
         evaluated_at: input.evaluated_at,
         expires_at: input.expires_at,
+        operation_mode: input.operation_mode,
         access_presence,
     })?;
     let locator = crate::sqlite_state::TrustedHostOperationalEntryLocator {
@@ -180,8 +216,7 @@ where
         immutable_run_bundle: input.execution_binding.immutable_run_bundle().clone(),
     };
     let executor = Box::new(GitHubRepositoryMetadataAttemptExecutor {
-        access_reference,
-        access_resolver,
+        access,
         binding_commitment: resolved.operation_binding,
         operation: input.operation,
         workflow_lifecycle: input.workflow_lifecycle,
@@ -392,9 +427,13 @@ mod tests {
     }
 
     impl GitHubRepositoryMetadataAttemptOperation for FixedOperation<'_> {
-        fn execute(&self, access: &str) -> GitHubRepositoryMetadataAttemptResult {
+        fn execute(
+            &self,
+            _input: &SkillInput,
+            access: Option<&str>,
+        ) -> GitHubRepositoryMetadataAttemptResult {
             self.calls.set(self.calls.get() + 1);
-            self.observed_length.set(access.len());
+            self.observed_length.set(access.map_or(0, str::len));
             (self.result)()
         }
     }
@@ -611,6 +650,7 @@ mod tests {
                     receipt: ContinuityReceiptId::new(format!("supervisor-receipt/{name}"))?,
                     yield_generation: None,
                 },
+                operation_mode: AdapterOperationMode::LiveReadOnly,
                 environment: |key: &str| {
                     (key == "WORKFLOW_OS_GITHUB_TOKEN").then(|| "exact-secret-marker".to_owned())
                 },
@@ -638,6 +678,21 @@ mod tests {
         GitHubRepositoryMetadataAttemptResult::AmbiguousMayHaveStarted
     }
 
+    fn fixture_skill_input() -> SkillInput {
+        SkillInput {
+            run_id: WorkflowRunId::new("run/fixture").expect("run"),
+            workflow_id: WorkflowId::new("workflow/fixture").expect("workflow"),
+            workflow_version: crate::WorkflowVersion::new("v1").expect("workflow version"),
+            schema_version: crate::SchemaVersion::new("workflowos.dev/v0").expect("schema"),
+            spec_hash: SpecContentHash::from_text("fixture"),
+            step_id: StepId::new("read").expect("step"),
+            skill_id: SkillId::new("adapter/github-repository-metadata").expect("skill"),
+            skill_version: SkillVersion::new("v1").expect("skill version"),
+            correlation_id: CorrelationId::new("correlation/fixture").expect("correlation"),
+            values: BTreeMap::new(),
+        }
+    }
+
     fn executor<'a>(
         token: Option<&'static str>,
         calls: &'a Cell<usize>,
@@ -653,11 +708,13 @@ mod tests {
                 .flatten()
         };
         GitHubRepositoryMetadataAttemptExecutor {
-            access_reference: GitHubRepositoryMetadataAccessReference::parse(
-                GitHubRepositoryMetadataReadConfiguration::ACCESS_REFERENCE,
-            )
-            .expect("access reference"),
-            access_resolver: GitHubRepositoryTransientAccessResolver::new(environment),
+            access: GitHubRepositoryMetadataAccessMode::Live {
+                reference: GitHubRepositoryMetadataAccessReference::parse(
+                    GitHubRepositoryMetadataReadConfiguration::ACCESS_REFERENCE,
+                )
+                .expect("access reference"),
+                resolver: GitHubRepositoryTransientAccessResolver::new(environment),
+            },
             binding_commitment: SpecContentHash::from_text(
                 "github repository metadata fixture operation",
             ),
@@ -682,7 +739,7 @@ mod tests {
         );
 
         assert!(matches!(
-            executor.execute_with_access(),
+            executor.execute_with_access(&fixture_skill_input()),
             TrustedHostAttemptExecutionResult::Succeeded(_)
         ));
         assert_eq!(calls.get(), 1);
@@ -698,7 +755,7 @@ mod tests {
         let executor = executor(None, &calls, &observed_length, success);
 
         assert!(matches!(
-            executor.execute_with_access(),
+            executor.execute_with_access(&fixture_skill_input()),
             TrustedHostAttemptExecutionResult::TerminalFailure
         ));
         assert_eq!(calls.get(), 0);
@@ -716,7 +773,7 @@ mod tests {
             terminal_failure,
         );
         assert!(matches!(
-            failure.execute_with_access(),
+            failure.execute_with_access(&fixture_skill_input()),
             TrustedHostAttemptExecutionResult::TerminalFailure
         ));
 
@@ -729,7 +786,7 @@ mod tests {
             ambiguous,
         );
         assert!(matches!(
-            ambiguous.execute_with_access(),
+            ambiguous.execute_with_access(&fixture_skill_input()),
             TrustedHostAttemptExecutionResult::AmbiguousMayHaveStarted
         ));
         assert_eq!(failure_calls.get(), 1);

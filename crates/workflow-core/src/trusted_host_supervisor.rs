@@ -189,6 +189,12 @@ pub(crate) struct TrustedHostAttemptExecutionContext<'a> {
     skill_input: &'a SkillInput,
 }
 
+impl<'a> TrustedHostAttemptExecutionContext<'a> {
+    pub(crate) const fn skill_input(&self) -> &'a SkillInput {
+        self.skill_input
+    }
+}
+
 impl fmt::Debug for TrustedHostAttemptExecutionContext<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
