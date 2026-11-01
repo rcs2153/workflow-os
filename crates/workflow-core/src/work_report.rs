@@ -6422,7 +6422,8 @@ fn terminal_report_sections(
         )?,
         report_section(
             WorkReportSectionKind::Approvals,
-            approval_summary(
+            &approval_summary(
+                input.run,
                 citations.approvals.is_empty() && citations.authority_receipts.is_empty(),
                 input.high_assurance_approval.as_ref(),
             ),
@@ -7272,23 +7273,72 @@ fn policy_summary(no_citations: bool) -> &'static str {
 }
 
 fn approval_summary(
+    run: &WorkflowRun,
     no_citations: bool,
     high_assurance: Option<&WorkReportHighAssuranceApprovalDisclosure>,
-) -> &'static str {
-    if let Some(disclosure) = high_assurance {
+) -> String {
+    let request_count = run.snapshot.approval_requests.len();
+    let high_assurance_summary = high_assurance.map(|disclosure| {
         if disclosure.validation_used() && disclosure.validation_passed() {
-            return "High-assurance approval validation was used and passed before approval disclosure; stable approval references are cited when supplied.";
+            return "High-assurance approval validation was used and passed before approval disclosure";
         }
         if disclosure.validation_used() {
-            return "High-assurance approval validation was used but did not report a passed posture; stable approval references are cited when supplied.";
+            return "High-assurance approval validation was used but did not report a passed posture";
         }
-        return "High-assurance approval disclosure was supplied without validation-used posture; stable approval references are cited when supplied.";
+        "High-assurance approval disclosure was supplied without validation-used posture"
+    });
+    if request_count == 0 {
+        if let Some(summary) = high_assurance_summary {
+            return format!("{summary}; stable approval references are cited when supplied.");
+        }
+        return if no_citations {
+            "No stable approval references were supplied.".to_owned()
+        } else {
+            "Stable approval references were supplied.".to_owned()
+        };
     }
-    if no_citations {
-        "No stable approval references were supplied."
+    let granted_count =
+        run.snapshot
+            .approval_requests
+            .iter()
+            .filter(|request| {
+                request.decision.as_ref().is_some_and(|decision| {
+                    decision.decision == crate::ApprovalDecisionKind::Granted
+                })
+            })
+            .count();
+    let denied_count =
+        run.snapshot
+            .approval_requests
+            .iter()
+            .filter(|request| {
+                request.decision.as_ref().is_some_and(|decision| {
+                    decision.decision == crate::ApprovalDecisionKind::Denied
+                })
+            })
+            .count();
+    let undecided_count = request_count.saturating_sub(granted_count + denied_count);
+    let citation_posture = if no_citations {
+        "no stable approval references were supplied"
     } else {
-        "Stable approval references were supplied."
-    }
+        "stable approval references were supplied"
+    };
+    let high_assurance_posture = high_assurance_summary
+        .map(|summary| format!(" {summary}."))
+        .unwrap_or_default();
+    let request_label = if request_count == 1 {
+        "approval request"
+    } else {
+        "approval requests"
+    };
+    let grant_label = if granted_count == 1 {
+        "grant"
+    } else {
+        "grants"
+    };
+    format!(
+        "The terminal run recorded {request_count} {request_label} and {granted_count} {grant_label} ({denied_count} denied, {undecided_count} undecided); {citation_posture}.{high_assurance_posture}"
+    )
 }
 
 fn side_effects_summary(

@@ -1340,9 +1340,9 @@ fn authoritative_governance_report_inputs(
             "Authoritative governance is an explicit local CLI preview.".to_owned()
         ],
         risks: vec!["Only the closed project-validation check profile is enabled.".to_owned()],
-        handoff_notes: vec![
-            "Inspect the durable run for workflow and governance event history.".to_owned(),
-        ],
+        handoff_notes: vec![format!(
+            "Run workflow-os inspect {run_id} to review durable workflow and governance event history."
+        )],
     })
 }
 
@@ -1431,11 +1431,22 @@ fn persist_authoritative_governance_approval_presentation(
             "authoritative governance could not resolve the waiting approval request",
         )
     })?;
-    let requested_action =
-        "approve the exact authoritative workflow run after reviewing its bounded governance context"
-            .to_owned();
-    let work_summary = "Execute the selected workflow under authoritative project validation and Core-derived proportional governance.";
-    let approved_scope = "Resume only this immutable workflow run through the closed project-validation profile and persist its exact governed terminal WorkReport artifact if terminal report generation succeeds.";
+    let aggregate = approval.governance_approval_binding.is_some();
+    let (requested_action, work_summary, approved_scope, why_now) = if aggregate {
+        (
+            "approve the aggregate governance boundary for the exact authoritative workflow run after reviewing its bounded governance context".to_owned(),
+            "Authorize this immutable run to pass Core-derived proportional governance and authoritative project validation; authored workflow gates remain separately enforceable.",
+            "Resume only this immutable workflow run through the closed project-validation profile and aggregate governance boundary. This approval does not grant any authored step approval.",
+            "Core selected a blocking aggregate governance route from complete source-bound governance facts.",
+        )
+    } else {
+        (
+            "approve the exact authored workflow step after reviewing its step-scoped execution contract".to_owned(),
+            "Authorize the exact authored step now waiting after the aggregate governance boundary was satisfied.",
+            "Resume only the exact waiting authored step in this immutable workflow run and persist its exact governed terminal WorkReport artifact if terminal report generation succeeds.",
+            "The aggregate governance boundary is satisfied and the authored workflow contract now requires a distinct step-scoped approval.",
+        )
+    };
     let strict_non_goals = vec![
         "No arbitrary commands, provider writes, arbitrary artifacts, report export or publication, hosted persistence, schemas, runtime configuration, OpenShell, or automatic approval.".to_owned(),
     ];
@@ -1445,8 +1456,6 @@ fn persist_authoritative_governance_approval_presentation(
     let validation_expectations = vec![
         "The canonical workflow-os project validation check must pass again at approval decision time.".to_owned(),
     ];
-    let why_now =
-        "Core selected a blocking approval route from complete source-bound governance facts.";
     let next_action = format!(
         "workflow-os approve {} {} --actor user/<approver> --reason <bounded-reason>",
         run.snapshot.identity.run_id, approval.approval_id
@@ -2042,10 +2051,14 @@ fn approve_command(
     Ok(())
 }
 
-const FIRST_RUN_ARTIFACT_REQUESTED_ACTION: &str =
+const FIRST_RUN_ARTIFACT_AGGREGATE_REQUESTED_ACTION: &str =
     "approve the immutable first-run analysis run and its local report artifact write";
-const FIRST_RUN_ARTIFACT_WORK_SUMMARY: &str =
+const FIRST_RUN_ARTIFACT_AGGREGATE_WORK_SUMMARY: &str =
     "Run bounded first-run repository governance analysis and persist its terminal WorkReport artifact.";
+const FIRST_RUN_ARTIFACT_STEP_REQUESTED_ACTION: &str =
+    "approve the exact first-run analysis step and its create-only local report artifact write";
+const FIRST_RUN_ARTIFACT_STEP_WORK_SUMMARY: &str =
+    "Execute the authored first-run analysis step under its immutable run commitment and persist its terminal WorkReport artifact.";
 const FIRST_RUN_DEMO_WORKFLOW_ID: &str = "local/first-run-governance";
 const FIRST_RUN_DEMO_SKILL_ID: &str = "local/first-run-report";
 const FIRST_RUN_ARTIFACT_WORKFLOW_ID: &str = "local/first-run-report-artifact";
@@ -2066,8 +2079,16 @@ fn is_first_run_artifact_run(
         .iter()
         .any(|record| {
             record.workflow_id() == &run.snapshot.identity.workflow_id
-                && record.requested_action() == FIRST_RUN_ARTIFACT_REQUESTED_ACTION
-                && record.work_summary() == FIRST_RUN_ARTIFACT_WORK_SUMMARY
+                && matches!(
+                    (record.requested_action(), record.work_summary()),
+                    (
+                        FIRST_RUN_ARTIFACT_AGGREGATE_REQUESTED_ACTION,
+                        FIRST_RUN_ARTIFACT_AGGREGATE_WORK_SUMMARY
+                    ) | (
+                        FIRST_RUN_ARTIFACT_STEP_REQUESTED_ACTION,
+                        FIRST_RUN_ARTIFACT_STEP_WORK_SUMMARY
+                    )
+                )
         }))
 }
 
@@ -3167,21 +3188,31 @@ fn first_run_artifact_sections(
 ) -> Result<Vec<WorkReportSection>, WorkflowOsError> {
     let context = &snapshot.context;
     let commitment = &snapshot.commitment;
-    let approval_granted = run.snapshot.approval_requests.iter().any(|approval| {
-        approval
-            .decision
-            .as_ref()
-            .is_some_and(|decision| decision.decision == ApprovalDecisionKind::Granted)
-    });
-    let approval_summary = if approval_granted {
-        "The durable first-run approval request was granted with approval-presentation proof before the trusted analysis handler ran."
+    let approval_request_count = run.snapshot.approval_requests.len();
+    let approval_grant_count = run
+        .snapshot
+        .approval_requests
+        .iter()
+        .filter(|approval| {
+            approval
+                .decision
+                .as_ref()
+                .is_some_and(|decision| decision.decision == ApprovalDecisionKind::Granted)
+        })
+        .count();
+    let approval_summary = if approval_request_count > 0 {
+        format!(
+            "The durable first-run run recorded {approval_request_count} approval requests and {approval_grant_count} grants with approval-presentation proof before the trusted analysis handler ran."
+        )
     } else {
-        "No approval grant was required by the selected governed route."
+        "No approval request or grant was required by the selected governed route.".to_owned()
     };
-    let local_state_summary = if approval_granted {
-        "Wrote durable local run, immutable-bundle, approval-presentation, event, and WorkReport artifact state; no external SideEffect occurred."
+    let local_state_summary = if approval_request_count > 0 {
+        format!(
+            "Wrote durable local run, immutable-bundle, {approval_request_count} approval request records, {approval_grant_count} approval decisions, approval-presentation, event, and WorkReport artifact state; no external SideEffect occurred."
+        )
     } else {
-        "Wrote durable local run, immutable-bundle, event, and WorkReport artifact state; no approval record or external SideEffect occurred."
+        "Wrote durable local run, immutable-bundle, event, and WorkReport artifact state; no approval record or external SideEffect occurred.".to_owned()
     };
     let definitions = [
         (
@@ -3216,14 +3247,14 @@ fn first_run_artifact_sections(
             WorkReportSectionKind::PolicyGatesEvaluated,
             "Evaluated the generated workflow's declared local and approval policies through the durable local executor.".to_owned(),
         ),
-        (WorkReportSectionKind::Approvals, approval_summary.to_owned()),
+        (WorkReportSectionKind::Approvals, approval_summary),
         (
             WorkReportSectionKind::ValidationAndQualityChecks,
             "Workflow OS project validation and exact generated-contract fingerprint checks passed; repository build, test, lint, typecheck, and external checks were skipped.".to_owned(),
         ),
         (
             WorkReportSectionKind::SideEffects,
-            local_state_summary.to_owned(),
+            local_state_summary,
         ),
         (
             WorkReportSectionKind::IncompleteOrDeferredWork,
@@ -3240,7 +3271,7 @@ fn first_run_artifact_sections(
         (
             WorkReportSectionKind::OperatorHandoffNotes,
             format!(
-                "Inspect workflow-os run {} and review recommendations before authoring governed workflows.",
+                "Run workflow-os inspect {} and review recommendations before authoring governed workflows.",
                 run.snapshot.identity.run_id
             ),
         ),
@@ -3315,9 +3346,22 @@ fn persist_first_run_artifact_approval_presentation(
             "first-run governed run did not expose its approval request",
         )
     })?;
-    let requested_action = FIRST_RUN_ARTIFACT_REQUESTED_ACTION.to_owned();
-    let work_summary = FIRST_RUN_ARTIFACT_WORK_SUMMARY;
-    let approved_scope = "Resume only this immutable generated first-run workflow, rerun the bounded safe-metadata analysis, require commitment equality, and persist one create-only local report artifact.";
+    let aggregate = approval.governance_approval_binding.is_some();
+    let (requested_action, work_summary, approved_scope, why_now) = if aggregate {
+        (
+            FIRST_RUN_ARTIFACT_AGGREGATE_REQUESTED_ACTION.to_owned(),
+            FIRST_RUN_ARTIFACT_AGGREGATE_WORK_SUMMARY,
+            "Authorize only this immutable generated first-run run to pass the Core-derived aggregate governance boundary; the authored analysis step remains separately gated if its contract requires approval.",
+            "Core selected a blocking aggregate governance route for the explicitly requested first-run report artifact path.",
+        )
+    } else {
+        (
+            FIRST_RUN_ARTIFACT_STEP_REQUESTED_ACTION.to_owned(),
+            FIRST_RUN_ARTIFACT_STEP_WORK_SUMMARY,
+            "Resume only the exact authored first-run analysis step, rerun the bounded safe-metadata analysis, require commitment equality, and persist one create-only local report artifact.",
+            "The aggregate governance boundary is satisfied and the exact authored first-run analysis step now requires its own approval.",
+        )
+    };
     let strict_non_goals = vec![
         "No arbitrary source reads, repository commands, provider or network access, external writes, mock evidence, report publication, hosted storage, or workflow promotion.".to_owned(),
     ];
@@ -3327,7 +3371,6 @@ fn persist_first_run_artifact_approval_presentation(
     let validation_expectations = vec![
         "The generated workflow, skill, and policy fingerprints must remain exact; the recomputed bounded analysis commitment must equal the immutable approved commitment before execution and artifact write.".to_owned(),
     ];
-    let why_now = "The user explicitly selected the governed first-run report artifact path.";
     let next_action = format!(
         "workflow-os approve {} {} --actor user/<approver> --reason <bounded-reason>",
         run.snapshot.identity.run_id, approval.approval_id
@@ -10887,7 +10930,7 @@ Unsupported in this scaffold:
 - automatic workflow execution;
 - automatic approval decisions;
 - automatic local check execution or handler registration;
-- report artifact generation;
+- automatic report artifact generation outside the explicit `workflow-os first-run --write-report-artifact` path;
 - write-capable adapters;
 - hosted or distributed execution;
 - higher-autonomy operation.

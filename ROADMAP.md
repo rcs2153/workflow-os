@@ -86,6 +86,26 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
+A P0 acceptance-hardening blocker preempts Phase 2 after independent fresh-pull
+evaluation reproduced five defects on current `main`: parallel local-host test
+fixtures could collide, a two-gate first-run WorkReport described one approval,
+generated agent guidance contradicted the explicit first-run artifact path, the
+report emitted an invalid inspection command, and aggregate-governance and
+authored-step approvals used semantically indistinguishable presentation copy.
+The accepted fix is intentionally narrow: make fixture identity deterministic,
+make reports enumerate all approval requests and decisions, emit a valid
+copy-safe inspection command, align generated guidance with the bounded
+artifact capability, and key approval presentation scope to the actual approval
+subject. Required CI must be terminal-green for the exact reviewed commit
+before the blocker is accepted. See the [P0 implementation
+report](docs/concepts/FIRST_RUN_REPORT_TRUTH_AND_TEST_STABILITY_P0_REPORT.md)
+and [focused review](docs/concepts/FIRST_RUN_REPORT_TRUTH_AND_TEST_STABILITY_P0_REVIEW.md).
+
+After independent maintainer/security review accepts that blocker, resume the
+preserved Phase 2 Core-private GitHub read-only authority, transient-access,
+continuity, and ambiguity-recovery implementation. No Phase 2 provider access
+or public runtime exposure is authorized by this preemption.
+
 The next authorized lane is **capability-gated GitHub read-only public adoption
 and recovery planning**. The existing crate-private executor composition already
 proves one exact repository-metadata read through immutable run identity,

@@ -192,6 +192,16 @@ Testing requirements:
 - Test names must describe the behavior being protected.
 - Tests that intentionally rely on mocks must identify the production boundary that remains unverified.
 - Runtime correctness tests must verify state and event-log behavior, not just return values.
+- Parallel and repeated test execution must not depend on clock-only temporary-path uniqueness or shared mutable fixture identity.
+
+Acceptance and operator-truth requirements:
+
+- A change is not accepted until required CI is terminal-green for the exact reviewed commit.
+- WorkReports must enumerate every approval request and decision relevant to the run; a multi-gate run must not be summarized as a singular approval.
+- Distinct aggregate-governance and authored-step approval gates must present distinct scope, non-goals, and requested actions.
+- Operator handoff commands must be valid, copy-safe commands supported by the current CLI.
+- Generated scaffolds and agent instructions must describe implemented capabilities and explicit exceptions accurately; broad unsupported claims must not contradict an available bounded path.
+- Flaky acceptance evidence is a correctness defect, not an acceptable rerun condition.
 
 ## 10. Documentation
 
@@ -295,4 +305,6 @@ Before any change is considered complete, reviewers and implementers must confir
 - Security and privacy implications were considered.
 - Tests cover meaningful behavior and failure modes.
 - Documentation matches actual behavior.
+- Reports, approval presentations, generated guidance, and operator commands truthfully describe the exact accepted behavior.
+- Required CI is terminal-green for the exact reviewed commit.
 - Placeholder or incomplete work is disclosed.

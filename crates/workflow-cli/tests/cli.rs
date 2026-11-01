@@ -524,10 +524,12 @@ fn assert_authoritative_artifact_approval_handoff(output: &str) {
     assert!(output.contains("route: approval_required"));
     assert!(output.contains("approval_handoff_required: true"));
     assert!(output.contains("presentation_content_hash: "));
-    assert!(output.contains("requested_action: approve the exact authoritative workflow run"));
-    assert!(output.contains("work_summary: Execute the selected workflow"));
     assert!(output.contains(
-        "approved_scope: Resume only this immutable workflow run through the closed project-validation profile and persist its exact governed terminal WorkReport artifact"
+        "requested_action: approve the aggregate governance boundary for the exact authoritative workflow run"
+    ));
+    assert!(output.contains("work_summary: Authorize this immutable run"));
+    assert!(output.contains(
+        "approved_scope: Resume only this immutable workflow run through the closed project-validation profile and aggregate governance boundary"
     ));
     assert!(output.contains("strict_non_goals: No arbitrary commands"));
     assert!(output.contains(
@@ -1201,6 +1203,7 @@ fn init_repo_governance_rejects_contradictory_posture_before_writing() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn init_repo_governance_authoritative_scaffold_runs_and_persists_report_artifact() {
     let project = TestProject::new("repo-governance-authoritative-run");
     let init = workflow_os(
@@ -1208,6 +1211,11 @@ fn init_repo_governance_authoritative_scaffold_runs_and_persists_report_artifact
         &["init-repo-governance", "--authoritative-governance"],
     );
     assert!(init.status.success(), "{}", stderr(&init));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert!(agents.contains(
+        "automatic report artifact generation outside the explicit `workflow-os first-run --write-report-artifact` path"
+    ));
+    assert!(!agents.contains("\n- report artifact generation;"));
 
     let run = workflow_os(
         &project,
@@ -1269,6 +1277,20 @@ fn init_repo_governance_authoritative_scaffold_runs_and_persists_report_artifact
     assert!(stdout(&workflow_approve).contains("status: Completed"));
     let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
     let run_id = WorkflowRunId::new(run_id).expect("run id");
+    let presentations = backend
+        .list_approval_presentation_records(&run_id)
+        .expect("approval presentation records");
+    assert_eq!(presentations.len(), 2);
+    assert_ne!(
+        presentations[0].requested_action(),
+        presentations[1].requested_action()
+    );
+    assert!(presentations.iter().any(|record| record
+        .requested_action()
+        .contains("aggregate governance boundary")));
+    assert!(presentations.iter().any(|record| record
+        .requested_action()
+        .contains("exact authored workflow step")));
     assert_eq!(
         backend
             .list_work_report_artifacts(&run_id)
@@ -1276,6 +1298,34 @@ fn init_repo_governance_authoritative_scaffold_runs_and_persists_report_artifact
             .len(),
         1
     );
+    let artifact = backend
+        .read_work_report_artifact(
+            &run_id,
+            &WorkReportId::new(format!("report/{run_id}")).expect("report id"),
+        )
+        .expect("report artifact read")
+        .expect("report artifact persisted");
+    let approvals = artifact
+        .work_report()
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::Approvals)
+        .expect("approvals section");
+    assert!(approvals
+        .summary()
+        .is_some_and(|summary| summary.contains("2 approval requests and 2 grants")));
+    assert!(artifact
+        .work_report()
+        .handoff_notes()
+        .iter()
+        .any(|note| note
+            .summary()
+            .contains(&format!("workflow-os inspect {run_id}"))));
+    assert!(!artifact
+        .work_report()
+        .handoff_notes()
+        .iter()
+        .any(|note| note.summary().contains("workflow-os run")));
 }
 
 #[test]
@@ -1592,6 +1642,18 @@ fn first_run_explicit_artifact_path_quietly_persists_and_replays_exactly() {
         .expect("artifact read")
         .expect("artifact persisted");
     assert_eq!(artifact.report_id().as_str(), format!("report/{run_id}"));
+    let handoff = artifact
+        .work_report()
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::OperatorHandoffNotes)
+        .expect("operator handoff section");
+    assert!(handoff
+        .summary()
+        .is_some_and(|summary| summary.contains(&format!("workflow-os inspect {run_id}"))));
+    assert!(!handoff
+        .summary()
+        .is_some_and(|summary| summary.contains("workflow-os run")));
 
     let retry = workflow_os(
         &project,
@@ -5833,6 +5895,14 @@ fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
     assert!(governance_approved_out.contains("report: deferred_non_terminal"));
     assert!(governance_approved_out.contains("approval_handoff_required: true"));
     assert!(governance_approved_out.contains("presentation_id: presentation/"));
+    assert!(governance_approved_out.contains(
+        "requested_action: approve the exact authored workflow step after reviewing its step-scoped execution contract"
+    ));
+    assert!(governance_approved_out.contains(
+        "approved_scope: Resume only the exact waiting authored step in this immutable workflow run"
+    ));
+    assert!(!governance_approved_out
+        .contains("requested_action: approve the aggregate governance boundary"));
     let workflow_approval_id = approval_id(&governance_approved);
 
     let workflow_approved = workflow_os(
