@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -312,6 +312,73 @@ test("phase-start live mode fails closed when work context is missing", () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /dogfood\.helper\.work_context_missing/);
   assert.doesNotMatch(result.stdout, /approval_handoff_required: true/);
+});
+
+test("live phase-start rejects no-build even when a binary exists", async () => {
+  const fixture = await createFreshnessFixture();
+  try {
+    const result = runFixtureHelper(fixture.root, [
+      "phase-start",
+      "--phase",
+      "blocker",
+      "--no-build",
+      ...materialWorkContextArgs(),
+    ]);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /dogfood\.helper\.kernel_freshness_required/);
+    assert.match(result.stderr, /rebuilding workflow-os from the current checkout/);
+    assert.equal(readFixtureLog(fixture.kernelLog), "");
+    assert.equal(readFixtureLog(fixture.cargoLog), "");
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("live phase-start rebuilds even when the binary already exists", async () => {
+  const fixture = await createFreshnessFixture();
+  try {
+    const result = runFixtureHelper(fixture.root, [
+      "phase-start",
+      "--phase",
+      "blocker",
+      ...materialWorkContextArgs(),
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /kernel_freshness: rebuilt_from_current_checkout/);
+    assert.match(readFixtureLog(fixture.cargoLog), /build -p workflow-cli --bin workflow-os/);
+    assert.match(readFixtureLog(fixture.kernelLog), / validate$/m);
+    assert.match(readFixtureLog(fixture.kernelLog), / run dg\/blocker$/m);
+    const events = readFixtureLog(fixture.eventLog).trim().split("\n");
+    assert.equal(events.length, 4);
+    assert.equal(events[0], "cargo build -p workflow-cli --bin workflow-os");
+    assert.match(events[1], /^kernel .* validate$/);
+    assert.match(events[2], /^kernel .* --mock-all-local-skills run dg\/blocker$/);
+    assert.match(events[3], /^kernel .* dogfood approval-presentation persist /);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("failed live phase build creates no governed run or approval state", async () => {
+  const fixture = await createFreshnessFixture({ cargoExitCode: 17 });
+  try {
+    const result = runFixtureHelper(fixture.root, [
+      "phase-start",
+      "--phase",
+      "blocker",
+      ...materialWorkContextArgs(),
+    ]);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /dogfood\.helper\.command_failed/);
+    assert.match(result.stderr, /workflow-os build failed with status 17/);
+    assert.match(readFixtureLog(fixture.cargoLog), /build -p workflow-cli --bin workflow-os/);
+    assert.equal(readFixtureLog(fixture.kernelLog), "");
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
 });
 
 test("phase-start dry-run prints supplied bounded work context before approval handoff", () => {
@@ -822,4 +889,84 @@ function runHelper(args) {
     cwd: repoRoot,
     encoding: "utf8",
   });
+}
+
+function materialWorkContextArgs() {
+  return [
+    "--work-summary",
+    "Harden governed phase kernel freshness.",
+    "--approved-scope",
+    "Update the repo-local phase runner, focused tests, and docs.",
+    "--strict-non-goals",
+    "No runtime semantics, provider access, schemas, releases, or unrelated edits.",
+    "--expected-touched-surfaces",
+    "scripts/self-governed-benchmark.mjs, focused tests, and docs.",
+    "--validation-required",
+    "Focused helper tests and documentation checks.",
+    "--why-now",
+    "A stale kernel can misrepresent the governing behavior of a live phase.",
+  ];
+}
+
+async function createFreshnessFixture({ cargoExitCode = 0 } = {}) {
+  const root = await mkdtemp(join(tmpdir(), "workflow-os-kernel-freshness-"));
+  const scriptsDir = join(root, "scripts");
+  const targetDir = join(root, "target", "debug");
+  const dogfoodDir = join(root, "dogfood", "workflow-os-self-governance");
+  const toolsDir = join(root, ".tools", "cargo", "bin");
+  const cargoLog = join(root, "cargo.log");
+  const kernelLog = join(root, "kernel.log");
+  const eventLog = join(root, "events.log");
+  mkdirSync(scriptsDir, { recursive: true });
+  mkdirSync(targetDir, { recursive: true });
+  mkdirSync(dogfoodDir, { recursive: true });
+  mkdirSync(toolsDir, { recursive: true });
+  copyFileSync(helperScript, join(scriptsDir, "self-governed-benchmark.mjs"));
+
+  const kernelPath = join(targetDir, "workflow-os");
+  writeFileSync(kernelPath, fakeKernelScript(kernelLog, eventLog));
+  chmodSync(kernelPath, 0o755);
+
+  const cargoPath = join(toolsDir, "cargo");
+  writeFileSync(
+    cargoPath,
+    `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(cargoLog)}\nprintf 'cargo %s\\n' "$*" >> ${JSON.stringify(eventLog)}\nexit ${cargoExitCode}\n`,
+  );
+  chmodSync(cargoPath, 0o755);
+
+  return { root, cargoLog, kernelLog, eventLog };
+}
+
+function fakeKernelScript(kernelLog, eventLog) {
+  return `#!/bin/sh
+printf '%s\\n' "$*" >> ${JSON.stringify(kernelLog)}
+printf 'kernel %s\\n' "$*" >> ${JSON.stringify(eventLog)}
+case " $* " in
+  *" validate "*) exit 0 ;;
+  *" dogfood approval-presentation persist "*)
+    printf '%s\\n' 'approval_presentation_persisted: true' 'presentation_id: presentation/freshness' 'presentation_content_hash: freshness-hash'
+    exit 0
+    ;;
+  *" run dg/blocker "*)
+    printf '%s\\n' 'run_id: run/freshness' 'status: WaitingForApproval' 'approval_id: approval/run-freshness/blocker-approved'
+    exit 0
+    ;;
+esac
+exit 0
+`;
+}
+
+function runFixtureHelper(root, args) {
+  return spawnSync(nodeBin, [join(root, "scripts", "self-governed-benchmark.mjs"), ...args], {
+    cwd: root,
+    encoding: "utf8",
+  });
+}
+
+function readFixtureLog(path) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return "";
+  }
 }

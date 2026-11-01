@@ -86,6 +86,20 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
+A P0 governed-phase kernel-freshness blocker preempts all additional roadmap
+execution. Every live material `phase-start` must rebuild the Workflow OS CLI
+from the exact current checkout before validation, run creation, approval
+creation, or phase-state persistence. Existing binaries, timestamps, and
+version strings are not freshness evidence. Live material phase starts reject
+`--no-build`, and build failure must leave no governed run or approval state.
+Dry-run and non-phase helper behavior remain unchanged. See the [P0
+report](docs/concepts/GOVERNED_PHASE_KERNEL_FRESHNESS_P0_REPORT.md).
+
+After focused review and terminal-green acceptance of this blocker, resume the
+preserved Phase 2 Core-private GitHub read-only authority, transient-access,
+continuity, and ambiguity-recovery implementation. No provider access or public
+runtime exposure is authorized by this preemption.
+
 A P0 acceptance-hardening blocker preempts Phase 2 after independent fresh-pull
 evaluation reproduced five defects on current `main`: parallel local-host test
 fixtures could collide, a two-gate first-run WorkReport described one approval,

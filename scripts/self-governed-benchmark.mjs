@@ -16,6 +16,7 @@ const helperErrors = {
   usage: "dogfood.helper.usage",
   binaryMissing: "dogfood.helper.binary_missing",
   commandFailed: "dogfood.helper.command_failed",
+  kernelFreshnessRequired: "dogfood.helper.kernel_freshness_required",
   unsupported: "dogfood.helper.unsupported",
   workContextMissing: "dogfood.helper.work_context_missing",
 };
@@ -452,12 +453,18 @@ function runPhaseStart(parsed) {
   if (!options.dryRun) {
     assertMaterialWorkContext(workContext);
   }
-  const bin = ensureWorkflowOsBinary(options);
+  const liveMaterialPhase = !options.dryRun;
+  const bin = ensureWorkflowOsBinary(options, {
+    requireCurrentCheckoutBuild: liveMaterialPhase,
+  });
   const validateCommand = workflowBaseCommand(bin, options, false).concat("validate");
   const runCommand = buildWorkflowCommand(parsed, bin);
 
   printBoundary(options);
   printPhaseBoundary(options.phase, phase);
+  console.log(
+    `kernel_freshness: ${liveMaterialPhase ? "rebuilt_from_current_checkout" : "not_applicable_dry_run"}`,
+  );
   console.log(`validation_command: ${displayCommand(validateCommand)}`);
   console.log(`start_command: ${displayCommand(runCommand)}`);
   if (options.dryRun) {
@@ -841,12 +848,18 @@ function safeDisclosureValue(value) {
   return value.length > 160 ? `${value.slice(0, 157)}...` : value;
 }
 
-function ensureWorkflowOsBinary(options) {
+function ensureWorkflowOsBinary(options, { requireCurrentCheckoutBuild = false } = {}) {
   const bin = workflowOsPath();
-  if (existsSync(bin)) {
+  if (!requireCurrentCheckoutBuild && existsSync(bin)) {
     return bin;
   }
   if (options.noBuild) {
+    if (requireCurrentCheckoutBuild) {
+      throw helperError(
+        helperErrors.kernelFreshnessRequired,
+        "live material phase-start requires rebuilding workflow-os from the current checkout; remove --no-build",
+      );
+    }
     throw helperError(
       helperErrors.binaryMissing,
       "target/debug/workflow-os is missing; rerun without --no-build to build it",

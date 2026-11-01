@@ -95,6 +95,16 @@ npm run dogfood:benchmark -- phase-close <run-id> --phase implementation
 
 `phase-start` validates the dogfood project, starts the mapped `dg/*` workflow, prints the real `run_id`, `approval_id`, status, and next action, prints an approval command for a human or maintainer to run explicitly, emits a structured `approval_handoff` block that agents must relay before asking for approval, and emits a `copy_safe_approval_request` block for the final user-facing approval request. For live material phase starts, bounded work-context fields are required before the runner will present approval as ready. It does not approve automatically.
 
+Every live material `phase-start` first rebuilds `target/debug/workflow-os` from
+the exact current checkout. An existing binary, its version, and its filesystem
+timestamp are not accepted as freshness evidence. `--no-build` is rejected for
+live material phase starts, and a failed build stops before project validation,
+run creation, approval creation, or phase-state persistence. The successful
+path prints `kernel_freshness: rebuilt_from_current_checkout`. Dry-run phase
+starts print `kernel_freshness: not_applicable_dry_run` and do not require a
+build because they cannot create governed state. Non-phase helper commands keep
+their existing build behavior.
+
 The emitted non-scope is phase-aware. Ordinary phases prohibit schema changes.
 Only `spec-field-operationalization` may authorize schema work, and its handoff
 still excludes schema changes outside the explicitly approved spec-field scope.
@@ -122,6 +132,10 @@ npm run dogfood:benchmark -- start --run-id run/dogfood-phase
 npm run dogfood:benchmark -- validate --dry-run --no-build
 npm run dogfood:benchmark -- prompt
 ```
+
+`--no-build` is suitable only for non-live-phase helper use such as the dry-run
+example above. It cannot waive the current-checkout build required by a live
+material `phase-start`.
 
 The helper keeps approval explicit. It may extract IDs from the local kernel output so humans can see the required checkpoint, but it does not approve immediately after start, register real check handlers, run arbitrary commands, write report artifacts, or render WorkReports.
 
