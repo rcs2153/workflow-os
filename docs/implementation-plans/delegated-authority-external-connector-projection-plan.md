@@ -5,6 +5,13 @@
 P0 planning requirement, accepted after focused maintainer/security review in
 [Delegated Authority External Connector Projection Plan Review](../concepts/DELEGATED_AUTHORITY_EXTERNAL_CONNECTOR_PROJECTION_PLAN_REVIEW.md).
 
+Delivery phase 2, the first model-only immutable authorization projection and
+successor-resource binding slice, is implemented. It remains non-authorizing,
+non-persistent, and no-write. See the [model
+report](../concepts/EXTERNAL_ACTION_AUTHORIZATION_PROJECTION_MODEL_REPORT.md).
+Focused maintainer/security review of that model is next; durable transition
+lifecycle work must not begin until the review accepts or corrects the model.
+
 This plan preempts broader provider mutation families, nested harness work, and
 claims of continuous delegated-maintainer autonomy. It extends existing scoped
 runtime authority, approval-presentation proof, current-authority same-call
@@ -283,7 +290,8 @@ reconciliation.
 
 1. focused maintainer/security review of this plan: complete;
 2. model-only immutable authorization projection, closed PR transition
-   vocabulary, successor-resource binding, and validation: next;
+   vocabulary, successor-resource binding, and validation: implemented; focused
+   maintainer/security review is next;
 3. durable transition lifecycle, reservation, consumption, revocation, and
    wait-condition records composed with authorized-execution continuity;
 4. Core-private same-call verifier/use capability with injected fixture
