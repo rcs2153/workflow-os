@@ -402,12 +402,13 @@ pub use executor::{
     GitHubRepositoryMetadataFixtureExecutionResult,
 };
 pub use external_action_authorization::{
-    derive_external_action_successor_binding, ExternalActionAuthorizationProjection,
-    ExternalActionAuthorizationProjectionDefinition, ExternalActionAuthorizationProjectionId,
-    ExternalActionAuthorizationProjectionVersion, ExternalActionEvidencePredicate,
-    ExternalActionEvidencePredicateKind, ExternalActionPayloadClass,
-    ExternalActionSuccessorBinding, ExternalActionSuccessorBindingId, ExternalActionTransition,
-    ExternalActionTransitionKind, ExternalConnectorKind, GitHubExternalActionResourceBinding,
+    compute_external_action_approval_scope_commitment, derive_external_action_successor_binding,
+    ExternalActionAuthorizationProjection, ExternalActionAuthorizationProjectionDefinition,
+    ExternalActionAuthorizationProjectionId, ExternalActionAuthorizationProjectionVersion,
+    ExternalActionEvidencePredicate, ExternalActionEvidencePredicateKind,
+    ExternalActionPayloadClass, ExternalActionSuccessorBinding, ExternalActionSuccessorBindingId,
+    ExternalActionTransition, ExternalActionTransitionKind, ExternalConnectorKind,
+    GitHubExternalActionResourceBinding,
 };
 pub use governance_decision_authority_receipt::{
     GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptClaimVerificationPosture,

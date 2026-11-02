@@ -26,6 +26,8 @@ automatic continuation was added.
   authorized branch deletion.
 - Added exact, payload-free GitHub repository, base, branch, and reviewed-head
   resource binding.
+- Added a canonical approval-presentation action-scope commitment over exact
+  connector, resource, transitions, evidence, payload, and strict non-goals.
 - Added transition-specific payload-class commitments and source-bound,
   subject-bound, freshness-bound evidence predicates.
 - Added canonical transition and evidence ordering, duplicate rejection, and
@@ -38,7 +40,9 @@ automatic continuation was added.
   projections, and successor bindings.
 - Added redaction-safe debug and stable, payload-free error behavior.
 - Added focused tests covering canonicalization, substitution, tampering,
-  evidence completeness, successor identity, serde validation, and redaction.
+  evidence completeness, presented-scope binding, transition dependencies,
+  resource syntax, successor identity and timing, serde validation, and
+  redaction.
 
 ## 3. Closed Transition Vocabulary
 
@@ -67,6 +71,12 @@ material, or a reusable connector capability.
 A future Core-private admission boundary must reload current authority and
 evidence, reserve the exact transition atomically, and issue a one-use same-call
 capability. This phase does not implement or simulate that boundary.
+
+Focused review corrected the presentation boundary so the projection requires
+an exact canonical action-scope commitment covering connector, account,
+resource, transitions, evidence, payload, and strict non-goals. The helper and
+stored value still do not prove human presentation or approval. Future Core
+admission must compare them with a current persisted presentation proof.
 
 ## 5. Resource And Successor Binding
 
@@ -131,7 +141,8 @@ This phase does not implement:
 ## 9. Validation Performed
 
 - `cargo fmt --all --check` - passed.
-- Focused external-action authorization unit tests - 8 passed.
+- Focused external-action authorization unit tests - 10 passed after review
+  corrections.
 - `cargo clippy -p workflow-core --all-targets --all-features -- -D warnings` -
   passed.
 - `cargo test -p workflow-core --all-features --lib` - 629 passed.
@@ -146,6 +157,14 @@ passed immediately in isolation, and the complete 629-test library rerun passed.
 No authority-model code touches that timer path. This remains disclosed as an
 order/timing-sensitive residual test risk rather than being represented as a
 deterministic regression or silently omitted.
+
+Focused review added two model tests. After those corrections, 10 focused tests
+passed, warnings-denied Clippy passed, and the complete 631-test library suite
+passed serially. Two default-parallel runs exposed the same existing timer-path
+reliability family with three and one failures respectively; all affected tests
+passed in isolation. See the [focused
+review](EXTERNAL_ACTION_AUTHORIZATION_PROJECTION_MODEL_REVIEW.md) for the exact
+validation posture.
 
 Documentation and diff validation are completed at governed phase close and
 recorded in the phase report.
@@ -173,10 +192,13 @@ operations, or provider actions.
 
 ## 11. Recommended Next Phase
 
-Recommended next phase: **focused maintainer/security review of the external
-action authorization projection model**.
+Focused maintainer/security review accepted the corrected model. See the
+[review](EXTERNAL_ACTION_AUTHORIZATION_PROJECTION_MODEL_REVIEW.md).
 
-The review should determine whether approval-presentation scope binding,
-reference typing, evidence freshness policy, Git commit algorithm posture,
-successor derivation, dependency validation, and redaction are sufficient before
-any durable transition lifecycle or connector-admission implementation begins.
+Recommended next phase: **durable external-action transition lifecycle model and
+local state composition**.
+
+That phase should add availability, reservation, attempt, success, denial,
+wait, ambiguity, expiry, revocation, and consumption state composed with
+authorized-execution continuity. It must not add connector execution,
+credentials, live GitHub behavior, provider writes, or scheduler claims.

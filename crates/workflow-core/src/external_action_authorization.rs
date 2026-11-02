@@ -527,6 +527,8 @@ pub struct ExternalActionAuthorizationProjectionDefinition {
     pub presentation_id: ApprovalPresentationId,
     /// Exact approval-presentation content commitment.
     pub presentation_content_hash: ApprovalPresentationContentHash,
+    /// Exact action-scope commitment carried by the approval presentation.
+    pub approval_presentation_scope_commitment: SpecContentHash,
     /// Scoped capability-grant reference.
     pub capability_grant_id: CapabilityGrantId,
     /// Policy-decision event reference.
@@ -553,6 +555,8 @@ pub struct ExternalActionAuthorizationProjectionDefinition {
     pub delegate: ActorId,
     /// Exact delegation-scope commitment.
     pub delegation_scope_commitment: SpecContentHash,
+    /// Exact strict non-goals commitment included in the approved scope.
+    pub strict_non_goals_commitment: SpecContentHash,
     /// Projection issuance time.
     pub issued_at: Timestamp,
     /// Earliest permitted use time.
@@ -592,6 +596,7 @@ struct ProjectionCommitmentInput<'a> {
     approval_reference_id: &'a ApprovalReferenceId,
     presentation_id: &'a ApprovalPresentationId,
     presentation_content_hash: &'a ApprovalPresentationContentHash,
+    approval_presentation_scope_commitment: &'a SpecContentHash,
     capability_grant_id: &'a CapabilityGrantId,
     policy_decision_event_id: &'a EventId,
     governance_assessment_commitment: &'a SpecContentHash,
@@ -605,6 +610,7 @@ struct ProjectionCommitmentInput<'a> {
     delegator: &'a ActorId,
     delegate: &'a ActorId,
     delegation_scope_commitment: &'a SpecContentHash,
+    strict_non_goals_commitment: &'a SpecContentHash,
     issued_at: Timestamp,
     not_before: Timestamp,
     expires_at: Timestamp,
@@ -623,6 +629,7 @@ pub struct ExternalActionAuthorizationProjection {
     approval_reference_id: ApprovalReferenceId,
     presentation_id: ApprovalPresentationId,
     presentation_content_hash: ApprovalPresentationContentHash,
+    approval_presentation_scope_commitment: SpecContentHash,
     capability_grant_id: CapabilityGrantId,
     policy_decision_event_id: EventId,
     governance_assessment_commitment: SpecContentHash,
@@ -636,6 +643,7 @@ pub struct ExternalActionAuthorizationProjection {
     delegator: ActorId,
     delegate: ActorId,
     delegation_scope_commitment: SpecContentHash,
+    strict_non_goals_commitment: SpecContentHash,
     issued_at: Timestamp,
     not_before: Timestamp,
     expires_at: Timestamp,
@@ -653,10 +661,10 @@ impl ExternalActionAuthorizationProjection {
     pub fn new(
         mut definition: ExternalActionAuthorizationProjectionDefinition,
     ) -> Result<Self, WorkflowOsError> {
-        validate_projection_definition(&definition)?;
         definition
             .transitions
             .sort_by_key(ExternalActionTransition::kind);
+        validate_projection_definition(&definition)?;
         let projection_commitment = compute_projection_commitment(&definition)?;
         Ok(Self {
             version: ExternalActionAuthorizationProjectionVersion::V1,
@@ -669,6 +677,8 @@ impl ExternalActionAuthorizationProjection {
             approval_reference_id: definition.approval_reference_id,
             presentation_id: definition.presentation_id,
             presentation_content_hash: definition.presentation_content_hash,
+            approval_presentation_scope_commitment: definition
+                .approval_presentation_scope_commitment,
             capability_grant_id: definition.capability_grant_id,
             policy_decision_event_id: definition.policy_decision_event_id,
             governance_assessment_commitment: definition.governance_assessment_commitment,
@@ -682,6 +692,7 @@ impl ExternalActionAuthorizationProjection {
             delegator: definition.delegator,
             delegate: definition.delegate,
             delegation_scope_commitment: definition.delegation_scope_commitment,
+            strict_non_goals_commitment: definition.strict_non_goals_commitment,
             issued_at: definition.issued_at,
             not_before: definition.not_before,
             expires_at: definition.expires_at,
@@ -706,6 +717,12 @@ impl ExternalActionAuthorizationProjection {
     /// Returns the complete immutable projection commitment.
     pub const fn projection_commitment(&self) -> &SpecContentHash {
         &self.projection_commitment
+    }
+
+    #[must_use]
+    /// Returns the exact action-scope commitment bound into the presentation.
+    pub const fn approval_presentation_scope_commitment(&self) -> &SpecContentHash {
+        &self.approval_presentation_scope_commitment
     }
 
     #[must_use]
@@ -778,6 +795,7 @@ impl<'de> Deserialize<'de> for ExternalActionAuthorizationProjection {
             approval_reference_id: ApprovalReferenceId,
             presentation_id: ApprovalPresentationId,
             presentation_content_hash: ApprovalPresentationContentHash,
+            approval_presentation_scope_commitment: SpecContentHash,
             capability_grant_id: CapabilityGrantId,
             policy_decision_event_id: EventId,
             governance_assessment_commitment: SpecContentHash,
@@ -791,6 +809,7 @@ impl<'de> Deserialize<'de> for ExternalActionAuthorizationProjection {
             delegator: ActorId,
             delegate: ActorId,
             delegation_scope_commitment: SpecContentHash,
+            strict_non_goals_commitment: SpecContentHash,
             issued_at: Timestamp,
             not_before: Timestamp,
             expires_at: Timestamp,
@@ -809,6 +828,7 @@ impl<'de> Deserialize<'de> for ExternalActionAuthorizationProjection {
             approval_reference_id: wire.approval_reference_id,
             presentation_id: wire.presentation_id,
             presentation_content_hash: wire.presentation_content_hash,
+            approval_presentation_scope_commitment: wire.approval_presentation_scope_commitment,
             capability_grant_id: wire.capability_grant_id,
             policy_decision_event_id: wire.policy_decision_event_id,
             governance_assessment_commitment: wire.governance_assessment_commitment,
@@ -822,6 +842,7 @@ impl<'de> Deserialize<'de> for ExternalActionAuthorizationProjection {
             delegator: wire.delegator,
             delegate: wire.delegate,
             delegation_scope_commitment: wire.delegation_scope_commitment,
+            strict_non_goals_commitment: wire.strict_non_goals_commitment,
             issued_at: wire.issued_at,
             not_before: wire.not_before,
             expires_at: wire.expires_at,
@@ -985,6 +1006,12 @@ pub fn derive_external_action_successor_binding(
             "external action successor pull request number is invalid",
         ));
     }
+    if observed_at < projection.not_before || observed_at > projection.expires_at {
+        return Err(projection_error(
+            "successor.observation_time_invalid",
+            "external action successor observation is outside the authorized window",
+        ));
+    }
     let create = projection
         .transition(ExternalActionTransitionKind::GitHubPullRequestCreateDraft)
         .ok_or_else(|| {
@@ -1012,6 +1039,55 @@ pub fn derive_external_action_successor_binding(
         reviewed_head_sha: projection.resource().reviewed_head_sha().to_owned(),
         observed_at,
     })
+}
+
+/// Computes the canonical approval scope for one closed external-action set.
+///
+/// The returned commitment is intended to be rendered into and recovered from
+/// approval-presentation context. It is not authority and does not prove that a
+/// presentation was current, persisted, or approved.
+///
+/// # Errors
+///
+/// Returns an error when connector metadata, resource binding, transition
+/// vocabulary, or transition dependencies are invalid.
+pub fn compute_external_action_approval_scope_commitment(
+    connector_kind: ExternalConnectorKind,
+    connector_account_reference: &str,
+    resource: &GitHubExternalActionResourceBinding,
+    transitions: &[ExternalActionTransition],
+    strict_non_goals_commitment: &SpecContentHash,
+) -> Result<SpecContentHash, WorkflowOsError> {
+    #[derive(Serialize)]
+    struct ApprovalScopeInput<'a> {
+        domain: &'static str,
+        connector_kind: ExternalConnectorKind,
+        connector_account_reference: &'a str,
+        resource: &'a GitHubExternalActionResourceBinding,
+        transitions: &'a [ExternalActionTransition],
+        strict_non_goals_commitment: &'a SpecContentHash,
+    }
+
+    validate_connector_account_reference(connector_account_reference)?;
+    resource.validate()?;
+    let mut canonical_transitions = transitions.to_vec();
+    canonical_transitions.sort_by_key(ExternalActionTransition::kind);
+    validate_transition_set(&canonical_transitions)?;
+    let bytes = serde_json::to_vec(&ApprovalScopeInput {
+        domain: "workflow-os/external-action-approval-scope/v1",
+        connector_kind,
+        connector_account_reference,
+        resource,
+        transitions: &canonical_transitions,
+        strict_non_goals_commitment,
+    })
+    .map_err(|_| {
+        projection_error(
+            "approval_scope.commitment_failed",
+            "external action approval scope commitment failed",
+        )
+    })?;
+    Ok(SpecContentHash::from_bytes(bytes))
 }
 
 fn compute_successor_binding_commitment(
@@ -1067,10 +1143,7 @@ fn validate_projection_definition(
             "external action authorization projection sensitivity must be known",
         ));
     }
-    validate_reference(
-        "connector account reference",
-        &definition.connector_account_reference,
-    )?;
+    validate_connector_account_reference(&definition.connector_account_reference)?;
     definition.resource.validate()?;
     validate_actor("actor", &definition.actor)?;
     validate_actor("delegator", &definition.delegator)?;
@@ -1081,18 +1154,37 @@ fn validate_projection_definition(
             "external action actor must match the delegated actor",
         ));
     }
-    if definition.transitions.is_empty() || definition.transitions.len() > MAX_TRANSITIONS {
+    validate_transition_set(&definition.transitions)?;
+    let expected_scope_commitment = compute_external_action_approval_scope_commitment(
+        definition.connector_kind,
+        &definition.connector_account_reference,
+        &definition.resource,
+        &definition.transitions,
+        &definition.strict_non_goals_commitment,
+    )?;
+    if expected_scope_commitment != definition.approval_presentation_scope_commitment {
+        return Err(projection_error(
+            "approval_scope.mismatch",
+            "external action approval presentation scope does not match the projected action set",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_transition_set(
+    transitions: &[ExternalActionTransition],
+) -> Result<(), WorkflowOsError> {
+    if transitions.is_empty() || transitions.len() > MAX_TRANSITIONS {
         return Err(projection_error(
             "transition.count_invalid",
             "external action authorization projection transition count is invalid",
         ));
     }
-    let kinds = definition
-        .transitions
+    let kinds = transitions
         .iter()
         .map(ExternalActionTransition::kind)
         .collect::<BTreeSet<_>>();
-    if kinds.len() != definition.transitions.len() {
+    if kinds.len() != transitions.len() {
         return Err(projection_error(
             "transition.duplicate",
             "external action authorization projection has duplicate transitions",
@@ -1118,6 +1210,15 @@ fn validate_projection_definition(
             "external action branch deletion requires squash merge authority",
         ));
     }
+    if kinds.contains(&ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead)
+        && !kinds
+            .contains(&ExternalActionTransitionKind::GitHubPullRequestMarkReadyAfterTerminalGreen)
+    {
+        return Err(projection_error(
+            "transition.ready_dependency_missing",
+            "external action squash merge requires ready-transition authority",
+        ));
+    }
     Ok(())
 }
 
@@ -1132,6 +1233,7 @@ fn compute_projection_commitment(
         approval_reference_id: &definition.approval_reference_id,
         presentation_id: &definition.presentation_id,
         presentation_content_hash: &definition.presentation_content_hash,
+        approval_presentation_scope_commitment: &definition.approval_presentation_scope_commitment,
         capability_grant_id: &definition.capability_grant_id,
         policy_decision_event_id: &definition.policy_decision_event_id,
         governance_assessment_commitment: &definition.governance_assessment_commitment,
@@ -1145,6 +1247,7 @@ fn compute_projection_commitment(
         delegator: &definition.delegator,
         delegate: &definition.delegate,
         delegation_scope_commitment: &definition.delegation_scope_commitment,
+        strict_non_goals_commitment: &definition.strict_non_goals_commitment,
         issued_at: definition.issued_at,
         not_before: definition.not_before,
         expires_at: definition.expires_at,
@@ -1232,7 +1335,19 @@ fn validate_repository(value: &str) -> Result<(), WorkflowOsError> {
     let mut parts = value.split('/');
     let owner = parts.next().unwrap_or_default();
     let repository = parts.next().unwrap_or_default();
-    if owner.is_empty() || repository.is_empty() || parts.next().is_some() {
+    let valid_owner = !owner.is_empty()
+        && !owner.starts_with('-')
+        && !owner.ends_with('-')
+        && owner
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-');
+    let valid_repository = !repository.is_empty()
+        && repository != "."
+        && repository != ".."
+        && repository
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
+    if !valid_owner || !valid_repository || parts.next().is_some() {
         return Err(projection_error(
             "resource.repository_invalid",
             "external action repository is invalid",
@@ -1244,15 +1359,36 @@ fn validate_repository(value: &str) -> Result<(), WorkflowOsError> {
 fn validate_git_ref(label: &'static str, value: &str) -> Result<(), WorkflowOsError> {
     validate_reference(label, value)?;
     if value.starts_with('/')
+        || value.starts_with('-')
         || value.ends_with('/')
         || value.ends_with('.')
+        || value == "@"
         || value.contains("..")
         || value.contains("@{")
         || value.contains("//")
+        || value.bytes().any(|byte| {
+            byte.is_ascii_whitespace()
+                || byte.is_ascii_control()
+                || matches!(byte, b'~' | b'^' | b':' | b'?' | b'*' | b'[' | b'\\')
+        })
+        || value.split('/').any(|component| {
+            component.starts_with('.') || component.to_ascii_lowercase().ends_with(".lock")
+        })
     {
         return Err(projection_error(
             "resource.ref_invalid",
             "external action Git ref is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_connector_account_reference(value: &str) -> Result<(), WorkflowOsError> {
+    validate_reference("connector account reference", value)?;
+    if value.trim() != value || value.bytes().any(|byte| byte.is_ascii_whitespace()) {
+        return Err(projection_error(
+            "connector.account_reference_invalid",
+            "external action connector account reference is invalid",
         ));
     }
     Ok(())
@@ -1366,6 +1502,31 @@ mod tests {
     }
 
     fn definition() -> ExternalActionAuthorizationProjectionDefinition {
+        let connector_kind = ExternalConnectorKind::GitHub;
+        let connector_account_reference = "github-installation/workflow-os".to_owned();
+        let resource = GitHubExternalActionResourceBinding::new(
+            "rcs2153/workflow-os",
+            "main",
+            "1111111111111111111111111111111111111111",
+            "codex/external-action-model",
+            "2222222222222222222222222222222222222222",
+        )
+        .expect("resource");
+        let transitions = vec![
+            transition(ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead),
+            transition(ExternalActionTransitionKind::GitHubPullRequestCreateDraft),
+            transition(ExternalActionTransitionKind::GitHubPullRequestMarkReadyAfterTerminalGreen),
+        ];
+        let strict_non_goals_commitment = hash("strict-non-goals");
+        let approval_presentation_scope_commitment =
+            compute_external_action_approval_scope_commitment(
+                connector_kind,
+                &connector_account_reference,
+                &resource,
+                &transitions,
+                &strict_non_goals_commitment,
+            )
+            .expect("approval scope");
         ExternalActionAuthorizationProjectionDefinition {
             workflow_id: WorkflowId::new("dg/pr").expect("workflow"),
             run_id: WorkflowRunId::new("run/external-action").expect("run"),
@@ -1377,39 +1538,40 @@ mod tests {
                 hash("presentation").as_str(),
             )
             .expect("presentation hash"),
+            approval_presentation_scope_commitment,
             capability_grant_id: CapabilityGrantId::new("grant/external-action").expect("grant"),
             policy_decision_event_id: EventId::new("event/external-action").expect("event"),
             governance_assessment_commitment: hash("governance"),
             execution_window_id: AuthorizedExecutionWindowId::new("window/external-action")
                 .expect("window"),
             immutable_run_bundle_commitment: hash("bundle"),
-            connector_kind: ExternalConnectorKind::GitHub,
-            connector_account_reference: "github-installation/workflow-os".to_owned(),
-            resource: GitHubExternalActionResourceBinding::new(
-                "rcs2153/workflow-os",
-                "main",
-                "1111111111111111111111111111111111111111",
-                "codex/external-action-model",
-                "2222222222222222222222222222222222222222",
-            )
-            .expect("resource"),
-            transitions: vec![
-                transition(ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead),
-                transition(ExternalActionTransitionKind::GitHubPullRequestCreateDraft),
-                transition(
-                    ExternalActionTransitionKind::GitHubPullRequestMarkReadyAfterTerminalGreen,
-                ),
-            ],
+            connector_kind,
+            connector_account_reference,
+            resource,
+            transitions,
             actor: ActorId::new("actor/delegated-maintainer").expect("actor"),
             delegator: ActorId::new("actor/repository-owner").expect("delegator"),
             delegate: ActorId::new("actor/delegated-maintainer").expect("delegate"),
             delegation_scope_commitment: hash("delegation"),
+            strict_non_goals_commitment,
             issued_at: time("2026-11-01T20:00:00Z"),
             not_before: time("2026-11-01T20:00:00Z"),
             expires_at: time("2026-11-01T22:00:00Z"),
             revocation_source_commitment: hash("revocation-source"),
             sensitivity: WorkReportSensitivity::Internal,
         }
+    }
+
+    fn refresh_approval_scope(definition: &mut ExternalActionAuthorizationProjectionDefinition) {
+        definition.approval_presentation_scope_commitment =
+            compute_external_action_approval_scope_commitment(
+                definition.connector_kind,
+                &definition.connector_account_reference,
+                &definition.resource,
+                &definition.transitions,
+                &definition.strict_non_goals_commitment,
+            )
+            .expect("approval scope");
     }
 
     #[test]
@@ -1508,9 +1670,7 @@ mod tests {
             Value::String("3333333333333333333333333333333333333333".to_owned());
         let error = serde_json::from_value::<ExternalActionAuthorizationProjection>(value)
             .expect_err("changed head must fail");
-        assert!(error
-            .to_string()
-            .contains("projection commitment is invalid"));
+        assert!(error.to_string().contains("projection is invalid"));
     }
 
     #[test]
@@ -1536,6 +1696,7 @@ mod tests {
             "3333333333333333333333333333333333333333",
         )
         .expect("changed resource");
+        refresh_approval_scope(&mut changed);
         let changed =
             ExternalActionAuthorizationProjection::new(changed).expect("changed projection");
         assert_eq!(
@@ -1587,6 +1748,88 @@ mod tests {
                 .expect_err("changed PR")
                 .to_string()
                 .contains("binding commitment is invalid")
+        );
+    }
+
+    #[test]
+    fn projection_requires_exact_presented_scope_and_ready_before_merge() {
+        let mut mismatched_scope = definition();
+        mismatched_scope.approval_presentation_scope_commitment = hash("different-scope");
+        assert_eq!(
+            ExternalActionAuthorizationProjection::new(mismatched_scope)
+                .expect_err("scope mismatch")
+                .code(),
+            "external_action_authorization.approval_scope.mismatch"
+        );
+
+        let mut changed_non_goals = definition();
+        changed_non_goals.strict_non_goals_commitment = hash("different-non-goals");
+        assert_eq!(
+            ExternalActionAuthorizationProjection::new(changed_non_goals)
+                .expect_err("non-goals mismatch")
+                .code(),
+            "external_action_authorization.approval_scope.mismatch"
+        );
+
+        let mut missing_ready = definition();
+        missing_ready.transitions.retain(|transition| {
+            transition.kind()
+                != ExternalActionTransitionKind::GitHubPullRequestMarkReadyAfterTerminalGreen
+        });
+        assert_eq!(
+            ExternalActionAuthorizationProjection::new(missing_ready)
+                .expect_err("ready transition dependency")
+                .code(),
+            "external_action_authorization.transition.ready_dependency_missing"
+        );
+    }
+
+    #[test]
+    fn resource_and_successor_time_validation_fail_closed() {
+        for repository in [
+            "owner with space/repository",
+            "-owner/repository",
+            "owner/repo$",
+        ] {
+            assert_eq!(
+                GitHubExternalActionResourceBinding::new(
+                    repository,
+                    "main",
+                    "1111111111111111111111111111111111111111",
+                    "feature",
+                    "2222222222222222222222222222222222222222",
+                )
+                .expect_err("invalid repository")
+                .code(),
+                "external_action_authorization.resource.repository_invalid"
+            );
+        }
+        for head_ref in ["feature branch", "-feature", "feature.lock", "feature~1"] {
+            assert_eq!(
+                GitHubExternalActionResourceBinding::new(
+                    "owner/repository",
+                    "main",
+                    "1111111111111111111111111111111111111111",
+                    head_ref,
+                    "2222222222222222222222222222222222222222",
+                )
+                .expect_err("invalid ref")
+                .code(),
+                "external_action_authorization.resource.ref_invalid"
+            );
+        }
+
+        let projection =
+            ExternalActionAuthorizationProjection::new(definition()).expect("projection");
+        assert_eq!(
+            derive_external_action_successor_binding(
+                &projection,
+                676,
+                time("2026-11-01T22:00:01Z"),
+            )
+            .expect_err("successor after expiry")
+            .code(),
+            "external_action_authorization.successor.observation_time_invalid"
         );
     }
 

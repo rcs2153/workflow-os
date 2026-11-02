@@ -189,9 +189,13 @@ canonicalization, deterministic commitment, validated deserialization, and
 redaction-safe diagnostics. It remains non-authorizing, non-persistent, and
 no-write. See the [model
 report](docs/concepts/EXTERNAL_ACTION_AUTHORIZATION_PROJECTION_MODEL_REPORT.md).
-Focused maintainer/security review of the model is next. Durable transition
-lifecycle, connector execution, credentials, live GitHub behavior, provider
-writes, scheduler claims, and any parallel permission system remain excluded.
+Focused maintainer/security review accepted the model after correcting exact
+approval-scope/non-goal binding, ready-before-merge dependency, GitHub resource
+validation, and successor observation timing. See the [focused
+review](docs/concepts/EXTERNAL_ACTION_AUTHORIZATION_PROJECTION_MODEL_REVIEW.md).
+Durable transition lifecycle model and local state composition is next.
+Connector execution, credentials, live GitHub behavior, provider writes,
+scheduler claims, and any parallel permission system remain excluded.
 See the
 [post-0.3 queue selection
 report](docs/concepts/POST_0_3_ROADMAP_QUEUE_SELECTION_REPORT.md) and the
