@@ -24,6 +24,13 @@ Before any release:
 6. Publish artifacts only after maintainers approve.
 7. Announce known limitations and experimental features.
 
+Native archive layout, target verification, install, uninstall, checksum, and
+state-preservation requirements are defined in
+[Native Archive Contract](NATIVE_ARCHIVE_CONTRACT.md). The launch-admission
+Phase 1 rehearsal produces provisional archives only. Final candidates must be
+rebuilt from the exact post-composition commit and require a separate governed
+publication decision.
+
 For the v0 readiness baseline, see [V0_READINESS.md](V0_READINESS.md) and [V0_KNOWN_LIMITATIONS.md](V0_KNOWN_LIMITATIONS.md).
 
 ## Public Preview Releases

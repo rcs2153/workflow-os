@@ -271,6 +271,18 @@ local archives and checksums for the selected platforms. Do not publish them.
 Validate version identity and clean-state behavior, but do not treat these
 pre-composition artifacts as clean-room candidates.
 
+Implementation status: complete subject to terminal-green exact-head CI. The
+provisional archive contract selects Apple Silicon macOS and musl Linux x86-64,
+binds packages to exact source commits, verifies target and version on native
+hosts, preserves local state during uninstall, and refuses publication posture.
+The local macOS rehearsal passed; the native Linux rehearsal runs as a
+non-uploading CI gate. Final candidates remain deferred until the exact
+post-Phase-2 commit. See the [Phase 1
+report](../concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_1_REPORT.md) and [native
+archive contract](../release/NATIVE_ARCHIVE_CONTRACT.md). The focused
+maintainer review is accepted pending terminal-green exact-head CI; see the
+[Phase 1 review](../concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_1_REVIEW.md).
+
 ### Phase 2: Golden-Path Composition
 
 Implement only the missing CLI composition required for the selected operation
