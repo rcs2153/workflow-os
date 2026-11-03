@@ -420,6 +420,7 @@ impl LocalRead {
             revision: self.revision,
             posture,
             source,
+            accepted_intents: Vec::new(),
             accounting,
         })
     }
