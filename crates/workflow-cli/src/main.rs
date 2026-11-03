@@ -47,8 +47,8 @@ use workflow_core::{
     GovernanceDisclosureRequirement, GovernanceDisclosureSensitivity, GovernanceDisclosureSurface,
     GovernanceDisclosureSurfaceKind, GovernanceExecutionDisposition, GovernanceStrictnessProfile,
     GovernedContinuationBrief, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
-    ImmutableRunBundleVersion, JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig,
-    LifecycleStatus, LoadedSpec, LocalApprovalDecisionRequest,
+    ImmutableRunBundleStore, ImmutableRunBundleVersion, JiraFixtureClient, JiraReadOnlyAdapter,
+    JiraReadOnlyConfig, LifecycleStatus, LoadedSpec, LocalApprovalDecisionRequest,
     LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
     LocalApprovalPresentationResolvedContextDecisionRequest,
     LocalApprovalProofMarkerAuditProjectionStore, LocalCheckResultId, LocalCheckResultReference,
@@ -2415,8 +2415,29 @@ fn status_from_backend<B: StateBackend>(
 
 fn next_action_command(invocation: &Invocation, run_id: &str) -> Result<(), WorkflowOsError> {
     let run_id = WorkflowRunId::new(run_id)?;
+    if github_repository_metadata_database_path(invocation).is_file() {
+        let backend = github_repository_metadata_backend(invocation)?;
+        if !backend.read_events(&run_id)?.is_empty() {
+            return next_action_from_sources(invocation, &backend, &backend, &run_id, true);
+        }
+    }
     let backend = local_backend(invocation)?;
-    let run = backend.rehydrate_run(&run_id)?;
+    let bundle_store = authoritative_immutable_bundle_store(invocation);
+    next_action_from_sources(invocation, &backend, &bundle_store, &run_id, false)
+}
+
+fn next_action_from_sources<B, S>(
+    invocation: &Invocation,
+    backend: &B,
+    bundle_store: &S,
+    run_id: &WorkflowRunId,
+    provider_fixture: bool,
+) -> Result<(), WorkflowOsError>
+where
+    B: StateBackend,
+    S: ImmutableRunBundleStore,
+{
+    let run = backend.rehydrate_run(run_id)?;
     let binding = run
         .snapshot
         .identity
@@ -2429,13 +2450,25 @@ fn next_action_command(invocation: &Invocation, run_id: &str) -> Result<(), Work
                 "next-action preview requires an immutable run bundle",
             )
         })?;
-    let store = authoritative_immutable_bundle_store(invocation);
-    let bundle = store.read_bundle(&run_id, binding.bundle_id())?;
+    let bundle = bundle_store.read_exact_bundle(run_id, binding.bundle_id())?;
     let brief = preview_governed_continuation(&run, &bundle)?;
     if invocation.json {
-        println!("{}", render_next_action_json(&brief)?);
+        let rendered = render_next_action_json(&brief)?;
+        if provider_fixture {
+            println!(
+                "{}",
+                append_github_repository_metadata_json_fields(&rendered)
+            );
+        } else {
+            println!("{rendered}");
+        }
     } else {
         print!("{}", render_next_action_human(&brief));
+        if provider_fixture {
+            println!("provider_operation: github.repository.metadata");
+            println!("provider_mode: fixture");
+            println!("live_transport: disabled");
+        }
     }
     Ok(())
 }

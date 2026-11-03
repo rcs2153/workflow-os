@@ -92,6 +92,49 @@ fn copy_dir(source: &Path, destination: &Path) {
     }
 }
 
+fn assert_fixture_next_action_rejects_non_running(project: &Path, state: &Path, run_id: &str) {
+    let inspect_before = workflow_os(project, state, &["inspect", run_id]);
+    assert!(
+        inspect_before.status.success(),
+        "{}",
+        stderr(&inspect_before)
+    );
+    let next_action = workflow_os(project, state, &["next-action", run_id]);
+    assert!(!next_action.status.success());
+    assert!(stderr(&next_action).contains("executor.governed_continuation.run.not_running"));
+    assert!(!stderr(&next_action).contains("runtime.events.empty"));
+    let inspect_after = workflow_os(project, state, &["inspect", run_id]);
+    assert_eq!(stdout(&inspect_after), stdout(&inspect_before));
+}
+
+fn assert_fixture_running_next_action(project: &Path, state: &Path, run_id: &str) {
+    let inspect_before = workflow_os(project, state, &["inspect", run_id]);
+    assert!(
+        inspect_before.status.success(),
+        "{}",
+        stderr(&inspect_before)
+    );
+    let next_action = workflow_os(project, state, &["next-action", run_id]);
+    assert!(next_action.status.success(), "{}", stderr(&next_action));
+    let output = stdout(&next_action);
+    assert!(output.contains("allowed_next_action: invoke_current_step_skill"));
+    assert!(output.contains("provider_operation: github.repository.metadata"));
+    assert!(output.contains("provider_mode: fixture"));
+    assert!(output.contains("live_transport: disabled"));
+
+    let json = workflow_os(project, state, &["--json", "next-action", run_id]);
+    assert!(json.status.success(), "{}", stderr(&json));
+    let value: serde_json::Value =
+        serde_json::from_str(stdout(&json).trim()).expect("next-action JSON parses");
+    assert_eq!(value["allowed_next_action"], "invoke_current_step_skill");
+    assert_eq!(value["provider_operation"], "github.repository.metadata");
+    assert_eq!(value["provider_mode"], "fixture");
+    assert_eq!(value["live_transport"], "disabled");
+
+    let inspect_after = workflow_os(project, state, &["inspect", run_id]);
+    assert_eq!(stdout(&inspect_after), stdout(&inspect_before));
+}
+
 #[test]
 fn repository_metadata_fixture_completes_through_public_cli_without_network() {
     let state = state_root("repository-metadata-fixture");
@@ -110,6 +153,7 @@ fn repository_metadata_fixture_completes_through_public_cli_without_network() {
     assert!(waiting_output.contains("A WorkReport artifact, live transport"));
     let run_id = run_id(&waiting);
     let approval_id = approval_id(&waiting);
+    assert_fixture_next_action_rejects_non_running(&project, &state, &run_id);
 
     let approved = workflow_os(
         &project,
@@ -126,6 +170,7 @@ fn repository_metadata_fixture_completes_through_public_cli_without_network() {
     );
     assert!(approved.status.success(), "{}", stderr(&approved));
     assert!(stdout(&approved).contains("status: Running"));
+    assert_fixture_running_next_action(&project, &state, &run_id);
 
     let completed = workflow_os(
         &project,
@@ -140,6 +185,7 @@ fn repository_metadata_fixture_completes_through_public_cli_without_network() {
     assert!(completed.status.success(), "{}", stderr(&completed));
     assert!(stdout(&completed).contains("status: Completed"));
     assert!(stdout(&completed).contains("provider_posture: completed"));
+    assert_fixture_next_action_rejects_non_running(&project, &state, &run_id);
 
     let status = workflow_os(&project, &state, &["status", &run_id]);
     assert!(status.status.success(), "{}", stderr(&status));

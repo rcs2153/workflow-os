@@ -277,14 +277,18 @@ recorded in the [P1 implementation
 report](docs/concepts/GENERATED_AGENT_GUIDANCE_PORTABILITY_P1_REPORT.md) and
 [focused review](docs/concepts/GENERATED_AGENT_GUIDANCE_PORTABILITY_P1_REVIEW.md).
 
-The remaining authoritative P1 queue item is provider-fixture-aware
-`next-action` routing: public GitHub fixture runs must route `next-action`
-through the same provider-aware state path as `status` and `inspect`. This is a
-bounded acceptance fix, not authorization to broaden the continuation
-implementation.
+The remaining authoritative P1 queue item, provider-fixture-aware `next-action`
+routing, is implemented and accepted after focused maintainer review. Public
+GitHub fixture runs now route `next-action` through the same fixture SQLite
+state and immutable-bundle source used by `status` and `inspect`, while
+ordinary local runs preserve their existing backend path. The bounded
+correction is recorded in the [P1 implementation
+report](docs/concepts/PROVIDER_FIXTURE_NEXT_ACTION_ROUTING_P1_REPORT.md) and
+[focused review](docs/concepts/PROVIDER_FIXTURE_NEXT_ACTION_ROUTING_P1_REVIEW.md).
+This is an acceptance fix, not a broadening of continuation behavior.
 
-The previously active **capability-gated GitHub read-only public adoption and
-recovery** lane is paused at its accepted public fixture milestone. The existing
+The **capability-gated GitHub read-only public adoption and recovery** lane now
+resumes from its accepted public fixture milestone. The existing
 crate-private executor composition already proves one exact repository-metadata
 read through immutable run identity,
 current source-backed authority, durable continuity, one-time continuation,
@@ -341,11 +345,11 @@ recovery disclosure, and terminal replay without live transport. See the
 [focused review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_FIXTURE_ACTIVATION_REVIEW.md),
 and the preceding [Phase 2 focused
 review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CORE_PRIVATE_AUTHORITY_LIFECYCLE_REVIEW.md).
-Core-private same-call connector authority verification resumes only after the
-authoritative post-compaction understanding lane meets the six exit criteria
-above. Connector execution, credentials, live GitHub behavior, provider writes,
-scheduler claims, and any parallel permission system remain excluded while the
-lane is paused.
+The authoritative post-compaction understanding lane and its two fresh-rerun
+P1 acceptance fixes are complete. Core-private same-call connector authority
+verification with a fixture connector is therefore the next authorized
+increment. Connector credentials, live GitHub behavior, provider writes,
+scheduler claims, and any parallel permission system remain excluded.
 
 Before broader provider mutation families, nested harness work, or claims of
 continuous delegated-maintainer autonomy, complete the P0 [Delegated Authority
