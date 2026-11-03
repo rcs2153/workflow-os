@@ -14,27 +14,30 @@ use serde::Serialize;
 
 use crate::continuation_context::{
     canonical_commitment, collector_expectation_for, derive_continuation_context,
-    empty_accounting_claims_for, ContinuationClaimAccountingEntry,
-    ContinuationClaimAccountingOutcome, ContinuationContextAccess,
-    ContinuationContextAuthorityDomain, ContinuationContextCollectorExpectation,
-    ContinuationContextCollectorOutcome, ContinuationContextDecision,
-    ContinuationContextDecisionInput, ContinuationContextFreshness, ContinuationContextIntegrity,
-    ContinuationContextPurpose, ContinuationContextScope, ContinuationContextSensitivity,
-    ContinuationContextSourceClass, ContinuationContextSourceCoverageEntry,
-    ContinuationContextSourceDefinition, ContinuationContextSourceId,
-    ContinuationUnderstandingCandidate, ContinuationUnderstandingClaimKind,
+    empty_accounting_claims_for, AcceptedIntentKind, AcceptedIntentSupersession,
+    ContinuationClaimAccountingEntry, ContinuationClaimAccountingOutcome,
+    ContinuationContextAccess, ContinuationContextAuthorityDomain,
+    ContinuationContextCollectorExpectation, ContinuationContextCollectorOutcome,
+    ContinuationContextDecision, ContinuationContextDecisionInput, ContinuationContextFreshness,
+    ContinuationContextIntegrity, ContinuationContextPurpose, ContinuationContextScope,
+    ContinuationContextSensitivity, ContinuationContextSourceClass,
+    ContinuationContextSourceCoverageEntry, ContinuationContextSourceDefinition,
+    ContinuationContextSourceId, ContinuationUnderstandingCandidate,
+    ContinuationUnderstandingClaimKind,
 };
 use crate::{ActorId, SpecContentHash, WorkflowOsError};
 
 mod accepted_intent;
 mod delivery;
 mod local_observers;
+mod replacement_executor;
 mod store_backed;
 
 const COLLECTION_ALGORITHM: &str = "workflow-os/continuation-collection/v1";
 const MAX_OBSERVATIONS: usize = ALL_COLLECTOR_KINDS.len();
 const MAX_CLAIMS_PER_OBSERVATION: usize = 64;
 const MAX_ACCOUNTING_PER_OBSERVATION: usize = 64;
+const MAX_WORK_IDENTITIES_PER_OBSERVATION: usize = 64;
 
 const ALL_COLLECTOR_KINDS: [ContinuationCollectorKind; 18] = [
     ContinuationCollectorKind::ValidatedDeclaration,
@@ -326,6 +329,7 @@ struct ContinuationCollectedSource {
     sensitivity: ContinuationContextSensitivity,
     materialized_bytes: u64,
     claims: Vec<ContinuationUnderstandingCandidate>,
+    work_identities: Vec<ContinuationCollectedWorkIdentity>,
 }
 
 impl fmt::Debug for ContinuationCollectedSource {
@@ -339,6 +343,7 @@ impl fmt::Debug for ContinuationCollectedSource {
             .field("sensitivity", &self.sensitivity)
             .field("materialized_bytes", &self.materialized_bytes)
             .field("claims", &self.claims.len())
+            .field("work_identity_count", &self.work_identities.len())
             .finish()
     }
 }
@@ -350,6 +355,44 @@ struct ContinuationCollectedAccounting {
     claim_kind: ContinuationUnderstandingClaimKind,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationCollectedWorkDisposition {
+    Completed,
+    LawfulNext,
+}
+
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ContinuationCollectedWorkIdentity {
+    identity: SpecContentHash,
+    source_binding: SpecContentHash,
+    disposition: ContinuationCollectedWorkDisposition,
+}
+
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ContinuationCollectedWorkCandidate {
+    source_id: ContinuationContextSourceId,
+    identity: ContinuationCollectedWorkIdentity,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ContinuationCollectedAcceptedIntent {
+    record: crate::continuation_context::AcceptedIntentRecord,
+    work_identity: Option<SpecContentHash>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationControlDisposition {
+    None,
+    Pause,
+    Stop,
+    Resume,
+}
+
 /// One private collector observation.
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -359,7 +402,7 @@ struct ContinuationCollectionObservation {
     revision: SpecContentHash,
     posture: ContinuationCollectionResultPosture,
     source: Option<ContinuationCollectedSource>,
-    accepted_intents: Vec<crate::continuation_context::AcceptedIntentRecord>,
+    accepted_intents: Vec<ContinuationCollectedAcceptedIntent>,
     accounting: Vec<ContinuationCollectedAccounting>,
 }
 
@@ -434,6 +477,8 @@ struct ContinuationAggregateCompositionProof {
     required_source_coverage: ContinuationAggregateRequiredCoveragePosture,
     observation_mode: ContinuationAggregateObservationMode,
     authority_posture: ContinuationAggregateAuthorityPosture,
+    control_disposition: ContinuationControlDisposition,
+    work_identities: Vec<ContinuationCollectedWorkIdentity>,
     commitment: SpecContentHash,
 }
 
@@ -454,6 +499,8 @@ impl fmt::Debug for ContinuationAggregateCompositionProof {
             .field("required_source_coverage", &self.required_source_coverage)
             .field("observation_mode", &self.observation_mode)
             .field("authority_posture", &self.authority_posture)
+            .field("control_disposition", &self.control_disposition)
+            .field("work_identity_count", &self.work_identities.len())
             .field("commitment", &"[REDACTED]")
             .finish()
     }
@@ -467,6 +514,8 @@ struct ContinuationAggregateComposition {
     scope: ContinuationContextScope,
     source_actor: ActorId,
     decision: ContinuationContextDecision,
+    control_disposition: ContinuationControlDisposition,
+    work_identities: Vec<ContinuationCollectedWorkIdentity>,
     proof: ContinuationAggregateCompositionProof,
 }
 
@@ -480,6 +529,8 @@ impl fmt::Debug for ContinuationAggregateComposition {
             .field("decision_posture", &self.decision.posture())
             .field("claim_count", &self.decision.understanding().claims().len())
             .field("gap_count", &self.decision.gaps().len())
+            .field("control_disposition", &self.control_disposition)
+            .field("work_identity_count", &self.work_identities.len())
             .field("proof", &self.proof)
             .finish()
     }
@@ -521,7 +572,7 @@ impl InMemoryContinuationCollectorRegistry {
         after_anchor: &ContinuationCollectionAnchor,
     ) -> Result<ContinuationContextDecisionInput, WorkflowOsError> {
         let observations = self.collect_observations(&request)?;
-        compose_collection(request, after_anchor, observations)
+        compose_collection(request, after_anchor, observations).map(|(input, _)| input)
     }
 
     fn compose(
@@ -700,8 +751,20 @@ fn compose_aggregate(
     let collector_contract_commitment = closed_collector_contract_commitment()?;
     let pre_collection_anchor_commitment = request.anchor.commitment.clone();
     let post_collection_anchor_commitment = after_anchor.commitment.clone();
-    let input = compose_collection(request, after_anchor, observations)?;
+    let (input, work_candidates) = compose_collection(request, after_anchor, observations)?;
+    let control_disposition = current_control_disposition(&input.accepted_intents)?;
     let decision = derive_continuation_context(input)?;
+    let selected_source_ids = decision
+        .bundle()
+        .selected_source_ids()
+        .iter()
+        .collect::<BTreeSet<_>>();
+    let mut work_identities = work_candidates
+        .into_iter()
+        .filter(|candidate| selected_source_ids.contains(&candidate.source_id))
+        .map(|candidate| candidate.identity)
+        .collect::<Vec<_>>();
+    canonicalize_work_identities(&mut work_identities)?;
 
     if ContinuationContextDecision::authorizes_execution()
         || !decision.bundle().is_non_authorizing()
@@ -748,6 +811,8 @@ fn compose_aggregate(
             required_source_coverage,
             observation_mode,
             authority_posture,
+            control_disposition,
+            &work_identities,
         ),
     )?;
     let proof = ContinuationAggregateCompositionProof {
@@ -764,6 +829,8 @@ fn compose_aggregate(
         required_source_coverage,
         observation_mode,
         authority_posture,
+        control_disposition,
+        work_identities: work_identities.clone(),
         commitment,
     };
     Ok(ContinuationAggregateComposition {
@@ -771,8 +838,23 @@ fn compose_aggregate(
         scope,
         source_actor,
         decision,
+        control_disposition,
+        work_identities,
         proof,
     })
+}
+
+fn canonicalize_work_identities(
+    work_identities: &mut [ContinuationCollectedWorkIdentity],
+) -> Result<(), WorkflowOsError> {
+    work_identities.sort();
+    if work_identities.windows(2).any(|items| items[0] == items[1]) {
+        return Err(collection_error(
+            "observation.work_identity_duplicate",
+            "selected authoritative sources contain a duplicate work identity and disposition",
+        ));
+    }
+    Ok(())
 }
 
 fn closed_collector_contract_commitment() -> Result<SpecContentHash, WorkflowOsError> {
@@ -783,11 +865,18 @@ fn closed_collector_contract_commitment() -> Result<SpecContentHash, WorkflowOsE
     collection_commitment("closed-collector-contract", &contract)
 }
 
+#[allow(clippy::too_many_lines)]
 fn compose_collection(
     request: ContinuationCollectionRequest,
     after_anchor: &ContinuationCollectionAnchor,
     mut observations: Vec<ContinuationCollectionObservation>,
-) -> Result<ContinuationContextDecisionInput, WorkflowOsError> {
+) -> Result<
+    (
+        ContinuationContextDecisionInput,
+        Vec<ContinuationCollectedWorkCandidate>,
+    ),
+    WorkflowOsError,
+> {
     if &request.anchor != after_anchor {
         return Err(collection_error(
             "anchor.drifted",
@@ -808,6 +897,7 @@ fn compose_collection(
     let mut sources = Vec::new();
     let mut claim_accounting = Vec::new();
     let mut accepted_intents = Vec::new();
+    let mut work_candidates = Vec::new();
 
     for mut observation in observations {
         if observation.request_commitment != request.commitment {
@@ -822,12 +912,7 @@ fn compose_collection(
                 "collector observation revision does not match the stable source fence",
             ));
         }
-        if observation.accounting.len() > MAX_ACCOUNTING_PER_OBSERVATION {
-            return Err(collection_error(
-                "observation.accounting_limit",
-                "collector observation exceeds the accounting-entry limit",
-            ));
-        }
+        validate_observation_limits(&observation)?;
 
         let expectation =
             collector_expectation_for(request.purpose, run_bound, observation.kind.source_class());
@@ -842,6 +927,12 @@ fn compose_collection(
                 ));
             }
             source.claims.sort();
+            for identity in &source.work_identities {
+                work_candidates.push(ContinuationCollectedWorkCandidate {
+                    source_id: source.source_id.clone(),
+                    identity: identity.clone(),
+                });
+            }
             sources.push(ContinuationContextSourceDefinition {
                 source_id: source.source_id,
                 source_class: observation.kind.source_class(),
@@ -856,7 +947,22 @@ fn compose_collection(
             });
         }
 
-        accepted_intents.append(&mut observation.accepted_intents);
+        for accepted in observation.accepted_intents {
+            if let Some(identity) = accepted.work_identity {
+                work_candidates.push(ContinuationCollectedWorkCandidate {
+                    source_id: accepted_intent_source_id(&accepted.record)?,
+                    identity: ContinuationCollectedWorkIdentity {
+                        identity,
+                        source_binding: canonical_commitment(
+                            "accepted-intent-record",
+                            &accepted.record,
+                        )?,
+                        disposition: ContinuationCollectedWorkDisposition::LawfulNext,
+                    },
+                });
+            }
+            accepted_intents.push(accepted.record);
+        }
 
         observation.accounting.sort();
         claim_accounting.extend(observation.accounting.into_iter().map(|item| {
@@ -876,17 +982,92 @@ fn compose_collection(
     sources.sort_by(|left, right| left.source_id.cmp(&right.source_id));
     claim_accounting.sort();
     coverage.sort();
-    Ok(ContinuationContextDecisionInput {
-        purpose: request.purpose,
-        scope: request.scope,
-        actor: request.actor,
-        maximum_sensitivity: request.maximum_sensitivity,
-        materialization_budget_bytes: request.materialization_budget_bytes,
-        coverage,
-        claim_accounting,
-        sources,
-        accepted_intents,
-    })
+    canonicalize_work_candidates(&mut work_candidates)?;
+    Ok((
+        ContinuationContextDecisionInput {
+            purpose: request.purpose,
+            scope: request.scope,
+            actor: request.actor,
+            maximum_sensitivity: request.maximum_sensitivity,
+            materialization_budget_bytes: request.materialization_budget_bytes,
+            coverage,
+            claim_accounting,
+            sources,
+            accepted_intents,
+        },
+        work_candidates,
+    ))
+}
+
+fn validate_observation_limits(
+    observation: &ContinuationCollectionObservation,
+) -> Result<(), WorkflowOsError> {
+    if observation.accounting.len() > MAX_ACCOUNTING_PER_OBSERVATION {
+        return Err(collection_error(
+            "observation.accounting_limit",
+            "collector observation exceeds the accounting-entry limit",
+        ));
+    }
+    let source_identities = observation
+        .source
+        .as_ref()
+        .map_or(0, |source| source.work_identities.len());
+    let intent_identities = observation
+        .accepted_intents
+        .iter()
+        .filter(|intent| intent.work_identity.is_some())
+        .count();
+    if source_identities.saturating_add(intent_identities) > MAX_WORK_IDENTITIES_PER_OBSERVATION {
+        return Err(collection_error(
+            "observation.work_identity_limit",
+            "collector observation exceeds the work-identity limit",
+        ));
+    }
+    Ok(())
+}
+
+fn canonicalize_work_candidates(
+    work_candidates: &mut [ContinuationCollectedWorkCandidate],
+) -> Result<(), WorkflowOsError> {
+    work_candidates.sort();
+    if work_candidates.windows(2).any(|items| items[0] == items[1]) {
+        return Err(collection_error(
+            "observation.work_identity_duplicate",
+            "collector observations contain a duplicate work identity and disposition",
+        ));
+    }
+    Ok(())
+}
+
+fn accepted_intent_source_id(
+    intent: &crate::continuation_context::AcceptedIntentRecord,
+) -> Result<ContinuationContextSourceId, WorkflowOsError> {
+    ContinuationContextSourceId::new(format!("accepted-intent/{}", intent.record_id.as_str()))
+}
+
+fn current_control_disposition(
+    intents: &[crate::continuation_context::AcceptedIntentRecord],
+) -> Result<ContinuationControlDisposition, WorkflowOsError> {
+    let controls = intents
+        .iter()
+        .filter(|intent| intent.supersession == AcceptedIntentSupersession::Current)
+        .filter_map(|intent| match intent.kind {
+            AcceptedIntentKind::Pause => Some(ContinuationControlDisposition::Pause),
+            AcceptedIntentKind::Stop => Some(ContinuationControlDisposition::Stop),
+            AcceptedIntentKind::Resume => Some(ContinuationControlDisposition::Resume),
+            AcceptedIntentKind::Objective
+            | AcceptedIntentKind::Amendment
+            | AcceptedIntentKind::Priority => None,
+        })
+        .collect::<Vec<_>>();
+    match controls.as_slice() {
+        [] => Ok(ContinuationControlDisposition::None),
+        [control] => Ok(*control),
+        _ => Err(collection_error(
+            "accepted_intent.control_ambiguous",
+            "multiple current control intents cannot be composed",
+        )),
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -897,6 +1078,23 @@ fn validate_result_shape(
     run_bound: bool,
 ) -> Result<(), WorkflowOsError> {
     let accepted_intent_observation = observation.kind == ContinuationCollectorKind::AcceptedIntent;
+    if observation.source.as_ref().is_some_and(|source| {
+        source.work_identities.iter().any(|item| {
+            observation.kind != ContinuationCollectorKind::WorkReport
+                || item.disposition != ContinuationCollectedWorkDisposition::Completed
+        })
+    }) || observation.accepted_intents.iter().any(|intent| {
+        intent.work_identity.is_some()
+            && (observation.kind != ContinuationCollectorKind::AcceptedIntent
+                || intent.record.kind != AcceptedIntentKind::Resume
+                || intent.record.supersession != AcceptedIntentSupersession::Current)
+    }) {
+        return Err(collection_error(
+            "observation.work_identity_kind_mismatch",
+            "work identity disposition does not match its authoritative collector kind",
+        ));
+    }
+    validate_work_identity_bindings(observation)?;
     if !accepted_intent_observation && !observation.accepted_intents.is_empty() {
         return Err(collection_error(
             "observation.accepted_intent_kind_mismatch",
@@ -1005,6 +1203,42 @@ fn validate_result_shape(
             return Err(collection_error(
                 "observation.freshness_mismatch",
                 "collector source freshness contradicts result posture",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_work_identity_bindings(
+    observation: &ContinuationCollectionObservation,
+) -> Result<(), WorkflowOsError> {
+    if let Some(source) = &observation.source {
+        for item in &source.work_identities {
+            let binding_matches = source
+                .claims
+                .iter()
+                .filter(|claim| {
+                    claim.kind == ContinuationUnderstandingClaimKind::CompletedObligation
+                })
+                .any(|claim| {
+                    collection_commitment("collected-work-claim", claim)
+                        .is_ok_and(|binding| binding == item.source_binding)
+                });
+            if !binding_matches {
+                return Err(collection_error(
+                    "observation.work_identity_binding_mismatch",
+                    "completed work identity is not carried by and bound to the exact authoritative source claim",
+                ));
+            }
+        }
+    }
+    for intent in &observation.accepted_intents {
+        if intent.work_identity.is_some()
+            && canonical_commitment("accepted-intent-record", &intent.record).is_err()
+        {
+            return Err(collection_error(
+                "observation.work_identity_binding_mismatch",
+                "lawful-next work identity cannot be bound to its exact authoritative intent record",
             ));
         }
     }
@@ -1297,6 +1531,45 @@ mod tests {
         }
     }
 
+    struct ReplacementAuthorityResolver {
+        calls: Cell<u32>,
+    }
+
+    impl replacement_executor::ReplacementExecutorFreshAuthorityResolver
+        for ReplacementAuthorityResolver
+    {
+        fn resolve_fresh(
+            &self,
+            _request: &replacement_executor::ReplacementFreshAuthorityRequest,
+        ) -> Result<(), WorkflowOsError> {
+            self.calls.set(self.calls.get() + 1);
+            Ok(())
+        }
+    }
+
+    struct ExactReplacementAuthorityResolver {
+        calls: Cell<u32>,
+        expected_operation: SpecContentHash,
+    }
+
+    impl replacement_executor::ReplacementExecutorFreshAuthorityResolver
+        for ExactReplacementAuthorityResolver
+    {
+        fn resolve_fresh(
+            &self,
+            request: &replacement_executor::ReplacementFreshAuthorityRequest,
+        ) -> Result<(), WorkflowOsError> {
+            if request.operation_identity() != &self.expected_operation {
+                return Err(collection_error(
+                    "replacement_executor.authority.operation_mismatch",
+                    "fresh authority request is bound to another operation identity",
+                ));
+            }
+            self.calls.set(self.calls.get() + 1);
+            Ok(())
+        }
+    }
+
     fn integrated_scope() -> ContinuationContextScope {
         ContinuationContextScope {
             project_id: ProjectId::new("project/integrated-continuation").expect("project"),
@@ -1312,6 +1585,7 @@ mod tests {
         posture: ContinuationCollectionResultPosture,
         source: Option<ContinuationCollectedSource>,
         accepted_intents: Vec<AcceptedIntentRecord>,
+        work_identities: Vec<ContinuationCollectedWorkIdentity>,
         accounting: Vec<ContinuationCollectedAccounting>,
         returned_kind: Option<ContinuationCollectorKind>,
         request_commitment: Option<SpecContentHash>,
@@ -1327,6 +1601,24 @@ mod tests {
             &self,
             request: &ContinuationCollectionRequest,
         ) -> Result<ContinuationCollectionObservation, WorkflowOsError> {
+            let mut source = self.source.clone();
+            if let Some(source) = &mut source {
+                source.work_identities = self
+                    .work_identities
+                    .iter()
+                    .filter(|identity| {
+                        identity.disposition == ContinuationCollectedWorkDisposition::Completed
+                    })
+                    .cloned()
+                    .collect();
+            }
+            let lawful_next = self
+                .work_identities
+                .iter()
+                .find(|identity| {
+                    identity.disposition == ContinuationCollectedWorkDisposition::LawfulNext
+                })
+                .map(|identity| identity.identity.clone());
             Ok(ContinuationCollectionObservation {
                 kind: self.returned_kind.unwrap_or(self.kind),
                 request_commitment: self
@@ -1341,8 +1633,19 @@ mod tests {
                         .clone()
                 }),
                 posture: self.posture,
-                source: self.source.clone(),
-                accepted_intents: self.accepted_intents.clone(),
+                source,
+                accepted_intents: self
+                    .accepted_intents
+                    .iter()
+                    .cloned()
+                    .map(|record| ContinuationCollectedAcceptedIntent {
+                        work_identity: (record.kind == AcceptedIntentKind::Resume
+                            && record.supersession == AcceptedIntentSupersession::Current)
+                            .then(|| lawful_next.clone())
+                            .flatten(),
+                        record,
+                    })
+                    .collect(),
                 accounting: self.accounting.clone(),
             })
         }
@@ -1414,6 +1717,7 @@ mod tests {
             posture,
             source: None,
             accepted_intents: Vec::new(),
+            work_identities: Vec::new(),
             accounting: Vec::new(),
             returned_kind: None,
             request_commitment: None,
@@ -1481,6 +1785,288 @@ mod tests {
 
     fn registry(request: &ContinuationCollectionRequest) -> InMemoryContinuationCollectorRegistry {
         registry_with_order(request, false)
+    }
+
+    fn replacement_request() -> ContinuationCollectionRequest {
+        let mut request = request(false);
+        request.purpose = ContinuationContextPurpose::MaterialContinuation;
+        request.commitment = collection_commitment(
+            "request",
+            &(
+                request.purpose,
+                &request.scope,
+                &request.actor,
+                request.maximum_sensitivity,
+                request.materialization_budget_bytes,
+                &request.anchor.commitment,
+            ),
+        )
+        .expect("replacement request commitment");
+        request
+    }
+
+    fn collected_source(
+        kind: ContinuationCollectorKind,
+        claims: &[(ContinuationUnderstandingClaimKind, &str)],
+    ) -> ContinuationCollectedSource {
+        ContinuationCollectedSource {
+            source_id: ContinuationContextSourceId::new(format!("source/{kind:?}").to_lowercase())
+                .expect("source id"),
+            freshness: ContinuationContextFreshness::Current,
+            integrity: ContinuationContextIntegrity::Verified,
+            access: ContinuationContextAccess::Permitted,
+            sensitivity: ContinuationContextSensitivity::Internal,
+            materialized_bytes: 128,
+            claims: claims
+                .iter()
+                .map(|(kind, value)| ContinuationUnderstandingCandidate {
+                    kind: *kind,
+                    value: ContinuationContextText::new(*value).expect("claim value"),
+                })
+                .collect(),
+            work_identities: Vec::new(),
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn replacement_registry(
+        request: &ContinuationCollectionRequest,
+        control_kind: AcceptedIntentKind,
+        repeat_completed_action: bool,
+    ) -> InMemoryContinuationCollectorRegistry {
+        replacement_registry_with_work_report_collector(
+            request,
+            control_kind,
+            repeat_completed_action,
+            |_| {},
+        )
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn replacement_registry_with_work_report_collector(
+        request: &ContinuationCollectionRequest,
+        control_kind: AcceptedIntentKind,
+        repeat_completed_action: bool,
+        mutate_collector: impl FnOnce(&mut FixtureCollector),
+    ) -> InMemoryContinuationCollectorRegistry {
+        use ContinuationUnderstandingClaimKind as Claim;
+
+        let mut collectors = ALL_COLLECTOR_KINDS
+            .iter()
+            .map(|kind| default_collector(*kind, request))
+            .collect::<Vec<_>>();
+        for collector in &mut collectors {
+            let claims: &[(ContinuationUnderstandingClaimKind, &str)] = match collector.kind {
+                ContinuationCollectorKind::Policy => &[
+                    (Claim::EvidenceRequirement, "attach focused test evidence"),
+                    (Claim::SideEffectPosture, "no external side effects"),
+                ],
+                ContinuationCollectorKind::GitObservation => &[
+                    (
+                        Claim::InProgressObligation,
+                        "replacement proof is in progress",
+                    ),
+                    (
+                        Claim::RemainingObligation,
+                        "complete the focused proof and report",
+                    ),
+                ],
+                ContinuationCollectorKind::OperatingDocument => &[
+                    (Claim::Scope, "private replacement-executor proof"),
+                    (Claim::StrictNonGoal, "no runtime consumer"),
+                    (Claim::Decision, "keep orientation separate from authority"),
+                    (Claim::RationaleReference, "accepted continuation plan"),
+                    (Claim::OpenQuestion, "host integration remains deferred"),
+                    (Claim::Assumption, "authoritative inputs are stable"),
+                    (Claim::Uncertainty, "external host behavior is unproven"),
+                    (
+                        Claim::ReportingCommitment,
+                        "publish a bounded implementation report",
+                    ),
+                    (Claim::PromisedFollowUp, "perform focused security review"),
+                ],
+                ContinuationCollectorKind::Check => &[
+                    (Claim::CheckRequirement, "run focused Core tests"),
+                    (
+                        Claim::ValidationCommitment,
+                        "run strict repository validation",
+                    ),
+                ],
+                ContinuationCollectorKind::WorkReport => &[
+                    (
+                        Claim::CompletedObligation,
+                        "projection delivery was completed",
+                    ),
+                    (
+                        Claim::DeferredObligation,
+                        "trusted host integration is deferred",
+                    ),
+                ],
+                _ => &[],
+            };
+            let expectation = collector_expectation_for(
+                request.purpose,
+                request.scope.run_id.is_some(),
+                collector.kind.source_class(),
+            );
+            if (!claims.is_empty()
+                || expectation == ContinuationContextCollectorExpectation::Required)
+                && collector.kind != ContinuationCollectorKind::AcceptedIntent
+            {
+                collector.posture = ContinuationCollectionResultPosture::Observed;
+                collector.source = Some(collected_source(collector.kind, claims));
+                collector.accounting = empty_accounting_claims_for(
+                    request.purpose,
+                    request.scope.run_id.is_some(),
+                    collector.kind.source_class(),
+                )
+                .expect("claim accounting")
+                .into_iter()
+                .map(|claim_kind| ContinuationCollectedAccounting { claim_kind })
+                .collect();
+            }
+        }
+
+        let completed = collectors
+            .iter_mut()
+            .find(|collector| collector.kind == ContinuationCollectorKind::WorkReport)
+            .expect("work report collector");
+        let completed_claim = completed
+            .source
+            .as_ref()
+            .expect("work report source")
+            .claims
+            .iter()
+            .find(|claim| claim.kind == Claim::CompletedObligation)
+            .expect("completed claim");
+        completed.work_identities = vec![ContinuationCollectedWorkIdentity {
+            identity: hash("work/projection-delivery"),
+            source_binding: collection_commitment("collected-work-claim", completed_claim)
+                .expect("completed claim binding"),
+            disposition: ContinuationCollectedWorkDisposition::Completed,
+        }];
+        mutate_collector(completed);
+
+        let accepted = collectors
+            .iter_mut()
+            .find(|collector| collector.kind == ContinuationCollectorKind::AcceptedIntent)
+            .expect("accepted-intent collector");
+        accepted.posture = ContinuationCollectionResultPosture::Observed;
+        let old_objective = AcceptedIntentRecord {
+            record_id: AcceptedIntentRecordId::new("intent/old-objective").expect("old intent"),
+            actor: ActorId::new("user/delegated-maintainer").expect("actor"),
+            directive_commitment: hash("old-objective-directive"),
+            scope: request.scope.clone(),
+            kind: AcceptedIntentKind::Objective,
+            meaning: ContinuationContextText::new("repeat projection delivery")
+                .expect("old objective"),
+            supersedes: Vec::new(),
+            supersession: AcceptedIntentSupersession::Superseded,
+        };
+        accepted.accepted_intents = vec![
+            old_objective,
+            AcceptedIntentRecord {
+                record_id: AcceptedIntentRecordId::new("intent/current-objective")
+                    .expect("current intent"),
+                actor: ActorId::new("user/delegated-maintainer").expect("actor"),
+                directive_commitment: hash("current-objective-directive"),
+                scope: request.scope.clone(),
+                kind: AcceptedIntentKind::Objective,
+                meaning: ContinuationContextText::new(
+                    "prove context-free replacement understanding",
+                )
+                .expect("current objective"),
+                supersedes: vec![
+                    AcceptedIntentRecordId::new("intent/old-objective").expect("old intent")
+                ],
+                supersession: AcceptedIntentSupersession::Current,
+            },
+            AcceptedIntentRecord {
+                record_id: AcceptedIntentRecordId::new("intent/accepted-amendment")
+                    .expect("amendment"),
+                actor: ActorId::new("user/delegated-maintainer").expect("actor"),
+                directive_commitment: hash("accepted-amendment-directive"),
+                scope: request.scope.clone(),
+                kind: AcceptedIntentKind::Amendment,
+                meaning: ContinuationContextText::new("disclose typed gaps").expect("amendment"),
+                supersedes: Vec::new(),
+                supersession: AcceptedIntentSupersession::Current,
+            },
+            AcceptedIntentRecord {
+                record_id: AcceptedIntentRecordId::new("intent/current-priority")
+                    .expect("priority"),
+                actor: ActorId::new("user/delegated-maintainer").expect("actor"),
+                directive_commitment: hash("priority-directive"),
+                scope: request.scope.clone(),
+                kind: AcceptedIntentKind::Priority,
+                meaning: ContinuationContextText::new("p0").expect("priority"),
+                supersedes: Vec::new(),
+                supersession: AcceptedIntentSupersession::Current,
+            },
+            AcceptedIntentRecord {
+                record_id: AcceptedIntentRecordId::new("intent/superseded-resume")
+                    .expect("superseded resume"),
+                actor: ActorId::new("user/delegated-maintainer").expect("actor"),
+                directive_commitment: hash("superseded-resume-directive"),
+                scope: request.scope.clone(),
+                kind: AcceptedIntentKind::Resume,
+                meaning: ContinuationContextText::new("resume stale completed work")
+                    .expect("superseded resume"),
+                supersedes: Vec::new(),
+                supersession: AcceptedIntentSupersession::Superseded,
+            },
+            AcceptedIntentRecord {
+                record_id: AcceptedIntentRecordId::new("intent/current-next-action")
+                    .expect("next action"),
+                actor: ActorId::new("user/delegated-maintainer").expect("actor"),
+                directive_commitment: hash("next-action-directive"),
+                scope: request.scope.clone(),
+                kind: control_kind,
+                meaning: ContinuationContextText::new(match control_kind {
+                    AcceptedIntentKind::Pause => "pause the replacement-executor proof",
+                    AcceptedIntentKind::Stop => "stop the replacement-executor proof",
+                    AcceptedIntentKind::Resume if repeat_completed_action => {
+                        "redo projection delivery using a fresh description"
+                    }
+                    AcceptedIntentKind::Resume => "implement the replacement-executor proof",
+                    AcceptedIntentKind::Objective
+                    | AcceptedIntentKind::Amendment
+                    | AcceptedIntentKind::Priority => unreachable!("control intent required"),
+                })
+                .expect("next action"),
+                supersedes: vec![AcceptedIntentRecordId::new("intent/superseded-resume")
+                    .expect("superseded resume")],
+                supersession: AcceptedIntentSupersession::Current,
+            },
+        ];
+        if control_kind == AcceptedIntentKind::Resume {
+            let current_resume = accepted
+                .accepted_intents
+                .iter()
+                .find(|intent| {
+                    intent.kind == AcceptedIntentKind::Resume
+                        && intent.supersession == AcceptedIntentSupersession::Current
+                })
+                .expect("current resume");
+            accepted.work_identities = vec![ContinuationCollectedWorkIdentity {
+                identity: hash(if repeat_completed_action {
+                    "work/projection-delivery"
+                } else {
+                    "work/replacement-proof"
+                }),
+                source_binding: canonical_commitment("accepted-intent-record", current_resume)
+                    .expect("current resume binding"),
+                disposition: ContinuationCollectedWorkDisposition::LawfulNext,
+            }];
+        }
+
+        InMemoryContinuationCollectorRegistry::new(
+            collectors
+                .into_iter()
+                .map(|collector| Box::new(collector) as Box<dyn ContinuationContextCollector>)
+                .collect(),
+        )
+        .expect("replacement registry")
     }
 
     fn registry_with_posture(
@@ -1963,6 +2549,402 @@ mod tests {
     }
 
     #[test]
+    fn context_free_replacement_receives_equivalent_understanding_then_resolves_fresh_authority() {
+        use ContinuationUnderstandingClaimKind as Claim;
+
+        let request = replacement_request();
+        let original_aggregate = replacement_registry(&request, AcceptedIntentKind::Resume, false)
+            .compose(request.clone(), &request.anchor)
+            .expect("original aggregate");
+        let replacement_aggregate =
+            replacement_registry(&request, AcceptedIntentKind::Resume, false)
+                .compose(request.clone(), &request.anchor)
+                .expect("replacement aggregate");
+        let original_recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/original-executor").expect("original recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let replacement_recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/context-free-replacement").expect("replacement recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let authority = ExactReplacementAuthorityResolver {
+            calls: Cell::new(0),
+            expected_operation: hash("work/replacement-proof"),
+        };
+
+        let (original, replacement, proof) =
+            replacement_executor::prove_replacement_executor_equivalence(
+                &original_aggregate,
+                &replacement_aggregate,
+                &original_recipient,
+                &replacement_recipient,
+                &authority,
+            )
+            .expect("replacement proof");
+
+        assert_eq!(original.claims(), replacement.claims());
+        assert_eq!(original.gaps(), replacement.gaps());
+        assert_eq!(
+            replacement.posture(),
+            ContinuationContextDecisionPosture::ReadyForAuthorityResolution
+        );
+        assert!(replacement.is_non_authorizing());
+        assert!(proof.is_non_authorizing());
+        assert_eq!(
+            proof.authority_posture(),
+            replacement_executor::ReplacementFreshAuthorityPosture::ResolvedSeparately
+        );
+        assert_eq!(authority.calls.get(), 1);
+
+        let claim_values = |kind| {
+            replacement
+                .claims()
+                .iter()
+                .filter(|claim| claim.kind() == kind)
+                .filter_map(|claim| claim.value().map(ContinuationContextText::as_str))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            claim_values(Claim::Objective),
+            vec!["prove context-free replacement understanding"]
+        );
+        assert!(!replacement.claims().iter().any(|claim| {
+            claim.value().map(ContinuationContextText::as_str) == Some("repeat projection delivery")
+        }));
+        for kind in [
+            Claim::AcceptedAmendment,
+            Claim::Scope,
+            Claim::StrictNonGoal,
+            Claim::Decision,
+            Claim::CompletedObligation,
+            Claim::InProgressObligation,
+            Claim::DeferredObligation,
+            Claim::RemainingObligation,
+            Claim::Blocker,
+            Claim::Uncertainty,
+            Claim::EvidenceRequirement,
+            Claim::CheckRequirement,
+            Claim::SideEffectPosture,
+            Claim::ValidationCommitment,
+            Claim::ReportingCommitment,
+            Claim::PromisedFollowUp,
+            Claim::LawfulNextOption,
+        ] {
+            assert!(
+                replacement
+                    .claims()
+                    .iter()
+                    .any(|claim| claim.kind() == kind),
+                "missing {kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn replacement_discloses_blocking_gaps_without_resolving_authority() {
+        let request = replacement_request();
+        let original_aggregate = registry(&request)
+            .compose(request.clone(), &request.anchor)
+            .expect("original blocked aggregate");
+        let replacement_aggregate = registry(&request)
+            .compose(request.clone(), &request.anchor)
+            .expect("replacement blocked aggregate");
+        let original_recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/original-blocked").expect("original recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let replacement_recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/replacement-blocked").expect("replacement recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let authority = ReplacementAuthorityResolver {
+            calls: Cell::new(0),
+        };
+
+        let (original, replacement, proof) =
+            replacement_executor::prove_replacement_executor_equivalence(
+                &original_aggregate,
+                &replacement_aggregate,
+                &original_recipient,
+                &replacement_recipient,
+                &authority,
+            )
+            .expect("blocked replacement proof");
+
+        assert_eq!(original.gaps(), replacement.gaps());
+        assert_ne!(replacement.gaps(), []);
+        assert_eq!(
+            replacement.posture(),
+            ContinuationContextDecisionPosture::Blocked
+        );
+        assert_eq!(authority.calls.get(), 0);
+        assert_eq!(
+            proof.authority_posture(),
+            replacement_executor::ReplacementFreshAuthorityPosture::NotRequestedBlocked
+        );
+    }
+
+    #[test]
+    fn replacement_pause_and_stop_never_resolve_authority_or_revive_superseded_resume() {
+        for (control, expected_posture) in [
+            (
+                AcceptedIntentKind::Pause,
+                replacement_executor::ReplacementFreshAuthorityPosture::NotRequestedPaused,
+            ),
+            (
+                AcceptedIntentKind::Stop,
+                replacement_executor::ReplacementFreshAuthorityPosture::NotRequestedStopped,
+            ),
+        ] {
+            let request = replacement_request();
+            let original_aggregate = replacement_registry(&request, control, false)
+                .compose(request.clone(), &request.anchor)
+                .expect("original aggregate");
+            let replacement_aggregate = replacement_registry(&request, control, false)
+                .compose(request.clone(), &request.anchor)
+                .expect("replacement aggregate");
+            let original_recipient = IntegratedRecipient {
+                actor: ActorId::new(format!("agent/original-{control:?}").to_lowercase())
+                    .expect("original recipient"),
+                posture: IntegratedReceiptPosture::Exact,
+            };
+            let replacement_recipient = IntegratedRecipient {
+                actor: ActorId::new(format!("agent/replacement-{control:?}").to_lowercase())
+                    .expect("replacement recipient"),
+                posture: IntegratedReceiptPosture::Exact,
+            };
+            let authority = ReplacementAuthorityResolver {
+                calls: Cell::new(0),
+            };
+
+            let (_, replacement, proof) =
+                replacement_executor::prove_replacement_executor_equivalence(
+                    &original_aggregate,
+                    &replacement_aggregate,
+                    &original_recipient,
+                    &replacement_recipient,
+                    &authority,
+                )
+                .expect("control disposition proof");
+
+            assert_eq!(proof.authority_posture(), expected_posture);
+            assert_eq!(authority.calls.get(), 0);
+            assert!(!replacement.claims().iter().any(|claim| {
+                claim.value().map(ContinuationContextText::as_str)
+                    == Some("resume stale completed work")
+            }));
+        }
+    }
+
+    #[test]
+    fn replacement_rejects_a_lawful_next_option_that_repeats_completed_work() {
+        let request = replacement_request();
+        let original_aggregate = replacement_registry(&request, AcceptedIntentKind::Resume, true)
+            .compose(request.clone(), &request.anchor)
+            .expect("original aggregate");
+        let replacement_aggregate =
+            replacement_registry(&request, AcceptedIntentKind::Resume, true)
+                .compose(request.clone(), &request.anchor)
+                .expect("replacement aggregate");
+        let original_recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/original-repeat").expect("original recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let replacement_recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/replacement-repeat").expect("replacement recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let authority = ReplacementAuthorityResolver {
+            calls: Cell::new(0),
+        };
+
+        let error = replacement_executor::prove_replacement_executor_equivalence(
+            &original_aggregate,
+            &replacement_aggregate,
+            &original_recipient,
+            &replacement_recipient,
+            &authority,
+        )
+        .err()
+        .expect("completed work cannot become the next action");
+
+        assert_eq!(
+            error.code(),
+            "continuation_collection.replacement_executor.next_action.repeats_completed"
+        );
+        assert_eq!(authority.calls.get(), 0);
+    }
+
+    #[test]
+    fn completed_work_identity_is_projected_only_from_a_selected_authoritative_source() {
+        for scenario in 0..4 {
+            let request = replacement_request();
+            let aggregate = replacement_registry_with_work_report_collector(
+                &request,
+                AcceptedIntentKind::Resume,
+                false,
+                move |collector| match scenario {
+                    0 => {
+                        collector.posture = ContinuationCollectionResultPosture::Stale;
+                        collector
+                            .source
+                            .as_mut()
+                            .expect("work report source")
+                            .freshness = ContinuationContextFreshness::StaleBlocking;
+                    }
+                    1 => {
+                        collector
+                            .source
+                            .as_mut()
+                            .expect("work report source")
+                            .access = ContinuationContextAccess::Denied;
+                    }
+                    2 => {
+                        collector
+                            .source
+                            .as_mut()
+                            .expect("work report source")
+                            .integrity = ContinuationContextIntegrity::Invalid;
+                    }
+                    3 => {
+                        collector
+                            .source
+                            .as_mut()
+                            .expect("work report source")
+                            .materialized_bytes = request.materialization_budget_bytes + 1;
+                    }
+                    _ => unreachable!("closed source-admission scenario"),
+                },
+            )
+            .compose(request.clone(), &request.anchor)
+            .expect("source disposition must remain inspectable");
+
+            assert!(!aggregate.work_identities.iter().any(|identity| {
+                identity.disposition == ContinuationCollectedWorkDisposition::Completed
+            }));
+            assert!(aggregate
+                .decision
+                .bundle()
+                .selected_source_ids()
+                .iter()
+                .all(|source_id| source_id.as_str() != "source/workreport"));
+        }
+    }
+
+    #[test]
+    fn replacement_rejects_another_aggregate_before_authority_resolution() {
+        let request = replacement_request();
+        let original_aggregate = replacement_registry(&request, AcceptedIntentKind::Resume, false)
+            .compose(request.clone(), &request.anchor)
+            .expect("original aggregate");
+        let replacement_aggregate = registry(&request)
+            .compose(request.clone(), &request.anchor)
+            .expect("different aggregate");
+        let original_recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/original-mismatch").expect("original recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let replacement_recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/replacement-mismatch").expect("replacement recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let authority = ReplacementAuthorityResolver {
+            calls: Cell::new(0),
+        };
+
+        let error = replacement_executor::prove_replacement_executor_equivalence(
+            &original_aggregate,
+            &replacement_aggregate,
+            &original_recipient,
+            &replacement_recipient,
+            &authority,
+        )
+        .err()
+        .expect("aggregate substitution must fail");
+
+        assert_eq!(
+            error.code(),
+            "continuation_collection.replacement_executor.aggregate.mismatch"
+        );
+        assert_eq!(authority.calls.get(), 0);
+    }
+
+    #[test]
+    fn replacement_rejects_operation_identity_substitution_before_authority_resolution() {
+        let request = replacement_request();
+        let original_aggregate = replacement_registry(&request, AcceptedIntentKind::Resume, false)
+            .compose(request.clone(), &request.anchor)
+            .expect("original aggregate");
+        let replacement_aggregate =
+            replacement_registry(&request, AcceptedIntentKind::Resume, true)
+                .compose(request.clone(), &request.anchor)
+                .expect("substituted operation aggregate");
+        let original_recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/original-operation").expect("original recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let replacement_recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/replacement-operation").expect("replacement recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let authority = ReplacementAuthorityResolver {
+            calls: Cell::new(0),
+        };
+
+        let error = replacement_executor::prove_replacement_executor_equivalence(
+            &original_aggregate,
+            &replacement_aggregate,
+            &original_recipient,
+            &replacement_recipient,
+            &authority,
+        )
+        .err()
+        .expect("operation identity substitution must fail");
+
+        assert_eq!(
+            error.code(),
+            "continuation_collection.replacement_executor.aggregate.mismatch"
+        );
+        assert_eq!(authority.calls.get(), 0);
+    }
+
+    #[test]
+    fn replacement_rejects_recipient_identity_reuse_before_authority_resolution() {
+        let request = replacement_request();
+        let original_aggregate = replacement_registry(&request, AcceptedIntentKind::Resume, false)
+            .compose(request.clone(), &request.anchor)
+            .expect("original aggregate");
+        let replacement_aggregate =
+            replacement_registry(&request, AcceptedIntentKind::Resume, false)
+                .compose(request.clone(), &request.anchor)
+                .expect("replacement aggregate");
+        let recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/reused-executor").expect("recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let authority = ReplacementAuthorityResolver {
+            calls: Cell::new(0),
+        };
+
+        let error = replacement_executor::prove_replacement_executor_equivalence(
+            &original_aggregate,
+            &replacement_aggregate,
+            &recipient,
+            &recipient,
+            &authority,
+        )
+        .err()
+        .expect("replacement identity must be distinct");
+
+        assert_eq!(
+            error.code(),
+            "continuation_collection.replacement_executor.recipient.not_distinct"
+        );
+        assert_eq!(authority.calls.get(), 0);
+    }
+
+    #[test]
     fn collector_kind_substitution_fails_closed() {
         let request = request(false);
         let mut collectors = ALL_COLLECTOR_KINDS
@@ -2021,6 +3003,7 @@ mod tests {
                 kind: ContinuationUnderstandingClaimKind::Objective,
                 value: ContinuationContextText::new("bounded objective").expect("text"),
             }],
+            work_identities: Vec::new(),
         };
         let mut collectors = ALL_COLLECTOR_KINDS
             .iter()
@@ -2080,6 +3063,7 @@ mod tests {
             sensitivity: ContinuationContextSensitivity::Internal,
             materialized_bytes: 32,
             claims: Vec::new(),
+            work_identities: Vec::new(),
         });
         let provider = collectors
             .iter_mut()
@@ -2191,6 +3175,7 @@ mod tests {
                     kind: ContinuationUnderstandingClaimKind::Objective,
                     value: ContinuationContextText::new(secret).expect("text"),
                 }],
+                work_identities: Vec::new(),
             }),
             accepted_intents: Vec::new(),
             accounting: Vec::new(),
@@ -2213,6 +3198,7 @@ mod tests {
             sensitivity: ContinuationContextSensitivity::Internal,
             materialized_bytes: 1,
             claims: Vec::new(),
+            work_identities: Vec::new(),
         };
         let mut observation = ContinuationCollectionObservation {
             kind,
@@ -2243,6 +3229,50 @@ mod tests {
             false,
         )
         .expect("unsupported posture");
+    }
+
+    #[test]
+    fn work_identity_must_bind_the_exact_authoritative_claim() {
+        let request = replacement_request();
+        let kind = ContinuationCollectorKind::WorkReport;
+        let mut source = collected_source(
+            kind,
+            &[(
+                ContinuationUnderstandingClaimKind::CompletedObligation,
+                "completed replacement proof",
+            )],
+        );
+        source.work_identities = vec![ContinuationCollectedWorkIdentity {
+            identity: hash("work/replacement-proof"),
+            source_binding: hash("unrelated-claim-binding"),
+            disposition: ContinuationCollectedWorkDisposition::Completed,
+        }];
+        let observation = ContinuationCollectionObservation {
+            kind,
+            request_commitment: request.commitment.clone(),
+            revision: request.anchor.revision_for(kind).expect("revision").clone(),
+            posture: ContinuationCollectionResultPosture::Observed,
+            source: Some(source),
+            accepted_intents: Vec::new(),
+            accounting: Vec::new(),
+        };
+
+        let error = validate_result_shape(
+            &observation,
+            collector_expectation_for(
+                request.purpose,
+                request.scope.run_id.is_some(),
+                kind.source_class(),
+            ),
+            request.purpose,
+            request.scope.run_id.is_some(),
+        )
+        .expect_err("unrelated claim binding must fail");
+
+        assert_eq!(
+            error.code(),
+            "continuation_collection.observation.work_identity_binding_mismatch"
+        );
     }
 
     #[test]

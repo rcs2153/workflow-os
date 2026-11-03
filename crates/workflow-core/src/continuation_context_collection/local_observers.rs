@@ -398,6 +398,7 @@ impl LocalRead {
                 sensitivity: ContinuationContextSensitivity::Internal,
                 materialized_bytes: self.materialized_bytes,
                 claims: Vec::new(),
+                work_identities: Vec::new(),
             })
         } else {
             None

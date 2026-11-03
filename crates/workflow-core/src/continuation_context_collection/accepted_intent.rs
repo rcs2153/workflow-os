@@ -11,8 +11,8 @@ use serde::Serialize;
 
 use super::{
     collection_commitment, collection_error, empty_accounting_claims_for,
-    ContinuationCollectedAccounting, ContinuationCollectionAnchor,
-    ContinuationCollectionObservation, ContinuationCollectionRequest,
+    ContinuationCollectedAcceptedIntent, ContinuationCollectedAccounting,
+    ContinuationCollectionAnchor, ContinuationCollectionObservation, ContinuationCollectionRequest,
     ContinuationCollectionResultPosture, ContinuationCollectorKind, ContinuationCollectorRevision,
     ContinuationContextCollector, ALL_COLLECTOR_KINDS,
 };
@@ -442,7 +442,14 @@ impl<S: AcceptedIntentRecordStore> ContinuationContextCollector
             revision: snapshot.revision,
             posture,
             source: None,
-            accepted_intents: snapshot.records,
+            accepted_intents: snapshot
+                .records
+                .into_iter()
+                .map(|record| ContinuationCollectedAcceptedIntent {
+                    record,
+                    work_identity: None,
+                })
+                .collect(),
             accounting,
         })
     }

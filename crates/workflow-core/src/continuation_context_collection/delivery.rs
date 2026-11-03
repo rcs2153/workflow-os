@@ -2,10 +2,13 @@ use std::fmt;
 
 use serde::Serialize;
 
-use super::{collection_commitment, collection_error, ContinuationAggregateComposition};
+use super::{
+    collection_commitment, collection_error, ContinuationAggregateComposition,
+    ContinuationCollectedWorkIdentity, ContinuationControlDisposition,
+};
 use crate::continuation_context::{
-    ContinuationContextDecisionPosture, ContinuationContextPurpose, ContinuationContextScope,
-    ContinuationUnderstandingProjection,
+    ContinuationContextDecisionPosture, ContinuationContextGap, ContinuationContextPurpose,
+    ContinuationContextScope, ContinuationUnderstandingProjection,
 };
 use crate::{ActorId, SpecContentHash, WorkflowOsError};
 
@@ -27,6 +30,9 @@ pub(super) struct ContinuationProjectionDelivery {
     aggregate_proof_commitment: SpecContentHash,
     decision_commitment: SpecContentHash,
     decision_posture: ContinuationContextDecisionPosture,
+    gaps: Vec<ContinuationContextGap>,
+    control_disposition: ContinuationControlDisposition,
+    work_identities: Vec<ContinuationCollectedWorkIdentity>,
     understanding: ContinuationUnderstandingProjection,
     commitment: SpecContentHash,
     non_authorizing: bool,
@@ -45,6 +51,9 @@ impl fmt::Debug for ContinuationProjectionDelivery {
             .field("aggregate_proof_commitment", &"[REDACTED]")
             .field("decision_commitment", &"[REDACTED]")
             .field("decision_posture", &self.decision_posture)
+            .field("gap_count", &self.gaps.len())
+            .field("control_disposition", &self.control_disposition)
+            .field("work_identity_count", &self.work_identities.len())
             .field("claim_count", &self.understanding.claims().len())
             .field("commitment", &"[REDACTED]")
             .field("non_authorizing", &self.non_authorizing)
@@ -64,6 +73,9 @@ impl ContinuationProjectionDelivery {
         let aggregate_proof_commitment = aggregate.proof.commitment.clone();
         let decision_commitment = aggregate.decision.commitment().clone();
         let decision_posture = aggregate.decision.posture();
+        let gaps = aggregate.decision.gaps().to_vec();
+        let control_disposition = aggregate.control_disposition;
+        let work_identities = aggregate.work_identities.clone();
         let understanding = aggregate.decision.understanding().clone();
         let commitment = collection_commitment(
             "projection-delivery",
@@ -77,6 +89,9 @@ impl ContinuationProjectionDelivery {
                 &aggregate_proof_commitment,
                 &decision_commitment,
                 decision_posture,
+                &gaps,
+                control_disposition,
+                &work_identities,
                 understanding.commitment(),
                 true,
             ),
@@ -91,6 +106,9 @@ impl ContinuationProjectionDelivery {
             aggregate_proof_commitment,
             decision_commitment,
             decision_posture,
+            gaps,
+            control_disposition,
+            work_identities,
             understanding,
             commitment,
             non_authorizing: true,
@@ -99,6 +117,26 @@ impl ContinuationProjectionDelivery {
 
     pub(super) const fn recipient(&self) -> &ActorId {
         &self.recipient
+    }
+
+    pub(super) const fn scope(&self) -> &ContinuationContextScope {
+        &self.scope
+    }
+
+    pub(super) const fn decision_posture(&self) -> ContinuationContextDecisionPosture {
+        self.decision_posture
+    }
+
+    pub(super) fn gaps(&self) -> &[ContinuationContextGap] {
+        &self.gaps
+    }
+
+    pub(super) const fn control_disposition(&self) -> ContinuationControlDisposition {
+        self.control_disposition
+    }
+
+    pub(super) fn work_identities(&self) -> &[ContinuationCollectedWorkIdentity] {
+        &self.work_identities
     }
 
     pub(super) const fn understanding(&self) -> &ContinuationUnderstandingProjection {
