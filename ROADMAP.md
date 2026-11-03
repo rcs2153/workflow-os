@@ -1468,9 +1468,24 @@ history. It is reference material, not a second delivery queue.
    caller-selected required claims and source necessity with twelve private
    purpose/scope profiles, distinguishes required values from typed required
    accounting, and adds Core-owned singleton versus set-valued resolution so
-   legitimate multi-item work is not misclassified as conflict. The next P0
-   phase is the private model-only implementation with focused tests, report,
-   and implementation review; collectors and runtime consumers remain later.
+   legitimate multi-item work is not misclassified as conflict. The private
+   model-only implementation is now complete. Core derives all 23 claim
+   obligations and all 18 source obligations from purpose and validated scope,
+   commits the permitted authority domains and highest-authority resolution
+   rule, accepts only typed authoritative empty accounting, preserves
+   deterministic set-valued claims with per-value provenance, and blocks
+   missing, withheld, conflicting, advisory-only, or incompletely accounted
+   required understanding. Caller-controlled `required_claims` and
+   `required_for_purpose` fields are removed. Forty focused tests pass.
+   See the [semantic-obligation profile implementation
+   report](docs/concepts/AUTHORITATIVE_CONTINUATION_CONTEXT_SEMANTIC_OBLIGATION_PROFILE_REPORT.md).
+   Focused implementation/security review accepts the increment after one
+   fix-forward correction ensured complete authoritative empty accounting
+   takes precedence over advisory-only prose without allowing advisory context
+   to satisfy required values or missing accounting. See the [semantic-
+   obligation profile implementation
+   review](docs/concepts/AUTHORITATIVE_CONTINUATION_CONTEXT_SEMANTIC_OBLIGATION_PROFILE_REVIEW.md).
+   Trusted collectors, composition, and runtime consumers remain later.
    Collectors, persistence, accepted-intent capture, CLI preview, runtime
    integration, compaction adapters, delivery receipts, Salsa, and
    replacement-executor proof remain unimplemented.

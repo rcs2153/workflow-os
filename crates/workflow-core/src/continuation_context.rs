@@ -5,12 +5,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ActorId, ProjectId, SpecContentHash, WorkflowId, WorkflowOsError, WorkflowRunId};
 
-const CONTEXT_ALGORITHM: &str = "workflow-os/continuation-context/v1";
+const CONTEXT_ALGORITHM: &str = "workflow-os/continuation-context/v2";
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_TEXT_BYTES: usize = 1_024;
 const MAX_SOURCES: usize = 256;
 const MAX_CLAIMS_PER_SOURCE: usize = 64;
 const MAX_COVERAGE_ENTRIES: usize = 32;
+const MAX_ACCOUNTING_ENTRIES: usize = 256;
 const ALL_CONTEXT_SOURCE_CLASSES: [ContinuationContextSourceClass; 18] = [
     ContinuationContextSourceClass::ValidatedDeclaration,
     ContinuationContextSourceClass::ImmutableRunBundle,
@@ -30,6 +31,51 @@ const ALL_CONTEXT_SOURCE_CLASSES: [ContinuationContextSourceClass; 18] = [
     ContinuationContextSourceClass::OperatingDocument,
     ContinuationContextSourceClass::ProviderObservation,
     ContinuationContextSourceClass::AgentAdvisory,
+];
+const ALL_UNDERSTANDING_CLAIM_KINDS: [ContinuationUnderstandingClaimKind; 23] = [
+    ContinuationUnderstandingClaimKind::Objective,
+    ContinuationUnderstandingClaimKind::Priority,
+    ContinuationUnderstandingClaimKind::AcceptedAmendment,
+    ContinuationUnderstandingClaimKind::Scope,
+    ContinuationUnderstandingClaimKind::StrictNonGoal,
+    ContinuationUnderstandingClaimKind::Decision,
+    ContinuationUnderstandingClaimKind::RationaleReference,
+    ContinuationUnderstandingClaimKind::CompletedObligation,
+    ContinuationUnderstandingClaimKind::InProgressObligation,
+    ContinuationUnderstandingClaimKind::DeferredObligation,
+    ContinuationUnderstandingClaimKind::RemainingObligation,
+    ContinuationUnderstandingClaimKind::Blocker,
+    ContinuationUnderstandingClaimKind::RegisteredWait,
+    ContinuationUnderstandingClaimKind::OpenQuestion,
+    ContinuationUnderstandingClaimKind::Assumption,
+    ContinuationUnderstandingClaimKind::Uncertainty,
+    ContinuationUnderstandingClaimKind::EvidenceRequirement,
+    ContinuationUnderstandingClaimKind::CheckRequirement,
+    ContinuationUnderstandingClaimKind::SideEffectPosture,
+    ContinuationUnderstandingClaimKind::ValidationCommitment,
+    ContinuationUnderstandingClaimKind::ReportingCommitment,
+    ContinuationUnderstandingClaimKind::PromisedFollowUp,
+    ContinuationUnderstandingClaimKind::LawfulNextOption,
+];
+const ALL_CONTEXT_AUTHORITY_DOMAINS: [ContinuationContextAuthorityDomain; 18] = [
+    ContinuationContextAuthorityDomain::Declaration,
+    ContinuationContextAuthorityDomain::ImmutableRunInput,
+    ContinuationContextAuthorityDomain::DurableRunState,
+    ContinuationContextAuthorityDomain::EventHistory,
+    ContinuationContextAuthorityDomain::Policy,
+    ContinuationContextAuthorityDomain::Approval,
+    ContinuationContextAuthorityDomain::Capability,
+    ContinuationContextAuthorityDomain::RequiredContext,
+    ContinuationContextAuthorityDomain::Evidence,
+    ContinuationContextAuthorityDomain::Check,
+    ContinuationContextAuthorityDomain::SideEffect,
+    ContinuationContextAuthorityDomain::WorkReport,
+    ContinuationContextAuthorityDomain::AcceptedIntent,
+    ContinuationContextAuthorityDomain::TypedHandoff,
+    ContinuationContextAuthorityDomain::GitObservation,
+    ContinuationContextAuthorityDomain::OperatingDocument,
+    ContinuationContextAuthorityDomain::ProviderObservation,
+    ContinuationContextAuthorityDomain::AgentAdvisory,
 ];
 
 macro_rules! bounded_identifier {
@@ -384,6 +430,106 @@ pub enum ContinuationUnderstandingClaimKind {
     LawfulNextOption,
 }
 
+/// Core-owned identity of one purpose- and scope-bound semantic profile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationContextSemanticProfileId {
+    PreRunPlanning,
+    PreRunImplementation,
+    PreRunApprovalReview,
+    PreRunProviderReconciliation,
+    PreRunChildHandoff,
+    PreRunMaterialContinuation,
+    RunBoundPlanning,
+    RunBoundImplementation,
+    RunBoundApprovalReview,
+    RunBoundProviderReconciliation,
+    RunBoundChildHandoff,
+    RunBoundMaterialContinuation,
+}
+
+/// Whether one claim needs a value, complete accounting, or neither.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationClaimRequirement {
+    RequiredValue,
+    RequiredAccounting,
+    Optional,
+    Inapplicable,
+}
+
+/// Core-owned value cardinality for one semantic claim kind.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationClaimCardinality {
+    Singleton,
+    Set,
+}
+
+/// Core-owned conflict and selection rule for one claim kind.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationClaimResolution {
+    HighestAuthority,
+}
+
+/// Core-owned selection posture for one admitted source class.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationSourceNecessity {
+    Mandatory,
+    Supplemental,
+    AdvisoryOnly,
+    Inapplicable,
+}
+
+/// One Core-owned semantic claim obligation.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContinuationClaimObligation {
+    kind: ContinuationUnderstandingClaimKind,
+    requirement: ContinuationClaimRequirement,
+    cardinality: ContinuationClaimCardinality,
+    resolution: ContinuationClaimResolution,
+    permitted_authority_domains: Vec<ContinuationContextAuthorityDomain>,
+}
+
+/// One Core-owned source-class obligation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContinuationSourceObligation {
+    source_class: ContinuationContextSourceClass,
+    necessity: ContinuationSourceNecessity,
+}
+
+/// Closed semantic contract derived only from purpose and validated scope.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContinuationContextSemanticProfile {
+    profile_id: ContinuationContextSemanticProfileId,
+    purpose: ContinuationContextPurpose,
+    run_bound: bool,
+    claim_obligations: Vec<ContinuationClaimObligation>,
+    source_obligations: Vec<ContinuationSourceObligation>,
+    commitment: SpecContentHash,
+}
+
+/// Typed claim-level accounting outcome supplied by an explicit collector.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContinuationClaimAccountingOutcome {
+    Empty,
+}
+
+/// Claim-level accounting observation. It cannot change Core requirements.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContinuationClaimAccountingEntry {
+    pub claim_kind: ContinuationUnderstandingClaimKind,
+    pub source_class: ContinuationContextSourceClass,
+    pub outcome: ContinuationClaimAccountingOutcome,
+}
+
 /// One bounded semantic candidate asserted by a source.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -404,7 +550,6 @@ pub struct ContinuationContextSourceDefinition {
     pub integrity: ContinuationContextIntegrity,
     pub access: ContinuationContextAccess,
     pub sensitivity: ContinuationContextSensitivity,
-    pub required_for_purpose: bool,
     pub materialized_bytes: u64,
     pub claims: Vec<ContinuationUnderstandingCandidate>,
 }
@@ -474,8 +619,8 @@ pub struct ContinuationContextDecisionInput {
     pub actor: ActorId,
     pub maximum_sensitivity: ContinuationContextSensitivity,
     pub materialization_budget_bytes: u64,
-    pub required_claims: BTreeSet<ContinuationUnderstandingClaimKind>,
     pub coverage: Vec<ContinuationContextSourceCoverageEntry>,
+    pub claim_accounting: Vec<ContinuationClaimAccountingEntry>,
     pub sources: Vec<ContinuationContextSourceDefinition>,
     pub accepted_intents: Vec<AcceptedIntentRecord>,
 }
@@ -507,7 +652,7 @@ pub struct ContinuationContextInventoryEntry {
     integrity: ContinuationContextIntegrity,
     access: ContinuationContextAccess,
     sensitivity: ContinuationContextSensitivity,
-    required_for_purpose: bool,
+    necessity: ContinuationSourceNecessity,
     disposition: ContinuationContextSourceDisposition,
 }
 
@@ -535,7 +680,7 @@ impl fmt::Debug for ContinuationContextInventoryEntry {
             .field("integrity", &self.integrity)
             .field("access", &self.access)
             .field("sensitivity", &self.sensitivity)
-            .field("required_for_purpose", &self.required_for_purpose)
+            .field("necessity", &self.necessity)
             .field("disposition", &self.disposition)
             .finish()
     }
@@ -576,6 +721,8 @@ pub enum ContinuationContextGapKind {
     SourceUnauthorized,
     SourceIntegrity,
     SourceOverBudget,
+    ClaimAccountingMissing,
+    ClaimAdvisoryOnly,
     ClaimUnknown,
     ClaimConflicting,
     ClaimWithheld,
@@ -631,6 +778,7 @@ pub enum ContinuationUnderstandingClaimPosture {
     Authoritative,
     Supported,
     Advisory,
+    AccountedEmpty,
     Conflicting,
     Unknown,
     Withheld,
@@ -719,6 +867,7 @@ pub enum ContinuationContextDecisionPosture {
 #[serde(deny_unknown_fields)]
 pub struct ContinuationContextDecision {
     coverage: ContinuationContextSourceCoverage,
+    semantic_profile: ContinuationContextSemanticProfile,
     inventory: ContinuationContextInventory,
     bundle: ContinuationContextBundle,
     understanding: ContinuationUnderstandingProjection,
@@ -789,34 +938,34 @@ pub fn derive_continuation_context(
     input
         .accepted_intents
         .sort_by(|left, right| left.record_id.cmp(&right.record_id));
+    input.claim_accounting.sort();
     reject_duplicate_coverage(&input.coverage)?;
     reject_duplicate_sources(&input.sources)?;
     reject_duplicate_intents(&input.accepted_intents)?;
+    reject_duplicate_claim_accounting(&input.claim_accounting)?;
     validate_scope(&input.scope)?;
-    let coverage_profile = coverage_profile_id(input.purpose, input.scope.run_id.is_some());
+    let run_bound = input.scope.run_id.is_some();
+    let coverage_profile = coverage_profile_id(input.purpose, run_bound);
+    let semantic_profile = derive_semantic_profile(input.purpose, run_bound)?;
     validate_source_coverage(&input)?;
     validate_coverage_expectations(coverage_profile, &input.coverage)?;
     validate_expectation_outcome_compatibility(&input.coverage)?;
     validate_coverage_outcomes(&input)?;
     validate_source_claims(&input.scope, &input.sources)?;
     validate_intent_scope(&input.scope, &input.accepted_intents)?;
+    validate_claim_accounting(&input, &semantic_profile)?;
 
-    let coverage = derive_coverage(
-        input.purpose,
-        coverage_profile,
-        input.scope.run_id.is_some(),
-        &input.coverage,
-    )?;
+    let coverage = derive_coverage(input.purpose, coverage_profile, run_bound, &input.coverage)?;
     let mut sources = input.sources;
     sources.extend(intent_sources(&input.accepted_intents)?);
     sources.sort_by(|left, right| left.source_id.cmp(&right.source_id));
     reject_duplicate_sources(&sources)?;
+    validate_semantic_sources(&semantic_profile, &sources)?;
 
     let mut selection_order = sources.iter().collect::<Vec<_>>();
     selection_order.sort_by(|left, right| {
-        right
-            .required_for_purpose
-            .cmp(&left.required_for_purpose)
+        source_necessity(&semantic_profile, left.source_class)
+            .cmp(&source_necessity(&semantic_profile, right.source_class))
             .then_with(|| left.source_id.cmp(&right.source_id))
     });
 
@@ -834,7 +983,9 @@ pub fn derive_continuation_context(
         } else if disposition == ContinuationContextSourceDisposition::Unauthorized {
             withheld_claims.extend(source.claims.iter().map(|claim| claim.kind));
         }
-        if source.required_for_purpose {
+        if source_necessity(&semantic_profile, source.source_class)
+            == ContinuationSourceNecessity::Mandatory
+        {
             if let Some(kind) = source_gap(disposition) {
                 gaps.push(ContinuationContextGap {
                     kind,
@@ -842,7 +993,11 @@ pub fn derive_continuation_context(
                 });
             }
         }
-        inventory_entries.push(inventory_entry(source, disposition));
+        inventory_entries.push(inventory_entry(
+            source,
+            source_necessity(&semantic_profile, source.source_class),
+            disposition,
+        ));
     }
     inventory_entries.sort_by(|left, right| left.source_id.cmp(&right.source_id));
     selected.sort_by(|left, right| left.source_id.cmp(&right.source_id));
@@ -854,7 +1009,10 @@ pub fn derive_continuation_context(
         });
     }
 
-    let inventory_commitment = canonical_commitment("private-inventory", &inventory_entries)?;
+    let inventory_commitment = canonical_commitment(
+        "private-inventory",
+        &(semantic_profile.commitment.clone(), &inventory_entries),
+    )?;
     let inventory = ContinuationContextInventory {
         algorithm: CONTEXT_ALGORITHM.to_owned(),
         entries: inventory_entries,
@@ -865,7 +1023,6 @@ pub fn derive_continuation_context(
         .iter()
         .map(|source| source.source_id.clone())
         .collect::<Vec<_>>();
-    let run_bound = input.scope.run_id.is_some();
     let materialized_bytes = selected
         .iter()
         .map(|source| source.materialized_bytes)
@@ -877,6 +1034,8 @@ pub fn derive_continuation_context(
             &input.scope,
             &input.actor,
             input.maximum_sensitivity,
+            semantic_profile.commitment.clone(),
+            &input.claim_accounting,
             &selected_source_ids,
             materialized_bytes,
             &selected,
@@ -894,15 +1053,23 @@ pub fn derive_continuation_context(
 
     let claims = derive_claims(
         &selected,
-        &input.required_claims,
+        &semantic_profile,
+        &input.claim_accounting,
+        &input.coverage,
         &withheld_claims,
         run_bound,
         &mut gaps,
     );
     gaps.sort();
     gaps.dedup();
-    let understanding_commitment =
-        canonical_commitment("understanding", &(bundle.commitment(), &claims))?;
+    let understanding_commitment = canonical_commitment(
+        "understanding",
+        &(
+            semantic_profile.commitment.clone(),
+            bundle.commitment(),
+            &claims,
+        ),
+    )?;
     let understanding = ContinuationUnderstandingProjection {
         claims,
         commitment: understanding_commitment,
@@ -917,6 +1084,7 @@ pub fn derive_continuation_context(
         "decision",
         &(
             coverage.commitment(),
+            semantic_profile.commitment.clone(),
             inventory.commitment(),
             bundle.commitment(),
             understanding.commitment(),
@@ -927,6 +1095,7 @@ pub fn derive_continuation_context(
 
     Ok(ContinuationContextDecision {
         coverage,
+        semantic_profile,
         inventory,
         bundle,
         understanding,
@@ -958,6 +1127,12 @@ fn validate_input_limits(input: &ContinuationContextDecisionInput) -> Result<(),
         return Err(context_error(
             "coverage.too_many",
             "collector coverage count exceeds the model limit",
+        ));
+    }
+    if input.claim_accounting.len() > MAX_ACCOUNTING_ENTRIES {
+        return Err(context_error(
+            "accounting.too_many",
+            "claim accounting count exceeds the model limit",
         ));
     }
     Ok(())
@@ -1001,6 +1176,21 @@ fn reject_duplicate_intents(intents: &[AcceptedIntentRecord]) -> Result<(), Work
         return Err(context_error(
             "intent.duplicate",
             "accepted intent contains a duplicate identity",
+        ));
+    }
+    Ok(())
+}
+
+fn reject_duplicate_claim_accounting(
+    accounting: &[ContinuationClaimAccountingEntry],
+) -> Result<(), WorkflowOsError> {
+    if accounting.windows(2).any(|entries| {
+        entries[0].claim_kind == entries[1].claim_kind
+            && entries[0].source_class == entries[1].source_class
+    }) {
+        return Err(context_error(
+            "accounting.duplicate",
+            "claim accounting contains a duplicate claim and source class",
         ));
     }
     Ok(())
@@ -1392,6 +1582,378 @@ const fn is_run_bound_profile(profile_id: ContinuationContextCoverageProfileId) 
     )
 }
 
+const fn semantic_profile_id(
+    purpose: ContinuationContextPurpose,
+    run_bound: bool,
+) -> ContinuationContextSemanticProfileId {
+    match (purpose, run_bound) {
+        (ContinuationContextPurpose::Planning, false) => {
+            ContinuationContextSemanticProfileId::PreRunPlanning
+        }
+        (ContinuationContextPurpose::Implementation, false) => {
+            ContinuationContextSemanticProfileId::PreRunImplementation
+        }
+        (ContinuationContextPurpose::ApprovalReview, false) => {
+            ContinuationContextSemanticProfileId::PreRunApprovalReview
+        }
+        (ContinuationContextPurpose::ProviderReconciliation, false) => {
+            ContinuationContextSemanticProfileId::PreRunProviderReconciliation
+        }
+        (ContinuationContextPurpose::ChildHandoff, false) => {
+            ContinuationContextSemanticProfileId::PreRunChildHandoff
+        }
+        (ContinuationContextPurpose::MaterialContinuation, false) => {
+            ContinuationContextSemanticProfileId::PreRunMaterialContinuation
+        }
+        (ContinuationContextPurpose::Planning, true) => {
+            ContinuationContextSemanticProfileId::RunBoundPlanning
+        }
+        (ContinuationContextPurpose::Implementation, true) => {
+            ContinuationContextSemanticProfileId::RunBoundImplementation
+        }
+        (ContinuationContextPurpose::ApprovalReview, true) => {
+            ContinuationContextSemanticProfileId::RunBoundApprovalReview
+        }
+        (ContinuationContextPurpose::ProviderReconciliation, true) => {
+            ContinuationContextSemanticProfileId::RunBoundProviderReconciliation
+        }
+        (ContinuationContextPurpose::ChildHandoff, true) => {
+            ContinuationContextSemanticProfileId::RunBoundChildHandoff
+        }
+        (ContinuationContextPurpose::MaterialContinuation, true) => {
+            ContinuationContextSemanticProfileId::RunBoundMaterialContinuation
+        }
+    }
+}
+
+const fn claim_requirement(
+    profile_id: ContinuationContextSemanticProfileId,
+    kind: ContinuationUnderstandingClaimKind,
+) -> ContinuationClaimRequirement {
+    use ContinuationClaimRequirement::{RequiredAccounting, RequiredValue};
+    use ContinuationContextPurpose as Purpose;
+    use ContinuationUnderstandingClaimKind as Claim;
+
+    let purpose = semantic_profile_purpose(profile_id);
+    let run_bound = semantic_profile_is_run_bound(profile_id);
+    match kind {
+        Claim::Objective | Claim::Scope | Claim::LawfulNextOption => RequiredValue,
+        Claim::RemainingObligation
+            if (run_bound && !matches!(purpose, Purpose::ApprovalReview))
+                || (!run_bound
+                    && matches!(
+                        purpose,
+                        Purpose::Implementation
+                            | Purpose::ChildHandoff
+                            | Purpose::MaterialContinuation
+                    )) =>
+        {
+            RequiredValue
+        }
+        Claim::EvidenceRequirement
+            if matches!(
+                purpose,
+                Purpose::ApprovalReview | Purpose::ProviderReconciliation
+            ) || (run_bound
+                && matches!(
+                    purpose,
+                    Purpose::Implementation | Purpose::ChildHandoff | Purpose::MaterialContinuation
+                )) =>
+        {
+            RequiredValue
+        }
+        Claim::CheckRequirement
+            if matches!(
+                purpose,
+                Purpose::Implementation | Purpose::ApprovalReview | Purpose::MaterialContinuation
+            ) || (run_bound && matches!(purpose, Purpose::ChildHandoff)) =>
+        {
+            RequiredValue
+        }
+        Claim::SideEffectPosture
+            if matches!(
+                purpose,
+                Purpose::Implementation
+                    | Purpose::ApprovalReview
+                    | Purpose::ProviderReconciliation
+                    | Purpose::MaterialContinuation
+            ) || (run_bound && matches!(purpose, Purpose::ChildHandoff)) =>
+        {
+            RequiredValue
+        }
+        Claim::ValidationCommitment | Claim::ReportingCommitment
+            if matches!(
+                purpose,
+                Purpose::Implementation
+                    | Purpose::ApprovalReview
+                    | Purpose::ChildHandoff
+                    | Purpose::MaterialContinuation
+            ) =>
+        {
+            RequiredValue
+        }
+        _ => RequiredAccounting,
+    }
+}
+
+const fn claim_cardinality(
+    kind: ContinuationUnderstandingClaimKind,
+) -> ContinuationClaimCardinality {
+    match kind {
+        ContinuationUnderstandingClaimKind::Objective
+        | ContinuationUnderstandingClaimKind::Priority
+        | ContinuationUnderstandingClaimKind::Scope => ContinuationClaimCardinality::Singleton,
+        _ => ContinuationClaimCardinality::Set,
+    }
+}
+
+const fn semantic_profile_purpose(
+    profile_id: ContinuationContextSemanticProfileId,
+) -> ContinuationContextPurpose {
+    match profile_id {
+        ContinuationContextSemanticProfileId::PreRunPlanning
+        | ContinuationContextSemanticProfileId::RunBoundPlanning => {
+            ContinuationContextPurpose::Planning
+        }
+        ContinuationContextSemanticProfileId::PreRunImplementation
+        | ContinuationContextSemanticProfileId::RunBoundImplementation => {
+            ContinuationContextPurpose::Implementation
+        }
+        ContinuationContextSemanticProfileId::PreRunApprovalReview
+        | ContinuationContextSemanticProfileId::RunBoundApprovalReview => {
+            ContinuationContextPurpose::ApprovalReview
+        }
+        ContinuationContextSemanticProfileId::PreRunProviderReconciliation
+        | ContinuationContextSemanticProfileId::RunBoundProviderReconciliation => {
+            ContinuationContextPurpose::ProviderReconciliation
+        }
+        ContinuationContextSemanticProfileId::PreRunChildHandoff
+        | ContinuationContextSemanticProfileId::RunBoundChildHandoff => {
+            ContinuationContextPurpose::ChildHandoff
+        }
+        ContinuationContextSemanticProfileId::PreRunMaterialContinuation
+        | ContinuationContextSemanticProfileId::RunBoundMaterialContinuation => {
+            ContinuationContextPurpose::MaterialContinuation
+        }
+    }
+}
+
+const fn semantic_profile_is_run_bound(profile_id: ContinuationContextSemanticProfileId) -> bool {
+    matches!(
+        profile_id,
+        ContinuationContextSemanticProfileId::RunBoundPlanning
+            | ContinuationContextSemanticProfileId::RunBoundImplementation
+            | ContinuationContextSemanticProfileId::RunBoundApprovalReview
+            | ContinuationContextSemanticProfileId::RunBoundProviderReconciliation
+            | ContinuationContextSemanticProfileId::RunBoundChildHandoff
+            | ContinuationContextSemanticProfileId::RunBoundMaterialContinuation
+    )
+}
+
+const fn semantic_source_necessity(
+    profile_id: ContinuationContextSemanticProfileId,
+    source_class: ContinuationContextSourceClass,
+) -> ContinuationSourceNecessity {
+    if matches!(source_class, ContinuationContextSourceClass::AgentAdvisory) {
+        return ContinuationSourceNecessity::AdvisoryOnly;
+    }
+    let expectation = coverage_profile_expectation(
+        coverage_profile_id(
+            semantic_profile_purpose(profile_id),
+            semantic_profile_is_run_bound(profile_id),
+        ),
+        source_class,
+    );
+    match expectation {
+        ContinuationContextCollectorExpectation::Required => ContinuationSourceNecessity::Mandatory,
+        ContinuationContextCollectorExpectation::Optional => {
+            ContinuationSourceNecessity::Supplemental
+        }
+        ContinuationContextCollectorExpectation::Inapplicable => {
+            ContinuationSourceNecessity::Inapplicable
+        }
+    }
+}
+
+fn derive_semantic_profile(
+    purpose: ContinuationContextPurpose,
+    run_bound: bool,
+) -> Result<ContinuationContextSemanticProfile, WorkflowOsError> {
+    let profile_id = semantic_profile_id(purpose, run_bound);
+    let claim_obligations = ALL_UNDERSTANDING_CLAIM_KINDS
+        .iter()
+        .map(|kind| ContinuationClaimObligation {
+            kind: *kind,
+            requirement: claim_requirement(profile_id, *kind),
+            cardinality: claim_cardinality(*kind),
+            resolution: ContinuationClaimResolution::HighestAuthority,
+            permitted_authority_domains: ALL_CONTEXT_AUTHORITY_DOMAINS
+                .iter()
+                .copied()
+                .filter(|domain| authority_rank(*kind, *domain, run_bound).is_some())
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    let source_obligations = ALL_CONTEXT_SOURCE_CLASSES
+        .iter()
+        .map(|source_class| ContinuationSourceObligation {
+            source_class: *source_class,
+            necessity: semantic_source_necessity(profile_id, *source_class),
+        })
+        .collect::<Vec<_>>();
+    let commitment = canonical_commitment(
+        "semantic-profile",
+        &(
+            profile_id,
+            purpose,
+            run_bound,
+            &claim_obligations,
+            &source_obligations,
+        ),
+    )?;
+    Ok(ContinuationContextSemanticProfile {
+        profile_id,
+        purpose,
+        run_bound,
+        claim_obligations,
+        source_obligations,
+        commitment,
+    })
+}
+
+fn source_necessity(
+    profile: &ContinuationContextSemanticProfile,
+    source_class: ContinuationContextSourceClass,
+) -> ContinuationSourceNecessity {
+    profile
+        .source_obligations
+        .iter()
+        .find(|obligation| obligation.source_class == source_class)
+        .map_or(ContinuationSourceNecessity::Inapplicable, |obligation| {
+            obligation.necessity
+        })
+}
+
+fn claim_obligation(
+    profile: &ContinuationContextSemanticProfile,
+    kind: ContinuationUnderstandingClaimKind,
+) -> ContinuationClaimObligation {
+    profile
+        .claim_obligations
+        .iter()
+        .find(|obligation| obligation.kind == kind)
+        .cloned()
+        .unwrap_or(ContinuationClaimObligation {
+            kind,
+            requirement: ContinuationClaimRequirement::Inapplicable,
+            cardinality: ContinuationClaimCardinality::Set,
+            resolution: ContinuationClaimResolution::HighestAuthority,
+            permitted_authority_domains: Vec::new(),
+        })
+}
+
+fn validate_semantic_sources(
+    profile: &ContinuationContextSemanticProfile,
+    sources: &[ContinuationContextSourceDefinition],
+) -> Result<(), WorkflowOsError> {
+    if sources.iter().any(|source| {
+        source_necessity(profile, source.source_class) == ContinuationSourceNecessity::Inapplicable
+    }) {
+        return Err(context_error(
+            "source.semantic_inapplicable",
+            "context source class is inapplicable to the Core-owned semantic profile",
+        ));
+    }
+    Ok(())
+}
+
+fn best_accounting_source_classes(
+    profile: &ContinuationContextSemanticProfile,
+    kind: ContinuationUnderstandingClaimKind,
+) -> Vec<ContinuationContextSourceClass> {
+    let mut ranked = profile
+        .source_obligations
+        .iter()
+        .filter(|obligation| obligation.necessity == ContinuationSourceNecessity::Mandatory)
+        .filter_map(|obligation| {
+            authority_rank(
+                kind,
+                authority_domain_for_source_class(obligation.source_class),
+                profile.run_bound,
+            )
+            .map(|rank| (rank, obligation.source_class))
+        })
+        .collect::<Vec<_>>();
+    ranked.sort();
+    let Some(best_rank) = ranked.first().map(|(rank, _)| *rank) else {
+        return Vec::new();
+    };
+    ranked
+        .into_iter()
+        .take_while(|(rank, _)| *rank == best_rank)
+        .map(|(_, source_class)| source_class)
+        .collect()
+}
+
+fn validate_claim_accounting(
+    input: &ContinuationContextDecisionInput,
+    profile: &ContinuationContextSemanticProfile,
+) -> Result<(), WorkflowOsError> {
+    for entry in &input.claim_accounting {
+        if claim_obligation(profile, entry.claim_kind).requirement
+            == ContinuationClaimRequirement::Inapplicable
+        {
+            return Err(context_error(
+                "accounting.claim_inapplicable",
+                "claim accounting targets an inapplicable claim kind",
+            ));
+        }
+        if !best_accounting_source_classes(profile, entry.claim_kind).contains(&entry.source_class)
+        {
+            return Err(context_error(
+                "accounting.source_not_authoritative",
+                "claim accounting source is not a Core-selected accounting source",
+            ));
+        }
+        if !input
+            .coverage
+            .iter()
+            .any(|coverage| coverage.source_class == entry.source_class)
+        {
+            return Err(context_error(
+                "accounting.coverage_missing",
+                "claim accounting source has no collector coverage entry",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn claim_accounting_complete(
+    profile: &ContinuationContextSemanticProfile,
+    accounting: &[ContinuationClaimAccountingEntry],
+    coverage: &[ContinuationContextSourceCoverageEntry],
+    kind: ContinuationUnderstandingClaimKind,
+) -> bool {
+    let expected = best_accounting_source_classes(profile, kind);
+    !expected.is_empty()
+        && expected.iter().all(|source_class| {
+            accounting.iter().any(|entry| {
+                entry.claim_kind == kind
+                    && entry.source_class == *source_class
+                    && entry.outcome == ContinuationClaimAccountingOutcome::Empty
+                    && coverage.iter().any(|coverage| {
+                        coverage.source_class == *source_class
+                            && matches!(
+                                coverage.outcome,
+                                ContinuationContextCollectorOutcome::Observed
+                                    | ContinuationContextCollectorOutcome::Empty
+                            )
+                    })
+            })
+        })
+}
+
 fn intent_sources(
     intents: &[AcceptedIntentRecord],
 ) -> Result<Vec<ContinuationContextSourceDefinition>, WorkflowOsError> {
@@ -1423,7 +1985,6 @@ fn intent_sources(
                 integrity: ContinuationContextIntegrity::Verified,
                 access: ContinuationContextAccess::Permitted,
                 sensitivity: ContinuationContextSensitivity::Internal,
-                required_for_purpose: true,
                 materialized_bytes: u64::try_from(intent.meaning.as_str().len())
                     .unwrap_or(u64::MAX),
                 claims: vec![ContinuationUnderstandingCandidate {
@@ -1499,6 +2060,7 @@ fn source_gap(
 
 fn inventory_entry(
     source: &ContinuationContextSourceDefinition,
+    necessity: ContinuationSourceNecessity,
     disposition: ContinuationContextSourceDisposition,
 ) -> ContinuationContextInventoryEntry {
     ContinuationContextInventoryEntry {
@@ -1510,22 +2072,21 @@ fn inventory_entry(
         integrity: source.integrity,
         access: source.access,
         sensitivity: source.sensitivity,
-        required_for_purpose: source.required_for_purpose,
+        necessity,
         disposition,
     }
 }
 
 fn derive_claims(
     selected: &[ContinuationContextSourceDefinition],
-    required: &BTreeSet<ContinuationUnderstandingClaimKind>,
+    profile: &ContinuationContextSemanticProfile,
+    accounting: &[ContinuationClaimAccountingEntry],
+    coverage: &[ContinuationContextSourceCoverageEntry],
     withheld: &BTreeSet<ContinuationUnderstandingClaimKind>,
     run_bound: bool,
     gaps: &mut Vec<ContinuationContextGap>,
 ) -> Vec<ContinuationUnderstandingClaim> {
-    let mut candidates = BTreeMap::<
-        ContinuationUnderstandingClaimKind,
-        Vec<(u8, ContinuationContextText, ContinuationContextSourceId)>,
-    >::new();
+    let mut candidates = BTreeMap::<ContinuationUnderstandingClaimKind, Vec<RankedClaim>>::new();
     for source in selected {
         for claim in &source.claims {
             if let Some(rank) = authority_rank(claim.kind, source.authority_domain, run_bound) {
@@ -1538,79 +2099,183 @@ fn derive_claims(
         }
     }
 
-    let kinds = required
-        .iter()
-        .copied()
-        .chain(candidates.keys().copied())
-        .collect::<BTreeSet<_>>();
-    let mut claims = Vec::with_capacity(kinds.len());
-    for kind in kinds {
+    let mut claims = Vec::new();
+    for obligation in &profile.claim_obligations {
+        if obligation.requirement == ContinuationClaimRequirement::Inapplicable {
+            continue;
+        }
+        let kind = obligation.kind;
         let mut values = candidates.remove(&kind).unwrap_or_default();
         values.sort();
         if values.is_empty() {
-            let posture = if withheld.contains(&kind) {
-                ContinuationUnderstandingClaimPosture::Withheld
-            } else {
-                ContinuationUnderstandingClaimPosture::Unknown
-            };
-            if required.contains(&kind) {
-                gaps.push(ContinuationContextGap {
-                    kind: if posture == ContinuationUnderstandingClaimPosture::Withheld {
-                        ContinuationContextGapKind::ClaimWithheld
-                    } else {
-                        ContinuationContextGapKind::ClaimUnknown
-                    },
-                    claim_kind: Some(kind),
-                });
-            }
+            claims.push(derive_missing_claim(
+                obligation,
+                profile,
+                accounting,
+                coverage,
+                withheld.contains(&kind),
+                gaps,
+            ));
+            continue;
+        }
+        if obligation.requirement == ContinuationClaimRequirement::RequiredAccounting
+            && values[0].0 >= 100
+            && claim_accounting_complete(profile, accounting, coverage, kind)
+        {
             claims.push(ContinuationUnderstandingClaim {
                 kind,
-                posture,
+                posture: ContinuationUnderstandingClaimPosture::AccountedEmpty,
                 value: None,
                 source_ids: Vec::new(),
             });
             continue;
         }
-        let best_rank = values[0].0;
-        let best = values
-            .into_iter()
-            .take_while(|candidate| candidate.0 == best_rank)
-            .collect::<Vec<_>>();
-        let distinct_values = best
-            .iter()
-            .map(|(_, value, _)| value.clone())
-            .collect::<BTreeSet<_>>();
-        if distinct_values.len() > 1 {
-            if required.contains(&kind) {
-                gaps.push(ContinuationContextGap {
-                    kind: ContinuationContextGapKind::ClaimConflicting,
-                    claim_kind: Some(kind),
-                });
-            }
-            claims.push(ContinuationUnderstandingClaim {
-                kind,
-                posture: ContinuationUnderstandingClaimPosture::Conflicting,
-                value: None,
-                source_ids: best.into_iter().map(|(_, _, source)| source).collect(),
-            });
-            continue;
-        }
-        let value = distinct_values.into_iter().next();
-        let posture = if best_rank <= 10 {
-            ContinuationUnderstandingClaimPosture::Authoritative
-        } else if best_rank < 100 {
-            ContinuationUnderstandingClaimPosture::Supported
-        } else {
-            ContinuationUnderstandingClaimPosture::Advisory
-        };
-        claims.push(ContinuationUnderstandingClaim {
-            kind,
-            posture,
-            value,
-            source_ids: best.into_iter().map(|(_, _, source)| source).collect(),
-        });
+        claims.extend(derive_present_claims(obligation, values, gaps));
     }
     claims
+}
+
+type RankedClaim = (u8, ContinuationContextText, ContinuationContextSourceId);
+
+fn derive_missing_claim(
+    obligation: &ContinuationClaimObligation,
+    profile: &ContinuationContextSemanticProfile,
+    accounting: &[ContinuationClaimAccountingEntry],
+    coverage: &[ContinuationContextSourceCoverageEntry],
+    withheld: bool,
+    gaps: &mut Vec<ContinuationContextGap>,
+) -> ContinuationUnderstandingClaim {
+    let accounted_empty = claim_accounting_complete(profile, accounting, coverage, obligation.kind);
+    let posture = if withheld {
+        ContinuationUnderstandingClaimPosture::Withheld
+    } else if accounted_empty {
+        ContinuationUnderstandingClaimPosture::AccountedEmpty
+    } else {
+        ContinuationUnderstandingClaimPosture::Unknown
+    };
+    let gap_kind = match obligation.requirement {
+        ContinuationClaimRequirement::RequiredValue => Some(if withheld {
+            ContinuationContextGapKind::ClaimWithheld
+        } else {
+            ContinuationContextGapKind::ClaimUnknown
+        }),
+        ContinuationClaimRequirement::RequiredAccounting if !accounted_empty => Some(if withheld {
+            ContinuationContextGapKind::ClaimWithheld
+        } else {
+            ContinuationContextGapKind::ClaimAccountingMissing
+        }),
+        ContinuationClaimRequirement::RequiredAccounting
+        | ContinuationClaimRequirement::Optional
+        | ContinuationClaimRequirement::Inapplicable => None,
+    };
+    if let Some(kind) = gap_kind {
+        gaps.push(ContinuationContextGap {
+            kind,
+            claim_kind: Some(obligation.kind),
+        });
+    }
+    ContinuationUnderstandingClaim {
+        kind: obligation.kind,
+        posture,
+        value: None,
+        source_ids: Vec::new(),
+    }
+}
+
+fn derive_present_claims(
+    obligation: &ContinuationClaimObligation,
+    values: Vec<RankedClaim>,
+    gaps: &mut Vec<ContinuationContextGap>,
+) -> Vec<ContinuationUnderstandingClaim> {
+    let best_rank = values[0].0;
+    let best = match obligation.resolution {
+        ContinuationClaimResolution::HighestAuthority => values
+            .into_iter()
+            .take_while(|candidate| candidate.0 == best_rank)
+            .collect::<Vec<_>>(),
+    };
+    let distinct_values = best
+        .iter()
+        .map(|(_, value, _)| value.clone())
+        .collect::<BTreeSet<_>>();
+    if obligation.cardinality == ContinuationClaimCardinality::Singleton
+        && distinct_values.len() > 1
+    {
+        if is_required_claim(obligation.requirement) {
+            gaps.push(ContinuationContextGap {
+                kind: ContinuationContextGapKind::ClaimConflicting,
+                claim_kind: Some(obligation.kind),
+            });
+        }
+        return vec![ContinuationUnderstandingClaim {
+            kind: obligation.kind,
+            posture: ContinuationUnderstandingClaimPosture::Conflicting,
+            value: None,
+            source_ids: best.into_iter().map(|(_, _, source)| source).collect(),
+        }];
+    }
+    let posture = claim_posture(best_rank);
+    if posture == ContinuationUnderstandingClaimPosture::Advisory
+        && is_required_claim(obligation.requirement)
+    {
+        gaps.push(ContinuationContextGap {
+            kind: ContinuationContextGapKind::ClaimAdvisoryOnly,
+            claim_kind: Some(obligation.kind),
+        });
+    }
+    materialize_claim_values(obligation, posture, distinct_values, &best)
+}
+
+const fn is_required_claim(requirement: ContinuationClaimRequirement) -> bool {
+    matches!(
+        requirement,
+        ContinuationClaimRequirement::RequiredValue
+            | ContinuationClaimRequirement::RequiredAccounting
+    )
+}
+
+const fn claim_posture(best_rank: u8) -> ContinuationUnderstandingClaimPosture {
+    if best_rank <= 10 {
+        ContinuationUnderstandingClaimPosture::Authoritative
+    } else if best_rank < 100 {
+        ContinuationUnderstandingClaimPosture::Supported
+    } else {
+        ContinuationUnderstandingClaimPosture::Advisory
+    }
+}
+
+fn materialize_claim_values(
+    obligation: &ContinuationClaimObligation,
+    posture: ContinuationUnderstandingClaimPosture,
+    distinct_values: BTreeSet<ContinuationContextText>,
+    best: &[RankedClaim],
+) -> Vec<ContinuationUnderstandingClaim> {
+    match obligation.cardinality {
+        ContinuationClaimCardinality::Singleton => vec![ContinuationUnderstandingClaim {
+            kind: obligation.kind,
+            posture,
+            value: distinct_values.into_iter().next(),
+            source_ids: best.iter().map(|(_, _, source)| source.clone()).collect(),
+        }],
+        ContinuationClaimCardinality::Set => distinct_values
+            .into_iter()
+            .map(|value| {
+                let mut source_ids = best
+                    .iter()
+                    .filter(|(_, candidate, _)| candidate == &value)
+                    .map(|(_, _, source)| source.clone())
+                    .collect::<Vec<_>>();
+                source_ids.sort();
+                source_ids.dedup();
+                ContinuationUnderstandingClaim {
+                    kind: obligation.kind,
+                    posture,
+                    value: Some(value),
+                    source_ids,
+                }
+            })
+            .collect(),
+    }
 }
 
 fn authority_rank(
@@ -1869,7 +2534,6 @@ mod tests {
             integrity: ContinuationContextIntegrity::Verified,
             access: ContinuationContextAccess::Permitted,
             sensitivity: ContinuationContextSensitivity::Internal,
-            required_for_purpose: true,
             materialized_bytes: 64,
             claims: vec![ContinuationUnderstandingCandidate {
                 kind: claim_kind,
@@ -1885,17 +2549,125 @@ mod tests {
             .iter()
             .map(|source| source.source_class)
             .collect::<BTreeSet<_>>();
+        let purpose = ContinuationContextPurpose::Implementation;
+        let run_bound = true;
+        let coverage = coverage_for(purpose, run_bound, observed);
         ContinuationContextDecisionInput {
-            purpose: ContinuationContextPurpose::Implementation,
+            purpose,
             scope: scope(),
             actor: ActorId::new("user/maintainer").expect("actor"),
             maximum_sensitivity: ContinuationContextSensitivity::Internal,
             materialization_budget_bytes: 4_096,
-            required_claims: BTreeSet::from([ContinuationUnderstandingClaimKind::Objective]),
-            coverage: complete_coverage(observed),
+            claim_accounting: accounting_for(purpose, run_bound),
+            coverage,
             sources,
             accepted_intents: Vec::new(),
         }
+    }
+
+    fn accounting_for(
+        purpose: ContinuationContextPurpose,
+        run_bound: bool,
+    ) -> Vec<ContinuationClaimAccountingEntry> {
+        let profile = derive_semantic_profile(purpose, run_bound).expect("semantic profile");
+        profile
+            .claim_obligations
+            .iter()
+            .filter(|obligation| {
+                obligation.requirement == ContinuationClaimRequirement::RequiredAccounting
+            })
+            .flat_map(|obligation| {
+                best_accounting_source_classes(&profile, obligation.kind)
+                    .into_iter()
+                    .map(|source_class| ContinuationClaimAccountingEntry {
+                        claim_kind: obligation.kind,
+                        source_class,
+                        outcome: ContinuationClaimAccountingOutcome::Empty,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    fn ready_input(
+        mut sources: Vec<ContinuationContextSourceDefinition>,
+    ) -> ContinuationContextDecisionInput {
+        let profile = derive_semantic_profile(ContinuationContextPurpose::Implementation, true)
+            .expect("semantic profile");
+        let missing = profile
+            .claim_obligations
+            .iter()
+            .filter(|obligation| {
+                obligation.requirement == ContinuationClaimRequirement::RequiredValue
+                    && !sources.iter().any(|source| {
+                        source
+                            .claims
+                            .iter()
+                            .any(|claim| claim.kind == obligation.kind)
+                    })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for obligation in missing {
+            let (source_class, domain) = match obligation.kind {
+                ContinuationUnderstandingClaimKind::Objective
+                | ContinuationUnderstandingClaimKind::Scope
+                | ContinuationUnderstandingClaimKind::ReportingCommitment => (
+                    ContinuationContextSourceClass::ImmutableRunBundle,
+                    ContinuationContextAuthorityDomain::ImmutableRunInput,
+                ),
+                ContinuationUnderstandingClaimKind::RemainingObligation => (
+                    ContinuationContextSourceClass::DurableRunState,
+                    ContinuationContextAuthorityDomain::DurableRunState,
+                ),
+                ContinuationUnderstandingClaimKind::EvidenceRequirement => (
+                    ContinuationContextSourceClass::Evidence,
+                    ContinuationContextAuthorityDomain::Evidence,
+                ),
+                ContinuationUnderstandingClaimKind::CheckRequirement
+                | ContinuationUnderstandingClaimKind::ValidationCommitment => (
+                    ContinuationContextSourceClass::Check,
+                    ContinuationContextAuthorityDomain::Check,
+                ),
+                ContinuationUnderstandingClaimKind::SideEffectPosture => (
+                    ContinuationContextSourceClass::SideEffect,
+                    ContinuationContextAuthorityDomain::SideEffect,
+                ),
+                ContinuationUnderstandingClaimKind::LawfulNextOption => (
+                    ContinuationContextSourceClass::Capability,
+                    ContinuationContextAuthorityDomain::Capability,
+                ),
+                _ => continue,
+            };
+            sources.push(source(
+                &format!("source/baseline/{:?}", obligation.kind).to_ascii_lowercase(),
+                source_class,
+                domain,
+                obligation.kind,
+                "baseline semantic value",
+            ));
+        }
+        input(sources)
+    }
+
+    fn set_profile(
+        input: &mut ContinuationContextDecisionInput,
+        purpose: ContinuationContextPurpose,
+        run_bound: bool,
+    ) {
+        input.purpose = purpose;
+        if run_bound {
+            input.scope.run_id = Some(WorkflowRunId::new("run-context").expect("run id"));
+        } else {
+            input.scope.run_id = None;
+        }
+        let observed = input
+            .sources
+            .iter()
+            .map(|source| source.source_class)
+            .collect::<BTreeSet<_>>();
+        input.coverage = coverage_for(purpose, run_bound, observed);
+        input.claim_accounting = accounting_for(purpose, run_bound);
     }
 
     #[test]
@@ -1914,14 +2686,8 @@ mod tests {
             ContinuationUnderstandingClaimKind::Objective,
             "restore bounded understanding",
         );
-        let mut first = input(vec![immutable.clone(), intent.clone()]);
-        first
-            .required_claims
-            .insert(ContinuationUnderstandingClaimKind::Scope);
-        let mut second = input(vec![intent, immutable]);
-        second
-            .required_claims
-            .insert(ContinuationUnderstandingClaimKind::Scope);
+        let first = ready_input(vec![immutable.clone(), intent.clone()]);
+        let mut second = ready_input(vec![intent, immutable]);
         second.coverage.reverse();
 
         let first = derive_continuation_context(first).expect("first decision");
@@ -2018,8 +2784,7 @@ mod tests {
             ContinuationUnderstandingClaimKind::Scope,
             "broader future work",
         );
-        let mut input = input(vec![document, immutable]);
-        input.required_claims = BTreeSet::from([ContinuationUnderstandingClaimKind::Scope]);
+        let input = input(vec![document, immutable]);
 
         let decision = derive_continuation_context(input).expect("decision");
         let claim = decision
@@ -2093,16 +2858,7 @@ mod tests {
             "planning objective",
         );
         let mut input = input(vec![document, intent]);
-        input.purpose = ContinuationContextPurpose::Planning;
-        input.scope.run_id = None;
-        input.coverage = coverage_for(
-            ContinuationContextPurpose::Planning,
-            false,
-            [
-                ContinuationContextSourceClass::OperatingDocument,
-                ContinuationContextSourceClass::AcceptedIntent,
-            ],
-        );
+        set_profile(&mut input, ContinuationContextPurpose::Planning, false);
 
         let decision = derive_continuation_context(input).expect("planning decision");
         let objective = decision
@@ -2299,6 +3055,287 @@ mod tests {
     }
 
     #[test]
+    fn every_semantic_profile_is_complete_distinct_and_authority_bound() {
+        let purposes = [
+            ContinuationContextPurpose::Planning,
+            ContinuationContextPurpose::Implementation,
+            ContinuationContextPurpose::ApprovalReview,
+            ContinuationContextPurpose::ProviderReconciliation,
+            ContinuationContextPurpose::ChildHandoff,
+            ContinuationContextPurpose::MaterialContinuation,
+        ];
+        let mut profile_ids = BTreeSet::new();
+        let mut commitments = BTreeSet::new();
+
+        for purpose in purposes {
+            for run_bound in [false, true] {
+                let profile = derive_semantic_profile(purpose, run_bound).expect("profile");
+                assert_eq!(profile.purpose, purpose);
+                assert_eq!(profile.run_bound, run_bound);
+                assert!(profile_ids.insert(profile.profile_id));
+                assert!(commitments.insert(profile.commitment.clone()));
+                assert_eq!(
+                    profile.claim_obligations.len(),
+                    ALL_UNDERSTANDING_CLAIM_KINDS.len()
+                );
+                assert_eq!(
+                    profile.source_obligations.len(),
+                    ALL_CONTEXT_SOURCE_CLASSES.len()
+                );
+                assert!(profile.claim_obligations.iter().all(|obligation| {
+                    obligation.resolution == ContinuationClaimResolution::HighestAuthority
+                        && !obligation.permitted_authority_domains.is_empty()
+                }));
+            }
+        }
+
+        assert_eq!(profile_ids.len(), 12);
+        assert_eq!(commitments.len(), 12);
+    }
+
+    #[test]
+    fn semantic_requirement_matrix_matches_reviewed_purpose_and_scope_differences() {
+        use ContinuationClaimRequirement::{RequiredAccounting, RequiredValue};
+        use ContinuationUnderstandingClaimKind as Claim;
+
+        let pre_planning = semantic_profile_id(ContinuationContextPurpose::Planning, false);
+        let pre_implementation =
+            semantic_profile_id(ContinuationContextPurpose::Implementation, false);
+        let pre_review = semantic_profile_id(ContinuationContextPurpose::ApprovalReview, false);
+        let pre_child = semantic_profile_id(ContinuationContextPurpose::ChildHandoff, false);
+        let run_planning = semantic_profile_id(ContinuationContextPurpose::Planning, true);
+        let run_child = semantic_profile_id(ContinuationContextPurpose::ChildHandoff, true);
+
+        assert_eq!(
+            claim_requirement(pre_planning, Claim::RemainingObligation),
+            RequiredAccounting
+        );
+        assert_eq!(
+            claim_requirement(pre_implementation, Claim::RemainingObligation),
+            RequiredValue
+        );
+        assert_eq!(
+            claim_requirement(run_planning, Claim::RemainingObligation),
+            RequiredValue
+        );
+        assert_eq!(
+            claim_requirement(pre_planning, Claim::EvidenceRequirement),
+            RequiredAccounting
+        );
+        assert_eq!(
+            claim_requirement(pre_review, Claim::EvidenceRequirement),
+            RequiredValue
+        );
+        assert_eq!(
+            claim_requirement(pre_child, Claim::CheckRequirement),
+            RequiredAccounting
+        );
+        assert_eq!(
+            claim_requirement(run_child, Claim::CheckRequirement),
+            RequiredValue
+        );
+        assert_eq!(
+            claim_requirement(pre_planning, Claim::LawfulNextOption),
+            RequiredValue
+        );
+    }
+
+    #[test]
+    fn missing_core_required_value_blocks_without_caller_override() {
+        let decision = derive_continuation_context(input(Vec::new())).expect("decision");
+        let objective = decision
+            .understanding()
+            .claims()
+            .iter()
+            .find(|claim| claim.kind() == ContinuationUnderstandingClaimKind::Objective)
+            .expect("objective claim");
+
+        assert_eq!(
+            decision.posture(),
+            ContinuationContextDecisionPosture::Blocked
+        );
+        assert_eq!(
+            objective.posture(),
+            ContinuationUnderstandingClaimPosture::Unknown
+        );
+        assert!(decision.gaps().contains(&ContinuationContextGap {
+            kind: ContinuationContextGapKind::ClaimUnknown,
+            claim_kind: Some(ContinuationUnderstandingClaimKind::Objective),
+        }));
+    }
+
+    #[test]
+    fn required_accounting_accepts_typed_empty_and_missing_accounting_blocks() {
+        let complete = derive_continuation_context(input(Vec::new())).expect("complete decision");
+        let priority = complete
+            .understanding()
+            .claims()
+            .iter()
+            .find(|claim| claim.kind() == ContinuationUnderstandingClaimKind::Priority)
+            .expect("priority claim");
+        assert_eq!(
+            priority.posture(),
+            ContinuationUnderstandingClaimPosture::AccountedEmpty
+        );
+        assert!(!complete.gaps().iter().any(|gap| {
+            gap.kind == ContinuationContextGapKind::ClaimAccountingMissing
+                && gap.claim_kind == Some(ContinuationUnderstandingClaimKind::Priority)
+        }));
+
+        let mut missing = input(Vec::new());
+        missing
+            .claim_accounting
+            .retain(|entry| entry.claim_kind != ContinuationUnderstandingClaimKind::Priority);
+        let missing = derive_continuation_context(missing).expect("missing accounting decision");
+        assert!(missing.gaps().contains(&ContinuationContextGap {
+            kind: ContinuationContextGapKind::ClaimAccountingMissing,
+            claim_kind: Some(ContinuationUnderstandingClaimKind::Priority),
+        }));
+    }
+
+    #[test]
+    fn advisory_only_value_cannot_satisfy_a_required_claim() {
+        let advisory = source(
+            "source/advisory-objective",
+            ContinuationContextSourceClass::AgentAdvisory,
+            ContinuationContextAuthorityDomain::AgentAdvisory,
+            ContinuationUnderstandingClaimKind::Objective,
+            "plausible but non-authoritative objective",
+        );
+
+        let decision = derive_continuation_context(input(vec![advisory])).expect("decision");
+        let objective = decision
+            .understanding()
+            .claims()
+            .iter()
+            .find(|claim| claim.kind() == ContinuationUnderstandingClaimKind::Objective)
+            .expect("objective claim");
+
+        assert_eq!(
+            objective.posture(),
+            ContinuationUnderstandingClaimPosture::Advisory
+        );
+        assert!(decision.gaps().contains(&ContinuationContextGap {
+            kind: ContinuationContextGapKind::ClaimAdvisoryOnly,
+            claim_kind: Some(ContinuationUnderstandingClaimKind::Objective),
+        }));
+    }
+
+    #[test]
+    fn authoritative_empty_accounting_precedes_advisory_only_prose() {
+        let advisory = source(
+            "source/advisory-priority",
+            ContinuationContextSourceClass::AgentAdvisory,
+            ContinuationContextAuthorityDomain::AgentAdvisory,
+            ContinuationUnderstandingClaimKind::Priority,
+            "model-guessed priority",
+        );
+
+        let decision = derive_continuation_context(ready_input(vec![advisory]))
+            .expect("accounted-empty decision");
+        let priority = decision
+            .understanding()
+            .claims()
+            .iter()
+            .find(|claim| claim.kind() == ContinuationUnderstandingClaimKind::Priority)
+            .expect("priority claim");
+
+        assert_eq!(
+            decision.posture(),
+            ContinuationContextDecisionPosture::ReadyForAuthorityResolution
+        );
+        assert_eq!(
+            priority.posture(),
+            ContinuationUnderstandingClaimPosture::AccountedEmpty
+        );
+        assert!(priority.value().is_none());
+        assert!(priority.source_ids().is_empty());
+        assert!(!decision.gaps().iter().any(|gap| {
+            gap.kind == ContinuationContextGapKind::ClaimAdvisoryOnly
+                && gap.claim_kind == Some(ContinuationUnderstandingClaimKind::Priority)
+        }));
+    }
+
+    #[test]
+    fn equal_rank_set_values_are_retained_with_deterministic_provenance() {
+        let first = source(
+            "source/intent-a",
+            ContinuationContextSourceClass::AcceptedIntent,
+            ContinuationContextAuthorityDomain::AcceptedIntent,
+            ContinuationUnderstandingClaimKind::PromisedFollowUp,
+            "publish the implementation report",
+        );
+        let second = source(
+            "source/intent-b",
+            ContinuationContextSourceClass::AcceptedIntent,
+            ContinuationContextAuthorityDomain::AcceptedIntent,
+            ContinuationUnderstandingClaimKind::PromisedFollowUp,
+            "run the replacement-executor proof later",
+        );
+
+        let decision = derive_continuation_context(ready_input(vec![second, first]))
+            .expect("set-valued decision");
+        let follow_ups = decision
+            .understanding()
+            .claims()
+            .iter()
+            .filter(|claim| claim.kind() == ContinuationUnderstandingClaimKind::PromisedFollowUp)
+            .collect::<Vec<_>>();
+
+        assert_eq!(follow_ups.len(), 2);
+        assert_eq!(
+            follow_ups
+                .iter()
+                .map(|claim| claim.value().expect("value").as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "publish the implementation report",
+                "run the replacement-executor proof later",
+            ]
+        );
+        assert_eq!(follow_ups[0].source_ids(), &[source_id("source/intent-a")]);
+        assert_eq!(follow_ups[1].source_ids(), &[source_id("source/intent-b")]);
+    }
+
+    #[test]
+    fn accounting_from_a_non_selected_authority_fails_closed() {
+        let mut input = input(Vec::new());
+        let priority = input
+            .claim_accounting
+            .iter_mut()
+            .find(|entry| entry.claim_kind == ContinuationUnderstandingClaimKind::Priority)
+            .expect("priority accounting");
+        priority.source_class = ContinuationContextSourceClass::AgentAdvisory;
+
+        let error =
+            derive_continuation_context(input).expect_err("must reject advisory accounting");
+        assert_eq!(
+            error.code(),
+            "continuation_context.accounting.source_not_authoritative"
+        );
+    }
+
+    #[test]
+    fn inapplicable_pre_run_source_is_rejected_before_projection() {
+        let approval = source(
+            "source/approval",
+            ContinuationContextSourceClass::Approval,
+            ContinuationContextAuthorityDomain::Approval,
+            ContinuationUnderstandingClaimKind::Decision,
+            "approval decision",
+        );
+        let mut input = input(vec![approval]);
+        set_profile(&mut input, ContinuationContextPurpose::Planning, false);
+
+        let error =
+            derive_continuation_context(input).expect_err("must reject inapplicable source");
+        assert_eq!(
+            error.code(),
+            "continuation_context.coverage.outcome_expectation_mismatch"
+        );
+    }
+
+    #[test]
     fn profile_matrices_match_the_reviewed_pre_run_and_run_bound_baselines() {
         let pre_run = coverage_profile_id(ContinuationContextPurpose::Planning, false);
         for source_class in [
@@ -2439,15 +3476,11 @@ mod tests {
 
     #[test]
     fn pre_run_and_run_bound_profiles_have_distinct_commitments() {
-        let mut run_bound = input(Vec::new());
-        run_bound.required_claims.clear();
+        let run_bound = input(Vec::new());
         let run_bound = derive_continuation_context(run_bound).expect("run-bound decision");
 
         let mut pre_run = input(Vec::new());
-        pre_run.purpose = ContinuationContextPurpose::Planning;
-        pre_run.scope.run_id = None;
-        pre_run.required_claims.clear();
-        pre_run.coverage = coverage_for(ContinuationContextPurpose::Planning, false, []);
+        set_profile(&mut pre_run, ContinuationContextPurpose::Planning, false);
         let pre_run = derive_continuation_context(pre_run).expect("pre-run decision");
 
         assert!(run_bound.coverage().is_run_bound());
@@ -2497,13 +3530,11 @@ mod tests {
 
     #[test]
     fn required_empty_is_complete_but_required_failure_blocks() {
-        let mut complete = input(Vec::new());
-        complete.required_claims.clear();
+        let complete = input(Vec::new());
         let complete = derive_continuation_context(complete).expect("complete empty coverage");
         assert!(complete.coverage().is_complete());
 
         let mut failed = input(Vec::new());
-        failed.required_claims.clear();
         failed
             .coverage
             .iter_mut()
@@ -2521,8 +3552,7 @@ mod tests {
 
     #[test]
     fn optional_failure_is_degraded_without_breaking_completeness() {
-        let mut input = input(Vec::new());
-        input.required_claims.clear();
+        let mut input = ready_input(Vec::new());
         input
             .coverage
             .iter_mut()
@@ -2630,16 +3660,14 @@ mod tests {
     fn optional_source_over_budget_is_disclosed_without_blocking() {
         let mut optional = source(
             "source/optional",
-            ContinuationContextSourceClass::OperatingDocument,
-            ContinuationContextAuthorityDomain::OperatingDocument,
+            ContinuationContextSourceClass::AgentAdvisory,
+            ContinuationContextAuthorityDomain::AgentAdvisory,
             ContinuationUnderstandingClaimKind::PromisedFollowUp,
             "optional follow-up",
         );
-        optional.required_for_purpose = false;
         optional.materialized_bytes = 10_000;
-        let mut input = input(vec![optional]);
-        input.required_claims.clear();
-        input.materialization_budget_bytes = 100;
+        let mut input = ready_input(vec![optional]);
+        input.materialization_budget_bytes = 600;
 
         let decision = derive_continuation_context(input).expect("decision");
 
@@ -2647,9 +3675,18 @@ mod tests {
             decision.posture(),
             ContinuationContextDecisionPosture::ReadyForAuthorityResolution
         );
-        assert_eq!(decision.bundle().selected_source_ids(), []);
+        assert!(!decision
+            .bundle()
+            .selected_source_ids()
+            .contains(&source_id("source/optional")));
         assert_eq!(
-            decision.inventory().entries()[0].disposition(),
+            decision
+                .inventory()
+                .entries()
+                .iter()
+                .find(|entry| entry.source_id() == &source_id("source/optional"))
+                .expect("optional inventory entry")
+                .disposition(),
             ContinuationContextSourceDisposition::OmittedBudget
         );
     }
@@ -2658,12 +3695,11 @@ mod tests {
     fn optional_source_cannot_consume_budget_before_required_source() {
         let mut optional = source(
             "source/a-optional",
-            ContinuationContextSourceClass::OperatingDocument,
-            ContinuationContextAuthorityDomain::OperatingDocument,
+            ContinuationContextSourceClass::AgentAdvisory,
+            ContinuationContextAuthorityDomain::AgentAdvisory,
             ContinuationUnderstandingClaimKind::PromisedFollowUp,
             "optional follow-up",
         );
-        optional.required_for_purpose = false;
         optional.materialized_bytes = 80;
         let mut required = source(
             "source/z-required",
@@ -2673,8 +3709,8 @@ mod tests {
             "required objective",
         );
         required.materialized_bytes = 80;
-        let mut input = input(vec![optional, required]);
-        input.materialization_budget_bytes = 100;
+        let mut input = ready_input(vec![optional, required]);
+        input.materialization_budget_bytes = 600;
 
         let decision = derive_continuation_context(input).expect("decision");
 
@@ -2682,10 +3718,14 @@ mod tests {
             decision.posture(),
             ContinuationContextDecisionPosture::ReadyForAuthorityResolution
         );
-        assert_eq!(
-            decision.bundle().selected_source_ids(),
-            &[source_id("source/z-required")]
-        );
+        assert!(decision
+            .bundle()
+            .selected_source_ids()
+            .contains(&source_id("source/z-required")));
+        assert!(!decision
+            .bundle()
+            .selected_source_ids()
+            .contains(&source_id("source/a-optional")));
     }
 
     #[test]
