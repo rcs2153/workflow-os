@@ -251,3 +251,161 @@ focused security review.
 - out-of-kernel work: source inspection, plan correction, review writing, and
   validation were performed by the delegated maintainer; the kernel governed
   scope and approval but did not edit files or run documentation checks
+
+## 19. Comprehensive Context Rehydration P0 Follow-Up Review
+
+### Verdict
+
+**Accepted after one security correction; proceed to the pure model-only
+inventory and bundle decision layer after this plan is merged.**
+
+The P0 correctly broadens continuation rehydration beyond conversation replay.
+The kernel needs a complete account of eligible authoritative and advisory
+sources, source-specific authority rules, deterministic conflict and freshness
+posture, and a bounded purpose-specific context bundle. This strengthens the
+existing continuation boundary without replacing immutable runs, durable
+events, governed-context access, required-context consumption, current
+authority, WorkReports, or same-call execution admission.
+
+### Architecture Reconciliation
+
+The reviewed plan is additive rather than disruptive:
+
+- validated declarations remain authoritative for future validation and run
+  creation;
+- immutable run bundles remain authoritative for active-run inputs;
+- durable events and authoritative stores remain authoritative for dynamic run
+  posture;
+- existing capability and governed-context models remain authoritative for
+  context access;
+- required-context contracts drive required versus optional materialization;
+- evidence, checks, approvals, SideEffects, and WorkReports retain their typed
+  proof boundaries;
+- provider observations establish bounded remote facts but never mutation
+  authority; and
+- serialized context inventory and bundles remain orientation-only.
+
+The design does not create another event ledger, permission model, policy
+engine, approval store, or reusable authority credential. Material execution
+continues through the existing fresh same-call Core boundary.
+
+### Blocking Finding And Resolution
+
+The initial P0 text described a complete inventory but did not distinguish the
+kernel-internal decision inventory from a consumer-visible inventory
+projection. That could reveal the existence, identity, class, locator, revision,
+commitment, or exact count of unauthorized sensitive sources even when their
+payloads were withheld.
+
+The plan now requires every exposed inventory view to pass through existing
+governed-context access and redaction rules. Protected entries may be represented
+only by an opaque withheld or incomplete posture. Exact counts and topology are
+coarsened or omitted when they would reveal protected information. Internal and
+consumer-visible commitments are domain-separated to prevent cross-project,
+cross-run, or cross-actor correlation.
+
+No blockers remain after this correction.
+
+### Sequencing Assessment
+
+The implementation sequence is appropriately narrow:
+
+1. pure model-only inventory and selection decisions from explicit inputs;
+2. in-memory conformance tests;
+3. explicit bounded local collectors;
+4. composition through existing context-access and required-context contracts;
+5. one read-only preview;
+6. one existing same-call consumer integration; and
+7. one total-conversation-loss dogfood proof.
+
+Payload-free directive receipts, replay handling, and durable stop or pause
+suspension remain important host hardening, but correctly follow the context
+assembly boundary rather than defining it. This P0 blocks unsupported claims of
+compaction-safe or cross-agent autonomous continuation. It does not invalidate
+accepted kernel work or block bounded validation, read-only, release-admission,
+or maintenance phases that make no such claim.
+
+### Validation And Governance
+
+- `npm run check:docs`: passed on the reviewed branch before this follow-up
+  record was added and must pass again on the final head.
+- `git diff --check`: passed on the reviewed branch before this follow-up record
+  was added and must pass again on the final head.
+- merge acceptance requires terminal-green CI for the exact final head.
+- workflow: `dg/review`
+- run ID: `run-1793692688599144000-2`
+- approval ID:
+  `approval/run-1793692688599144000-2/review-scope-approved`
+- presentation ID: `presentation/ca9a0ebc71b392d5`
+- approval outcome: granted under delegated-maintainer authority after the
+  complete persisted review handoff was presented
+- out-of-kernel work: source and plan inspection, the narrow disclosure
+  correction, review writing, local validation, Git operations, and GitHub PR
+  operations were performed by the delegated maintainer; the kernel governed
+  phase scope and approval but did not perform those actions
+
+## 20. Post-Compaction Understanding Amendment Review
+
+### Verdict
+
+**Accepted. The amended P0 is ready for exact-head documentation validation and
+merge, followed by the pure model-only implementation increment.**
+
+The amendment closes the gap between reconstructing equal run disposition and
+reconstructing equal bounded understanding. It adds three necessary controls:
+
+- attributable accepted intent is captured before the total-conversation-loss
+  proof whenever no existing immutable run, typed handoff, accepted plan, or
+  approval presentation already represents that meaning;
+- inventory completeness is measured against a purpose-bound closed collector
+  coverage contract rather than whichever collectors a host registered; and
+- every material understanding claim is derived with provenance and an explicit
+  authoritative, supported, advisory, conflicting, unknown, or withheld
+  posture.
+
+These controls remain non-authorizing. The understanding projection restores
+orientation; current policy, approval, capability, evidence, checks,
+SideEffects, immutable inputs, event cursor, and exact operation are still
+resolved through the existing private same-call authority boundary.
+
+### Salsa Boundary
+
+Salsa is architecturally relevant as a possible incremental derivation engine,
+but it is neither selected nor authorized by this review. Canonical semantics
+must first be implemented and tested without Salsa. Any later prototype must
+produce identical commitments from the same authoritative inputs, invalidate
+only affected derivations, remain stable under irrelevant changes, and rebuild
+from an empty cache. Salsa state is discardable and cannot become durable
+truth, a permission system, or an execution boundary.
+
+### Acceptance Checks
+
+- accepted-intent capture precedes the replacement-executor proof when intent
+  would otherwise exist only in conversation;
+- the source-coverage contract exposes required, optional, invoked, empty,
+  denied, failed, unsupported, inapplicable, and intentionally omitted posture;
+- private inventory completeness remains distinct from capability-filtered and
+  redacted consumer projections;
+- replacement-executor acceptance proves equivalent bounded objective,
+  decisions, progress, remaining obligations, blockers, uncertainty,
+  validation commitments, and lawful next action, not merely equal status;
+- completed work cannot be repeated and superseded direction cannot be revived;
+- explicit host compaction signals force immediate invalidation and refresh,
+  while unconditional material-boundary rehydration remains the portable
+  correctness boundary; and
+- neither the inventory, bundle, understanding projection, delivery receipt,
+  accepted-intent record, nor an incremental cache can authorize execution.
+
+### Governance
+
+- workflow: `dg/d`
+- run ID: `run-1793693895401170000-2`
+- approval ID:
+  `approval/run-1793693895401170000-2/planning-approved`
+- presentation ID: `presentation/d37b884261fd97ab`
+- approval outcome: granted under delegated-maintainer authority after the
+  complete persisted handoff was reviewed
+- out-of-kernel work: reconciliation, architecture review, documentation edits,
+  validation, Git operations, and PR updates are performed by the delegated
+  maintainer; the kernel governs phase scope and approval but does not perform
+  those actions

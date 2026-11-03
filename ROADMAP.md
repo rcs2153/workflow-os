@@ -208,8 +208,28 @@ Core-private same-call current-authority verification and a fixture connector
 are next. Connector execution, credentials, live GitHub behavior, provider
 writes, scheduler claims, and any parallel permission system remain excluded.
 
-After the current delegated-authority connector lane is complete, evaluate one
-future **Governed Obligation Plan reconciliation** lane. The purpose is to test
+After the current delegated-authority connector lane is complete, the next
+authoritative milestone is **Hacker News launch admission**. This is a bounded
+product-admission lane, not another primitive family and not authorization to
+publish. It must compose existing kernel capabilities into one credential-free,
+non-mock golden path for a fresh external repository: install a verified release
+artifact, preserve existing repository guidance while initializing governance,
+produce bounded first-run posture and recommendations, execute one exact reviewed
+operation through ordinary governed runtime semantics, select proportional
+governance from authoritative facts, persist an evidence-backed WorkReport, and
+inspect or replay the durable event trail. Two clean-room repositories must pass
+the exact released-artifact path without internal repository knowledge, mock
+handlers, hidden manual state repair, or unsupported product claims. Launch
+admission also requires a concise default UX, explicit limitations, terminal-green
+release validation, and a separately governed publication decision. During this
+lane, new primitive families, Salsa, broad provider mutation, OpenShell activation,
+nested harness execution, enterprise administration, and general arbitrary-command
+execution remain deferred unless a clean-room failure proves one is a correctness
+blocker. See the [Hacker News Launch Admission
+Plan](docs/implementation-plans/hacker-news-launch-admission-plan.md).
+
+After Hacker News launch admission is accepted, evaluate one future **Governed
+Obligation Plan reconciliation** lane. The purpose is to test
 whether existing Workflow OS workflows, policies, required context, checks,
 approvals, SideEffects, and report contracts can derive one deterministic,
 inspectable obligation plan without creating a second source language,
@@ -1276,6 +1296,116 @@ history. It is reference material, not a second delivery queue.
    can proceed. Subagent launch and result acceptance must use typed handoffs;
    natural-language summaries alone cannot establish governed continuation.
    Correctness must not depend on a provider exposing a compaction event.
+
+   **Open P0 comprehensive context rehydration gap.** A live
+   delegated-maintainer session demonstrated that post-compaction agent context
+   can elevate a stale conversational fragment over richer current local
+   evidence. Conversation replay is one symptom, not the architecture. Workflow
+   OS must reconstruct the maximum relevant, authorized, provenance-preserving
+   context available from validated declarations, immutable run inputs,
+   append-only events, authority and approval records, required context,
+   evidence, checks, SideEffects, WorkReports, Git/worktree observations,
+   allowlisted operating documents, and current external-resource observations.
+   It must resolve which source is authoritative for each fact domain before a
+   material continuation is presented.
+
+   The P0 introduces three non-authorizing products. A complete bounded
+   `ContinuationContextInventory` accounts for every eligible source with its
+   authority domain, provenance, scope, revision, freshness, integrity,
+   sensitivity, access, conflict, and selection or omission posture. A
+   purpose-bound `ContinuationContextBundle` materializes only the context
+   required and permitted for the current workflow, phase, actor, handoff, and
+   proposed action. A derived `ContinuationUnderstandingProjection` reconstructs
+   the bounded meaning of the work: accepted intent, decisions and rationale
+   references, progress, remaining obligations, blockers, uncertainty,
+   validation/reporting commitments, and lawful next options. Every material
+   understanding claim cites inventory provenance and remains authoritative,
+   supported, advisory, conflicting, unknown, or withheld rather than being
+   completed by model inference. Maximum context means maximum relevant and
+   authorized context with explicit omissions, not maximum raw bytes or indiscriminate
+   repository, transcript, tool-output, or provider-payload loading.
+   Inventory completeness is kernel-internal; any agent-, operator-, CLI-,
+   report-, or child-visible inventory is a separately capability-filtered and
+   redacted projection that must not reveal protected source existence or
+   repository topology.
+
+   Source precedence is domain-specific. Current YAML governs declarations for
+   future validation and run creation; the canonical immutable run bundle
+   governs inputs for an active run. The event ledger and authoritative stores
+   govern dynamic run posture. Policy, approval, capability, evidence, checks,
+   SideEffects, WorkReports, Git observations, operating documents, provider
+   observations, user requests, and agent summaries retain their existing
+   bounded authority and must not be collapsed into one latest-text rule.
+   Conflicts, stale facts, unavailable required sources, access denial, and
+   unsupported collectors remain typed, inspectable posture rather than being
+   silently resolved by the agent.
+
+   Full semantic continuity also requires typed durable capture of the accepted
+   effect of attributable user or delegated-maintainer direction before
+   conversation can disappear. These accepted-intent records preserve objective,
+   amendment, priority, pause, stop, or resume meaning without copying raw
+   transcripts, hidden reasoning, or granting execution authority. Generated
+   agent summaries remain advisory inputs that may contribute only supported or
+   explicitly advisory claims.
+
+   Inventory completeness must be proven against a purpose-bound source-coverage
+   contract. Required, optional, unsupported, denied, failed, empty, and omitted
+   collector classes must be explicit; a host cannot claim completeness merely
+   because it registered only the collectors it implemented.
+
+   This work must compose existing immutable-run, governed-context,
+   required-context, current-authority, typed-handoff, proportional-governance,
+   evidence, report, and continuation primitives. It must not create a second
+   state database, event ledger, permission model, policy engine, or reusable
+   authority token. The serialized inventory and bundle orient agents and
+   operators; material execution still requires fresh same-call Core resolution
+   and one exact existing consumer boundary.
+
+   Sequence a focused architecture/security reconciliation, a pure model-only
+   inventory and selection layer, in-memory conformance tests, explicit local
+   collectors, existing governed-context and required-context composition, one
+   read-only preview, one existing same-call consumer integration, and an
+   induced total-conversation-loss dogfood proof. A replacement agent with no
+   transcript must reach the same kernel disposition and reconstruct the same
+   bounded objective, accepted decisions, progress, remaining obligations,
+   blockers, uncertainty, validation/reporting commitments, and lawful next
+   action as an agent with full conversational memory from the same authoritative
+   sources. It must not repeat completed work, revive superseded direction, or
+   silently infer missing understanding. Payload-free
+   directive receipts, replay handling, and durable stop/pause suspension remain
+   a subordinate host-hardening slice after the context boundary is accepted.
+
+   When a trusted host exposes a compaction, context-replacement, executor-
+   replacement, or session-resume signal, Workflow OS must immediately
+   invalidate the prior orientation and rebuild the inventory, source-coverage
+   result, bundle, and understanding projection before material continuation.
+   The replacement executor must acknowledge delivery of the exact projection
+   commitment; that receipt proves delivery, not comprehension or authority.
+   Host signaling is not the correctness dependency: unconditional rehydration
+   at every material boundary remains mandatory for silent or unsupported host
+   compaction.
+
+   After the pure canonical inventory, source-coverage, bundle, and understanding
+   models are accepted, evaluate Salsa only as a possible internal incremental
+   derivation engine. Canonical outputs must first be defined by a straightforward
+   deterministic implementation. A later bounded prototype may prove equivalent
+   outputs, precise invalidation, irrelevant-input stability, and empty-cache
+   reconstruction. Salsa is not selected or authorized here; any Salsa database
+   must remain a discardable cache and can never own durable state, authority,
+   policy, approvals, evidence, SideEffects, audit posture, or execution. No
+   dependency or Rust toolchain change is authorized without a separate
+   evidence-backed architecture decision.
+
+   This P0 preempts claims of compaction-safe delegated continuation,
+   cross-agent continuation, nested harness execution, and broader autonomous
+   provider mutation that depend on reliable rehydration. It does not invalidate
+   accepted kernel work or block bounded read-only, validation, release-
+   admission, and maintenance phases that do not make those autonomy claims.
+   Full design and acceptance criteria are incorporated into the existing
+   [Authoritative Agent Continuation Context And Rehydration
+   Plan](docs/implementation-plans/authoritative-agent-continuation-context-rehydration-plan.md),
+   not a parallel context or authorization system.
+
    Read-only low-risk refresh may remain quiet, while stale, ambiguous,
    approval-sensitive, or mutation-capable paths fail closed. Planning is
    documented in [Authoritative Agent Continuation Context And Rehydration
