@@ -1318,6 +1318,10 @@ history. It is reference material, not a second delivery queue.
    proposed action. Maximum context means maximum relevant and authorized
    context with explicit omissions, not maximum raw bytes or indiscriminate
    repository, transcript, tool-output, or provider-payload loading.
+   Inventory completeness is kernel-internal; any agent-, operator-, CLI-,
+   report-, or child-visible inventory is a separately capability-filtered and
+   redacted projection that must not reveal protected source existence or
+   repository topology.
 
    Source precedence is domain-specific. Current YAML governs declarations for
    future validation and run creation; the canonical immutable run bundle

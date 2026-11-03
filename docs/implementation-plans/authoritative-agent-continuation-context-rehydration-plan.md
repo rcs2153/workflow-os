@@ -55,6 +55,11 @@ The P0 must separate two products:
 2. a `ContinuationContextBundle` that materializes only the bounded subset
    required for the current workflow, phase, actor, and proposed action.
 
+The complete inventory is a kernel-internal decision input. Any inventory view
+exposed to an agent, operator, hook, report, CLI, or child harness is a separate
+governed projection. Lack of access to a source must not reveal its identity,
+locator, authority domain, revision, or other sensitive existence metadata.
+
 "Maximum context" means maximum relevant and authorized context with complete
 inventory and explicit omissions. It does not mean copying every local file,
 conversation turn, provider payload, or tool result into model context.
@@ -308,6 +313,14 @@ scan arbitrary files from Core, infer authority from prose, or store raw source
 contents. Local hosts and adapters collect candidate observations through
 explicit interfaces; Core validates, classifies, and reconciles them.
 
+Completeness applies to the private Core decision inventory, not to every
+consumer-visible projection. An exposed inventory projection must pass through
+existing governed-context access and redaction rules. When even source
+existence is sensitive, the projection may disclose only an opaque withheld or
+incomplete posture, without entry identity, locator, source class, authority
+domain, revision, or content commitment. Counts must also be coarsened or
+omitted when they would reveal protected topology.
+
 ### 6.4 Continuation Context Bundle
 
 The bundle is the bounded materialized context supplied to an agent, operator,
@@ -357,6 +370,10 @@ Budget exhaustion cannot silently remove a required source. The algorithm must
 prefer typed summaries, reference-only projections, and deterministic bounded
 metadata before raw content. If no permitted representation can satisfy a
 required obligation, the result is blocked with a stable gap code.
+
+The private inventory commitment may bind protected entries for integrity, but
+consumer-visible commitments must be domain-separated and scoped so they cannot
+be used to correlate hidden sources across actors, projects, or runs.
 
 ### 6.6 Conflict, Freshness, And Gap Semantics
 
@@ -702,6 +719,8 @@ Future tests must cover:
   visibly advisory when optional;
 - unauthorized sensitive context is not materialized and cannot be summarized
   by the model as though it were available;
+- unauthorized source identity, locator, class, revision, commitment, and exact
+  counts are absent from consumer-visible inventory projections;
 - collector failure is distinguishable from source absence;
 - arbitrary unallowlisted repository files are not discovered or loaded;
 - no raw conversation, hidden reasoning, credential, environment value,
@@ -736,6 +755,8 @@ Future tests must cover:
 - Current kernel state, not model memory, determines the next material action.
 - One complete bounded inventory explains every eligible source and its
   authority, provenance, freshness, sensitivity, access, and disposition.
+- Consumer-visible inventory is a separately authorized, redacted projection;
+  internal completeness never implies disclosure of protected source existence.
 - One purpose-bound bundle contains all required permitted context, explicitly
   records optional omissions, and blocks on unresolved required gaps.
 - Authority precedence is defined per source domain and covered by tests; no
