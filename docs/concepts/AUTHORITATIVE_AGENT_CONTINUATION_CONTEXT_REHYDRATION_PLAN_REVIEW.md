@@ -343,3 +343,69 @@ or maintenance phases that make no such claim.
   correction, review writing, local validation, Git operations, and GitHub PR
   operations were performed by the delegated maintainer; the kernel governed
   phase scope and approval but did not perform those actions
+
+## 20. Post-Compaction Understanding Amendment Review
+
+### Verdict
+
+**Accepted. The amended P0 is ready for exact-head documentation validation and
+merge, followed by the pure model-only implementation increment.**
+
+The amendment closes the gap between reconstructing equal run disposition and
+reconstructing equal bounded understanding. It adds three necessary controls:
+
+- attributable accepted intent is captured before the total-conversation-loss
+  proof whenever no existing immutable run, typed handoff, accepted plan, or
+  approval presentation already represents that meaning;
+- inventory completeness is measured against a purpose-bound closed collector
+  coverage contract rather than whichever collectors a host registered; and
+- every material understanding claim is derived with provenance and an explicit
+  authoritative, supported, advisory, conflicting, unknown, or withheld
+  posture.
+
+These controls remain non-authorizing. The understanding projection restores
+orientation; current policy, approval, capability, evidence, checks,
+SideEffects, immutable inputs, event cursor, and exact operation are still
+resolved through the existing private same-call authority boundary.
+
+### Salsa Boundary
+
+Salsa is architecturally relevant as a possible incremental derivation engine,
+but it is neither selected nor authorized by this review. Canonical semantics
+must first be implemented and tested without Salsa. Any later prototype must
+produce identical commitments from the same authoritative inputs, invalidate
+only affected derivations, remain stable under irrelevant changes, and rebuild
+from an empty cache. Salsa state is discardable and cannot become durable
+truth, a permission system, or an execution boundary.
+
+### Acceptance Checks
+
+- accepted-intent capture precedes the replacement-executor proof when intent
+  would otherwise exist only in conversation;
+- the source-coverage contract exposes required, optional, invoked, empty,
+  denied, failed, unsupported, inapplicable, and intentionally omitted posture;
+- private inventory completeness remains distinct from capability-filtered and
+  redacted consumer projections;
+- replacement-executor acceptance proves equivalent bounded objective,
+  decisions, progress, remaining obligations, blockers, uncertainty,
+  validation commitments, and lawful next action, not merely equal status;
+- completed work cannot be repeated and superseded direction cannot be revived;
+- explicit host compaction signals force immediate invalidation and refresh,
+  while unconditional material-boundary rehydration remains the portable
+  correctness boundary; and
+- neither the inventory, bundle, understanding projection, delivery receipt,
+  accepted-intent record, nor an incremental cache can authorize execution.
+
+### Governance
+
+- workflow: `dg/d`
+- run ID: `run-1793693895401170000-2`
+- approval ID:
+  `approval/run-1793693895401170000-2/planning-approved`
+- presentation ID: `presentation/d37b884261fd97ab`
+- approval outcome: granted under delegated-maintainer authority after the
+  complete persisted handoff was reviewed
+- out-of-kernel work: reconciliation, architecture review, documentation edits,
+  validation, Git operations, and PR updates are performed by the delegated
+  maintainer; the kernel governs phase scope and approval but does not perform
+  those actions

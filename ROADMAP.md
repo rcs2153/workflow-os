@@ -1309,14 +1309,20 @@ history. It is reference material, not a second delivery queue.
    It must resolve which source is authoritative for each fact domain before a
    material continuation is presented.
 
-   The P0 introduces two non-authorizing products. A complete bounded
+   The P0 introduces three non-authorizing products. A complete bounded
    `ContinuationContextInventory` accounts for every eligible source with its
    authority domain, provenance, scope, revision, freshness, integrity,
    sensitivity, access, conflict, and selection or omission posture. A
    purpose-bound `ContinuationContextBundle` materializes only the context
    required and permitted for the current workflow, phase, actor, handoff, and
-   proposed action. Maximum context means maximum relevant and authorized
-   context with explicit omissions, not maximum raw bytes or indiscriminate
+   proposed action. A derived `ContinuationUnderstandingProjection` reconstructs
+   the bounded meaning of the work: accepted intent, decisions and rationale
+   references, progress, remaining obligations, blockers, uncertainty,
+   validation/reporting commitments, and lawful next options. Every material
+   understanding claim cites inventory provenance and remains authoritative,
+   supported, advisory, conflicting, unknown, or withheld rather than being
+   completed by model inference. Maximum context means maximum relevant and
+   authorized context with explicit omissions, not maximum raw bytes or indiscriminate
    repository, transcript, tool-output, or provider-payload loading.
    Inventory completeness is kernel-internal; any agent-, operator-, CLI-,
    report-, or child-visible inventory is a separately capability-filtered and
@@ -1334,6 +1340,19 @@ history. It is reference material, not a second delivery queue.
    unsupported collectors remain typed, inspectable posture rather than being
    silently resolved by the agent.
 
+   Full semantic continuity also requires typed durable capture of the accepted
+   effect of attributable user or delegated-maintainer direction before
+   conversation can disappear. These accepted-intent records preserve objective,
+   amendment, priority, pause, stop, or resume meaning without copying raw
+   transcripts, hidden reasoning, or granting execution authority. Generated
+   agent summaries remain advisory inputs that may contribute only supported or
+   explicitly advisory claims.
+
+   Inventory completeness must be proven against a purpose-bound source-coverage
+   contract. Required, optional, unsupported, denied, failed, empty, and omitted
+   collector classes must be explicit; a host cannot claim completeness merely
+   because it registered only the collectors it implemented.
+
    This work must compose existing immutable-run, governed-context,
    required-context, current-authority, typed-handoff, proportional-governance,
    evidence, report, and continuation primitives. It must not create a second
@@ -1347,10 +1366,35 @@ history. It is reference material, not a second delivery queue.
    collectors, existing governed-context and required-context composition, one
    read-only preview, one existing same-call consumer integration, and an
    induced total-conversation-loss dogfood proof. A replacement agent with no
-   transcript must reach the same kernel disposition as an agent with full
-   conversational memory from the same authoritative sources. Payload-free
+   transcript must reach the same kernel disposition and reconstruct the same
+   bounded objective, accepted decisions, progress, remaining obligations,
+   blockers, uncertainty, validation/reporting commitments, and lawful next
+   action as an agent with full conversational memory from the same authoritative
+   sources. It must not repeat completed work, revive superseded direction, or
+   silently infer missing understanding. Payload-free
    directive receipts, replay handling, and durable stop/pause suspension remain
    a subordinate host-hardening slice after the context boundary is accepted.
+
+   When a trusted host exposes a compaction, context-replacement, executor-
+   replacement, or session-resume signal, Workflow OS must immediately
+   invalidate the prior orientation and rebuild the inventory, source-coverage
+   result, bundle, and understanding projection before material continuation.
+   The replacement executor must acknowledge delivery of the exact projection
+   commitment; that receipt proves delivery, not comprehension or authority.
+   Host signaling is not the correctness dependency: unconditional rehydration
+   at every material boundary remains mandatory for silent or unsupported host
+   compaction.
+
+   After the pure canonical inventory, source-coverage, bundle, and understanding
+   models are accepted, evaluate Salsa only as a possible internal incremental
+   derivation engine. Canonical outputs must first be defined by a straightforward
+   deterministic implementation. A later bounded prototype may prove equivalent
+   outputs, precise invalidation, irrelevant-input stability, and empty-cache
+   reconstruction. Salsa is not selected or authorized here; any Salsa database
+   must remain a discardable cache and can never own durable state, authority,
+   policy, approvals, evidence, SideEffects, audit posture, or execution. No
+   dependency or Rust toolchain change is authorized without a separate
+   evidence-backed architecture decision.
 
    This P0 preempts claims of compaction-safe delegated continuation,
    cross-agent continuation, nested harness execution, and broader autonomous
