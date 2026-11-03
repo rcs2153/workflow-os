@@ -647,6 +647,14 @@ report](../concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_FIXTURE_ACTIVATION_REPORT.
 and [focused
 review](../concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_FIXTURE_ACTIVATION_REVIEW.md).
 
+Post-acceptance independent evaluation found and corrected a P0 cross-run
+state defect. Schema v9 scopes operational-opening, dispatch-reservation, and
+continuity-projection event sequence uniqueness to the run, explicitly upgrades
+exact v8 provider state, and requires pre-outcome session failures to terminalize
+rather than strand a resumed run. The public regression completes two distinct
+run IDs against one durable provider state across process restarts and proves
+terminal replay does not require fixture reload.
+
 See the [Phase 2 implementation
 report](../concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CORE_PRIVATE_AUTHORITY_LIFECYCLE_REPORT.md).
 

@@ -33,6 +33,9 @@ atomic provider lifecycle:
   fixture mode, disabled live transport, terminal report posture, and bounded
   recovery posture.
 
+The terminal report posture is a bounded terminal-event reference. This path
+does not currently generate or persist a WorkReport artifact.
+
 ## Public Example
 
 `examples/github-repository-metadata-fixture` is the canonical public example.
@@ -54,9 +57,18 @@ resource, and fixture-content commitment. Approval reconstruction and every
 later dispatch reproduce that commitment. A changed fixture is rejected before
 an approval event or provider entry.
 
-An already-terminal run returns `terminal_replay` without another adapter call.
+An already-terminal run returns `terminal_replay` without reloading the fixture
+or making another adapter call.
 A may-have-started posture remains `recovery_required`; automatic retry is
 prohibited and inspect directs the operator to explicit reassessment.
+
+The dedicated provider database uses schema v9. Operational opening, dispatch
+reservation, and continuity-projection event sequence identities are scoped by
+run rather than globally. Two distinct approved runs can therefore complete in
+one durable state database even when their per-run event sequence numbers are
+the same. Exact v8 provider state is upgraded explicitly before use. A session
+failure before a bounded attempt outcome appends a terminal `RunFailed` event
+instead of leaving an approved run stranded in `Running`.
 
 ## Validation
 
@@ -65,6 +77,11 @@ prohibited and inspect directs the operator to explicit reassessment.
 - proof-backed denial remains available after fixture removal and produces no
   provider invocation or adapter telemetry;
 - adapter telemetry is visible through provider-backed inspect;
+- two distinct run IDs complete sequentially against one provider state across
+  CLI process restarts, each retaining one bounded telemetry record;
+- terminal replay succeeds after the fixture is removed and performs no
+  provider entry;
+- exact v8 state upgrades atomically to run-scoped schema v9; and
 - formatting and warnings-denied Clippy pass for Core and CLI;
 - full workspace Rust, repository, integration, documentation, and diff
   validation pass under the repository's pinned toolchain.

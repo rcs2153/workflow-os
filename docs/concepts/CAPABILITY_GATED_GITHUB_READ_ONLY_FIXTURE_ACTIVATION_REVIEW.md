@@ -2,7 +2,7 @@
 
 ## Decision
 
-Accepted after one blocking correction.
+Accepted after blocking corrections.
 
 The Phase 3 public path remains one exact fixture-backed
 `github.repository.metadata` read. It is selectable through ordinary CLI run,
@@ -27,6 +27,12 @@ The review verified that:
 - status and inspect disclose fixture mode, disabled live transport, report
   posture, and explicit recovery posture.
 
+The approval handoff now states the actual report contract: bounded terminal
+event, adapter audit, observability, and authority-receipt references. It does
+not claim that this fixture path writes a WorkReport artifact. A proof-backed
+denial directs the operator to inspect the terminal run rather than suggesting
+an impossible resume.
+
 ## Blocking Finding And Correction
 
 The initial approval path reloaded and validated the fixture for both grant and
@@ -48,9 +54,38 @@ Focused CLI coverage removes the fixture after presentation, denies the run,
 and proves `ApprovalDenied` is durable while no skill invocation or adapter
 telemetry exists.
 
+## Cross-Run P0 Correction
+
+Independent evaluation later found that the accepted fixture was effectively
+single-use per provider database. Three historical SQLite constraints treated
+per-run event sequence numbers as globally unique across operational openings,
+dispatch reservations, and continuity projections. A second approved run could
+open no complete provider lifecycle and was left `Running` after its session
+failed.
+
+Schema v9 corrects all three boundaries to run-scoped sequence uniqueness and
+preserves exact v8 state through an explicit atomic migration. Public CLI
+coverage now completes two distinct runs against one state directory across
+separate processes, verifies independent telemetry, removes the fixture, and
+replays the terminal run without provider entry. An opaque trusted-host session
+failure never invents a terminal provider outcome: the fixture rehydrates the
+durable run, respects any terminal projection Core already committed, and
+otherwise reports explicit recovery-required posture with automatic retry
+prohibited.
+
+The focused maintainer/security review rejected an intermediate correction
+that converted every opaque trusted-host session error into an invented
+terminal workflow failure. A session error can follow dispatch or persistence
+ambiguity, and the payload-free application boundary does not prove that the
+provider never started. The accepted implementation therefore derives posture
+only from rehydrated durable state: an already-terminal projection is
+respected, while every non-terminal result requires explicit recovery and
+forbids automatic retry.
+
 ## Validation
 
-- focused fixture lifecycle, drift, and denial tests pass;
+- focused fixture lifecycle, drift, denial, cross-run, opaque-session, and
+  populated v8-to-v9 migration tests pass;
 - Rust formatting passes;
 - warnings-denied Clippy passes for Core and CLI across all targets and
   features under the repository toolchain;

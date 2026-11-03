@@ -264,54 +264,15 @@ fn approve_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsErr
         return Err(usage("approve dispatch requires an approve command"));
     };
     let run_id_value = WorkflowRunId::new(run_id)?;
-    if github_repository_metadata_database_path(invocation).is_file() {
-        let provider_backend = github_repository_metadata_backend(invocation)?;
-        if !provider_backend.read_events(&run_id_value)?.is_empty() {
-            let decision = if *deny {
-                ApprovalDecisionKind::Denied
-            } else {
-                ApprovalDecisionKind::Granted
-            };
-            let fixture_json = if *deny {
-                None
-            } else {
-                Some(read_github_repository_metadata_fixture(invocation)?)
-            };
-            let run = decide_github_repository_metadata_fixture_approval(
-                &provider_backend,
-                LocalApprovalPresentationDecisionRequest {
-                    approval: LocalApprovalDecisionRequest {
-                        project_root: invocation.project_dir.clone(),
-                        run_id: run_id_value,
-                        approval_id: approval_id.clone(),
-                        decision,
-                        actor: ActorId::new(actor.as_deref().unwrap_or("user/local-approver"))?,
-                        reason: reason
-                            .clone()
-                            .unwrap_or_else(|| "approved through workflow-os CLI".to_owned()),
-                        correlation_id: CorrelationId::generate(),
-                    },
-                    proof: LocalApprovalPresentationProof::ResolveByRunAndApproval,
-                    max_presentation_age: Some(AUTHORITATIVE_GOVERNANCE_PRESENTATION_MAX_AGE),
-                },
-                fixture_json.as_deref(),
-            )?;
-            if invocation.json {
-                println!(
-                    "{}",
-                    github_repository_metadata_run_json(&run, Some(decision))
-                );
-            } else {
-                print_approval_summary(invocation, &run, decision);
-                println!("provider_operation: github.repository.metadata");
-                println!("provider_mode: fixture");
-                println!(
-                    "next_action: workflow-os run {} --run-id {}",
-                    run.snapshot.identity.workflow_id, run.snapshot.identity.run_id
-                );
-            }
-            return Ok(());
-        }
+    if decide_github_repository_metadata_approval_if_present(
+        invocation,
+        &run_id_value,
+        approval_id,
+        actor.as_deref(),
+        reason.as_deref(),
+        *deny,
+    )? {
+        return Ok(());
     }
     let backend = local_backend(invocation)?;
     let waiting_run = backend.rehydrate_run(&run_id_value)?;
@@ -348,6 +309,74 @@ fn approve_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsErr
             *deny,
         )
     }
+}
+
+fn decide_github_repository_metadata_approval_if_present(
+    invocation: &Invocation,
+    run_id: &WorkflowRunId,
+    approval_id: &str,
+    actor: Option<&str>,
+    reason: Option<&str>,
+    deny: bool,
+) -> Result<bool, WorkflowOsError> {
+    if !github_repository_metadata_database_path(invocation).is_file() {
+        return Ok(false);
+    }
+    let provider_backend = github_repository_metadata_backend(invocation)?;
+    if provider_backend.read_events(run_id)?.is_empty() {
+        return Ok(false);
+    }
+    let decision = if deny {
+        ApprovalDecisionKind::Denied
+    } else {
+        ApprovalDecisionKind::Granted
+    };
+    let fixture_json = if deny {
+        None
+    } else {
+        Some(read_github_repository_metadata_fixture(invocation)?)
+    };
+    let run = decide_github_repository_metadata_fixture_approval(
+        &provider_backend,
+        LocalApprovalPresentationDecisionRequest {
+            approval: LocalApprovalDecisionRequest {
+                project_root: invocation.project_dir.clone(),
+                run_id: run_id.clone(),
+                approval_id: approval_id.to_owned(),
+                decision,
+                actor: ActorId::new(actor.unwrap_or("user/local-approver"))?,
+                reason: reason
+                    .unwrap_or("approved through workflow-os CLI")
+                    .to_owned(),
+                correlation_id: CorrelationId::generate(),
+            },
+            proof: LocalApprovalPresentationProof::ResolveByRunAndApproval,
+            max_presentation_age: Some(AUTHORITATIVE_GOVERNANCE_PRESENTATION_MAX_AGE),
+        },
+        fixture_json.as_deref(),
+    )?;
+    if invocation.json {
+        println!(
+            "{}",
+            github_repository_metadata_run_json(&run, Some(decision))
+        );
+    } else {
+        print_approval_summary(invocation, &run, decision);
+        println!("provider_operation: github.repository.metadata");
+        println!("provider_mode: fixture");
+        if decision == ApprovalDecisionKind::Denied {
+            println!(
+                "next_action: workflow-os inspect {}",
+                run.snapshot.identity.run_id
+            );
+        } else {
+            println!(
+                "next_action: workflow-os run {} --run-id {}",
+                run.snapshot.identity.workflow_id, run.snapshot.identity.run_id
+            );
+        }
+    }
+    Ok(true)
 }
 
 fn author_workflow_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> {
@@ -933,7 +962,14 @@ fn github_repository_metadata_fixture_run_command(
         Some(backend.rehydrate_run(&run_id)?)
     };
     let bundle = github_repository_metadata_bundle_inputs(&backend, &run_id, existing.as_ref())?;
-    let fixture_json = read_github_repository_metadata_fixture(invocation)?;
+    let fixture_json = if existing
+        .as_ref()
+        .is_some_and(|run| run.snapshot.status.is_terminal())
+    {
+        String::new()
+    } else {
+        read_github_repository_metadata_fixture(invocation)?
+    };
     let observed_at = Timestamp::now_utc();
     let expires_at = Timestamp::from_offset_date_time(
         observed_at.as_offset_date_time() + time::Duration::minutes(5),
@@ -989,7 +1025,7 @@ fn github_repository_metadata_fixture_run_command(
             println!("next_action: inspect the exact run; automatic retry is prohibited");
         }
         if let Some(presentation) = presentation.as_ref() {
-            print_authoritative_approval_handoff(presentation);
+            print_github_repository_metadata_approval_handoff(presentation);
         }
     }
     if result.run().snapshot.status == WorkflowRunStatus::Failed {
@@ -1073,7 +1109,12 @@ fn github_repository_metadata_run_json(
 fn github_repository_metadata_backend(
     invocation: &Invocation,
 ) -> Result<SqliteStateBackend, WorkflowOsError> {
-    SqliteStateBackend::open(github_repository_metadata_database_path(invocation))
+    let database = github_repository_metadata_database_path(invocation);
+    if database.is_file() {
+        SqliteStateBackend::upgrade_operational_opening_run_scope_v8_to_v9(database)
+    } else {
+        SqliteStateBackend::open(database)
+    }
 }
 
 fn github_repository_metadata_database_path(invocation: &Invocation) -> PathBuf {
@@ -2221,6 +2262,26 @@ fn ensure_selected_authoritative_artifact_obligation(
 }
 
 fn print_authoritative_approval_handoff(record: &ApprovalPresentationRecord) {
+    print_approval_handoff(
+        record,
+        "Resume only the exact waiting run after fresh validation and proof enforcement, then persist its exact governed terminal WorkReport artifact if terminal report generation succeeds.",
+        "New commands, broader runtime authority, provider writes, arbitrary artifacts, report export or publication, hosted persistence, or scope expansion.",
+    );
+}
+
+fn print_github_repository_metadata_approval_handoff(record: &ApprovalPresentationRecord) {
+    print_approval_handoff(
+        record,
+        "Resume only the exact waiting fixture run after fresh validation and proof enforcement, then persist bounded terminal event, adapter audit, observability, and authority-receipt references.",
+        "A WorkReport artifact, live transport, credentials, provider writes, new commands, broader runtime authority, report export or publication, hosted persistence, or scope expansion.",
+    );
+}
+
+fn print_approval_handoff(
+    record: &ApprovalPresentationRecord,
+    approval_allows: &str,
+    approval_does_not_allow: &str,
+) {
     println!("approval_handoff_required: true");
     println!("approval_handoff:");
     println!("  run_id: {}", record.run_id());
@@ -2244,8 +2305,8 @@ fn print_authoritative_approval_handoff(record: &ApprovalPresentationRecord) {
         record.validation_expectations().join("; ")
     );
     println!("  why_now: {}", record.why_now());
-    println!("  approval_allows: Resume only the exact waiting run after fresh validation and proof enforcement, then persist its exact governed terminal WorkReport artifact if terminal report generation succeeds.");
-    println!("  approval_does_not_allow: New commands, broader runtime authority, provider writes, arbitrary artifacts, report export or publication, hosted persistence, or scope expansion.");
+    println!("  approval_allows: {approval_allows}");
+    println!("  approval_does_not_allow: {approval_does_not_allow}");
     println!("  next_action: {}", record.next_action());
 }
 

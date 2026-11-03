@@ -18,3 +18,9 @@ workflow-os inspect <run-id>
 
 The approval presentation binds the exact immutable workflow and fixture
 content. Changing either before approval or execution fails closed.
+
+The same state directory may hold multiple distinct runs. Event sequence
+identity is scoped to each run, and terminal replay does not require the
+fixture to remain present. The current report posture is a bounded terminal
+event reference plus adapter audit, observability, and authority-receipt
+references; this example does not persist a WorkReport artifact.

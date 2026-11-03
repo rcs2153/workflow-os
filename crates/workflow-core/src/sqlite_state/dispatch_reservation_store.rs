@@ -293,7 +293,12 @@ impl SqliteStateBackend {
             reservation_commitment: reservation_binding.clone(),
             committed_at: observation.observed_at(),
         };
-        insert_reservation(&transaction, &record, &event)?;
+        insert_reservation(
+            &transaction,
+            &request.expected_window_binding.run_id,
+            &record,
+            &event,
+        )?;
         insert_projection(
             &transaction,
             &record,
@@ -351,6 +356,7 @@ impl SqliteStateBackend {
 
 fn insert_reservation(
     transaction: &rusqlite::Transaction<'_>,
+    run_id: &crate::WorkflowRunId,
     record: &DispatchReservationRecord,
     event: &DispatchAdmissionProjectionEvent,
 ) -> Result<(), WorkflowOsError> {
@@ -360,12 +366,14 @@ fn insert_reservation(
     transaction
         .execute(
             "INSERT INTO dispatch_reservations
-             (attempt_id,window_id,operation_id,receipt_id,request_commitment,reservation_commitment,
-              result_event_id,result_sequence,committed_seconds,committed_nanos,record_json)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+             (attempt_id,window_id,run_id,operation_id,receipt_id,request_commitment,
+              reservation_commitment,result_event_id,result_sequence,committed_seconds,
+              committed_nanos,record_json)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
             params![
                 record.attempt_id.as_str(),
                 record.window_id.as_str(),
+                run_id.as_str(),
                 record.operation_id.as_str(),
                 record.receipt_id.as_str(),
                 record.request_commitment.as_str(),
