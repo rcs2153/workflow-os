@@ -110,9 +110,53 @@ subject. Required CI was terminal-green for the exact reviewed commit. See the [
 report](docs/concepts/FIRST_RUN_REPORT_TRUTH_AND_TEST_STABILITY_P0_REPORT.md)
 and [focused review](docs/concepts/FIRST_RUN_REPORT_TRUTH_AND_TEST_STABILITY_P0_REVIEW.md).
 
-The next authorized lane is **capability-gated GitHub read-only public adoption
-and recovery planning**. The existing crate-private executor composition already
-proves one exact repository-metadata read through immutable run identity,
+A later P0 preemption now makes **authoritative post-compaction understanding
+and continuation rehydration** the active delivery lane. This is the only
+authorized forward implementation sequence until its exit criteria are met.
+The preemption is required because a replacement executor must recover the same
+bounded, evidence-backed understanding of lawful work rather than merely the
+same runtime disposition. Reconstructed orientation remains non-authorizing.
+
+The accepted increments are:
+
+1. the authoritative continuation context inventory, bundle, understanding,
+   gap, and non-authorizing decision model;
+2. purpose-specific complete source-coverage profiles;
+3. claim-level semantic obligation profiles;
+4. a reviewed trusted-local-collector architecture with source-specific
+   revision fences and non-consuming observation; and
+5. the private Phase A closed collector model, accepted after fixing complete
+   typed negative-knowledge accounting for empty results.
+
+The remaining authorized sequence is:
+
+1. existing-store-backed kernel collectors through stable read interfaces;
+2. bounded local Git and allowlisted operating-document observers;
+3. a separately reviewed durable accepted-intent capture boundary;
+4. aggregate non-consuming composition into a claim-level
+   `ContinuationUnderstandingProjection` with complete source-coverage proof;
+5. exact post-compaction projection delivery and acknowledgment; and
+6. one local end-to-end replacement-executor proof showing that completed work
+   is not repeated, superseded direction is not revived, missing or conflicting
+   understanding is disclosed, and fresh authority is resolved separately at
+   the next material boundary.
+
+No phase may claim compaction-safe continuation, consume approval or capability
+authority during reconstruction, or expose a runtime consumer before the
+preceding phase and focused security review are accepted. The P0 queue-integrity
+repair is recorded in [Roadmap Active Queue Authority P0
+Report](docs/concepts/ROADMAP_ACTIVE_QUEUE_AUTHORITY_P0_REPORT.md).
+
+The two fresh-rerun P1 defects are queued behind this P0: generated downstream
+agent instructions must not reference a source-checkout-only guide, and public
+GitHub fixture runs must route `next-action` through the same provider-aware
+state path as `status` and `inspect`. They are bounded acceptance fixes, not
+authorization to broaden the continuation implementation.
+
+The previously active **capability-gated GitHub read-only public adoption and
+recovery** lane is paused at its accepted public fixture milestone. The existing
+crate-private executor composition already proves one exact repository-metadata
+read through immutable run identity,
 current source-backed authority, durable continuity, one-time continuation,
 policy evaluation, bounded telemetry, and a payload-free receipt. It is not yet
 a user-selectable runtime path, and its claim-only and invocation-started
@@ -167,6 +211,11 @@ recovery disclosure, and terminal replay without live transport. See the
 [focused review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_FIXTURE_ACTIVATION_REVIEW.md),
 and the preceding [Phase 2 focused
 review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CORE_PRIVATE_AUTHORITY_LIFECYCLE_REVIEW.md).
+Core-private same-call connector authority verification resumes only after the
+authoritative post-compaction understanding lane meets the six exit criteria
+above. Connector execution, credentials, live GitHub behavior, provider writes,
+scheduler claims, and any parallel permission system remain excluded while the
+lane is paused.
 
 Before broader provider mutation families, nested harness work, or claims of
 continuous delegated-maintainer autonomy, complete the P0 [Delegated Authority
@@ -205,8 +254,7 @@ payload-free, non-authorizing, and no-write. See the [lifecycle
 report](docs/concepts/EXTERNAL_ACTION_TRANSITION_LIFECYCLE_REPORT.md) and
 [focused review](docs/concepts/EXTERNAL_ACTION_TRANSITION_LIFECYCLE_REVIEW.md).
 Core-private same-call current-authority verification and a fixture connector
-are next. Connector execution, credentials, live GitHub behavior, provider
-writes, scheduler claims, and any parallel permission system remain excluded.
+remain the next connector increment after the active P0 preemption closes.
 
 After the current delegated-authority connector lane is complete, the next
 authoritative milestone is **Hacker News launch admission**. This is a bounded
@@ -1503,9 +1551,22 @@ history. It is reference material, not a second delivery queue.
    capabilities, approval authority, and idempotency state remain untouched
    until a later fresh same-call material boundary. See the [plan
    review](docs/concepts/CONTINUATION_CONTEXT_TRUSTED_LOCAL_COLLECTORS_PLAN_REVIEW.md).
-   The next P0 phase is the private Phase A collector model and reference
-   conformance layer only. Store-backed collectors, composition, and runtime
-   consumers remain later.
+   The private Phase A collector model and reference conformance layer are now
+   implemented. Core owns a closed 18-kind collector registry, exact
+   source-class and authority-domain mapping, purpose/scope/actor-bound requests,
+   complete source-revision anchors, nine distinct result postures, redacted
+   observation forms, and deterministic conversion into the accepted pure
+   decision input. Collector kind, request, source revision, and aggregate
+   anchor substitution fail closed. Accepted-intent collection remains
+   unsupported. Focused review found and fixed one negative-knowledge boundary:
+   an `Empty` collector result must now carry the exact complete Core-owned typed
+   accounting set for its purpose, scope posture, and source class. Fifteen
+   focused tests pass. See the [Phase A implementation
+   report](docs/concepts/CONTINUATION_CONTEXT_TRUSTED_COLLECTOR_MODEL_REPORT.md).
+   Focused implementation/security review is accepted after the typed-empty
+   accounting fix; see the [Phase A review](docs/concepts/CONTINUATION_CONTEXT_TRUSTED_COLLECTOR_MODEL_REVIEW.md).
+   Store-backed collectors are next. Aggregate composition and runtime consumers
+   remain later.
    Collectors, persistence, accepted-intent capture, CLI preview, runtime
    integration, compaction adapters, delivery receipts, Salsa, and
    replacement-executor proof remain unimplemented.
