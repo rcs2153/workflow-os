@@ -3104,7 +3104,7 @@ fn init_agent_harness_command(
     let prompt_path = root.join(".workflow-os").join("agent-harness-prompt.md");
     let agents_content = scaffold_file_content(
         &agents_path,
-        &agent_harness_agents_file(agent),
+        &agent_harness_agents_file(agent, false),
         force,
         "AGENTS.md",
     )?;
@@ -10819,7 +10819,7 @@ fn repo_governance_scaffold_files(
         ),
         (
             "AGENTS.md",
-            agent_harness_agents_file(agent),
+            agent_harness_agents_file(agent, true),
             ScaffoldKind::ManagedBlock,
         ),
         (
@@ -11412,7 +11412,15 @@ fn managed_block(content: &str) -> Result<String, WorkflowOsError> {
     Ok(content[begin..end].to_owned())
 }
 
-fn agent_harness_agents_file(agent: AgentHarnessFlavor) -> String {
+fn agent_harness_agents_file(
+    agent: AgentHarnessFlavor,
+    repo_governance_setup_note_available: bool,
+) -> String {
+    let local_guidance = if repo_governance_setup_note_available {
+        "- Read `.workflow-os/README.md` and `.workflow-os/agent-harness-prompt.md` before governed work."
+    } else {
+        "- Read `.workflow-os/agent-harness-prompt.md` before governed work."
+    };
     format!(
         r"# Workflow OS Agent Instructions
 
@@ -11423,7 +11431,7 @@ Audience: {audience}
 
 Before changing this repository:
 - Read this repository's engineering standard or contribution guide if one exists.
-- Read `.workflow-os/README.md` and `.workflow-os/agent-harness-prompt.md` before governed work.
+{local_guidance}
 - Validate project state before implementation when the phase requires it.
 - Start or resume the relevant governed workflow when required by the user or sprint plan.
 - Treat approval checkpoints as mandatory governed boundaries.
@@ -11440,12 +11448,13 @@ Unsupported in this scaffold:
 - hosted or distributed execution;
 - higher-autonomy operation.
 
-Use `docs/user-guide/agent-harness-quickstart.md` for the current local adoption loop.
+Use the repository-local `.workflow-os/agent-harness-prompt.md` for the current local agent loop.
 {end}
 ",
         begin = AGENT_HARNESS_BEGIN,
         end = AGENT_HARNESS_END,
         audience = agent.audience_label(),
+        local_guidance = local_guidance,
     )
 }
 
