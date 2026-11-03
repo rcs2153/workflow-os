@@ -847,8 +847,19 @@ fn init_agent_harness_creates_scaffold_files() {
     assert!(agents.contains("approval checkpoints"));
     assert!(agents.contains("automatic local check execution or handler registration"));
     assert!(agents.contains("engineering standard or contribution guide if one exists"));
-    assert!(agents.contains(".workflow-os/README.md"));
+    assert!(!agents.contains(".workflow-os/README.md"));
     assert!(agents.contains(".workflow-os/agent-harness-prompt.md"));
+    assert!(!agents.contains("docs/user-guide/agent-harness-quickstart.md"));
+    assert!(project
+        .path()
+        .join(".workflow-os")
+        .join("agent-harness-prompt.md")
+        .is_file());
+    assert!(!project
+        .path()
+        .join(".workflow-os")
+        .join("README.md")
+        .exists());
     assert!(!agents.contains("docs/ENGINEERING_STANDARD.md"));
     assert!(prompt.contains("Agent executes. Workflow OS governs."));
     assert!(prompt.contains("Use Workflow OS as the governing layer"));
@@ -1097,6 +1108,17 @@ fn init_repo_governance_creates_valid_local_project() {
     assert!(agents.contains("engineering standard or contribution guide if one exists"));
     assert!(agents.contains(".workflow-os/README.md"));
     assert!(agents.contains(".workflow-os/agent-harness-prompt.md"));
+    assert!(!agents.contains("docs/user-guide/agent-harness-quickstart.md"));
+    assert!(project
+        .path()
+        .join(".workflow-os")
+        .join("README.md")
+        .is_file());
+    assert!(project
+        .path()
+        .join(".workflow-os")
+        .join("agent-harness-prompt.md")
+        .is_file());
     assert!(!agents.contains("docs/ENGINEERING_STANDARD.md"));
 
     let validate = workflow_os(&project, &["validate"]);

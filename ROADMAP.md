@@ -268,11 +268,20 @@ preceding phase and focused security review are accepted. The P0 queue-integrity
 repair is recorded in [Roadmap Active Queue Authority P0
 Report](docs/concepts/ROADMAP_ACTIVE_QUEUE_AUTHORITY_P0_REPORT.md).
 
-The two fresh-rerun P1 defects are now the next authoritative queue: generated downstream
-agent instructions must not reference a source-checkout-only guide, and public
-GitHub fixture runs must route `next-action` through the same provider-aware
-state path as `status` and `inspect`. They are bounded acceptance fixes, not
-authorization to broaden the continuation implementation.
+The first of the two fresh-rerun P1 defects is implemented and accepted after
+focused maintainer review corrected one blocker. Generated downstream agent
+instructions are context-aware and reference only repository-local artifacts
+created by the selected scaffold entry point; neither path references a guide
+available only in the Workflow OS source checkout. The bounded correction is
+recorded in the [P1 implementation
+report](docs/concepts/GENERATED_AGENT_GUIDANCE_PORTABILITY_P1_REPORT.md) and
+[focused review](docs/concepts/GENERATED_AGENT_GUIDANCE_PORTABILITY_P1_REVIEW.md).
+
+The remaining authoritative P1 queue item is provider-fixture-aware
+`next-action` routing: public GitHub fixture runs must route `next-action`
+through the same provider-aware state path as `status` and `inspect`. This is a
+bounded acceptance fix, not authorization to broaden the continuation
+implementation.
 
 The previously active **capability-gated GitHub read-only public adoption and
 recovery** lane is paused at its accepted public fixture milestone. The existing
