@@ -459,9 +459,26 @@ implementation
 report](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5B_REPORT.md) and
 [focused
 review](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5B_REVIEW.md).
-Phase 5C evidence wait and exact-successor mark-ready is the next authorized
-increment. Merge and later lifecycle work remain unauthorized until Phase 5C
-is implemented and review-accepted.
+Phase 5C evidence wait and exact-successor mark-ready is implemented and
+accepted after focused maintainer/security review corrected wait-proof,
+successor-replay, dispatch-time-refusal, and resume-drift blockers. The
+Core-private fixture now carries the complete create, ready, and later merge
+scope before first connector entry; observes exact-head required-check and
+pre-dispatch connector posture; binds ready to the persisted successor;
+registers pending or failed checks and connector refusal as durable typed
+waits; explicitly resolves the same bound wait under fresh source observation;
+and resumes only from a typed, rehydration-validated wait-resolution proof
+through the same-call authority boundary. Exact ready replay and receipt lookup
+bind the immutable provider operation and successor without redispatch.
+Dispatch-time pre-mutation check regression or connector refusal becomes a
+durable wait, while changed-head or revoked-source re-entry rejects before
+connector mutation. See the [Phase 5C implementation
+report](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5C_REPORT.md) and
+[focused
+review](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5C_REVIEW.md).
+Phase 5D exact unchanged-head merge, replay, and accepted ambiguity recovery is
+the next authorized increment. Phase 5E and live connector work remain
+unauthorized until Phase 5D is implemented and review-accepted.
 
 After the current delegated-authority connector lane is complete, the next
 authoritative milestone is **Hacker News launch admission**. This is a bounded
