@@ -1521,6 +1521,84 @@ fn projection_error(suffix: &str, message: impl Into<String>) -> WorkflowOsError
 }
 
 #[cfg(test)]
+pub(crate) fn external_action_test_projection(
+) -> Result<ExternalActionAuthorizationProjection, WorkflowOsError> {
+    let observed_at = Timestamp::parse_rfc3339("2026-11-01T20:00:00Z")?;
+    let predicate = |kind| {
+        ExternalActionEvidencePredicate::new(
+            kind,
+            SpecContentHash::from_text(&format!("source-{kind:?}")),
+            SpecContentHash::from_text(&format!("subject-{kind:?}")),
+            observed_at,
+            3_600,
+        )
+    };
+    let transition = |kind| {
+        ExternalActionTransition::new(
+            kind,
+            SpecContentHash::from_text(&format!("operation-{kind:?}")),
+            expected_payload_class(kind),
+            SpecContentHash::from_text(&format!("payload-{kind:?}")),
+            required_evidence(kind)
+                .into_iter()
+                .map(predicate)
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+    };
+    let connector_kind = ExternalConnectorKind::GitHub;
+    let connector_account_reference = "github-installation/workflow-os".to_owned();
+    let resource = GitHubExternalActionResourceBinding::new(
+        "rcs2153/workflow-os",
+        "main",
+        "1111111111111111111111111111111111111111",
+        "codex/external-action-model",
+        "2222222222222222222222222222222222222222",
+    )?;
+    let transitions = vec![
+        transition(ExternalActionTransitionKind::GitHubPullRequestCreateDraft)?,
+        transition(ExternalActionTransitionKind::GitHubPullRequestMarkReadyAfterTerminalGreen)?,
+        transition(ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead)?,
+    ];
+    let strict_non_goals_commitment = SpecContentHash::from_text("strict-non-goals");
+    let approval_presentation_scope_commitment = compute_external_action_approval_scope_commitment(
+        connector_kind,
+        &connector_account_reference,
+        &resource,
+        &transitions,
+        &strict_non_goals_commitment,
+    )?;
+    ExternalActionAuthorizationProjection::new(ExternalActionAuthorizationProjectionDefinition {
+        workflow_id: WorkflowId::new("dg/pr")?,
+        run_id: WorkflowRunId::new("run/external-action")?,
+        approval_reference_id: ApprovalReferenceId::new("approval/external-action")?,
+        presentation_id: ApprovalPresentationId::new("presentation/external-action")?,
+        presentation_content_hash: ApprovalPresentationContentHash::new(
+            SpecContentHash::from_text("presentation").as_str(),
+        )?,
+        approval_presentation_scope_commitment,
+        capability_grant_id: CapabilityGrantId::new("grant/external-action")?,
+        policy_decision_event_id: EventId::new("event/external-action")?,
+        governance_assessment_commitment: SpecContentHash::from_text("governance"),
+        execution_window_id: AuthorizedExecutionWindowId::new("window/external-action")?,
+        immutable_run_bundle_commitment: SpecContentHash::from_text("bundle"),
+        connector_kind,
+        connector_account_reference,
+        resource,
+        transitions,
+        actor: ActorId::new("actor/delegated-maintainer")?,
+        delegator: ActorId::new("actor/repository-owner")?,
+        delegate: ActorId::new("actor/delegated-maintainer")?,
+        delegation_scope_commitment: SpecContentHash::from_text("delegation"),
+        strict_non_goals_commitment,
+        issued_at: observed_at,
+        not_before: observed_at,
+        expires_at: Timestamp::parse_rfc3339("2026-11-01T22:00:00Z")?,
+        revocation_source_commitment: SpecContentHash::from_text("revocation-source"),
+        sensitivity: WorkReportSensitivity::Internal,
+    })
+}
+
+#[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
     use serde_json::Value;
