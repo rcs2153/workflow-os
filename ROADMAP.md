@@ -410,6 +410,44 @@ The next authorized increment is delivery-sequence Phase 5: one end-to-end
 fixture-backed PR lifecycle proof. No live provider integration or broader
 mutation family is authorized by this acceptance.
 
+Planning for Phase 5 is now captured in the [External Action Fixture
+Pull-Request Lifecycle Proof
+Plan](docs/implementation-plans/external-action-fixture-pr-lifecycle-proof-plan.md).
+The plan limits the proof to one credential-free, Core-private create-draft,
+mark-ready-after-terminal-green, and squash-merge sequence. It requires
+authoritative source composition in place of caller-authored current-fact
+booleans, exact successor binding, durable evidence and connector-refusal
+waits, ambiguous-outcome reconciliation, and no-redispatch replay. Ref updates,
+branch deletion, live GitHub access, credentials, network, provider writes,
+public connector APIs, schemas, SDKs, CLI mutation commands, schedulers, and
+broader mutation families remain excluded. Focused maintainer/security review
+accepts the plan after correcting three blockers: provider operations now
+require atomic expected-revision comparison, successor bindings are explicitly
+Core-owned, and provider-success/local-persistence ambiguity has a deterministic
+reconciliation and repair path. The review also clarifies that closed windows
+are not resumable waits, connector refusal requires proof that dispatch did not
+begin, and failed checks remain typed evidence blockers unless policy makes
+them terminal. See the [focused plan
+review](docs/concepts/EXTERNAL_ACTION_FIXTURE_PR_LIFECYCLE_PROOF_PLAN_REVIEW.md).
+
+Phase 5A source and fixture contracts are implemented and accepted after
+focused maintainer/security review corrected deterministic replay. A closed ten-source coverage
+model rejects missing, duplicate, unavailable, stale, denied, failed, or
+drifting required inputs. Stable source anchors bind complete coverage to the
+provider revision. A revision-fenced fixture-provider contract proves atomic
+compare-and-operate, exact operation replay, and concurrent one-winner behavior
+without connector dispatch. A Core-owned in-memory successor-binding store
+accepts exact replay and rejects conflicting projection bindings. The slice
+adds no complete PR lifecycle, live provider behavior, network, credentials,
+public API, schema, SDK, CLI mutation, scheduler, broader mutation, or Salsa.
+See the [Phase 5A implementation
+report](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5A_REPORT.md) and
+[focused
+review](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5A_REVIEW.md).
+Phase 5B draft creation and exact successor binding is the next authorized
+increment. Later lifecycle transitions remain unauthorized until Phase 5B is
+implemented and review-accepted.
+
 After the current delegated-authority connector lane is complete, the next
 authoritative milestone is **Hacker News launch admission**. This is a bounded
 product-admission lane, not another primitive family and not authorization to
