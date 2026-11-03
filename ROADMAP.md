@@ -158,13 +158,32 @@ fabricated. See the [Phase C implementation
 report](docs/concepts/CONTINUATION_CONTEXT_BOUNDED_LOCAL_OBSERVERS_REPORT.md)
 and [focused review](docs/concepts/CONTINUATION_CONTEXT_BOUNDED_LOCAL_OBSERVERS_REVIEW.md).
 
+Phase D accepted-intent capture is now implemented and accepted after focused
+maintainer/security review as a Core-private, non-authorizing contract. Accepted
+semantic effects are attributable to one actor, bound to exact project,
+workflow, run, and phase scope, committed to one directive provenance hash,
+bounded by the existing continuation text model, and stored through an atomic
+compare-and-replace interface. Capture is idempotent for the exact same record,
+rejects identity or directive rebinding, requires explicit same-family
+supersession for singleton objective, priority, pause, stop, and resume posture,
+and verifies the committed replacement by exact revision readback. The private
+collector admits records without manufacturing a generic source payload and
+rejects store drift after anchor capture. The phase adds only a store contract
+and in-memory conformance fixture; no production persistence backend, host
+directive ingestion path, raw conversation storage, public API, or runtime
+consumer exists. Review corrected two blocking replay defects by binding exact
+supersession lineage into the durable record and accepting replay from the
+original pre-write request only when the complete record is identical. See the
+[Phase D implementation
+report](docs/concepts/CONTINUATION_CONTEXT_ACCEPTED_INTENT_CAPTURE_REPORT.md)
+and [focused review](docs/concepts/CONTINUATION_CONTEXT_ACCEPTED_INTENT_CAPTURE_REVIEW.md).
+
 The remaining authorized sequence is:
 
-1. a separately reviewed durable accepted-intent capture boundary;
-2. aggregate non-consuming composition into a claim-level
+1. aggregate non-consuming composition into a claim-level
    `ContinuationUnderstandingProjection` with complete source-coverage proof;
-3. exact post-compaction projection delivery and acknowledgment; and
-4. one local end-to-end replacement-executor proof showing that completed work
+2. exact post-compaction projection delivery and acknowledgment; and
+3. one local end-to-end replacement-executor proof showing that completed work
    is not repeated, superseded direction is not revived, missing or conflicting
    understanding is disclosed, and fresh authority is resolved separately at
    the next material boundary.
@@ -1602,14 +1621,16 @@ history. It is reference material, not a second delivery queue.
    Focused maintainer/security review accepts Phase B after adding direct
    durable-snapshot drift and backend-restart stability proofs. See the [Phase
    B review](docs/concepts/CONTINUATION_CONTEXT_STORE_BACKED_COLLECTORS_REVIEW.md).
-   Bounded local observers are the next authorized action.
+   Bounded local observers and the first accepted-intent capture contract are
+   now implemented and focused-review accepted. Aggregate non-consuming
+   composition is next.
    Focused implementation/security review is accepted after the typed-empty
    accounting fix; see the [Phase A review](docs/concepts/CONTINUATION_CONTEXT_TRUSTED_COLLECTOR_MODEL_REVIEW.md).
-   Bounded local observers are next. Aggregate composition and runtime consumers
-   remain later.
-   Collectors, persistence, accepted-intent capture, CLI preview, runtime
-   integration, compaction adapters, delivery receipts, Salsa, and
-   replacement-executor proof remain unimplemented.
+   Aggregate composition and runtime consumers remain later.
+   Production collector registration, production accepted-intent persistence,
+   host directive ingestion, CLI preview, runtime integration, compaction
+   adapters, delivery receipts, Salsa, and replacement-executor proof remain
+   unimplemented.
    The review added a durable cursor-bound single-consumption requirement and
    narrowed the first allowed operation to one local
    `invoke_current_step_skill` `BeforeSkillInvocation` consumer. That opt-in

@@ -667,6 +667,7 @@ impl StoreBackedRead {
             revision: self.revision,
             posture,
             source,
+            accepted_intents: Vec::new(),
             accounting: self.accounting,
         })
     }

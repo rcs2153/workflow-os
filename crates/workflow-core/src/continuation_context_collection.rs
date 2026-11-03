@@ -25,6 +25,7 @@ use crate::continuation_context::{
 };
 use crate::{ActorId, SpecContentHash, WorkflowOsError};
 
+mod accepted_intent;
 mod local_observers;
 mod store_backed;
 
@@ -356,6 +357,7 @@ struct ContinuationCollectionObservation {
     revision: SpecContentHash,
     posture: ContinuationCollectionResultPosture,
     source: Option<ContinuationCollectedSource>,
+    accepted_intents: Vec<crate::continuation_context::AcceptedIntentRecord>,
     accounting: Vec<ContinuationCollectedAccounting>,
 }
 
@@ -368,6 +370,7 @@ impl fmt::Debug for ContinuationCollectionObservation {
             .field("revision", &"[REDACTED]")
             .field("posture", &self.posture)
             .field("source", &self.source)
+            .field("accepted_intents", &self.accepted_intents.len())
             .field("accounting", &self.accounting.len())
             .finish()
     }
@@ -456,6 +459,7 @@ fn compose_collection(
     let mut coverage = Vec::with_capacity(observations.len());
     let mut sources = Vec::new();
     let mut claim_accounting = Vec::new();
+    let mut accepted_intents = Vec::new();
 
     for mut observation in observations {
         if observation.request_commitment != request.commitment {
@@ -504,6 +508,8 @@ fn compose_collection(
             });
         }
 
+        accepted_intents.append(&mut observation.accepted_intents);
+
         observation.accounting.sort();
         claim_accounting.extend(observation.accounting.into_iter().map(|item| {
             ContinuationClaimAccountingEntry {
@@ -531,23 +537,34 @@ fn compose_collection(
         coverage,
         claim_accounting,
         sources,
-        accepted_intents: Vec::new(),
+        accepted_intents,
     })
 }
 
+#[allow(clippy::too_many_lines)]
 fn validate_result_shape(
     observation: &ContinuationCollectionObservation,
     expectation: ContinuationContextCollectorExpectation,
     purpose: ContinuationContextPurpose,
     run_bound: bool,
 ) -> Result<(), WorkflowOsError> {
-    if observation.kind == ContinuationCollectorKind::AcceptedIntent
-        && observation.posture != ContinuationCollectionResultPosture::Unsupported
-    {
+    let accepted_intent_observation = observation.kind == ContinuationCollectorKind::AcceptedIntent;
+    if !accepted_intent_observation && !observation.accepted_intents.is_empty() {
         return Err(collection_error(
-            "observation.accepted_intent_unavailable",
-            "accepted-intent collection remains unsupported until its capture boundary exists",
+            "observation.accepted_intent_kind_mismatch",
+            "only the accepted-intent collector can return accepted-intent records",
         ));
+    }
+    if accepted_intent_observation {
+        let records_required = observation.posture == ContinuationCollectionResultPosture::Observed;
+        if records_required == observation.accepted_intents.is_empty()
+            || observation.source.is_some()
+        {
+            return Err(collection_error(
+                "observation.accepted_intent_shape",
+                "accepted-intent posture must use bounded records without a generic source payload",
+            ));
+        }
     }
     match (expectation, observation.posture) {
         (ContinuationContextCollectorExpectation::Inapplicable, posture)
@@ -574,10 +591,12 @@ fn validate_result_shape(
         _ => {}
     }
 
-    let source_required = matches!(
-        observation.posture,
-        ContinuationCollectionResultPosture::Observed | ContinuationCollectionResultPosture::Stale
-    );
+    let source_required = !accepted_intent_observation
+        && matches!(
+            observation.posture,
+            ContinuationCollectionResultPosture::Observed
+                | ContinuationCollectionResultPosture::Stale
+        );
     if source_required != observation.source.is_some() {
         return Err(collection_error(
             "observation.source_shape",
@@ -713,7 +732,9 @@ mod tests {
 
     use super::*;
     use crate::continuation_context::{
-        derive_continuation_context, ContinuationContextDecisionPosture, ContinuationContextText,
+        derive_continuation_context, AcceptedIntentKind, AcceptedIntentRecord,
+        AcceptedIntentRecordId, AcceptedIntentSupersession, ContinuationContextDecisionPosture,
+        ContinuationContextText,
     };
     use crate::{ProjectId, WorkflowId, WorkflowRunId};
 
@@ -722,6 +743,7 @@ mod tests {
         kind: ContinuationCollectorKind,
         posture: ContinuationCollectionResultPosture,
         source: Option<ContinuationCollectedSource>,
+        accepted_intents: Vec<AcceptedIntentRecord>,
         accounting: Vec<ContinuationCollectedAccounting>,
         returned_kind: Option<ContinuationCollectorKind>,
         request_commitment: Option<SpecContentHash>,
@@ -752,6 +774,7 @@ mod tests {
                 }),
                 posture: self.posture,
                 source: self.source.clone(),
+                accepted_intents: self.accepted_intents.clone(),
                 accounting: self.accounting.clone(),
             })
         }
@@ -822,11 +845,50 @@ mod tests {
             kind,
             posture,
             source: None,
+            accepted_intents: Vec::new(),
             accounting: Vec::new(),
             returned_kind: None,
             request_commitment: None,
             revision: None,
         }
+    }
+
+    #[test]
+    fn accepted_intent_records_survive_collection_without_generic_source_substitution() {
+        let request = request(false);
+        let mut collectors = ALL_COLLECTOR_KINDS
+            .iter()
+            .map(|kind| default_collector(*kind, &request))
+            .collect::<Vec<_>>();
+        let target = collectors
+            .iter_mut()
+            .find(|collector| collector.kind == ContinuationCollectorKind::AcceptedIntent)
+            .expect("accepted-intent collector");
+        target.posture = ContinuationCollectionResultPosture::Observed;
+        target.accepted_intents = vec![AcceptedIntentRecord {
+            record_id: AcceptedIntentRecordId::new("intent/objective").expect("intent"),
+            actor: ActorId::new("user/maintainer").expect("actor"),
+            directive_commitment: hash("directive"),
+            scope: request.scope.clone(),
+            kind: AcceptedIntentKind::Objective,
+            meaning: ContinuationContextText::new("implement the bounded phase").expect("meaning"),
+            supersedes: Vec::new(),
+            supersession: AcceptedIntentSupersession::Current,
+        }];
+        let registry = InMemoryContinuationCollectorRegistry::new(
+            collectors
+                .into_iter()
+                .map(|collector| Box::new(collector) as Box<dyn ContinuationContextCollector>)
+                .collect(),
+        )
+        .expect("registry");
+
+        let input = registry
+            .collect(request.clone(), &request.anchor)
+            .expect("input");
+        assert_eq!(input.accepted_intents.len(), 1);
+        assert_eq!(input.sources, []);
+        assert_eq!(input.accepted_intents[0].actor.as_str(), "user/maintainer");
     }
 
     fn registry_with_order(
@@ -1152,6 +1214,7 @@ mod tests {
                     value: ContinuationContextText::new(secret).expect("text"),
                 }],
             }),
+            accepted_intents: Vec::new(),
             accounting: Vec::new(),
         };
 
@@ -1161,7 +1224,7 @@ mod tests {
     }
 
     #[test]
-    fn accepted_intent_cannot_be_observed_before_capture_boundary() {
+    fn accepted_intent_observation_rejects_generic_source_payload() {
         let request = request(false);
         let kind = ContinuationCollectorKind::AcceptedIntent;
         let source = ContinuationCollectedSource {
@@ -1179,6 +1242,7 @@ mod tests {
             revision: request.anchor.revision_for(kind).expect("revision").clone(),
             posture: ContinuationCollectionResultPosture::Observed,
             source: Some(source),
+            accepted_intents: Vec::new(),
             accounting: Vec::new(),
         };
         let error = validate_result_shape(
@@ -1187,10 +1251,10 @@ mod tests {
             request.purpose,
             false,
         )
-        .expect_err("accepted intent must remain unsupported");
+        .expect_err("accepted intent must not use a generic source payload");
         assert_eq!(
             error.code(),
-            "continuation_collection.observation.accepted_intent_unavailable"
+            "continuation_collection.observation.accepted_intent_shape"
         );
         observation.posture = ContinuationCollectionResultPosture::Unsupported;
         observation.source = None;
@@ -1213,6 +1277,7 @@ mod tests {
             revision: request.anchor.revision_for(kind).expect("revision").clone(),
             posture: ContinuationCollectionResultPosture::Failed,
             source: None,
+            accepted_intents: Vec::new(),
             accounting: vec![ContinuationCollectedAccounting {
                 claim_kind: ContinuationUnderstandingClaimKind::Decision,
             }],
@@ -1274,6 +1339,7 @@ mod tests {
             revision: request.anchor.revision_for(kind).expect("revision").clone(),
             posture: ContinuationCollectionResultPosture::Empty,
             source: None,
+            accepted_intents: Vec::new(),
             accounting: Vec::new(),
         };
 

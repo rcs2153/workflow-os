@@ -591,10 +591,12 @@ pub struct ContinuationContextScope {
 #[serde(deny_unknown_fields)]
 pub struct AcceptedIntentRecord {
     pub record_id: AcceptedIntentRecordId,
+    pub actor: ActorId,
     pub directive_commitment: SpecContentHash,
     pub scope: ContinuationContextScope,
     pub kind: AcceptedIntentKind,
     pub meaning: ContinuationContextText,
+    pub supersedes: Vec<AcceptedIntentRecordId>,
     pub supersession: AcceptedIntentSupersession,
 }
 
@@ -603,10 +605,12 @@ impl fmt::Debug for AcceptedIntentRecord {
         formatter
             .debug_struct("AcceptedIntentRecord")
             .field("record_id", &"[REDACTED]")
+            .field("actor", &"[REDACTED]")
             .field("directive_commitment", &"[REDACTED]")
             .field("scope", &"[REDACTED]")
             .field("kind", &self.kind)
             .field("meaning", &"[REDACTED]")
+            .field("supersedes", &self.supersedes.len())
             .field("supersession", &self.supersession)
             .finish()
     }
@@ -2007,7 +2011,7 @@ fn intent_sources(
                 ))?,
                 source_class: ContinuationContextSourceClass::AcceptedIntent,
                 authority_domain: ContinuationContextAuthorityDomain::AcceptedIntent,
-                revision: intent.directive_commitment.clone(),
+                revision: canonical_commitment("accepted-intent-record", intent)?,
                 freshness: ContinuationContextFreshness::Current,
                 integrity: ContinuationContextIntegrity::Verified,
                 access: ContinuationContextAccess::Permitted,
@@ -3629,10 +3633,12 @@ mod tests {
     fn accepted_intent_is_bounded_non_authorizing_input() {
         let intent = AcceptedIntentRecord {
             record_id: AcceptedIntentRecordId::new("intent/objective").expect("intent id"),
+            actor: ActorId::new("user/maintainer").expect("actor"),
             directive_commitment: SpecContentHash::from_text("directive"),
             scope: scope(),
             kind: AcceptedIntentKind::Objective,
             meaning: text("implement the pure model slice"),
+            supersedes: Vec::new(),
             supersession: AcceptedIntentSupersession::Current,
         };
         let mut input = input(Vec::new());
@@ -3788,10 +3794,12 @@ mod tests {
     fn superseded_intent_cannot_restore_old_objective() {
         let intent = AcceptedIntentRecord {
             record_id: AcceptedIntentRecordId::new("intent/old-objective").expect("intent id"),
+            actor: ActorId::new("user/maintainer").expect("actor"),
             directive_commitment: SpecContentHash::from_text("old-directive"),
             scope: scope(),
             kind: AcceptedIntentKind::Objective,
             meaning: text("superseded objective"),
+            supersedes: Vec::new(),
             supersession: AcceptedIntentSupersession::Superseded,
         };
         let mut input = input(Vec::new());
