@@ -216,10 +216,25 @@ report](docs/concepts/CONTINUATION_CONTEXT_INTEGRATED_CONFORMANCE_REPORT.md) and
 The focused review is an owner-conducted repository review, not independent
 external security assurance.
 
-The remaining authorized sequence is:
+Exact private projection delivery and recipient acknowledgment are now
+implemented and accepted after focused maintainer/security review. The private delivery
+derives purpose, scope, source actor, collection-request commitment, aggregate
+proof commitment, decision commitment and posture, and the redacted
+understanding projection from the accepted aggregate; callers cannot resupply
+those bindings at delivery time. One exact recipient returns a commitment-bound
+receipt that proves only receipt of the exact projection. It explicitly does
+not claim comprehension or execution authority. Recipient, delivery,
+projection, and receipt-commitment substitution fail closed. The slice adds no
+persistence, host integration, compaction signal, runtime consumer, next-action
+admission, authority consumption, provider operation, public contract, or
+Salsa. See the [implementation
+report](docs/concepts/CONTINUATION_CONTEXT_PROJECTION_DELIVERY_REPORT.md) and
+[focused review](docs/concepts/CONTINUATION_CONTEXT_PROJECTION_DELIVERY_REVIEW.md).
+The focused review is an owner-conducted repository review, not independent
+external security assurance.
 
-1. exact post-compaction projection delivery and acknowledgment; and
-2. one local end-to-end replacement-executor proof showing that completed work
+The remaining authorized phase is one local end-to-end replacement-executor
+proof showing that completed work
    is not repeated, superseded direction is not revived, missing or conflicting
    understanding is disclosed, and fresh authority is resolved separately at
    the next material boundary.

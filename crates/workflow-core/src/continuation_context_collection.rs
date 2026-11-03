@@ -27,6 +27,7 @@ use crate::continuation_context::{
 use crate::{ActorId, SpecContentHash, WorkflowOsError};
 
 mod accepted_intent;
+mod delivery;
 mod local_observers;
 mod store_backed;
 
@@ -462,6 +463,9 @@ impl fmt::Debug for ContinuationAggregateCompositionProof {
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ContinuationAggregateComposition {
+    purpose: ContinuationContextPurpose,
+    scope: ContinuationContextScope,
+    source_actor: ActorId,
     decision: ContinuationContextDecision,
     proof: ContinuationAggregateCompositionProof,
 }
@@ -470,6 +474,9 @@ impl fmt::Debug for ContinuationAggregateComposition {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ContinuationAggregateComposition")
+            .field("purpose", &self.purpose)
+            .field("scope", &"[REDACTED]")
+            .field("source_actor", &"[REDACTED]")
             .field("decision_posture", &self.decision.posture())
             .field("claim_count", &self.decision.understanding().claims().len())
             .field("gap_count", &self.decision.gaps().len())
@@ -686,6 +693,9 @@ fn compose_aggregate(
     observations.sort_by_key(|item| item.kind);
     validate_complete_kinds(observations.iter().map(|item| item.kind), "observation")?;
     let observation_set_commitment = collection_commitment("observation-set", &observations)?;
+    let purpose = request.purpose;
+    let scope = request.scope.clone();
+    let source_actor = request.actor.clone();
     let request_commitment = request.commitment.clone();
     let collector_contract_commitment = closed_collector_contract_commitment()?;
     let pre_collection_anchor_commitment = request.anchor.commitment.clone();
@@ -756,7 +766,13 @@ fn compose_aggregate(
         authority_posture,
         commitment,
     };
-    Ok(ContinuationAggregateComposition { decision, proof })
+    Ok(ContinuationAggregateComposition {
+        purpose,
+        scope,
+        source_actor,
+        decision,
+        proof,
+    })
 }
 
 fn closed_collector_contract_commitment() -> Result<SpecContentHash, WorkflowOsError> {
@@ -1233,6 +1249,51 @@ mod tests {
             }
             *snapshot = replacement.clone();
             Ok(true)
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum IntegratedReceiptPosture {
+        Exact,
+        WrongDelivery,
+        WrongProjection,
+        WrongRecipient,
+        WrongReceiptCommitment,
+    }
+
+    struct IntegratedRecipient {
+        actor: ActorId,
+        posture: IntegratedReceiptPosture,
+    }
+
+    impl delivery::ContinuationProjectionRecipient for IntegratedRecipient {
+        fn recipient(&self) -> &ActorId {
+            &self.actor
+        }
+
+        fn acknowledge(
+            &self,
+            projection: &delivery::ContinuationProjectionDelivery,
+        ) -> Result<delivery::ContinuationProjectionDeliveryReceipt, WorkflowOsError> {
+            let mut receipt = delivery::ContinuationProjectionDeliveryReceipt::acknowledge_exact(
+                projection,
+                self.actor.clone(),
+            )?;
+            match self.posture {
+                IntegratedReceiptPosture::Exact => {}
+                IntegratedReceiptPosture::WrongDelivery => receipt
+                    .substitute_delivery_commitment_for_test(hash("wrong-delivery-commitment")),
+                IntegratedReceiptPosture::WrongProjection => receipt
+                    .substitute_projection_commitment_for_test(hash("wrong-projection-commitment")),
+                IntegratedReceiptPosture::WrongRecipient => receipt.substitute_recipient_for_test(
+                    ActorId::new("agent/replacement-substitute").expect("substitute actor"),
+                ),
+                IntegratedReceiptPosture::WrongReceiptCommitment => {
+                    receipt
+                        .substitute_receipt_commitment_for_test(hash("wrong-receipt-commitment"));
+                }
+            }
+            Ok(receipt)
         }
     }
 
@@ -1762,6 +1823,143 @@ mod tests {
 
         assert_eq!(error.code(), "continuation_collection.anchor.drifted");
         assert_eq!(observer.git_reads.get(), 3);
+    }
+
+    #[test]
+    fn integrated_projection_delivery_returns_exact_non_authorizing_acknowledgment() {
+        let root = IntegratedTestRoot::new();
+        let state = LocalStateBackend::new(root.path().join("state")).expect("state");
+        let bundles = LocalImmutableRunBundleStore::new(root.path().join("bundles"));
+        let observer = IntegratedObserver {
+            contract: hash("integrated-observer-contract"),
+            git_reads: Cell::new(0),
+            drift_after_collection: false,
+        };
+        let scope = integrated_scope();
+        let intents = IntegratedIntentStore::new(scope.clone());
+        let sources = IntegratedContinuationSourceSet::new(&state, &bundles, &observer, &intents);
+        let purpose = ContinuationContextPurpose::MaterialContinuation;
+        let source_actor = ActorId::new("user/delegated-maintainer").expect("source actor");
+        let aggregate = sources
+            .compose(
+                purpose,
+                scope.clone(),
+                source_actor.clone(),
+                ContinuationContextSensitivity::Restricted,
+                32_768,
+            )
+            .expect("integrated composition");
+        let recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/replacement-executor").expect("recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+
+        let (delivery, receipt) =
+            delivery::deliver_exact_projection(&aggregate, &recipient).expect("exact delivery");
+
+        assert_eq!(delivery.recipient(), &recipient.actor);
+        assert_eq!(
+            delivery.understanding().commitment(),
+            aggregate.decision.understanding().commitment()
+        );
+        assert!(delivery.is_non_authorizing());
+        assert!(receipt.is_non_authorizing());
+        assert_ne!(receipt.commitment(), delivery.commitment());
+        assert!(!ContinuationContextDecision::authorizes_execution());
+        let debug = format!("{delivery:?} {receipt:?}");
+        assert!(!debug.contains("continue the governed roadmap phase"));
+        assert!(!debug.contains(delivery.commitment().as_str()));
+        assert!(!debug.contains(receipt.commitment().as_str()));
+    }
+
+    #[test]
+    fn integrated_projection_delivery_rejects_substituted_acknowledgment_bindings() {
+        for posture in [
+            IntegratedReceiptPosture::WrongDelivery,
+            IntegratedReceiptPosture::WrongProjection,
+            IntegratedReceiptPosture::WrongRecipient,
+            IntegratedReceiptPosture::WrongReceiptCommitment,
+        ] {
+            let root = IntegratedTestRoot::new();
+            let state = LocalStateBackend::new(root.path().join("state")).expect("state");
+            let bundles = LocalImmutableRunBundleStore::new(root.path().join("bundles"));
+            let observer = IntegratedObserver {
+                contract: hash("integrated-observer-contract"),
+                git_reads: Cell::new(0),
+                drift_after_collection: false,
+            };
+            let scope = integrated_scope();
+            let intents = IntegratedIntentStore::new(scope.clone());
+            let sources =
+                IntegratedContinuationSourceSet::new(&state, &bundles, &observer, &intents);
+            let purpose = ContinuationContextPurpose::MaterialContinuation;
+            let source_actor = ActorId::new("user/delegated-maintainer").expect("source actor");
+            let aggregate = sources
+                .compose(
+                    purpose,
+                    scope.clone(),
+                    source_actor.clone(),
+                    ContinuationContextSensitivity::Restricted,
+                    32_768,
+                )
+                .expect("integrated composition");
+            let recipient = IntegratedRecipient {
+                actor: ActorId::new("agent/replacement-executor").expect("recipient"),
+                posture,
+            };
+
+            let error = delivery::deliver_exact_projection(&aggregate, &recipient)
+                .expect_err("substituted receipt must fail closed");
+
+            assert!(matches!(
+                error.code(),
+                "continuation_collection.delivery.receipt.binding_mismatch"
+                    | "continuation_collection.delivery.receipt.commitment_mismatch"
+            ));
+        }
+    }
+
+    #[test]
+    fn exact_acknowledgment_constructor_rejects_another_recipient() {
+        let root = IntegratedTestRoot::new();
+        let state = LocalStateBackend::new(root.path().join("state")).expect("state");
+        let bundles = LocalImmutableRunBundleStore::new(root.path().join("bundles"));
+        let observer = IntegratedObserver {
+            contract: hash("integrated-observer-contract"),
+            git_reads: Cell::new(0),
+            drift_after_collection: false,
+        };
+        let scope = integrated_scope();
+        let intents = IntegratedIntentStore::new(scope.clone());
+        let sources = IntegratedContinuationSourceSet::new(&state, &bundles, &observer, &intents);
+        let purpose = ContinuationContextPurpose::MaterialContinuation;
+        let source_actor = ActorId::new("user/delegated-maintainer").expect("source actor");
+        let aggregate = sources
+            .compose(
+                purpose,
+                scope.clone(),
+                source_actor.clone(),
+                ContinuationContextSensitivity::Restricted,
+                32_768,
+            )
+            .expect("integrated composition");
+        let recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/replacement-executor").expect("recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let delivery = delivery::ContinuationProjectionDelivery::new(&aggregate, recipient.actor)
+            .expect("delivery");
+
+        let error = delivery::ContinuationProjectionDeliveryReceipt::acknowledge_exact(
+            &delivery,
+            ActorId::new("agent/other-executor").expect("other recipient"),
+        )
+        .expect_err("recipient substitution must fail");
+
+        assert_eq!(
+            error.code(),
+            "continuation_collection.delivery.receipt.recipient_mismatch"
+        );
     }
 
     #[test]
