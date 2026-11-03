@@ -28,6 +28,7 @@ mod error;
 mod evidence;
 mod executor;
 mod external_action_authorization;
+mod external_action_transition_lifecycle;
 mod github;
 mod governance_decision_authority_receipt;
 mod governance_decision_authority_receipt_store;
@@ -409,6 +410,16 @@ pub use external_action_authorization::{
     ExternalActionPayloadClass, ExternalActionSuccessorBinding, ExternalActionSuccessorBindingId,
     ExternalActionTransition, ExternalActionTransitionKind, ExternalConnectorKind,
     GitHubExternalActionResourceBinding,
+};
+pub use external_action_transition_lifecycle::{
+    ExternalActionTransitionLifecycleAppendOutcome, ExternalActionTransitionLifecycleCommand,
+    ExternalActionTransitionLifecycleCursor, ExternalActionTransitionLifecycleEvent,
+    ExternalActionTransitionLifecycleEventKind,
+    ExternalActionTransitionLifecycleInitializationOutcome,
+    ExternalActionTransitionLifecycleOutcome, ExternalActionTransitionLifecycleRefusalKind,
+    ExternalActionTransitionLifecycleSnapshot, ExternalActionTransitionLifecycleStatus,
+    ExternalActionTransitionOperation, ExternalActionTransitionOperationId,
+    LocalExternalActionTransitionLifecycleStore,
 };
 pub use governance_decision_authority_receipt::{
     GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptClaimVerificationPosture,

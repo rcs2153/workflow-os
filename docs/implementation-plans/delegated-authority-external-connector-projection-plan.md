@@ -13,7 +13,20 @@ non-persistent, and no-write. See the [model
 report](../concepts/EXTERNAL_ACTION_AUTHORIZATION_PROJECTION_MODEL_REPORT.md)
 and [focused
 review](../concepts/EXTERNAL_ACTION_AUTHORIZATION_PROJECTION_MODEL_REVIEW.md).
-Durable transition lifecycle model and local state composition is next.
+Delivery phase 3, durable transition lifecycle model and local state
+composition, is implemented. The local append-only store composes immutable
+projected operations with reservation, admission, attempt, provider-outcome,
+ambiguity reconciliation, wait, denial, consumption, revocation, exact replay,
+and stale-cursor behavior. It remains payload-free, non-authorizing, local,
+and no-write. See the [lifecycle
+report](../concepts/EXTERNAL_ACTION_TRANSITION_LIFECYCLE_REPORT.md).
+Focused maintainer/security review accepted the slice after binding wait
+resolution to the exact condition, clearing waits at terminal closure,
+hardening interrupted temporary-file handling, validating operation
+deserialization, and proving one-winner reservation contention. See the
+[focused review](../concepts/EXTERNAL_ACTION_TRANSITION_LIFECYCLE_REVIEW.md).
+Core-private same-call current-authority verification with an injected fixture
+connector is next.
 
 This plan preempts broader provider mutation families, nested harness work, and
 claims of continuous delegated-maintainer autonomy. It extends existing scoped
