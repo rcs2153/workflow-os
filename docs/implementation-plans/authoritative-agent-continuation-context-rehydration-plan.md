@@ -20,8 +20,15 @@ store-backed collectors, bounded local observers, accepted-intent capture,
 aggregate proof, integrated private conformance composition, and exact private
 projection delivery and recipient acknowledgment are implemented and
 focused-review accepted.
-The local end-to-end replacement-executor proof remains unimplemented. A live
-post-compaction failure showed that an agent can receive or reconstruct stale
+The local end-to-end replacement-executor conformance proof is implemented,
+hardened, and accepted after focused maintainer/security re-review. Typed
+pause/stop disposition, exact fresh-authority request binding, and stable
+completed-work identity carried only by exact Core-selected authoritative
+private sources are accepted inside the private conformance boundary. It
+remains private, in-process, and
+non-authorizing; it does not prove host compaction, model comprehension,
+process replacement, runtime admission, or automatic WorkReport production. A
+live post-compaction failure showed that an agent can receive or reconstruct stale
 conversation context and answer it as current. The required correction is
 broader than conversation replay detection. Workflow OS must reconstruct the
 maximum relevant, authorized, provenance-preserving local context available,
@@ -863,6 +870,21 @@ reviewed increments:
 19. Complete adversarial review before claiming compaction-safe delegated
     continuation, cross-agent continuation, or context-independent autonomous
     maintenance.
+
+Implementation status for step 16: the private local conformance path composes
+the exact aggregate independently for an original and context-free replacement
+recipient, requires identical aggregate and understanding commitments, delivers
+and acknowledges each exact projection, exposes bounded typed gaps, rejects a
+next action equal to a completed obligation, excludes superseded accepted
+intent, and calls an injected fresh-authority resolver only after exact
+equivalence. A blocked, paused, or stopped posture never calls the resolver.
+The focused-review blockers and hardening re-review findings are corrected
+through typed control disposition, source-carried and selection-gated stable
+work identity, and an exact payload-free authority request constructed after
+proof validation. Existing production-shaped collectors do not fabricate
+stable work identities. Focused re-review accepts the private proof. This is a
+deterministic Core conformance proof, not an operational host or model-
+replacement claim.
 
 ## 16. Test Plan
 

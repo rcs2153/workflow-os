@@ -233,11 +233,34 @@ report](docs/concepts/CONTINUATION_CONTEXT_PROJECTION_DELIVERY_REPORT.md) and
 The focused review is an owner-conducted repository review, not independent
 external security assurance.
 
-The remaining authorized phase is one local end-to-end replacement-executor
-proof showing that completed work
-   is not repeated, superseded direction is not revived, missing or conflicting
-   understanding is disclosed, and fresh authority is resolved separately at
-   the next material boundary.
+The local end-to-end replacement-executor conformance proof is implemented,
+hardened, and accepted after focused maintainer/security re-review.
+Two independently composed
+orientations from one exact authoritative aggregate deliver the same canonical
+understanding to distinct context-free recipients. The private proof preserves
+current accepted intent while excluding superseded intent, rejects one exact-
+value lawful-next replay fixture, carries bounded decision gaps to the
+recipient, withholds fresh authority resolution while blocked, and invokes a
+separate fresh-authority boundary only after exact aggregate and semantic
+equivalence. It remains an in-process local conformance proof rather than
+evidence of host compaction, model comprehension, process replacement, runtime
+admission, or automatic WorkReport production. See the [implementation
+report](docs/concepts/CONTINUATION_CONTEXT_REPLACEMENT_EXECUTOR_PROOF_REPORT.md)
+and [focused review](docs/concepts/CONTINUATION_CONTEXT_REPLACEMENT_EXECUTOR_PROOF_REVIEW.md).
+
+The three initial review blockers and two hardening re-review findings are
+corrected in the private conformance boundary.
+Typed pause/stop/resume disposition now survives composition and delivery,
+stable work identities carried by exact Core-selected authoritative private
+sources replace text equality, and a payload-free fresh-
+authority request binds the exact scope, aggregate, decision, recipient, and
+operation after proof validation. Existing collectors do not fabricate these
+identities. Focused re-review accepts this boundary with no remaining blocker.
+No public API, runtime consumer, persistence, provider, schema, hosted, nested-
+harness, agent-memory, or Salsa work is authorized. See the [hardening
+report](docs/concepts/CONTINUATION_CONTEXT_REPLACEMENT_EXECUTOR_PROOF_HARDENING_REPORT.md)
+and [hardening focused
+review](docs/concepts/CONTINUATION_CONTEXT_REPLACEMENT_EXECUTOR_PROOF_HARDENING_REVIEW.md).
 
 No phase may claim compaction-safe continuation, consume approval or capability
 authority during reconstruction, or expose a runtime consumer before the
@@ -245,7 +268,7 @@ preceding phase and focused security review are accepted. The P0 queue-integrity
 repair is recorded in [Roadmap Active Queue Authority P0
 Report](docs/concepts/ROADMAP_ACTIVE_QUEUE_AUTHORITY_P0_REPORT.md).
 
-The two fresh-rerun P1 defects are queued behind this P0: generated downstream
+The two fresh-rerun P1 defects are now the next authoritative queue: generated downstream
 agent instructions must not reference a source-checkout-only guide, and public
 GitHub fixture runs must route `next-action` through the same provider-aware
 state path as `status` and `inspect`. They are bounded acceptance fixes, not

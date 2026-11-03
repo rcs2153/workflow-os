@@ -652,6 +652,7 @@ impl StoreBackedRead {
                 sensitivity,
                 materialized_bytes,
                 claims: self.claims,
+                work_identities: Vec::new(),
             }),
             (None, None) => None,
             _ => {
