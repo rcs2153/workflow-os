@@ -5,12 +5,20 @@ use crate::current_authority_source::{
     RegisteredCurrentAuthorityUsePosture, RegisteredExactGrantVerificationInput,
     RegisteredInMemoryCurrentAuthoritySource,
 };
+use crate::external_action_fixture_lifecycle::{
+    ExternalActionFixtureProviderApplyPosture, ExternalActionFixtureProviderApplyResult,
+    ExternalActionFixtureProviderOperation, ExternalActionFixtureProviderSource,
+    ExternalActionFixtureSourceAnchor, ExternalActionFixtureSourceClass,
+    ExternalActionFixtureSourceCoverage, ExternalActionFixtureSourceDisposition,
+    ExternalActionFixtureSourceRecord, ExternalActionSuccessorBindingStore,
+    ExternalActionSuccessorBindingWritePosture,
+};
 use crate::{
-    ApprovalDecision, ApprovalDecisionKind, ApprovalDecisionProofEnforcementMode,
-    ApprovalDecisionProofValidationPolicy, ApprovalPresentationRecord,
-    AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId, CapabilityReference,
-    CapabilityResourceKind, EventId, ExternalActionAuthorizationProjection,
-    ExternalActionEvidencePredicate, ExternalActionTransitionKind,
+    derive_external_action_successor_binding, ApprovalDecision, ApprovalDecisionKind,
+    ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofValidationPolicy,
+    ApprovalPresentationRecord, AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId,
+    CapabilityReference, CapabilityResourceKind, EventId, ExternalActionAuthorizationProjection,
+    ExternalActionEvidencePredicate, ExternalActionSuccessorBinding, ExternalActionTransitionKind,
     ExternalActionTransitionLifecycleCommand, ExternalActionTransitionLifecycleOutcome,
     ExternalActionTransitionLifecycleStatus, ExternalActionTransitionOperation,
     LocalExternalActionTransitionLifecycleStore, RedactionMetadata, RequiredContextContractBinding,
@@ -19,6 +27,7 @@ use crate::{
 
 const EXTERNAL_ACTION_CAPABILITY: &str = "github.pull_request.lifecycle";
 
+#[derive(Clone, Copy)]
 pub(crate) struct ExternalActionConnectorFixtureFacts<'a> {
     pub(crate) approval_presentation: &'a ApprovalPresentationRecord,
     pub(crate) approval_decision: &'a ApprovalDecision,
@@ -30,6 +39,87 @@ pub(crate) struct ExternalActionConnectorFixtureFacts<'a> {
     pub(crate) revoked: bool,
     pub(crate) current_resource: &'a crate::GitHubExternalActionResourceBinding,
     pub(crate) evidence: &'a [ExternalActionEvidencePredicate],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub(crate) enum ExternalActionFixtureExecutionWindowPosture {
+    Open,
+    Closed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub(crate) enum ExternalActionFixtureRevocationPosture {
+    Current,
+    Revoked,
+}
+
+#[derive(Clone)]
+pub(crate) struct ExternalActionFixtureDraftSourceDefinition {
+    pub(crate) approval_presentation: ApprovalPresentationRecord,
+    pub(crate) approval_decision: ApprovalDecision,
+    pub(crate) policy_decision_event_id: EventId,
+    pub(crate) governance_assessment_commitment: SpecContentHash,
+    pub(crate) execution_window_id: AuthorizedExecutionWindowId,
+    pub(crate) execution_window_posture: ExternalActionFixtureExecutionWindowPosture,
+    pub(crate) revocation_source_commitment: SpecContentHash,
+    pub(crate) revocation_posture: ExternalActionFixtureRevocationPosture,
+    pub(crate) current_resource: crate::GitHubExternalActionResourceBinding,
+    pub(crate) evidence: Vec<ExternalActionEvidencePredicate>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ExternalActionFixtureDraftSourceObservation {
+    definition: ExternalActionFixtureDraftSourceDefinition,
+}
+
+impl std::fmt::Debug for ExternalActionFixtureDraftSourceObservation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ExternalActionFixtureDraftSourceObservation")
+            .field("source_coverage", &"[REDACTED]")
+            .field(
+                "execution_window_posture",
+                &self.definition.execution_window_posture,
+            )
+            .field("revocation_posture", &self.definition.revocation_posture)
+            .field("evidence_count", &self.definition.evidence.len())
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) trait ExternalActionFixtureDraftSource {
+    fn observe(&self) -> Result<ExternalActionFixtureDraftSourceObservation, WorkflowOsError>;
+}
+
+pub(crate) struct InMemoryExternalActionFixtureDraftSource {
+    observation: ExternalActionFixtureDraftSourceObservation,
+}
+
+impl InMemoryExternalActionFixtureDraftSource {
+    pub(crate) fn new(definition: ExternalActionFixtureDraftSourceDefinition) -> Self {
+        Self {
+            observation: ExternalActionFixtureDraftSourceObservation { definition },
+        }
+    }
+}
+
+impl ExternalActionFixtureDraftSource for InMemoryExternalActionFixtureDraftSource {
+    fn observe(&self) -> Result<ExternalActionFixtureDraftSourceObservation, WorkflowOsError> {
+        Ok(self.observation.clone())
+    }
+}
+
+pub(crate) struct ExternalActionFixtureDraftCreationInput<'a, F, P, S> {
+    pub(crate) projection: &'a ExternalActionAuthorizationProjection,
+    pub(crate) authority_source: &'a RegisteredInMemoryCurrentAuthoritySource,
+    pub(crate) execution_binding: &'a RequiredContextExecutionBinding,
+    pub(crate) required_context_contract: &'a RequiredContextContractBinding,
+    pub(crate) lifecycle_store: &'a LocalExternalActionTransitionLifecycleStore,
+    pub(crate) evaluated_at: Timestamp,
+    pub(crate) redaction: &'a RedactionMetadata,
+    pub(crate) fact_source: &'a F,
+    pub(crate) provider: &'a P,
+    pub(crate) successor_store: &'a S,
 }
 
 pub(crate) struct ExternalActionConnectorAdmissionInput<'a, C> {
@@ -112,6 +202,353 @@ impl ExternalActionConnectorAdmissionOutcome {
 
     pub(crate) const fn status(&self) -> ExternalActionTransitionLifecycleStatus {
         self.status
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ExternalActionFixtureDraftCreationPosture {
+    Created,
+    ExactReplay,
+    ReconciledSuccessor,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) struct ExternalActionFixtureDraftCreationOutcome {
+    posture: ExternalActionFixtureDraftCreationPosture,
+    successor_binding: ExternalActionSuccessorBinding,
+    provider_receipt_commitment: SpecContentHash,
+}
+
+impl ExternalActionFixtureDraftCreationOutcome {
+    pub(crate) const fn posture(&self) -> ExternalActionFixtureDraftCreationPosture {
+        self.posture
+    }
+
+    pub(crate) const fn successor_binding(&self) -> &ExternalActionSuccessorBinding {
+        &self.successor_binding
+    }
+}
+
+impl std::fmt::Debug for ExternalActionFixtureDraftCreationOutcome {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ExternalActionFixtureDraftCreationOutcome")
+            .field("posture", &self.posture)
+            .field("successor_binding", &self.successor_binding)
+            .field("provider_receipt_commitment", &"[REDACTED]")
+            .finish()
+    }
+}
+
+struct FixtureDraftProviderConnector<'a, P> {
+    provider: &'a P,
+    expected_provider_revision: SpecContentHash,
+    capture: Option<Result<ExternalActionFixtureProviderApplyResult, WorkflowOsError>>,
+}
+
+impl<P: ExternalActionFixtureProviderSource> ExternalActionFixtureConnector
+    for FixtureDraftProviderConnector<'_, P>
+{
+    fn execute(
+        &mut self,
+        capability: ExternalActionConnectorUseCapability<'_>,
+    ) -> ExternalActionFixtureConnectorResult {
+        let operation = ExternalActionFixtureProviderOperation::new(
+            capability.operation().operation_id().clone(),
+            capability.operation().transition_kind(),
+            self.expected_provider_revision.clone(),
+        );
+        let result = self.provider.compare_and_apply(&operation);
+        let posture = if result.is_ok() {
+            ExternalActionFixtureConnectorResult::Succeeded
+        } else {
+            ExternalActionFixtureConnectorResult::Failed
+        };
+        self.capture = Some(result);
+        posture
+    }
+}
+
+pub(crate) fn execute_fixture_draft_creation<
+    F: ExternalActionFixtureDraftSource,
+    P: ExternalActionFixtureProviderSource,
+    S: ExternalActionSuccessorBindingStore,
+>(
+    input: &ExternalActionFixtureDraftCreationInput<'_, F, P, S>,
+) -> Result<ExternalActionFixtureDraftCreationOutcome, WorkflowOsError> {
+    let fact_observation = input.fact_source.observe()?;
+    let before = input.provider.observe()?;
+    let operation = ExternalActionTransitionOperation::from_projection(
+        input.projection,
+        ExternalActionTransitionKind::GitHubPullRequestCreateDraft,
+    )?;
+    let source_coverage =
+        compose_draft_source_coverage(input, &fact_observation, &before, &operation)?;
+    let before_anchor = ExternalActionFixtureSourceAnchor::new(
+        &source_coverage,
+        before.provider_revision().clone(),
+    )?;
+    let current = input.provider.observe()?;
+    let current_anchor = ExternalActionFixtureSourceAnchor::new(
+        &source_coverage,
+        current.provider_revision().clone(),
+    )?;
+    before_anchor.verify_unchanged(&current_anchor)?;
+
+    let mut connector = FixtureDraftProviderConnector {
+        provider: input.provider,
+        expected_provider_revision: current.provider_revision().clone(),
+        capture: None,
+    };
+    let admission = execute_fixture_external_action(&mut ExternalActionConnectorAdmissionInput {
+        projection: input.projection,
+        transition_kind: ExternalActionTransitionKind::GitHubPullRequestCreateDraft,
+        authority_source: input.authority_source,
+        execution_binding: input.execution_binding,
+        required_context_contract: input.required_context_contract,
+        lifecycle_store: input.lifecycle_store,
+        fixture_facts: ExternalActionConnectorFixtureFacts {
+            approval_presentation: &fact_observation.definition.approval_presentation,
+            approval_decision: &fact_observation.definition.approval_decision,
+            policy_decision_event_id: &fact_observation.definition.policy_decision_event_id,
+            governance_assessment_commitment: &fact_observation
+                .definition
+                .governance_assessment_commitment,
+            execution_window_id: &fact_observation.definition.execution_window_id,
+            execution_window_open: fact_observation.definition.execution_window_posture
+                == ExternalActionFixtureExecutionWindowPosture::Open,
+            revocation_source_commitment: &fact_observation.definition.revocation_source_commitment,
+            revoked: fact_observation.definition.revocation_posture
+                == ExternalActionFixtureRevocationPosture::Revoked,
+            current_resource: &fact_observation.definition.current_resource,
+            evidence: &fact_observation.definition.evidence,
+        },
+        evaluated_at: input.evaluated_at,
+        redaction: input.redaction,
+        connector: &mut connector,
+    })?;
+
+    let (provider_result, repairing) = resolve_draft_provider_result(
+        input.provider,
+        operation.operation_id(),
+        admission.posture(),
+        connector.capture,
+    )?;
+    persist_draft_successor(input, &provider_result, repairing)
+}
+
+fn compose_draft_source_coverage<F, P, S>(
+    input: &ExternalActionFixtureDraftCreationInput<'_, F, P, S>,
+    facts: &ExternalActionFixtureDraftSourceObservation,
+    provider: &crate::external_action_fixture_lifecycle::ExternalActionFixtureProviderObservation,
+    operation: &ExternalActionTransitionOperation,
+) -> Result<ExternalActionFixtureSourceCoverage, WorkflowOsError> {
+    let definition = &facts.definition;
+    let revisions = [
+        (
+            ExternalActionFixtureSourceClass::ImmutableRun,
+            input.projection.immutable_run_bundle_commitment().clone(),
+        ),
+        (
+            ExternalActionFixtureSourceClass::ApprovalPresentation,
+            SpecContentHash::from_text(definition.approval_presentation.content_hash().as_str()),
+        ),
+        (
+            ExternalActionFixtureSourceClass::ApprovalDecision,
+            commitment(
+                "external-action-draft-source-approval-decision-v1",
+                &definition.approval_decision,
+            )?,
+        ),
+        (
+            ExternalActionFixtureSourceClass::CurrentCapability,
+            commitment(
+                "external-action-draft-source-current-capability-v1",
+                &(
+                    input.projection.capability_grant_id(),
+                    input.execution_binding.binding_hash(),
+                ),
+            )?,
+        ),
+        (
+            ExternalActionFixtureSourceClass::PolicyAndGovernance,
+            commitment(
+                "external-action-draft-source-policy-v1",
+                &(
+                    &definition.policy_decision_event_id,
+                    &definition.governance_assessment_commitment,
+                ),
+            )?,
+        ),
+        (
+            ExternalActionFixtureSourceClass::ExecutionWindow,
+            commitment(
+                "external-action-draft-source-window-v1",
+                &(
+                    &definition.execution_window_id,
+                    definition.execution_window_posture,
+                    input.evaluated_at,
+                ),
+            )?,
+        ),
+        (
+            ExternalActionFixtureSourceClass::Revocation,
+            commitment(
+                "external-action-draft-source-revocation-v1",
+                &(
+                    &definition.revocation_source_commitment,
+                    definition.revocation_posture,
+                ),
+            )?,
+        ),
+        (
+            ExternalActionFixtureSourceClass::ProviderResource,
+            commitment(
+                "external-action-draft-source-provider-resource-v1",
+                provider.observation_commitment(),
+            )?,
+        ),
+        (
+            ExternalActionFixtureSourceClass::ProviderEvidence,
+            commitment(
+                "external-action-draft-source-provider-evidence-v1",
+                &(provider.observation_commitment(), &definition.evidence),
+            )?,
+        ),
+        (
+            ExternalActionFixtureSourceClass::TransitionLifecycle,
+            operation.operation_definition_commitment().clone(),
+        ),
+    ];
+    ExternalActionFixtureSourceCoverage::new(
+        revisions
+            .into_iter()
+            .map(|(class, revision)| {
+                ExternalActionFixtureSourceRecord::new(
+                    class,
+                    revision,
+                    ExternalActionFixtureSourceDisposition::Available,
+                )
+            })
+            .collect(),
+    )
+}
+
+fn resolve_draft_provider_result<P: ExternalActionFixtureProviderSource>(
+    provider: &P,
+    operation_id: &crate::ExternalActionTransitionOperationId,
+    admission_posture: ExternalActionConnectorAdmissionPosture,
+    capture: Option<Result<ExternalActionFixtureProviderApplyResult, WorkflowOsError>>,
+) -> Result<(ExternalActionFixtureProviderApplyResult, bool), WorkflowOsError> {
+    Ok(match capture {
+        Some(Ok(result)) => (result, false),
+        Some(Err(error)) => return Err(error),
+        None if admission_posture == ExternalActionConnectorAdmissionPosture::ExistingTerminal => (
+            provider.lookup_operation(operation_id)?.ok_or_else(|| {
+                admission_error(
+                    "draft.reconciliation_inconclusive",
+                    "fixture draft creation requires provider receipt reconciliation",
+                )
+            })?,
+            true,
+        ),
+        None => {
+            return Err(admission_error(
+                "draft.provider_result_missing",
+                "fixture draft creation provider result is missing",
+            ));
+        }
+    })
+}
+
+fn persist_draft_successor<F, P, S: ExternalActionSuccessorBindingStore>(
+    input: &ExternalActionFixtureDraftCreationInput<'_, F, P, S>,
+    provider_result: &ExternalActionFixtureProviderApplyResult,
+    repairing: bool,
+) -> Result<ExternalActionFixtureDraftCreationOutcome, WorkflowOsError> {
+    let created = provider_result.created_successor().ok_or_else(|| {
+        admission_error(
+            "draft.successor_missing",
+            "fixture draft creation result is missing the successor identity",
+        )
+    })?;
+    let binding = derive_external_action_successor_binding(
+        input.projection,
+        created.pull_request_number(),
+        created.observed_at(),
+    )?;
+    if let Some(existing) = input
+        .successor_store
+        .read_exact(input.projection)
+        .map_err(classify_successor_store_error)?
+    {
+        if existing != binding {
+            return Err(admission_error(
+                "draft.successor_persistence_conflict",
+                "persisted successor binding does not match the provider result",
+            ));
+        }
+        return Ok(ExternalActionFixtureDraftCreationOutcome {
+            posture: ExternalActionFixtureDraftCreationPosture::ExactReplay,
+            successor_binding: existing,
+            provider_receipt_commitment: provider_result.provider_receipt_commitment().clone(),
+        });
+    }
+    let write = input
+        .successor_store
+        .put_exact(input.projection, &binding)
+        .map_err(|error| {
+            if error.code() == "external_action_fixture_lifecycle.successor.conflict" {
+                error
+            } else {
+                admission_error(
+                    "draft.successor_persistence_ambiguous",
+                    "provider creation succeeded but successor persistence is unresolved",
+                )
+            }
+        })?;
+    let persisted = input
+        .successor_store
+        .read_exact(input.projection)
+        .map_err(classify_successor_store_error)?
+        .ok_or_else(|| {
+            admission_error(
+                "draft.successor_persistence_ambiguous",
+                "provider creation succeeded but successor persistence is unresolved",
+            )
+        })?;
+    if persisted != binding {
+        return Err(admission_error(
+            "draft.successor_persistence_conflict",
+            "persisted successor binding does not match the provider result",
+        ));
+    }
+    let posture = if repairing {
+        ExternalActionFixtureDraftCreationPosture::ReconciledSuccessor
+    } else if provider_result.posture() == ExternalActionFixtureProviderApplyPosture::ExactReplay
+        || write == ExternalActionSuccessorBindingWritePosture::ExactReplay
+    {
+        ExternalActionFixtureDraftCreationPosture::ExactReplay
+    } else {
+        ExternalActionFixtureDraftCreationPosture::Created
+    };
+    Ok(ExternalActionFixtureDraftCreationOutcome {
+        posture,
+        successor_binding: persisted,
+        provider_receipt_commitment: provider_result.provider_receipt_commitment().clone(),
+    })
+}
+
+fn classify_successor_store_error(error: WorkflowOsError) -> WorkflowOsError {
+    if error.code() == "external_action_fixture_lifecycle.successor.store_unavailable"
+        || error.code() == "external_action_connector_admission.test.successor_store_unavailable"
+    {
+        admission_error(
+            "draft.successor_persistence_ambiguous",
+            "provider creation succeeded but successor persistence is unresolved",
+        )
+    } else {
+        error
     }
 }
 
@@ -565,7 +1002,7 @@ fn admission_error(code: &'static str, message: &'static str) -> WorkflowOsError
 #[allow(clippy::expect_used, clippy::too_many_lines)]
 mod tests {
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
     use super::*;
     use crate::current_authority_source::{
@@ -573,6 +1010,9 @@ mod tests {
         registered_current_authority_test_grants_with_first_lifecycle,
         registered_current_authority_test_references,
         registered_current_authority_test_source_with_inventory,
+    };
+    use crate::external_action_fixture_lifecycle::{
+        InMemoryExternalActionFixtureProvider, InMemoryExternalActionSuccessorBindingStore,
     };
     use crate::{
         compute_approval_presentation_content_hash,
@@ -584,8 +1024,9 @@ mod tests {
         CapabilityGrant, CapabilityGrantDefinition, CapabilityGrantId, CapabilityGrantLifecycle,
         CapabilityGrantRequirements, CapabilityGrantScope, CapabilityResourceScope, CorrelationId,
         ExternalActionAuthorizationProjectionDefinition, ExternalActionEvidencePredicateKind,
-        ExternalActionPayloadClass, ExternalActionTransition, ExternalConnectorKind,
-        GitHubExternalActionResourceBinding, SpecContentHash, WorkReportSensitivity,
+        ExternalActionPayloadClass, ExternalActionSuccessorBinding, ExternalActionTransition,
+        ExternalConnectorKind, GitHubExternalActionResourceBinding, SpecContentHash,
+        WorkReportSensitivity,
     };
 
     static ROOT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -925,6 +1366,284 @@ mod tests {
             redaction: &RedactionMetadata::empty(),
             connector,
         })
+    }
+
+    fn execute_draft<S: ExternalActionSuccessorBindingStore>(
+        fixture: &Fixture,
+        lifecycle_store: &LocalExternalActionTransitionLifecycleStore,
+        provider: &InMemoryExternalActionFixtureProvider,
+        successor_store: &S,
+    ) -> Result<ExternalActionFixtureDraftCreationOutcome, WorkflowOsError> {
+        let fact_source = draft_fact_source(
+            fixture,
+            ExternalActionFixtureRevocationPosture::Current,
+            fixture.resource.clone(),
+        );
+        execute_draft_with_source(
+            fixture,
+            lifecycle_store,
+            provider,
+            successor_store,
+            &fact_source,
+        )
+    }
+
+    fn draft_fact_source(
+        fixture: &Fixture,
+        revocation_posture: ExternalActionFixtureRevocationPosture,
+        current_resource: GitHubExternalActionResourceBinding,
+    ) -> InMemoryExternalActionFixtureDraftSource {
+        InMemoryExternalActionFixtureDraftSource::new(ExternalActionFixtureDraftSourceDefinition {
+            approval_presentation: fixture.presentation.clone(),
+            approval_decision: fixture.decision.clone(),
+            policy_decision_event_id: fixture.policy_event_id.clone(),
+            governance_assessment_commitment: fixture.governance_commitment.clone(),
+            execution_window_id: fixture.window_id.clone(),
+            execution_window_posture: ExternalActionFixtureExecutionWindowPosture::Open,
+            revocation_source_commitment: fixture.revocation_commitment.clone(),
+            revocation_posture,
+            current_resource,
+            evidence: fixture.evidence.clone(),
+        })
+    }
+
+    fn execute_draft_with_source<S: ExternalActionSuccessorBindingStore>(
+        fixture: &Fixture,
+        lifecycle_store: &LocalExternalActionTransitionLifecycleStore,
+        provider: &InMemoryExternalActionFixtureProvider,
+        successor_store: &S,
+        fact_source: &InMemoryExternalActionFixtureDraftSource,
+    ) -> Result<ExternalActionFixtureDraftCreationOutcome, WorkflowOsError> {
+        let redaction = RedactionMetadata::empty();
+        execute_fixture_draft_creation(&ExternalActionFixtureDraftCreationInput {
+            projection: &fixture.projection,
+            authority_source: &fixture.source,
+            execution_binding: &fixture.binding,
+            required_context_contract: &fixture.contract,
+            lifecycle_store,
+            evaluated_at: timestamp("2026-07-26T10:25:00Z"),
+            redaction: &redaction,
+            fact_source,
+            provider,
+            successor_store,
+        })
+    }
+
+    struct FailOnceSuccessorStore {
+        fail_next: AtomicBool,
+        inner: InMemoryExternalActionSuccessorBindingStore,
+    }
+
+    impl FailOnceSuccessorStore {
+        fn new() -> Self {
+            Self {
+                fail_next: AtomicBool::new(true),
+                inner: InMemoryExternalActionSuccessorBindingStore::default(),
+            }
+        }
+    }
+
+    impl ExternalActionSuccessorBindingStore for FailOnceSuccessorStore {
+        fn put_exact(
+            &self,
+            projection: &ExternalActionAuthorizationProjection,
+            binding: &ExternalActionSuccessorBinding,
+        ) -> Result<ExternalActionSuccessorBindingWritePosture, WorkflowOsError> {
+            if self.fail_next.swap(false, Ordering::SeqCst) {
+                return Err(admission_error(
+                    "test.successor_store_unavailable",
+                    "test successor store is unavailable",
+                ));
+            }
+            self.inner.put_exact(projection, binding)
+        }
+
+        fn read_exact(
+            &self,
+            projection: &ExternalActionAuthorizationProjection,
+        ) -> Result<Option<ExternalActionSuccessorBinding>, WorkflowOsError> {
+            self.inner.read_exact(projection)
+        }
+    }
+
+    struct FailReadOnceSuccessorStore {
+        fail_next_read: AtomicBool,
+        inner: InMemoryExternalActionSuccessorBindingStore,
+    }
+
+    impl FailReadOnceSuccessorStore {
+        fn new() -> Self {
+            Self {
+                fail_next_read: AtomicBool::new(true),
+                inner: InMemoryExternalActionSuccessorBindingStore::default(),
+            }
+        }
+    }
+
+    impl ExternalActionSuccessorBindingStore for FailReadOnceSuccessorStore {
+        fn put_exact(
+            &self,
+            projection: &ExternalActionAuthorizationProjection,
+            binding: &ExternalActionSuccessorBinding,
+        ) -> Result<ExternalActionSuccessorBindingWritePosture, WorkflowOsError> {
+            self.inner.put_exact(projection, binding)
+        }
+
+        fn read_exact(
+            &self,
+            projection: &ExternalActionAuthorizationProjection,
+        ) -> Result<Option<ExternalActionSuccessorBinding>, WorkflowOsError> {
+            if self.fail_next_read.swap(false, Ordering::SeqCst) {
+                return Err(admission_error(
+                    "test.successor_store_unavailable",
+                    "test successor store is unavailable",
+                ));
+            }
+            self.inner.read_exact(projection)
+        }
+    }
+
+    #[test]
+    fn phase_5b_creates_one_draft_binds_successor_and_replays_without_provider_entry() {
+        let fixture = fixture(CapabilityGrantLifecycle::Active);
+        let root = TestRoot::new();
+        let lifecycle_store = LocalExternalActionTransitionLifecycleStore::new(&root.0);
+        let provider =
+            InMemoryExternalActionFixtureProvider::new(timestamp("2026-07-26T10:24:00Z"));
+        let successor_store = InMemoryExternalActionSuccessorBindingStore::default();
+
+        let created = execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect("created");
+        assert_eq!(
+            created.posture(),
+            ExternalActionFixtureDraftCreationPosture::Created
+        );
+        assert_eq!(provider.operation_count().expect("operation count"), 1);
+
+        let replay =
+            execute_draft(&fixture, &lifecycle_store, &provider, &successor_store).expect("replay");
+        assert_eq!(
+            replay.posture(),
+            ExternalActionFixtureDraftCreationPosture::ExactReplay
+        );
+        assert_eq!(replay.successor_binding(), created.successor_binding());
+        assert_eq!(provider.operation_count().expect("operation count"), 1);
+    }
+
+    #[test]
+    fn phase_5b_repairs_successor_after_provider_success_without_duplicate_create() {
+        let fixture = fixture(CapabilityGrantLifecycle::Active);
+        let root = TestRoot::new();
+        let lifecycle_store = LocalExternalActionTransitionLifecycleStore::new(&root.0);
+        let provider =
+            InMemoryExternalActionFixtureProvider::new(timestamp("2026-07-26T10:24:00Z"));
+        let successor_store = FailOnceSuccessorStore::new();
+
+        let error = execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect_err("local persistence ambiguity");
+        assert_eq!(
+            error.code(),
+            "external_action_connector_admission.draft.successor_persistence_ambiguous"
+        );
+        assert_eq!(provider.operation_count().expect("operation count"), 1);
+
+        let repaired = execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect("repaired");
+        assert_eq!(
+            repaired.posture(),
+            ExternalActionFixtureDraftCreationPosture::ReconciledSuccessor
+        );
+        assert_eq!(provider.operation_count().expect("operation count"), 1);
+    }
+
+    #[test]
+    fn phase_5b_repairs_after_post_provider_successor_read_failure() {
+        let fixture = fixture(CapabilityGrantLifecycle::Active);
+        let root = TestRoot::new();
+        let lifecycle_store = LocalExternalActionTransitionLifecycleStore::new(&root.0);
+        let provider =
+            InMemoryExternalActionFixtureProvider::new(timestamp("2026-07-26T10:24:00Z"));
+        let successor_store = FailReadOnceSuccessorStore::new();
+
+        let error = execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect_err("local read ambiguity");
+        assert_eq!(
+            error.code(),
+            "external_action_connector_admission.draft.successor_persistence_ambiguous"
+        );
+        assert_eq!(provider.operation_count().expect("operation count"), 1);
+
+        let repaired = execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect("repaired");
+        assert_eq!(
+            repaired.posture(),
+            ExternalActionFixtureDraftCreationPosture::ReconciledSuccessor
+        );
+        assert_eq!(provider.operation_count().expect("operation count"), 1);
+    }
+
+    #[test]
+    fn phase_5b_rejects_local_successor_that_conflicts_with_provider_receipt() {
+        let fixture = fixture(CapabilityGrantLifecycle::Active);
+        let root = TestRoot::new();
+        let lifecycle_store = LocalExternalActionTransitionLifecycleStore::new(&root.0);
+        let provider =
+            InMemoryExternalActionFixtureProvider::new(timestamp("2026-07-26T10:24:00Z"));
+        let successor_store = InMemoryExternalActionSuccessorBindingStore::default();
+        let conflicting = derive_external_action_successor_binding(
+            &fixture.projection,
+            43,
+            timestamp("2026-07-26T10:24:00Z"),
+        )
+        .expect("conflicting binding");
+        successor_store
+            .put_exact(&fixture.projection, &conflicting)
+            .expect("seed conflicting binding");
+
+        let error = execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect_err("conflicting successor");
+        assert_eq!(
+            error.code(),
+            "external_action_connector_admission.draft.successor_persistence_conflict"
+        );
+        assert_eq!(provider.operation_count().expect("operation count"), 1);
+    }
+
+    #[test]
+    fn phase_5b_fixture_source_mismatch_blocks_before_provider_mutation() {
+        let fixture = fixture(CapabilityGrantLifecycle::Active);
+        let root = TestRoot::new();
+        let lifecycle_store = LocalExternalActionTransitionLifecycleStore::new(&root.0);
+        let provider =
+            InMemoryExternalActionFixtureProvider::new(timestamp("2026-07-26T10:24:00Z"));
+        let successor_store = InMemoryExternalActionSuccessorBindingStore::default();
+        let mismatched_resource = GitHubExternalActionResourceBinding::new(
+            "rcs2153/workflow-os",
+            "main",
+            "1111111111111111111111111111111111111111",
+            "codex/substituted-source",
+            "3333333333333333333333333333333333333333",
+        )
+        .expect("resource");
+        let fact_source = draft_fact_source(
+            &fixture,
+            ExternalActionFixtureRevocationPosture::Current,
+            mismatched_resource,
+        );
+
+        let error = execute_draft_with_source(
+            &fixture,
+            &lifecycle_store,
+            &provider,
+            &successor_store,
+            &fact_source,
+        )
+        .expect_err("source mismatch");
+        assert_eq!(
+            error.code(),
+            "external_action_connector_admission.current_facts.mismatch"
+        );
+        assert_eq!(provider.operation_count().expect("operation count"), 0);
     }
 
     #[test]
