@@ -178,10 +178,35 @@ original pre-write request only when the complete record is identical. See the
 report](docs/concepts/CONTINUATION_CONTEXT_ACCEPTED_INTENT_CAPTURE_REPORT.md)
 and [focused review](docs/concepts/CONTINUATION_CONTEXT_ACCEPTED_INTENT_CAPTURE_REVIEW.md).
 
+The Phase E reference aggregate composition is implemented and accepted after
+focused maintainer/security review. The private closed reference registry can
+compose one canonical fixture observation set under equal pre- and
+post-collection anchors, derive the existing claim-level non-authorizing
+decision in the same call, and return a redaction-safe proof chain binding the
+request, exact collector/source/authority contract, anchors, observations,
+coverage, understanding, and decision commitments. The proof distinguishes
+complete accounting for all 18 collector classes from whether required sources
+were actually available; unavailable, unsupported, denied, failed, and stale
+sources therefore remain inspectable without fabricating readiness. Review
+corrected one blocker by binding the exact closed collector contract into the
+proof. The accepted store-backed, bounded-local-observer, and accepted-intent
+source sets remain independently tested and are not yet composed through one
+integrated aggregate path, so this is not the operational Phase E exit. The
+phase adds no production registry, public preview, runtime consumer, projection
+delivery, acknowledgment, authority resolution, consumption, provider action,
+host ingestion, or Salsa. See the [Phase E implementation
+report](docs/concepts/CONTINUATION_CONTEXT_AGGREGATE_COMPOSITION_REPORT.md) and
+[focused review](docs/concepts/CONTINUATION_CONTEXT_AGGREGATE_COMPOSITION_REVIEW.md).
+
+Projection delivery and replacement-executor work remain unauthorized until
+the integrated private Phase E conformance composition is implemented and
+focused-review accepted.
+
 The remaining authorized sequence is:
 
-1. aggregate non-consuming composition into a claim-level
-   `ContinuationUnderstandingProjection` with complete source-coverage proof;
+1. integrated private conformance composition across the accepted store-backed,
+   bounded-local-observer, accepted-intent, and explicit closed-posture source
+   contracts under one stable anchor and aggregate proof;
 2. exact post-compaction projection delivery and acknowledgment; and
 3. one local end-to-end replacement-executor proof showing that completed work
    is not repeated, superseded direction is not revived, missing or conflicting
