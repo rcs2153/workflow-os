@@ -545,6 +545,139 @@ impl InMemoryContinuationCollectorRegistry {
     }
 }
 
+/// Private conformance composition over the accepted Phase B-D source sets.
+///
+/// This remains an internal proof boundary. It has no runtime registration,
+/// delivery, authority, consumption, or provider-operation surface.
+struct IntegratedContinuationSourceSet<'a, S, B, O, I> {
+    store_backed: store_backed::StoreBackedContinuationSourceSet<'a, S, B>,
+    local: local_observers::BoundedLocalContinuationSourceSet<'a, O>,
+    accepted_intent: accepted_intent::AcceptedIntentContinuationSourceSet<'a, I>,
+}
+
+impl<'a, S, B, O, I> IntegratedContinuationSourceSet<'a, S, B, O, I>
+where
+    S: store_backed::ContinuationStateReadStore,
+    B: crate::ImmutableRunBundleStore,
+    O: local_observers::ContinuationLocalObserver,
+    I: accepted_intent::AcceptedIntentRecordStore,
+{
+    const fn new(state: &'a S, bundles: &'a B, observer: &'a O, intents: &'a I) -> Self {
+        Self {
+            store_backed: store_backed::StoreBackedContinuationSourceSet::new(state, bundles),
+            local: local_observers::BoundedLocalContinuationSourceSet::new(observer),
+            accepted_intent: accepted_intent::AcceptedIntentContinuationSourceSet::new(intents),
+        }
+    }
+
+    fn capture_anchor(
+        &self,
+        purpose: ContinuationContextPurpose,
+        scope: &ContinuationContextScope,
+        actor: &ActorId,
+    ) -> Result<ContinuationCollectionAnchor, WorkflowOsError> {
+        let store_anchor = self.store_backed.capture_anchor(purpose, scope)?;
+        let local_anchor =
+            self.local
+                .capture_anchor(&store_anchor, purpose, scope.clone(), actor.clone())?;
+        self.accepted_intent
+            .capture_anchor_over(&local_anchor, scope)
+    }
+
+    fn compose(
+        &self,
+        purpose: ContinuationContextPurpose,
+        scope: ContinuationContextScope,
+        actor: ActorId,
+        maximum_sensitivity: ContinuationContextSensitivity,
+        materialization_budget_bytes: u64,
+    ) -> Result<ContinuationAggregateComposition, WorkflowOsError> {
+        let anchor = self.capture_anchor(purpose, &scope, &actor)?;
+        let request = ContinuationCollectionRequest::new(
+            purpose,
+            scope,
+            actor,
+            maximum_sensitivity,
+            materialization_budget_bytes,
+            anchor,
+        )?;
+        let mut observations = Vec::with_capacity(ALL_COLLECTOR_KINDS.len());
+        for kind in store_backed::STORE_BACKED_KINDS {
+            observations.push(self.store_backed.collector(kind)?.collect(&request)?);
+        }
+        for kind in local_observers::LOCAL_OBSERVER_KINDS {
+            observations.push(self.local.collector(kind)?.collect(&request)?);
+        }
+        observations.push(self.accepted_intent.collector().collect(&request)?);
+        for kind in [
+            ContinuationCollectorKind::ProviderObservation,
+            ContinuationCollectorKind::AgentAdvisory,
+        ] {
+            observations.push(ExplicitClosedPostureCollector::new(kind)?.collect(&request)?);
+        }
+        let after_anchor = self.capture_anchor(request.purpose, &request.scope, &request.actor)?;
+        compose_aggregate(request, &after_anchor, observations)
+    }
+}
+
+struct ExplicitClosedPostureCollector {
+    kind: ContinuationCollectorKind,
+}
+
+impl ExplicitClosedPostureCollector {
+    fn new(kind: ContinuationCollectorKind) -> Result<Self, WorkflowOsError> {
+        if !matches!(
+            kind,
+            ContinuationCollectorKind::ProviderObservation
+                | ContinuationCollectorKind::AgentAdvisory
+        ) {
+            return Err(collection_error(
+                "closed_posture.kind_invalid",
+                "explicit closed posture is limited to provider observation and agent advisory",
+            ));
+        }
+        Ok(Self { kind })
+    }
+}
+
+impl ContinuationContextCollector for ExplicitClosedPostureCollector {
+    fn kind(&self) -> ContinuationCollectorKind {
+        self.kind
+    }
+
+    fn collect(
+        &self,
+        request: &ContinuationCollectionRequest,
+    ) -> Result<ContinuationCollectionObservation, WorkflowOsError> {
+        let revision = store_backed::outside_batch_revision(self.kind)?;
+        if &revision != request.anchor.revision_for(self.kind)? {
+            return Err(collection_error(
+                "closed_posture.source_drift",
+                "explicit closed-posture revision changed after anchor capture",
+            ));
+        }
+        let posture = if collector_expectation_for(
+            request.purpose,
+            request.scope.run_id.is_some(),
+            self.kind.source_class(),
+        ) == ContinuationContextCollectorExpectation::Inapplicable
+        {
+            ContinuationCollectionResultPosture::Inapplicable
+        } else {
+            ContinuationCollectionResultPosture::Unsupported
+        };
+        Ok(ContinuationCollectionObservation {
+            kind: self.kind,
+            request_commitment: request.commitment.clone(),
+            revision,
+            posture,
+            source: None,
+            accepted_intents: Vec::new(),
+            accounting: Vec::new(),
+        })
+    }
+}
+
 fn compose_aggregate(
     request: ContinuationCollectionRequest,
     after_anchor: &ContinuationCollectionAnchor,
@@ -929,13 +1062,188 @@ fn collection_error(code: &str, message: impl Into<String>) -> WorkflowOsError {
 mod tests {
     #![allow(clippy::expect_used)]
 
+    use std::{
+        cell::Cell,
+        fs,
+        path::{Path, PathBuf},
+        sync::{
+            atomic::{AtomicU64, Ordering},
+            Mutex,
+        },
+    };
+
     use super::*;
     use crate::continuation_context::{
         derive_continuation_context, AcceptedIntentKind, AcceptedIntentRecord,
         AcceptedIntentRecordId, AcceptedIntentSupersession, ContinuationContextDecisionPosture,
         ContinuationContextText,
     };
-    use crate::{ProjectId, WorkflowId, WorkflowRunId};
+    use crate::{
+        LocalImmutableRunBundleStore, LocalStateBackend, ProjectId, WorkflowId, WorkflowRunId,
+    };
+
+    static NEXT_INTEGRATED_ROOT: AtomicU64 = AtomicU64::new(1);
+
+    struct IntegratedTestRoot(PathBuf);
+
+    impl IntegratedTestRoot {
+        fn new() -> Self {
+            let id = NEXT_INTEGRATED_ROOT.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "workflow-os-continuation-integrated-{}-{id}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("integrated root");
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for IntegratedTestRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    struct IntegratedObserver {
+        contract: SpecContentHash,
+        git_reads: Cell<u32>,
+        drift_after_collection: bool,
+    }
+
+    impl local_observers::ContinuationLocalObserver for IntegratedObserver {
+        fn contract_commitment(&self) -> SpecContentHash {
+            self.contract.clone()
+        }
+
+        fn observe_git_worktree(
+            &self,
+            request: &local_observers::LocalObservationRequest,
+        ) -> Result<local_observers::GitWorktreeObservation, WorkflowOsError> {
+            let read = self.git_reads.get() + 1;
+            self.git_reads.set(read);
+            let revision = if self.drift_after_collection && read >= 3 {
+                "integrated-worktree-drifted"
+            } else {
+                "integrated-worktree-stable"
+            };
+            Ok(local_observers::GitWorktreeObservation {
+                request_commitment: request.commitment.clone(),
+                repository_present: true,
+                head_commitment: Some(hash("integrated-head")),
+                worktree_commitment: hash(revision),
+                tracked_change_count: 0,
+                untracked_change_count: 0,
+                conflict_count: 0,
+            })
+        }
+
+        fn observe_operating_documents(
+            &self,
+            request: &local_observers::LocalObservationRequest,
+        ) -> Result<local_observers::OperatingDocumentObservationSet, WorkflowOsError> {
+            Ok(local_observers::OperatingDocumentObservationSet {
+                request_commitment: request.commitment.clone(),
+                documents: vec![
+                    integrated_document(
+                        local_observers::OperatingDocumentKind::AgentInstructions,
+                        "integrated-agents",
+                    ),
+                    integrated_document(
+                        local_observers::OperatingDocumentKind::EngineeringStandard,
+                        "integrated-standard",
+                    ),
+                    integrated_document(
+                        local_observers::OperatingDocumentKind::Roadmap,
+                        "integrated-roadmap",
+                    ),
+                ],
+            })
+        }
+    }
+
+    fn integrated_document(
+        kind: local_observers::OperatingDocumentKind,
+        commitment: &str,
+    ) -> local_observers::OperatingDocumentObservation {
+        local_observers::OperatingDocumentObservation {
+            kind,
+            content_commitment: hash(commitment),
+            byte_len: 1_024,
+            canonical_beneath_project_root: true,
+            symlink_free: true,
+            sensitivity: ContinuationContextSensitivity::Internal,
+        }
+    }
+
+    struct IntegratedIntentStore {
+        snapshot: Mutex<accepted_intent::AcceptedIntentStoreSnapshot>,
+    }
+
+    impl IntegratedIntentStore {
+        fn new(scope: ContinuationContextScope) -> Self {
+            let record = AcceptedIntentRecord {
+                record_id: AcceptedIntentRecordId::new("intent/integrated-objective")
+                    .expect("intent id"),
+                actor: ActorId::new("user/delegated-maintainer").expect("actor"),
+                directive_commitment: hash("integrated-directive"),
+                scope: scope.clone(),
+                kind: AcceptedIntentKind::Objective,
+                meaning: ContinuationContextText::new("continue the governed roadmap phase")
+                    .expect("meaning"),
+                supersedes: Vec::new(),
+                supersession: AcceptedIntentSupersession::Current,
+            };
+            Self {
+                snapshot: Mutex::new(
+                    accepted_intent::AcceptedIntentStoreSnapshot::new(scope, vec![record])
+                        .expect("intent snapshot"),
+                ),
+            }
+        }
+    }
+
+    impl accepted_intent::AcceptedIntentRecordStore for IntegratedIntentStore {
+        fn read_snapshot(
+            &self,
+            scope: &ContinuationContextScope,
+        ) -> Result<accepted_intent::AcceptedIntentStoreSnapshot, WorkflowOsError> {
+            let snapshot = self.snapshot.lock().expect("intent lock").clone();
+            if &snapshot.scope != scope {
+                return Err(collection_error(
+                    "integrated.intent_scope_mismatch",
+                    "integrated accepted-intent store was opened for another scope",
+                ));
+            }
+            Ok(snapshot)
+        }
+
+        fn compare_and_replace(
+            &self,
+            expected_revision: &SpecContentHash,
+            replacement: &accepted_intent::AcceptedIntentStoreSnapshot,
+        ) -> Result<bool, WorkflowOsError> {
+            let mut snapshot = self.snapshot.lock().expect("intent lock");
+            if &snapshot.revision != expected_revision {
+                return Ok(false);
+            }
+            *snapshot = replacement.clone();
+            Ok(true)
+        }
+    }
+
+    fn integrated_scope() -> ContinuationContextScope {
+        ContinuationContextScope {
+            project_id: ProjectId::new("project/integrated-continuation").expect("project"),
+            workflow_id: None,
+            run_id: None,
+            phase: Some(ContinuationContextText::new("implementation").expect("phase")),
+        }
+    }
 
     #[derive(Clone)]
     struct FixtureCollector {
@@ -1376,6 +1684,84 @@ mod tests {
         assert!(debug.contains("[REDACTED]"));
         assert!(!debug.contains(&request_commitment));
         assert!(!debug.contains(&decision_commitment));
+    }
+
+    #[test]
+    fn integrated_source_sets_compose_one_stable_non_authorizing_aggregate() {
+        let root = IntegratedTestRoot::new();
+        let state = LocalStateBackend::new(root.path().join("state")).expect("state");
+        let bundles = LocalImmutableRunBundleStore::new(root.path().join("bundles"));
+        let observer = IntegratedObserver {
+            contract: hash("integrated-observer-contract"),
+            git_reads: Cell::new(0),
+            drift_after_collection: false,
+        };
+        let scope = integrated_scope();
+        let intents = IntegratedIntentStore::new(scope.clone());
+        let sources = IntegratedContinuationSourceSet::new(&state, &bundles, &observer, &intents);
+
+        let aggregate = sources
+            .compose(
+                ContinuationContextPurpose::MaterialContinuation,
+                scope,
+                ActorId::new("user/delegated-maintainer").expect("actor"),
+                ContinuationContextSensitivity::Restricted,
+                32_768,
+            )
+            .expect("integrated composition");
+
+        assert_eq!(
+            aggregate.proof.collector_kinds_accounted,
+            ALL_COLLECTOR_KINDS.len()
+        );
+        assert_eq!(
+            aggregate.proof.collector_accounting,
+            ContinuationAggregateCollectorAccountingPosture::Complete
+        );
+        assert_eq!(
+            aggregate.proof.authority_posture,
+            ContinuationAggregateAuthorityPosture::NonAuthorizing
+        );
+        assert!(aggregate
+            .decision
+            .understanding()
+            .claims()
+            .iter()
+            .any(|claim| {
+                claim.kind() == ContinuationUnderstandingClaimKind::Objective
+                    && claim.value().map(ContinuationContextText::as_str)
+                        == Some("continue the governed roadmap phase")
+            }));
+        assert!(!ContinuationContextDecision::authorizes_execution());
+        assert_eq!(observer.git_reads.get(), 3);
+    }
+
+    #[test]
+    fn integrated_source_sets_reject_cross_source_post_collection_drift() {
+        let root = IntegratedTestRoot::new();
+        let state = LocalStateBackend::new(root.path().join("state")).expect("state");
+        let bundles = LocalImmutableRunBundleStore::new(root.path().join("bundles"));
+        let observer = IntegratedObserver {
+            contract: hash("integrated-observer-contract"),
+            git_reads: Cell::new(0),
+            drift_after_collection: true,
+        };
+        let scope = integrated_scope();
+        let intents = IntegratedIntentStore::new(scope.clone());
+        let sources = IntegratedContinuationSourceSet::new(&state, &bundles, &observer, &intents);
+
+        let error = sources
+            .compose(
+                ContinuationContextPurpose::MaterialContinuation,
+                scope,
+                ActorId::new("user/delegated-maintainer").expect("actor"),
+                ContinuationContextSensitivity::Restricted,
+                32_768,
+            )
+            .expect_err("cross-source drift must fail the integrated aggregate");
+
+        assert_eq!(error.code(), "continuation_collection.anchor.drifted");
+        assert_eq!(observer.git_reads.get(), 3);
     }
 
     #[test]

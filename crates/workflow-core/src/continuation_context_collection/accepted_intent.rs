@@ -26,10 +26,10 @@ const MAX_ACCEPTED_INTENTS_PER_SCOPE: usize = 128;
 
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptedIntentStoreSnapshot {
-    scope: ContinuationContextScope,
-    records: Vec<AcceptedIntentRecord>,
-    revision: SpecContentHash,
+pub(super) struct AcceptedIntentStoreSnapshot {
+    pub(super) scope: ContinuationContextScope,
+    pub(super) records: Vec<AcceptedIntentRecord>,
+    pub(super) revision: SpecContentHash,
 }
 
 impl fmt::Debug for AcceptedIntentStoreSnapshot {
@@ -44,7 +44,7 @@ impl fmt::Debug for AcceptedIntentStoreSnapshot {
 }
 
 impl AcceptedIntentStoreSnapshot {
-    fn new(
+    pub(super) fn new(
         scope: ContinuationContextScope,
         mut records: Vec<AcceptedIntentRecord>,
     ) -> Result<Self, WorkflowOsError> {
@@ -63,7 +63,7 @@ impl AcceptedIntentStoreSnapshot {
 ///
 /// Implementations must compare and replace atomically. Returning `false`
 /// means the expected revision was stale and no state was changed.
-trait AcceptedIntentRecordStore {
+pub(super) trait AcceptedIntentRecordStore {
     fn read_snapshot(
         &self,
         scope: &ContinuationContextScope,
@@ -345,12 +345,12 @@ fn validate_records(
     Ok(())
 }
 
-struct AcceptedIntentContinuationSourceSet<'a, S> {
+pub(super) struct AcceptedIntentContinuationSourceSet<'a, S> {
     store: &'a S,
 }
 
 impl<'a, S: AcceptedIntentRecordStore> AcceptedIntentContinuationSourceSet<'a, S> {
-    const fn new(store: &'a S) -> Self {
+    pub(super) const fn new(store: &'a S) -> Self {
         Self { store }
     }
 
@@ -371,12 +371,34 @@ impl<'a, S: AcceptedIntentRecordStore> AcceptedIntentContinuationSourceSet<'a, S
         ContinuationCollectionAnchor::new(None, None, revisions)
     }
 
-    fn collector(&'a self) -> AcceptedIntentContinuationCollector<'a, S> {
+    pub(super) fn capture_anchor_over(
+        &self,
+        base: &ContinuationCollectionAnchor,
+        scope: &ContinuationContextScope,
+    ) -> Result<ContinuationCollectionAnchor, WorkflowOsError> {
+        let snapshot = self.store.read_snapshot(scope)?;
+        let mut revisions = Vec::with_capacity(ALL_COLLECTOR_KINDS.len());
+        for kind in ALL_COLLECTOR_KINDS {
+            let revision = if kind == ContinuationCollectorKind::AcceptedIntent {
+                snapshot.revision.clone()
+            } else {
+                base.revision_for(kind)?.clone()
+            };
+            revisions.push(ContinuationCollectorRevision { kind, revision });
+        }
+        ContinuationCollectionAnchor::new(
+            base.immutable_bundle.clone(),
+            base.event_cursor.clone(),
+            revisions,
+        )
+    }
+
+    pub(super) fn collector(&'a self) -> AcceptedIntentContinuationCollector<'a, S> {
         AcceptedIntentContinuationCollector { sources: self }
     }
 }
 
-struct AcceptedIntentContinuationCollector<'a, S> {
+pub(super) struct AcceptedIntentContinuationCollector<'a, S> {
     sources: &'a AcceptedIntentContinuationSourceSet<'a, S>,
 }
 
