@@ -17,6 +17,8 @@ mod collaborative_approval_authority_receipt;
 mod collaborative_approval_authority_receipt_store;
 mod collaborative_identity;
 mod collaborative_identity_authority_source;
+#[allow(dead_code)]
+mod continuation_context;
 mod current_authority_fact_set;
 mod current_authority_proportional_governance;
 mod current_authority_source;

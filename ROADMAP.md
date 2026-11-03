@@ -1413,6 +1413,31 @@ history. It is reference material, not a second delivery queue.
    Focused maintainer/security review is accepted in [Authoritative Agent
    Continuation Context And Rehydration Plan
    Review](docs/concepts/AUTHORITATIVE_AGENT_CONTINUATION_CONTEXT_REHYDRATION_PLAN_REVIEW.md).
+   The first comprehensive-context implementation increment is now complete as
+   a Core-private, model-only decision layer. It defines closed source classes,
+   source-specific authority domains, purpose-bound collector coverage,
+   accepted-intent records, private inventory entries, bounded bundles,
+   provenance-backed understanding claims, explicit gaps, deterministic
+   commitments, sensitivity ceilings, and a non-authorizing readiness posture.
+   Required sources are admitted before optional context so budget pressure
+   cannot silently displace required understanding. Equal-authority conflicts,
+   unavailable required collectors, stale or unauthorized required sources,
+   missing required claims, sensitivity denial, integrity failure, and required
+   budget exhaustion block. Optional budget omission remains disclosed without
+   blocking. The complete inventory and semantic values are not exported from
+   the crate; a separately reviewed redacted projection is still required before
+   any CLI, schema, report, hook, or child-harness exposure. See the [model
+   report](docs/concepts/AUTHORITATIVE_CONTINUATION_CONTEXT_MODEL_REPORT.md).
+   Focused maintainer/security review is accepted after fixing exact
+   source-class/authority-domain binding, complete closed-class collector
+   accounting, purpose-bound coverage, active-run immutable-objective
+   precedence, run/workflow scope shape, and transitive bundle/understanding
+   commitments. See the [model
+   review](docs/concepts/AUTHORITATIVE_CONTINUATION_CONTEXT_MODEL_REVIEW.md).
+   Purpose-specific trusted collector-expectation profile planning is next.
+   Collectors, persistence, accepted-intent capture, CLI preview, runtime
+   integration, compaction adapters, delivery receipts, Salsa, and
+   replacement-executor proof remain unimplemented.
    The review added a durable cursor-bound single-consumption requirement and
    narrowed the first allowed operation to one local
    `invoke_current_step_skill` `BeforeSkillInvocation` consumer. That opt-in
