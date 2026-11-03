@@ -531,6 +531,18 @@ nested harness execution, enterprise administration, and general arbitrary-comma
 execution remain deferred unless a clean-room failure proves one is a correctness
 blocker. See the [Hacker News Launch Admission
 Plan](docs/implementation-plans/hacker-news-launch-admission-plan.md).
+Phase 0 focused maintainer/product/security review is accepted after correcting
+one P0 product-loop ambiguity and five P1 truth/UX gaps. The lane selects one
+exact non-mock operation:
+`workflow-os first-run --write-report-artifact --run-id
+launch-first-run-v1`. It must preserve the initial project-validation citation,
+expose bounded report and citation posture through `inspect`, recommend the real
+artifact path instead of mock execution, treat `next-action` as nonterminal-only,
+use fault-injected recovery without manual state repair, and rebuild final native
+archives from the exact post-composition commit. Generic handler registration,
+parallel runtime, provider fixtures, package-manager execution, and publication
+remain unauthorized. See the [Phase 0 focused
+review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PLAN_REVIEW.md).
 
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
