@@ -166,6 +166,10 @@ impl ExternalActionFixtureSourceAnchor {
         }
         Ok(())
     }
+
+    pub(crate) const fn commitment(&self) -> &SpecContentHash {
+        &self.anchor_commitment
+    }
 }
 
 impl fmt::Debug for ExternalActionFixtureSourceAnchor {
@@ -625,6 +629,7 @@ struct FixtureProviderState {
     ambiguous_next_apply: bool,
     compare_and_apply_count: usize,
     lookup_count: usize,
+    lookup_available: bool,
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize)]
@@ -669,6 +674,7 @@ impl InMemoryExternalActionFixtureProvider {
                 ambiguous_next_apply: false,
                 compare_and_apply_count: 0,
                 lookup_count: 0,
+                lookup_available: true,
             }),
             observed_at,
         }
@@ -712,6 +718,11 @@ impl InMemoryExternalActionFixtureProvider {
         posture: ExternalActionFixtureConnectorPosture,
     ) -> Result<(), WorkflowOsError> {
         self.mutate_fixture_state(|state| state.connector_posture = posture)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_lookup_available(&self, available: bool) -> Result<(), WorkflowOsError> {
+        self.mutate_fixture_state(|state| state.lookup_available = available)
     }
 
     #[cfg(test)]
@@ -1039,6 +1050,9 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
             .lock()
             .map_err(|_| fixture_error("provider.unavailable", "fixture provider unavailable"))?;
         state.lookup_count += 1;
+        if !state.lookup_available {
+            return Ok(ExternalActionFixtureProviderLookupOutcome::Unavailable);
+        }
         let operation_content_commitment = operation.operation_content_commitment()?;
         let coverage = ExternalActionFixtureLookupCoverage::new(operation, state.revision.clone())?;
         let Some(receipt) = state.receipts.get(&operation.operation_id) else {
