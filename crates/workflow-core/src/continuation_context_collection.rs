@@ -25,6 +25,8 @@ use crate::continuation_context::{
 };
 use crate::{ActorId, SpecContentHash, WorkflowOsError};
 
+mod store_backed;
+
 const COLLECTION_ALGORITHM: &str = "workflow-os/continuation-collection/v1";
 const MAX_OBSERVATIONS: usize = ALL_COLLECTOR_KINDS.len();
 const MAX_CLAIMS_PER_OBSERVATION: usize = 64;

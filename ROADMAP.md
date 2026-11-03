@@ -128,15 +128,28 @@ The accepted increments are:
 5. the private Phase A closed collector model, accepted after fixing complete
    typed negative-knowledge accounting for empty results.
 
+Phase B existing-store-backed collectors are now implemented as a private,
+non-consuming layer over the accepted store interfaces. Stable observations
+cover declarations, immutable bundles, durable state, event history, policies,
+approvals, checks, side effects, and report artifacts. Capability,
+required-context, and evidence collection remain typed `Unsupported` because
+their current interfaces do not yet prove complete revision-fenced,
+non-consuming reads. The implementation does not create new stores or weaken
+those contracts. See the [Phase B implementation
+report](docs/concepts/CONTINUATION_CONTEXT_STORE_BACKED_COLLECTORS_REPORT.md).
+Focused maintainer/security review accepts Phase B after adding direct proofs
+for durable-snapshot drift rejection and unchanged revision stability after
+backend restart. See the [Phase B
+review](docs/concepts/CONTINUATION_CONTEXT_STORE_BACKED_COLLECTORS_REVIEW.md).
+
 The remaining authorized sequence is:
 
-1. existing-store-backed kernel collectors through stable read interfaces;
-2. bounded local Git and allowlisted operating-document observers;
-3. a separately reviewed durable accepted-intent capture boundary;
-4. aggregate non-consuming composition into a claim-level
+1. bounded local Git and allowlisted operating-document observers;
+2. a separately reviewed durable accepted-intent capture boundary;
+3. aggregate non-consuming composition into a claim-level
    `ContinuationUnderstandingProjection` with complete source-coverage proof;
-5. exact post-compaction projection delivery and acknowledgment; and
-6. one local end-to-end replacement-executor proof showing that completed work
+4. exact post-compaction projection delivery and acknowledgment; and
+5. one local end-to-end replacement-executor proof showing that completed work
    is not repeated, superseded direction is not revived, missing or conflicting
    understanding is disclosed, and fresh authority is resolved separately at
    the next material boundary.
@@ -1563,9 +1576,21 @@ history. It is reference material, not a second delivery queue.
    accounting set for its purpose, scope posture, and source class. Fifteen
    focused tests pass. See the [Phase A implementation
    report](docs/concepts/CONTINUATION_CONTEXT_TRUSTED_COLLECTOR_MODEL_REPORT.md).
+   The private Phase B store-backed collector layer is now implemented over
+   existing stable local read interfaces. Nine source classes produce bounded
+   revision-fenced observations; capability, required-context, and evidence
+   remain typed `Unsupported` rather than overstating incomplete store
+   contracts. Collection is non-consuming, drift rejects the full observation
+   set, and no runtime consumer or public surface is added. See the [Phase B
+   implementation
+   report](docs/concepts/CONTINUATION_CONTEXT_STORE_BACKED_COLLECTORS_REPORT.md).
+   Focused maintainer/security review accepts Phase B after adding direct
+   durable-snapshot drift and backend-restart stability proofs. See the [Phase
+   B review](docs/concepts/CONTINUATION_CONTEXT_STORE_BACKED_COLLECTORS_REVIEW.md).
+   Bounded local observers are the next authorized action.
    Focused implementation/security review is accepted after the typed-empty
    accounting fix; see the [Phase A review](docs/concepts/CONTINUATION_CONTEXT_TRUSTED_COLLECTOR_MODEL_REVIEW.md).
-   Store-backed collectors are next. Aggregate composition and runtime consumers
+   Bounded local observers are next. Aggregate composition and runtime consumers
    remain later.
    Collectors, persistence, accepted-intent capture, CLI preview, runtime
    integration, compaction adapters, delivery receipts, Salsa, and
