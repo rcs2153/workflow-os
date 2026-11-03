@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-10-31.
+Status date: 2026-11-03.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -1485,7 +1485,27 @@ history. It is reference material, not a second delivery queue.
    to satisfy required values or missing accounting. See the [semantic-
    obligation profile implementation
    review](docs/concepts/AUTHORITATIVE_CONTINUATION_CONTEXT_SEMANTIC_OBLIGATION_PROFILE_REVIEW.md).
-   Trusted collectors, composition, and runtime consumers remain later.
+   Trusted local collector planning is now complete in the [Continuation
+   Context Trusted Local Collectors
+   Plan](docs/implementation-plans/continuation-context-trusted-local-collectors-plan.md).
+   The plan keeps collector registration, source-class and authority-domain
+   mapping, coverage and semantic obligations, stable-anchor verification, and
+   canonical composition inside Core. Collectors return bounded typed
+   observations and cannot decide readiness or authority. It sequences a
+   private collector model, store-backed collectors, bounded local observers,
+   the separately reviewed accepted-intent boundary, and aggregate composition.
+   Planning itself authorized no collector implementation. See the [planning
+   report](docs/concepts/CONTINUATION_CONTEXT_TRUSTED_LOCAL_COLLECTORS_PLAN_REPORT.md).
+   Focused architecture/security review now accepts the plan after two
+   corrections. Every independently mutable authoritative collector requires a
+   source-specific revision fence or exact snapshot proof; the run cursor alone
+   is insufficient. Collection is strictly non-consuming, so required context,
+   capabilities, approval authority, and idempotency state remain untouched
+   until a later fresh same-call material boundary. See the [plan
+   review](docs/concepts/CONTINUATION_CONTEXT_TRUSTED_LOCAL_COLLECTORS_PLAN_REVIEW.md).
+   The next P0 phase is the private Phase A collector model and reference
+   conformance layer only. Store-backed collectors, composition, and runtime
+   consumers remain later.
    Collectors, persistence, accepted-intent capture, CLI preview, runtime
    integration, compaction adapters, delivery receipts, Salsa, and
    replacement-executor proof remain unimplemented.

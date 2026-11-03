@@ -813,7 +813,12 @@ reviewed increments:
     and evidence references, accepted-intent records, Git/worktree posture, and
     an allowlisted operating-document set. Collectors return bounded
     observations; they do not decide authority or crawl arbitrary repository
-    content.
+    content. The detailed boundary, source-ownership matrix, stable-anchor
+    algorithm, phased implementation, and conformance requirements are now
+    specified in the [Continuation Context Trusted Local Collectors
+    Plan](continuation-context-trusted-local-collectors-plan.md). Focused
+    architecture/security review of that plan is the next phase. No collector
+    implementation or operational composition is authorized by planning.
 12. Add one narrow attributable accepted-intent capture boundary before the
     full-understanding proof. Persist only the typed semantic effect, provenance,
     scope, and supersession posture; do not persist raw conversation or make the
