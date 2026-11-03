@@ -316,10 +316,12 @@ pub enum ContinuationContextCollectorExpectation {
 pub enum ContinuationContextCollectorOutcome {
     Observed,
     Empty,
+    Unavailable,
     SkippedOptional,
     AccessDenied,
     Failed,
     Unsupported,
+    Stale,
     Inapplicable,
     IntentionallyOmitted,
 }
@@ -1296,13 +1298,17 @@ fn validate_coverage_outcomes(
             .copied()
             .unwrap_or_default();
         match entry.outcome {
-            ContinuationContextCollectorOutcome::Observed if observed_count == 0 => {
+            ContinuationContextCollectorOutcome::Observed
+            | ContinuationContextCollectorOutcome::Stale
+                if observed_count == 0 =>
+            {
                 return Err(context_error(
                     "coverage.observed_without_source",
                     "collector coverage reports observed context without a supplied source",
                 ));
             }
-            ContinuationContextCollectorOutcome::Observed => {}
+            ContinuationContextCollectorOutcome::Observed
+            | ContinuationContextCollectorOutcome::Stale => {}
             ContinuationContextCollectorOutcome::Empty if observed_count == 0 => {}
             _ if observed_count > 0 => {
                 return Err(context_error(
@@ -1568,6 +1574,27 @@ const fn coverage_profile_expectation(
             ContinuationContextCollectorExpectation::Inapplicable
         }
     }
+}
+
+pub(super) const fn collector_expectation_for(
+    purpose: ContinuationContextPurpose,
+    run_bound: bool,
+    source_class: ContinuationContextSourceClass,
+) -> ContinuationContextCollectorExpectation {
+    coverage_profile_expectation(coverage_profile_id(purpose, run_bound), source_class)
+}
+
+pub(super) fn empty_accounting_claims_for(
+    purpose: ContinuationContextPurpose,
+    run_bound: bool,
+    source_class: ContinuationContextSourceClass,
+) -> Result<Vec<ContinuationUnderstandingClaimKind>, WorkflowOsError> {
+    let profile = derive_semantic_profile(purpose, run_bound)?;
+    Ok(ALL_UNDERSTANDING_CLAIM_KINDS
+        .iter()
+        .copied()
+        .filter(|kind| best_accounting_source_classes(&profile, *kind).contains(&source_class))
+        .collect())
 }
 
 const fn is_run_bound_profile(profile_id: ContinuationContextCoverageProfileId) -> bool {
@@ -2400,7 +2427,7 @@ const fn objective_authority_rank(
     }
 }
 
-fn canonical_commitment<T: Serialize + ?Sized>(
+pub(super) fn canonical_commitment<T: Serialize + ?Sized>(
     domain: &str,
     value: &T,
 ) -> Result<SpecContentHash, WorkflowOsError> {
