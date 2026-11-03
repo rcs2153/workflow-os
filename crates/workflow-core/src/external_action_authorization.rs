@@ -719,6 +719,18 @@ impl ExternalActionAuthorizationProjection {
         &self.projection_commitment
     }
 
+    pub(crate) const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    pub(crate) const fn execution_window_id(&self) -> &AuthorizedExecutionWindowId {
+        &self.execution_window_id
+    }
+
+    pub(crate) const fn actor(&self) -> &ActorId {
+        &self.actor
+    }
+
     #[must_use]
     /// Returns the exact action-scope commitment bound into the presentation.
     pub const fn approval_presentation_scope_commitment(&self) -> &SpecContentHash {

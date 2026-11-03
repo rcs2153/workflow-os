@@ -193,9 +193,20 @@ Focused maintainer/security review accepted the model after correcting exact
 approval-scope/non-goal binding, ready-before-merge dependency, GitHub resource
 validation, and successor observation timing. See the [focused
 review](docs/concepts/EXTERNAL_ACTION_AUTHORIZATION_PROJECTION_MODEL_REVIEW.md).
-Durable transition lifecycle model and local state composition is next.
-Connector execution, credentials, live GitHub behavior, provider writes,
-scheduler claims, and any parallel permission system remain excluded.
+The durable transition lifecycle and local state composition slice is
+implemented. Core now derives one immutable operation per projected transition,
+persists a create-only operation definition and commitment-chained event
+history, applies optimistic cursor admission, and models reservation,
+admission, attempt, observed outcome, ambiguity reconciliation, retry after
+known failure, genuine continuity waits, denial, consumption, and revocation.
+Exact replay does not duplicate events, ambiguous outcomes block redispatch,
+and corrupt or stale local state fails closed. The slice remains local,
+payload-free, non-authorizing, and no-write. See the [lifecycle
+report](docs/concepts/EXTERNAL_ACTION_TRANSITION_LIFECYCLE_REPORT.md) and
+[focused review](docs/concepts/EXTERNAL_ACTION_TRANSITION_LIFECYCLE_REVIEW.md).
+Core-private same-call current-authority verification and a fixture connector
+are next. Connector execution, credentials, live GitHub behavior, provider
+writes, scheduler claims, and any parallel permission system remain excluded.
 
 After the current delegated-authority connector lane is complete, evaluate one
 future **Governed Obligation Plan reconciliation** lane. The purpose is to test

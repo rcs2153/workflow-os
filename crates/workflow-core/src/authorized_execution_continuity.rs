@@ -410,6 +410,18 @@ impl AuthorizedExecutionWaitCondition {
     pub const fn condition_id(&self) -> &AuthorizedExecutionWaitConditionId {
         &self.condition_id
     }
+    pub(crate) const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+    pub(crate) const fn window_id(&self) -> &AuthorizedExecutionWindowId {
+        &self.window_id
+    }
+    pub(crate) const fn action_reference(&self) -> &AuthorizedExecutionActionReference {
+        &self.action_reference
+    }
+    pub(crate) const fn attempt_id(&self) -> &AuthorizedExecutionAttemptId {
+        &self.attempt_id
+    }
     /// Returns the typed dependency class.
     #[must_use]
     pub const fn kind(&self) -> AuthorizedExecutionWaitConditionKind {
