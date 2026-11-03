@@ -312,7 +312,11 @@ impl ExternalActionFixtureProviderOperation {
         }
     }
 
-    fn operation_content_commitment(&self) -> Result<SpecContentHash, WorkflowOsError> {
+    pub(crate) const fn operation_id(&self) -> &ExternalActionTransitionOperationId {
+        &self.operation_id
+    }
+
+    pub(crate) fn operation_content_commitment(&self) -> Result<SpecContentHash, WorkflowOsError> {
         commitment(
             "workflow-os/external-action-fixture-provider-operation/v1",
             &(
@@ -348,6 +352,7 @@ pub(crate) enum ExternalActionFixtureProviderApplyPosture {
 #[derive(Clone, Eq, PartialEq)]
 pub(crate) struct ExternalActionFixtureProviderApplyResult {
     posture: ExternalActionFixtureProviderApplyPosture,
+    operation_content_commitment: SpecContentHash,
     provider_revision: SpecContentHash,
     provider_receipt_commitment: SpecContentHash,
     created_successor: Option<ExternalActionFixtureCreatedSuccessor>,
@@ -405,6 +410,37 @@ impl ExternalActionFixtureProviderApplyResult {
         &self.provider_receipt_commitment
     }
 
+    pub(crate) fn validate_for_operation(
+        &self,
+        operation: &ExternalActionFixtureProviderOperation,
+    ) -> Result<(), WorkflowOsError> {
+        if self.operation_content_commitment != operation.operation_content_commitment()? {
+            return Err(fixture_error(
+                "provider.result_binding_mismatch",
+                "fixture provider result does not match the exact requested operation",
+            ));
+        }
+        let shape_valid = match operation.transition_kind {
+            ExternalActionTransitionKind::GitHubPullRequestCreateDraft => {
+                self.created_successor.is_some() && self.exact_merge_result.is_none()
+            }
+            ExternalActionTransitionKind::GitHubPullRequestMarkReadyAfterTerminalGreen => {
+                self.created_successor.is_none() && self.exact_merge_result.is_none()
+            }
+            ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead => {
+                self.created_successor.is_none() && self.exact_merge_result.is_some()
+            }
+            _ => false,
+        };
+        if !shape_valid {
+            return Err(fixture_error(
+                "provider.result_shape_invalid",
+                "fixture provider result shape does not match the requested transition",
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) const fn created_successor(&self) -> Option<&ExternalActionFixtureCreatedSuccessor> {
         self.created_successor.as_ref()
     }
@@ -414,6 +450,21 @@ impl ExternalActionFixtureProviderApplyResult {
     ) -> Option<&ExternalActionFixtureExactMergeResult> {
         self.exact_merge_result.as_ref()
     }
+
+    #[cfg(test)]
+    pub(crate) fn substituted_create_result(observed_at: Timestamp) -> Self {
+        Self {
+            posture: ExternalActionFixtureProviderApplyPosture::Applied,
+            operation_content_commitment: SpecContentHash::from_text("substituted-operation"),
+            provider_revision: SpecContentHash::from_text("substituted-revision"),
+            provider_receipt_commitment: SpecContentHash::from_text("substituted-receipt"),
+            created_successor: Some(ExternalActionFixtureCreatedSuccessor {
+                pull_request_number: 999,
+                observed_at,
+            }),
+            exact_merge_result: None,
+        }
+    }
 }
 
 impl fmt::Debug for ExternalActionFixtureProviderApplyResult {
@@ -421,10 +472,103 @@ impl fmt::Debug for ExternalActionFixtureProviderApplyResult {
         formatter
             .debug_struct("ExternalActionFixtureProviderApplyResult")
             .field("posture", &self.posture)
+            .field("operation_content_commitment", &"[REDACTED]")
             .field("provider_revision", &"[REDACTED]")
             .field("provider_receipt_commitment", &"[REDACTED]")
             .field("created_successor", &self.created_successor.is_some())
             .field("exact_merge_result", &self.exact_merge_result.is_some())
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ExternalActionFixtureProviderDispatchOutcome {
+    Applied,
+    MayHaveStartedAmbiguous,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) struct ExternalActionFixtureLookupCoverage {
+    operation_content_commitment: SpecContentHash,
+    provider_revision: SpecContentHash,
+    coverage_commitment: SpecContentHash,
+}
+
+impl ExternalActionFixtureLookupCoverage {
+    pub(crate) fn new(
+        operation: &ExternalActionFixtureProviderOperation,
+        provider_revision: SpecContentHash,
+    ) -> Result<Self, WorkflowOsError> {
+        let operation_content_commitment = operation.operation_content_commitment()?;
+        let coverage_commitment = commitment(
+            "workflow-os/external-action-fixture-lookup-coverage/v1",
+            &(&operation_content_commitment, &provider_revision),
+        )?;
+        Ok(Self {
+            operation_content_commitment,
+            provider_revision,
+            coverage_commitment,
+        })
+    }
+
+    pub(crate) fn validate_for_operation(
+        &self,
+        operation: &ExternalActionFixtureProviderOperation,
+    ) -> Result<(), WorkflowOsError> {
+        let expected = Self::new(operation, self.provider_revision.clone())?;
+        if &expected != self {
+            return Err(fixture_error(
+                "provider.lookup_coverage_mismatch",
+                "fixture provider lookup coverage does not match the exact operation",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) const fn coverage_commitment(&self) -> &SpecContentHash {
+        &self.coverage_commitment
+    }
+}
+
+impl fmt::Debug for ExternalActionFixtureLookupCoverage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ExternalActionFixtureLookupCoverage")
+            .field("operation_content_commitment", &"[REDACTED]")
+            .field("provider_revision", &"[REDACTED]")
+            .field("coverage_commitment", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) enum ExternalActionFixtureProviderLookupOutcome {
+    ExactFound {
+        result: ExternalActionFixtureProviderApplyResult,
+        coverage: ExternalActionFixtureLookupCoverage,
+    },
+    AuthoritativeNotFound {
+        coverage: ExternalActionFixtureLookupCoverage,
+    },
+    Inconclusive {
+        coverage: ExternalActionFixtureLookupCoverage,
+    },
+    Unavailable,
+}
+
+impl fmt::Debug for ExternalActionFixtureProviderLookupOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ExternalActionFixtureProviderLookupOutcome")
+            .field(
+                "posture",
+                &match self {
+                    Self::ExactFound { .. } => "exact_found",
+                    Self::AuthoritativeNotFound { .. } => "authoritative_not_found",
+                    Self::Inconclusive { .. } => "inconclusive",
+                    Self::Unavailable => "unavailable",
+                },
+            )
             .finish()
     }
 }
@@ -435,12 +579,18 @@ pub(crate) trait ExternalActionFixtureProviderSource {
     fn compare_and_apply(
         &self,
         operation: &ExternalActionFixtureProviderOperation,
-    ) -> Result<ExternalActionFixtureProviderApplyResult, WorkflowOsError>;
+    ) -> Result<
+        (
+            ExternalActionFixtureProviderDispatchOutcome,
+            Option<ExternalActionFixtureProviderApplyResult>,
+        ),
+        WorkflowOsError,
+    >;
 
     fn lookup_operation(
         &self,
         operation: &ExternalActionFixtureProviderOperation,
-    ) -> Result<Option<ExternalActionFixtureProviderApplyResult>, WorkflowOsError>;
+    ) -> Result<ExternalActionFixtureProviderLookupOutcome, WorkflowOsError>;
 }
 
 struct FixtureProviderState {
@@ -454,6 +604,9 @@ struct FixtureProviderState {
     base_target_commitment: SpecContentHash,
     reviewed_head_commitment: SpecContentHash,
     receipts: BTreeMap<ExternalActionTransitionOperationId, FixtureProviderReceipt>,
+    ambiguous_next_apply: bool,
+    compare_and_apply_count: usize,
+    lookup_count: usize,
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize)]
@@ -495,6 +648,9 @@ impl InMemoryExternalActionFixtureProvider {
                     "2222222222222222222222222222222222222222",
                 ),
                 receipts: BTreeMap::new(),
+                ambiguous_next_apply: false,
+                compare_and_apply_count: 0,
+                lookup_count: 0,
             }),
             observed_at,
         }
@@ -505,6 +661,22 @@ impl InMemoryExternalActionFixtureProvider {
         self.state
             .lock()
             .map(|state| state.receipts.len())
+            .map_err(|_| fixture_error("provider.unavailable", "fixture provider unavailable"))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn compare_and_apply_count(&self) -> Result<usize, WorkflowOsError> {
+        self.state
+            .lock()
+            .map(|state| state.compare_and_apply_count)
+            .map_err(|_| fixture_error("provider.unavailable", "fixture provider unavailable"))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn lookup_count(&self) -> Result<usize, WorkflowOsError> {
+        self.state
+            .lock()
+            .map(|state| state.lookup_count)
             .map_err(|_| fixture_error("provider.unavailable", "fixture provider unavailable"))
     }
 
@@ -530,6 +702,16 @@ impl InMemoryExternalActionFixtureProvider {
         commitment: SpecContentHash,
     ) -> Result<(), WorkflowOsError> {
         self.mutate_fixture_state(|state| state.reviewed_head_commitment = commitment)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn make_next_apply_ambiguous(&self) -> Result<(), WorkflowOsError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| fixture_error("provider.unavailable", "fixture provider unavailable"))?;
+        state.ambiguous_next_apply = true;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -593,11 +775,18 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
     fn compare_and_apply(
         &self,
         operation: &ExternalActionFixtureProviderOperation,
-    ) -> Result<ExternalActionFixtureProviderApplyResult, WorkflowOsError> {
+    ) -> Result<
+        (
+            ExternalActionFixtureProviderDispatchOutcome,
+            Option<ExternalActionFixtureProviderApplyResult>,
+        ),
+        WorkflowOsError,
+    > {
         let mut state = self
             .state
             .lock()
             .map_err(|_| fixture_error("provider.unavailable", "fixture provider unavailable"))?;
+        state.compare_and_apply_count += 1;
         let operation_content_commitment = operation.operation_content_commitment()?;
         if let Some(receipt) = state.receipts.get(&operation.operation_id) {
             if receipt.operation_content_commitment != operation_content_commitment {
@@ -606,13 +795,17 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
                     "fixture provider operation identity conflicts with prior content",
                 ));
             }
-            return Ok(ExternalActionFixtureProviderApplyResult {
-                posture: ExternalActionFixtureProviderApplyPosture::ExactReplay,
-                provider_revision: receipt.resulting_revision.clone(),
-                provider_receipt_commitment: receipt.receipt_commitment.clone(),
-                created_successor: receipt.created_successor.clone(),
-                exact_merge_result: receipt.exact_merge_result.clone(),
-            });
+            return Ok((
+                ExternalActionFixtureProviderDispatchOutcome::Applied,
+                Some(ExternalActionFixtureProviderApplyResult {
+                    posture: ExternalActionFixtureProviderApplyPosture::ExactReplay,
+                    operation_content_commitment,
+                    provider_revision: receipt.resulting_revision.clone(),
+                    provider_receipt_commitment: receipt.receipt_commitment.clone(),
+                    created_successor: receipt.created_successor.clone(),
+                    exact_merge_result: receipt.exact_merge_result.clone(),
+                }),
+            ));
         }
         if state.revision != operation.expected_provider_revision {
             return Err(fixture_error(
@@ -790,33 +983,50 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
         state.receipts.insert(
             operation.operation_id.clone(),
             FixtureProviderReceipt {
-                operation_content_commitment,
+                operation_content_commitment: operation_content_commitment.clone(),
                 receipt_commitment: receipt.clone(),
                 resulting_revision: resulting_revision.clone(),
                 created_successor: created_successor.clone(),
                 exact_merge_result: exact_merge_result.clone(),
             },
         );
-        Ok(ExternalActionFixtureProviderApplyResult {
+        let result = ExternalActionFixtureProviderApplyResult {
             posture: ExternalActionFixtureProviderApplyPosture::Applied,
+            operation_content_commitment,
             provider_revision: resulting_revision,
             provider_receipt_commitment: receipt,
             created_successor,
             exact_merge_result,
-        })
+        };
+        if state.ambiguous_next_apply {
+            state.ambiguous_next_apply = false;
+            Ok((
+                ExternalActionFixtureProviderDispatchOutcome::MayHaveStartedAmbiguous,
+                None,
+            ))
+        } else {
+            Ok((
+                ExternalActionFixtureProviderDispatchOutcome::Applied,
+                Some(result),
+            ))
+        }
     }
 
     fn lookup_operation(
         &self,
         operation: &ExternalActionFixtureProviderOperation,
-    ) -> Result<Option<ExternalActionFixtureProviderApplyResult>, WorkflowOsError> {
-        let state = self
+    ) -> Result<ExternalActionFixtureProviderLookupOutcome, WorkflowOsError> {
+        let mut state = self
             .state
             .lock()
             .map_err(|_| fixture_error("provider.unavailable", "fixture provider unavailable"))?;
+        state.lookup_count += 1;
         let operation_content_commitment = operation.operation_content_commitment()?;
+        let coverage = ExternalActionFixtureLookupCoverage::new(operation, state.revision.clone())?;
         let Some(receipt) = state.receipts.get(&operation.operation_id) else {
-            return Ok(None);
+            return Ok(
+                ExternalActionFixtureProviderLookupOutcome::AuthoritativeNotFound { coverage },
+            );
         };
         if receipt.operation_content_commitment != operation_content_commitment {
             return Err(fixture_error(
@@ -824,13 +1034,17 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
                 "fixture provider operation identity conflicts with prior content",
             ));
         }
-        Ok(Some(ExternalActionFixtureProviderApplyResult {
-            posture: ExternalActionFixtureProviderApplyPosture::ExactReplay,
-            provider_revision: receipt.resulting_revision.clone(),
-            provider_receipt_commitment: receipt.receipt_commitment.clone(),
-            created_successor: receipt.created_successor.clone(),
-            exact_merge_result: receipt.exact_merge_result.clone(),
-        }))
+        Ok(ExternalActionFixtureProviderLookupOutcome::ExactFound {
+            result: ExternalActionFixtureProviderApplyResult {
+                posture: ExternalActionFixtureProviderApplyPosture::ExactReplay,
+                operation_content_commitment,
+                provider_revision: receipt.resulting_revision.clone(),
+                provider_receipt_commitment: receipt.receipt_commitment.clone(),
+                created_successor: receipt.created_successor.clone(),
+                exact_merge_result: receipt.exact_merge_result.clone(),
+            },
+            coverage,
+        })
     }
 }
 
@@ -974,6 +1188,19 @@ mod tests {
         external_action_authorization::external_action_test_projection().expect("projection")
     }
 
+    fn apply_result(
+        provider: &InMemoryExternalActionFixtureProvider,
+        operation: &ExternalActionFixtureProviderOperation,
+        context: &str,
+    ) -> ExternalActionFixtureProviderApplyResult {
+        let (posture, result) = provider.compare_and_apply(operation).expect(context);
+        assert_eq!(
+            posture,
+            ExternalActionFixtureProviderDispatchOutcome::Applied
+        );
+        result.expect("applied provider result")
+    }
+
     fn fixture_operation(
         projection: &ExternalActionAuthorizationProjection,
         transition_kind: ExternalActionTransitionKind,
@@ -1019,7 +1246,7 @@ mod tests {
                 .provider_revision()
                 .clone(),
         );
-        provider.compare_and_apply(&create).expect("create draft");
+        apply_result(provider, &create, "create draft");
         provider
             .set_required_checks_posture(ExternalActionFixtureRequiredChecksPosture::TerminalGreen)
             .expect("checks green");
@@ -1033,7 +1260,7 @@ mod tests {
                 .clone(),
             42,
         );
-        provider.compare_and_apply(&ready).expect("mark ready");
+        apply_result(provider, &ready, "mark ready");
     }
 
     #[test]
@@ -1097,13 +1324,13 @@ mod tests {
             ExternalActionTransitionKind::GitHubPullRequestCreateDraft,
             observed.provider_revision().clone(),
         );
-        let applied = provider.compare_and_apply(&operation).expect("apply");
+        let applied = apply_result(&provider, &operation, "apply");
         assert_eq!(
             applied.posture,
             ExternalActionFixtureProviderApplyPosture::Applied
         );
 
-        let replay = provider.compare_and_apply(&operation).expect("replay");
+        let replay = apply_result(&provider, &operation, "replay");
         assert_eq!(
             replay.posture,
             ExternalActionFixtureProviderApplyPosture::ExactReplay
@@ -1129,7 +1356,7 @@ mod tests {
             current.provider_revision().clone(),
             42,
         );
-        provider.compare_and_apply(&advance).expect("advance");
+        apply_result(&provider, &advance, "advance");
         let substituted_successor = ExternalActionFixtureProviderOperation::for_successor(
             ready_operation.operation_id().clone(),
             ready_operation.transition_kind(),
@@ -1150,7 +1377,7 @@ mod tests {
                 .code(),
             "external_action_fixture_lifecycle.provider.operation_conflict"
         );
-        let replay_after_advance = provider.compare_and_apply(&operation).expect("replay");
+        let replay_after_advance = apply_result(&provider, &operation, "replay");
         assert_eq!(replay_after_advance, replay);
 
         let different = fixture_operation(
@@ -1223,7 +1450,7 @@ mod tests {
             42,
         );
 
-        let applied = provider.compare_and_apply(&merge).expect("squash merge");
+        let applied = apply_result(&provider, &merge, "squash merge");
         assert_eq!(
             applied.posture(),
             ExternalActionFixtureProviderApplyPosture::Applied
@@ -1236,7 +1463,7 @@ mod tests {
         );
         assert_eq!(provider.operation_count().expect("operation count"), 3);
 
-        let replay = provider.compare_and_apply(&merge).expect("exact replay");
+        let replay = apply_result(&provider, &merge, "exact replay");
         assert_eq!(
             replay.posture(),
             ExternalActionFixtureProviderApplyPosture::ExactReplay
@@ -1248,10 +1475,13 @@ mod tests {
         );
         assert_eq!(replay.exact_merge_result(), applied.exact_merge_result());
         assert_eq!(provider.operation_count().expect("operation count"), 3);
-        let looked_up = provider
-            .lookup_operation(&merge)
-            .expect("lookup")
-            .expect("receipt");
+        let looked_up = match provider.lookup_operation(&merge).expect("lookup") {
+            ExternalActionFixtureProviderLookupOutcome::ExactFound { result, coverage } => {
+                coverage.validate_for_operation(&merge).expect("coverage");
+                result
+            }
+            outcome => panic!("expected exact receipt, got {outcome:?}"),
+        };
         assert_eq!(
             looked_up.posture(),
             ExternalActionFixtureProviderApplyPosture::ExactReplay
@@ -1299,7 +1529,7 @@ mod tests {
                 .provider_revision()
                 .clone(),
         );
-        not_ready.compare_and_apply(&create).expect("create draft");
+        apply_result(&not_ready, &create, "create draft");
         let merge = fixture_successor_operation(
             &projection,
             ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead,
@@ -1393,7 +1623,10 @@ mod tests {
             "external_action_fixture_lifecycle.provider.revision_drift"
         );
         assert_eq!(provider.operation_count().expect("operation count"), 2);
-        assert!(provider.lookup_operation(&merge).expect("lookup").is_none());
+        assert!(matches!(
+            provider.lookup_operation(&merge).expect("lookup"),
+            ExternalActionFixtureProviderLookupOutcome::AuthoritativeNotFound { .. }
+        ));
     }
 
     #[test]

@@ -6,13 +6,14 @@ use crate::current_authority_source::{
     RegisteredInMemoryCurrentAuthoritySource,
 };
 use crate::external_action_fixture_lifecycle::{
-    ExternalActionFixtureConnectorPosture, ExternalActionFixtureProviderApplyPosture,
-    ExternalActionFixtureProviderApplyResult, ExternalActionFixtureProviderOperation,
-    ExternalActionFixtureProviderSource, ExternalActionFixtureRequiredChecksPosture,
-    ExternalActionFixtureSourceAnchor, ExternalActionFixtureSourceClass,
-    ExternalActionFixtureSourceCoverage, ExternalActionFixtureSourceDisposition,
-    ExternalActionFixtureSourceRecord, ExternalActionSuccessorBindingStore,
-    ExternalActionSuccessorBindingWritePosture,
+    ExternalActionFixtureConnectorPosture, ExternalActionFixtureExactMergeResult,
+    ExternalActionFixtureProviderApplyPosture, ExternalActionFixtureProviderApplyResult,
+    ExternalActionFixtureProviderDispatchOutcome, ExternalActionFixtureProviderLookupOutcome,
+    ExternalActionFixtureProviderOperation, ExternalActionFixtureProviderSource,
+    ExternalActionFixtureRequiredChecksPosture, ExternalActionFixtureSourceAnchor,
+    ExternalActionFixtureSourceClass, ExternalActionFixtureSourceCoverage,
+    ExternalActionFixtureSourceDisposition, ExternalActionFixtureSourceRecord,
+    ExternalActionSuccessorBindingStore, ExternalActionSuccessorBindingWritePosture,
 };
 use crate::{
     derive_external_action_successor_binding, ApprovalDecision, ApprovalDecisionKind,
@@ -141,6 +142,19 @@ pub(crate) struct ExternalActionFixtureMarkReadyInput<'a, F, P, S> {
     pub(crate) successor_store: &'a S,
 }
 
+pub(crate) struct ExternalActionFixtureSquashMergeInput<'a, F, P, S> {
+    pub(crate) projection: &'a ExternalActionAuthorizationProjection,
+    pub(crate) authority_source: &'a RegisteredInMemoryCurrentAuthoritySource,
+    pub(crate) execution_binding: &'a RequiredContextExecutionBinding,
+    pub(crate) required_context_contract: &'a RequiredContextContractBinding,
+    pub(crate) lifecycle_store: &'a LocalExternalActionTransitionLifecycleStore,
+    pub(crate) evaluated_at: Timestamp,
+    pub(crate) redaction: &'a RedactionMetadata,
+    pub(crate) fact_source: &'a F,
+    pub(crate) provider: &'a P,
+    pub(crate) successor_store: &'a S,
+}
+
 pub(crate) struct ExternalActionConnectorAdmissionInput<'a, C> {
     pub(crate) projection: &'a ExternalActionAuthorizationProjection,
     pub(crate) transition_kind: ExternalActionTransitionKind,
@@ -205,6 +219,8 @@ pub(crate) enum ExternalActionConnectorAdmissionPosture {
     Failed,
     Ambiguous,
     ExistingTerminal,
+    ExistingTerminalDenied,
+    ExistingTerminalRevoked,
     RecoveryRequired,
 }
 
@@ -244,6 +260,56 @@ pub(crate) enum ExternalActionFixtureMarkReadyPosture {
     WaitingForConnector,
     MarkedReady,
     ExactReplay,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ExternalActionFixtureSquashMergePosture {
+    WaitingForEvidence,
+    WaitingForConnector,
+    Merged,
+    Reconciled,
+    ExactReplay,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) struct ExternalActionFixtureSquashMergeOutcome {
+    posture: ExternalActionFixtureSquashMergePosture,
+    successor_binding: ExternalActionSuccessorBinding,
+    wait_condition_id: Option<AuthorizedExecutionWaitConditionId>,
+    provider_receipt_commitment: Option<SpecContentHash>,
+    exact_merge_result: Option<ExternalActionFixtureExactMergeResult>,
+}
+
+impl ExternalActionFixtureSquashMergeOutcome {
+    pub(crate) const fn posture(&self) -> ExternalActionFixtureSquashMergePosture {
+        self.posture
+    }
+
+    pub(crate) const fn wait_condition_id(&self) -> Option<&AuthorizedExecutionWaitConditionId> {
+        self.wait_condition_id.as_ref()
+    }
+
+    pub(crate) const fn exact_merge_result(
+        &self,
+    ) -> Option<&ExternalActionFixtureExactMergeResult> {
+        self.exact_merge_result.as_ref()
+    }
+}
+
+impl std::fmt::Debug for ExternalActionFixtureSquashMergeOutcome {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ExternalActionFixtureSquashMergeOutcome")
+            .field("posture", &self.posture)
+            .field("successor_binding", &self.successor_binding)
+            .field("wait_condition", &self.wait_condition_id.is_some())
+            .field(
+                "provider_receipt",
+                &self.provider_receipt_commitment.is_some(),
+            )
+            .field("exact_merge_result", &self.exact_merge_result.is_some())
+            .finish()
+    }
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -312,6 +378,7 @@ struct FixtureProviderConnector<'a, P> {
 
 enum FixtureProviderConnectorCapture {
     Applied(ExternalActionFixtureProviderApplyResult),
+    Ambiguous,
     PreMutationRefusal(FixtureProviderPreMutationRefusal),
     Failed(WorkflowOsError),
 }
@@ -347,9 +414,20 @@ impl<P: ExternalActionFixtureProviderSource> ExternalActionFixtureConnector
             },
         );
         let (capture, posture) = match self.provider.compare_and_apply(&operation) {
-            Ok(result) => (
+            Ok((ExternalActionFixtureProviderDispatchOutcome::Applied, Some(result))) => (
                 FixtureProviderConnectorCapture::Applied(result),
                 ExternalActionFixtureConnectorResult::Succeeded,
+            ),
+            Ok((ExternalActionFixtureProviderDispatchOutcome::MayHaveStartedAmbiguous, None)) => (
+                FixtureProviderConnectorCapture::Ambiguous,
+                ExternalActionFixtureConnectorResult::Ambiguous,
+            ),
+            Ok(_) => (
+                FixtureProviderConnectorCapture::Failed(admission_error(
+                    "provider.result_missing",
+                    "fixture provider dispatch result does not match its posture",
+                )),
+                ExternalActionFixtureConnectorResult::Failed,
             ),
             Err(error)
                 if error.code() == "external_action_fixture.provider.refused_before_dispatch" =>
@@ -443,17 +521,149 @@ pub(crate) fn execute_fixture_draft_creation<
         connector: &mut connector,
     })?;
 
+    let provider_operation = ExternalActionFixtureProviderOperation::new(
+        operation.operation_id().clone(),
+        operation.transition_kind(),
+        current.provider_revision().clone(),
+    );
+    if admission.posture() == ExternalActionConnectorAdmissionPosture::RecoveryRequired
+        && admission.status() == ExternalActionTransitionLifecycleStatus::OutcomeAmbiguous
+    {
+        return match reconcile_provider_operation(
+            input.provider,
+            &provider_operation,
+            input.lifecycle_store,
+            input.evaluated_at,
+        )? {
+            FixtureReconciliationOutcome::Found(result) => {
+                persist_draft_successor(input, &result, true)
+            }
+            FixtureReconciliationOutcome::AuthoritativeNotFound => Err(admission_error(
+                "draft.reconciled_not_found",
+                "fixture draft operation was authoritatively not found",
+            )),
+            FixtureReconciliationOutcome::Inconclusive => Err(admission_error(
+                "draft.reconciliation_inconclusive",
+                "fixture draft reconciliation remains inconclusive",
+            )),
+            FixtureReconciliationOutcome::Unavailable => Err(admission_error(
+                "draft.reconciliation_unavailable",
+                "fixture draft reconciliation source is unavailable",
+            )),
+        };
+    }
     let (provider_result, repairing) = resolve_draft_provider_result(
         input.provider,
-        &ExternalActionFixtureProviderOperation::new(
-            operation.operation_id().clone(),
-            operation.transition_kind(),
-            current.provider_revision().clone(),
-        ),
+        &provider_operation,
         admission.posture(),
         connector.capture,
     )?;
+    provider_result.validate_for_operation(&provider_operation)?;
     persist_draft_successor(input, &provider_result, repairing)
+}
+
+enum FixtureReconciliationOutcome {
+    Found(ExternalActionFixtureProviderApplyResult),
+    AuthoritativeNotFound,
+    Inconclusive,
+    Unavailable,
+}
+
+fn reconcile_provider_operation<P: ExternalActionFixtureProviderSource>(
+    provider: &P,
+    operation: &ExternalActionFixtureProviderOperation,
+    lifecycle_store: &LocalExternalActionTransitionLifecycleStore,
+    evaluated_at: Timestamp,
+) -> Result<FixtureReconciliationOutcome, WorkflowOsError> {
+    let snapshot = lifecycle_store.read_snapshot(operation.operation_id())?;
+    if snapshot.status() != ExternalActionTransitionLifecycleStatus::OutcomeAmbiguous {
+        return Err(admission_error(
+            "reconciliation.state_invalid",
+            "fixture reconciliation requires an ambiguous durable outcome",
+        ));
+    }
+    let attempt_id = snapshot.active_attempt_id().cloned().ok_or_else(|| {
+        admission_error(
+            "reconciliation.attempt_missing",
+            "fixture reconciliation requires the exact ambiguous attempt",
+        )
+    })?;
+    match provider.lookup_operation(operation)? {
+        ExternalActionFixtureProviderLookupOutcome::ExactFound { result, coverage } => {
+            coverage.validate_for_operation(operation)?;
+            result.validate_for_operation(operation)?;
+            let reconciliation_commitment = commitment(
+                "external-action-fixture-reconciliation-found-v1",
+                &(
+                    operation.operation_content_commitment()?,
+                    coverage.coverage_commitment(),
+                    result.provider_receipt_commitment(),
+                ),
+            )?;
+            lifecycle_store.append(
+                operation.operation_id(),
+                snapshot.cursor(),
+                &ExternalActionTransitionLifecycleCommand::ReconcileOutcome {
+                    attempt_id,
+                    outcome: ExternalActionTransitionLifecycleOutcome::Succeeded,
+                    reconciliation_commitment,
+                },
+                evaluated_at,
+            )?;
+            Ok(FixtureReconciliationOutcome::Found(result))
+        }
+        ExternalActionFixtureProviderLookupOutcome::AuthoritativeNotFound { coverage } => {
+            coverage.validate_for_operation(operation)?;
+            let reconciliation_commitment = commitment(
+                "external-action-fixture-reconciliation-not-found-v1",
+                &(
+                    operation.operation_content_commitment()?,
+                    coverage.coverage_commitment(),
+                ),
+            )?;
+            lifecycle_store.append(
+                operation.operation_id(),
+                snapshot.cursor(),
+                &ExternalActionTransitionLifecycleCommand::ReconcileOutcome {
+                    attempt_id,
+                    outcome: ExternalActionTransitionLifecycleOutcome::Failed,
+                    reconciliation_commitment,
+                },
+                evaluated_at,
+            )?;
+            Ok(FixtureReconciliationOutcome::AuthoritativeNotFound)
+        }
+        ExternalActionFixtureProviderLookupOutcome::Inconclusive { coverage } => {
+            coverage.validate_for_operation(operation)?;
+            Ok(FixtureReconciliationOutcome::Inconclusive)
+        }
+        ExternalActionFixtureProviderLookupOutcome::Unavailable => {
+            Ok(FixtureReconciliationOutcome::Unavailable)
+        }
+    }
+}
+
+fn lookup_exact_terminal<P: ExternalActionFixtureProviderSource>(
+    provider: &P,
+    operation: &ExternalActionFixtureProviderOperation,
+    transition_name: &'static str,
+) -> Result<ExternalActionFixtureProviderApplyResult, WorkflowOsError> {
+    match provider.lookup_operation(operation)? {
+        ExternalActionFixtureProviderLookupOutcome::ExactFound { result, coverage } => {
+            coverage.validate_for_operation(operation)?;
+            result.validate_for_operation(operation)?;
+            Ok(result)
+        }
+        _ => Err(admission_error(
+            "terminal.reconciliation_inconclusive",
+            match transition_name {
+                "draft" => "fixture draft terminal replay requires the exact provider receipt",
+                "ready" => "fixture mark-ready terminal replay requires the exact provider receipt",
+                "merge" => "fixture merge terminal replay requires the exact provider receipt",
+                _ => "fixture terminal replay requires the exact provider receipt",
+            },
+        )),
+    }
 }
 
 fn compose_fixture_source_coverage(
@@ -574,6 +784,12 @@ fn resolve_draft_provider_result<P: ExternalActionFixtureProviderSource>(
 ) -> Result<(ExternalActionFixtureProviderApplyResult, bool), WorkflowOsError> {
     Ok(match capture {
         Some(FixtureProviderConnectorCapture::Applied(result)) => (result, false),
+        Some(FixtureProviderConnectorCapture::Ambiguous) => {
+            return Err(admission_error(
+                "draft.outcome_ambiguous",
+                "fixture draft provider outcome is ambiguous and requires reconciliation",
+            ));
+        }
         Some(FixtureProviderConnectorCapture::Failed(error)) => return Err(error),
         Some(FixtureProviderConnectorCapture::PreMutationRefusal(_)) => {
             return Err(admission_error(
@@ -581,15 +797,20 @@ fn resolve_draft_provider_result<P: ExternalActionFixtureProviderSource>(
                 "fixture draft provider refused before mutation",
             ));
         }
-        None if admission_posture == ExternalActionConnectorAdmissionPosture::ExistingTerminal => (
-            provider.lookup_operation(operation)?.ok_or_else(|| {
-                admission_error(
-                    "draft.reconciliation_inconclusive",
-                    "fixture draft creation requires provider receipt reconciliation",
-                )
-            })?,
-            true,
-        ),
+        None if admission_posture == ExternalActionConnectorAdmissionPosture::ExistingTerminal => {
+            (lookup_exact_terminal(provider, operation, "draft")?, true)
+        }
+        None if matches!(
+            admission_posture,
+            ExternalActionConnectorAdmissionPosture::ExistingTerminalDenied
+                | ExternalActionConnectorAdmissionPosture::ExistingTerminalRevoked
+        ) =>
+        {
+            return Err(admission_error(
+                "draft.terminal_not_successful",
+                "fixture draft terminal state is not a successful provider outcome",
+            ));
+        }
         None => {
             return Err(admission_error(
                 "draft.provider_result_missing",
@@ -804,8 +1025,58 @@ pub(crate) fn execute_fixture_mark_ready<
         redaction: input.redaction,
         connector: &mut connector,
     })?;
+    let provider_operation = ExternalActionFixtureProviderOperation::for_successor(
+        operation.operation_id().clone(),
+        operation.transition_kind(),
+        current.provider_revision().clone(),
+        successor_binding.provider_pull_request_number(),
+    );
+    if admission.posture() == ExternalActionConnectorAdmissionPosture::RecoveryRequired
+        && admission.status() == ExternalActionTransitionLifecycleStatus::OutcomeAmbiguous
+    {
+        return match reconcile_provider_operation(
+            input.provider,
+            &provider_operation,
+            input.lifecycle_store,
+            input.evaluated_at,
+        )? {
+            FixtureReconciliationOutcome::Found(result) => {
+                result.validate_for_operation(&provider_operation)?;
+                if result.created_successor().is_some() || result.exact_merge_result().is_some() {
+                    return Err(admission_error(
+                        "ready.result_shape_invalid",
+                        "fixture mark-ready reconciliation returned an invalid result shape",
+                    ));
+                }
+                Ok(ExternalActionFixtureMarkReadyOutcome {
+                    posture: ExternalActionFixtureMarkReadyPosture::ExactReplay,
+                    successor_binding,
+                    wait_condition_id: None,
+                    provider_receipt_commitment: Some(result.provider_receipt_commitment().clone()),
+                })
+            }
+            FixtureReconciliationOutcome::AuthoritativeNotFound => Err(admission_error(
+                "ready.reconciled_not_found",
+                "fixture mark-ready operation was authoritatively not found",
+            )),
+            FixtureReconciliationOutcome::Inconclusive => Err(admission_error(
+                "ready.reconciliation_inconclusive",
+                "fixture mark-ready reconciliation remains inconclusive",
+            )),
+            FixtureReconciliationOutcome::Unavailable => Err(admission_error(
+                "ready.reconciliation_unavailable",
+                "fixture mark-ready reconciliation source is unavailable",
+            )),
+        };
+    }
     let provider_result = match connector.capture {
         Some(FixtureProviderConnectorCapture::Applied(result)) => result,
+        Some(FixtureProviderConnectorCapture::Ambiguous) => {
+            return Err(admission_error(
+                "ready.outcome_ambiguous",
+                "fixture mark-ready provider outcome is ambiguous and requires reconciliation",
+            ));
+        }
         Some(FixtureProviderConnectorCapture::PreMutationRefusal(refusal)) => {
             let refreshed = input.provider.observe()?;
             let wait_kind = match refusal {
@@ -828,20 +1099,18 @@ pub(crate) fn execute_fixture_mark_ready<
         None if admission.posture()
             == ExternalActionConnectorAdmissionPosture::ExistingTerminal =>
         {
-            input
-                .provider
-                .lookup_operation(&ExternalActionFixtureProviderOperation::for_successor(
-                    operation.operation_id().clone(),
-                    operation.transition_kind(),
-                    current.provider_revision().clone(),
-                    successor_binding.provider_pull_request_number(),
-                ))?
-                .ok_or_else(|| {
-                    admission_error(
-                        "ready.reconciliation_inconclusive",
-                        "fixture mark-ready requires the exact provider receipt",
-                    )
-                })?
+            lookup_exact_terminal(input.provider, &provider_operation, "ready")?
+        }
+        None if matches!(
+            admission.posture(),
+            ExternalActionConnectorAdmissionPosture::ExistingTerminalDenied
+                | ExternalActionConnectorAdmissionPosture::ExistingTerminalRevoked
+        ) =>
+        {
+            return Err(admission_error(
+                "ready.terminal_not_successful",
+                "fixture mark-ready terminal state is not a successful provider outcome",
+            ));
         }
         None => {
             return Err(admission_error(
@@ -850,12 +1119,7 @@ pub(crate) fn execute_fixture_mark_ready<
             ));
         }
     };
-    if provider_result.created_successor().is_some() {
-        return Err(admission_error(
-            "ready.successor_unexpected",
-            "fixture mark-ready must not create a successor identity",
-        ));
-    }
+    provider_result.validate_for_operation(&provider_operation)?;
     Ok(ExternalActionFixtureMarkReadyOutcome {
         posture: if admission.posture() == ExternalActionConnectorAdmissionPosture::ExistingTerminal
             || provider_result.posture() == ExternalActionFixtureProviderApplyPosture::ExactReplay
@@ -867,6 +1131,235 @@ pub(crate) fn execute_fixture_mark_ready<
         successor_binding,
         wait_condition_id: None,
         provider_receipt_commitment: Some(provider_result.provider_receipt_commitment().clone()),
+    })
+}
+
+#[allow(clippy::too_many_lines)]
+pub(crate) fn execute_fixture_squash_merge<
+    F: ExternalActionFixtureDraftSource,
+    P: ExternalActionFixtureProviderSource,
+    S: ExternalActionSuccessorBindingStore,
+>(
+    input: &ExternalActionFixtureSquashMergeInput<'_, F, P, S>,
+) -> Result<ExternalActionFixtureSquashMergeOutcome, WorkflowOsError> {
+    let fact_observation = input.fact_source.observe()?;
+    let before = input.provider.observe()?;
+    let operation = ExternalActionTransitionOperation::from_projection(
+        input.projection,
+        ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead,
+    )?;
+    let source_coverage = compose_fixture_source_coverage(
+        input.projection,
+        input.execution_binding,
+        input.evaluated_at,
+        &fact_observation,
+        &before,
+        &operation,
+    )?;
+    let before_anchor = ExternalActionFixtureSourceAnchor::new(
+        &source_coverage,
+        before.provider_revision().clone(),
+    )?;
+    let current = input.provider.observe()?;
+    let current_anchor = ExternalActionFixtureSourceAnchor::new(
+        &source_coverage,
+        current.provider_revision().clone(),
+    )?;
+    before_anchor.verify_unchanged(&current_anchor)?;
+    validate_fixture_provider_resource(input.projection, &current)?;
+
+    let successor_binding = input
+        .successor_store
+        .read_exact(input.projection)?
+        .ok_or_else(|| {
+            admission_error(
+                "merge.successor_missing",
+                "fixture squash-merge requires the exact persisted successor binding",
+            )
+        })?;
+    successor_binding.validate_for_projection(input.projection)?;
+
+    {
+        let mut validation_connector = FixtureProviderConnector {
+            provider: input.provider,
+            expected_provider_revision: current.provider_revision().clone(),
+            expected_successor_number: Some(successor_binding.provider_pull_request_number()),
+            capture: None,
+        };
+        validate_static_input(&ExternalActionConnectorAdmissionInput {
+            projection: input.projection,
+            transition_kind:
+                ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead,
+            authority_source: input.authority_source,
+            execution_binding: input.execution_binding,
+            required_context_contract: input.required_context_contract,
+            lifecycle_store: input.lifecycle_store,
+            fixture_facts: fixture_facts(&fact_observation),
+            evaluated_at: input.evaluated_at,
+            redaction: input.redaction,
+            connector: &mut validation_connector,
+        })?;
+    }
+    input
+        .lifecycle_store
+        .initialize(&operation, input.evaluated_at)?;
+
+    if let Some(waiting) =
+        resolve_or_preserve_merge_wait(input, &operation, &current, &successor_binding)?
+    {
+        return Ok(waiting);
+    }
+    if current.required_checks_posture()
+        != ExternalActionFixtureRequiredChecksPosture::TerminalGreen
+    {
+        return register_merge_wait(
+            input,
+            &operation,
+            &current,
+            successor_binding,
+            AuthorizedExecutionWaitConditionKind::CheckRequired,
+        );
+    }
+    if current.connector_posture() == ExternalActionFixtureConnectorPosture::RefusedBeforeDispatch {
+        return register_merge_wait(
+            input,
+            &operation,
+            &current,
+            successor_binding,
+            AuthorizedExecutionWaitConditionKind::CapabilityUnavailable,
+        );
+    }
+
+    let provider_operation = ExternalActionFixtureProviderOperation::for_successor(
+        operation.operation_id().clone(),
+        operation.transition_kind(),
+        current.provider_revision().clone(),
+        successor_binding.provider_pull_request_number(),
+    );
+    let mut connector = FixtureProviderConnector {
+        provider: input.provider,
+        expected_provider_revision: current.provider_revision().clone(),
+        expected_successor_number: Some(successor_binding.provider_pull_request_number()),
+        capture: None,
+    };
+    let admission = execute_fixture_external_action(&mut ExternalActionConnectorAdmissionInput {
+        projection: input.projection,
+        transition_kind: ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead,
+        authority_source: input.authority_source,
+        execution_binding: input.execution_binding,
+        required_context_contract: input.required_context_contract,
+        lifecycle_store: input.lifecycle_store,
+        fixture_facts: fixture_facts(&fact_observation),
+        evaluated_at: input.evaluated_at,
+        redaction: input.redaction,
+        connector: &mut connector,
+    })?;
+
+    let (provider_result, posture) = if admission.posture()
+        == ExternalActionConnectorAdmissionPosture::RecoveryRequired
+        && admission.status() == ExternalActionTransitionLifecycleStatus::OutcomeAmbiguous
+    {
+        match reconcile_provider_operation(
+            input.provider,
+            &provider_operation,
+            input.lifecycle_store,
+            input.evaluated_at,
+        )? {
+            FixtureReconciliationOutcome::Found(result) => {
+                (result, ExternalActionFixtureSquashMergePosture::Reconciled)
+            }
+            FixtureReconciliationOutcome::AuthoritativeNotFound => {
+                return Err(admission_error(
+                    "merge.reconciled_not_found",
+                    "fixture squash-merge operation was authoritatively not found",
+                ));
+            }
+            FixtureReconciliationOutcome::Inconclusive => {
+                return Err(admission_error(
+                    "merge.reconciliation_inconclusive",
+                    "fixture squash-merge reconciliation remains inconclusive",
+                ));
+            }
+            FixtureReconciliationOutcome::Unavailable => {
+                return Err(admission_error(
+                    "merge.reconciliation_unavailable",
+                    "fixture squash-merge reconciliation source is unavailable",
+                ));
+            }
+        }
+    } else {
+        match connector.capture {
+            Some(FixtureProviderConnectorCapture::Applied(result)) => {
+                (result, ExternalActionFixtureSquashMergePosture::Merged)
+            }
+            Some(FixtureProviderConnectorCapture::Ambiguous) => {
+                return Err(admission_error(
+                    "merge.outcome_ambiguous",
+                    "fixture squash-merge provider outcome is ambiguous and requires reconciliation",
+                ));
+            }
+            Some(FixtureProviderConnectorCapture::PreMutationRefusal(refusal)) => {
+                let refreshed = input.provider.observe()?;
+                let wait_kind = match refusal {
+                    FixtureProviderPreMutationRefusal::ChecksNotGreen => {
+                        AuthorizedExecutionWaitConditionKind::CheckRequired
+                    }
+                    FixtureProviderPreMutationRefusal::ConnectorUnavailable => {
+                        AuthorizedExecutionWaitConditionKind::CapabilityUnavailable
+                    }
+                };
+                return register_merge_wait(
+                    input,
+                    &operation,
+                    &refreshed,
+                    successor_binding,
+                    wait_kind,
+                );
+            }
+            Some(FixtureProviderConnectorCapture::Failed(error)) => return Err(error),
+            None if admission.posture()
+                == ExternalActionConnectorAdmissionPosture::ExistingTerminal =>
+            {
+                (
+                    lookup_exact_terminal(input.provider, &provider_operation, "merge")?,
+                    ExternalActionFixtureSquashMergePosture::ExactReplay,
+                )
+            }
+            None if matches!(
+                admission.posture(),
+                ExternalActionConnectorAdmissionPosture::ExistingTerminalDenied
+                    | ExternalActionConnectorAdmissionPosture::ExistingTerminalRevoked
+            ) =>
+            {
+                return Err(admission_error(
+                    "merge.terminal_not_successful",
+                    "fixture squash-merge terminal state is not a successful provider outcome",
+                ));
+            }
+            None => {
+                return Err(admission_error(
+                    "merge.provider_result_missing",
+                    "fixture squash-merge provider result is missing",
+                ));
+            }
+        }
+    };
+    provider_result.validate_for_operation(&provider_operation)?;
+    let exact_merge_result = provider_result
+        .exact_merge_result()
+        .cloned()
+        .ok_or_else(|| {
+            admission_error(
+                "merge.result_missing",
+                "fixture squash-merge result is missing exact merge evidence",
+            )
+        })?;
+    Ok(ExternalActionFixtureSquashMergeOutcome {
+        posture,
+        successor_binding,
+        wait_condition_id: None,
+        provider_receipt_commitment: Some(provider_result.provider_receipt_commitment().clone()),
+        exact_merge_result: Some(exact_merge_result),
     })
 }
 
@@ -1102,6 +1595,197 @@ fn wait_posture(
     }
 }
 
+fn resolve_or_preserve_merge_wait<F, P, S>(
+    input: &ExternalActionFixtureSquashMergeInput<'_, F, P, S>,
+    operation: &ExternalActionTransitionOperation,
+    provider: &crate::external_action_fixture_lifecycle::ExternalActionFixtureProviderObservation,
+    successor_binding: &ExternalActionSuccessorBinding,
+) -> Result<Option<ExternalActionFixtureSquashMergeOutcome>, WorkflowOsError> {
+    let snapshot = input
+        .lifecycle_store
+        .read_snapshot(operation.operation_id())?;
+    if snapshot.status() != ExternalActionTransitionLifecycleStatus::Waiting {
+        return Ok(None);
+    }
+    let active = snapshot.active_wait().ok_or_else(|| {
+        admission_error(
+            "merge.wait_missing",
+            "fixture squash-merge lifecycle is waiting without an active condition",
+        )
+    })?;
+    let still_waiting = match active.kind() {
+        AuthorizedExecutionWaitConditionKind::CheckRequired => {
+            provider.required_checks_posture()
+                != ExternalActionFixtureRequiredChecksPosture::TerminalGreen
+        }
+        AuthorizedExecutionWaitConditionKind::CapabilityUnavailable => {
+            provider.connector_posture()
+                == ExternalActionFixtureConnectorPosture::RefusedBeforeDispatch
+        }
+        _ => {
+            return Err(admission_error(
+                "merge.wait_kind_invalid",
+                "fixture squash-merge active wait has an unsupported kind",
+            ));
+        }
+    };
+    if still_waiting {
+        return Ok(Some(ExternalActionFixtureSquashMergeOutcome {
+            posture: merge_wait_posture(active.kind())?,
+            successor_binding: successor_binding.clone(),
+            wait_condition_id: Some(active.condition_id().clone()),
+            provider_receipt_commitment: None,
+            exact_merge_result: None,
+        }));
+    }
+    input.lifecycle_store.append(
+        operation.operation_id(),
+        snapshot.cursor(),
+        &ExternalActionTransitionLifecycleCommand::ResolveWait {
+            proof: ExternalActionWaitResolutionProof::new(
+                active,
+                provider.observation_commitment().clone(),
+                AuthorizedExecutionWaitStatus::Satisfied,
+                input.evaluated_at,
+            )?,
+        },
+        input.evaluated_at,
+    )?;
+    Ok(None)
+}
+
+#[allow(clippy::too_many_lines)]
+fn register_merge_wait<F, P, S>(
+    input: &ExternalActionFixtureSquashMergeInput<'_, F, P, S>,
+    operation: &ExternalActionTransitionOperation,
+    provider: &crate::external_action_fixture_lifecycle::ExternalActionFixtureProviderObservation,
+    successor_binding: ExternalActionSuccessorBinding,
+    kind: AuthorizedExecutionWaitConditionKind,
+) -> Result<ExternalActionFixtureSquashMergeOutcome, WorkflowOsError> {
+    let mut snapshot = input
+        .lifecycle_store
+        .read_snapshot(operation.operation_id())?;
+    let attempt_id = if matches!(
+        snapshot.status(),
+        ExternalActionTransitionLifecycleStatus::Projected
+            | ExternalActionTransitionLifecycleStatus::OutcomeFailed
+            | ExternalActionTransitionLifecycleStatus::ReconciledFailed
+    ) {
+        let attempt_id = derive_attempt_id(operation, &snapshot)?;
+        input.lifecycle_store.append(
+            operation.operation_id(),
+            snapshot.cursor(),
+            &ExternalActionTransitionLifecycleCommand::Reserve {
+                attempt_id: attempt_id.clone(),
+            },
+            input.evaluated_at,
+        )?;
+        snapshot = input
+            .lifecycle_store
+            .read_snapshot(operation.operation_id())?;
+        attempt_id
+    } else if snapshot.status() == ExternalActionTransitionLifecycleStatus::Reserved
+        && snapshot.verified_wait_resume_attempt_id().is_some()
+    {
+        snapshot.active_attempt_id().cloned().ok_or_else(|| {
+            admission_error(
+                "merge.wait_attempt_missing",
+                "fixture squash-merge wait is missing its reserved attempt",
+            )
+        })?
+    } else {
+        return Err(admission_error(
+            "merge.wait_registration_illegal",
+            "fixture squash-merge cannot register a wait from the current lifecycle posture",
+        ));
+    };
+    let wait_commitment = commitment(
+        "external-action-fixture-merge-wait-v1",
+        &(
+            operation.operation_id(),
+            kind,
+            provider.observation_commitment(),
+            successor_binding.binding_commitment(),
+        ),
+    )?;
+    let condition_id = AuthorizedExecutionWaitConditionId::new(format!(
+        "external-action-wait/{}",
+        wait_commitment.as_str()
+    ))?;
+    let wait = AuthorizedExecutionWaitCondition::new(AuthorizedExecutionWaitConditionDefinition {
+        condition_id: condition_id.clone(),
+        condition_version: 1,
+        kind,
+        workflow_id: input.projection.workflow_id().clone(),
+        run_id: input.projection.run_id().clone(),
+        window_id: input.projection.execution_window_id().clone(),
+        action_reference: AuthorizedExecutionActionReference::new(format!(
+            "external-action/{}",
+            operation.operation_id().as_str()
+        ))?,
+        step_id: input.execution_binding.step_id().clone(),
+        attempt_id,
+        expected_sequence_number: EventSequenceNumber::new(snapshot.cursor().sequence())?,
+        expected_event_id: EventId::new(format!(
+            "event/external-action/{}",
+            snapshot.cursor().head_commitment().as_str()
+        ))?,
+        required_reference: AuthorizedExecutionResourceReference::new(format!(
+            "external-action-requirement/{}",
+            wait_commitment.as_str()
+        ))?,
+        created_at: input.evaluated_at,
+        deadline: Some(input.projection.expires_at()),
+        wake_trigger: match kind {
+            AuthorizedExecutionWaitConditionKind::CheckRequired => {
+                AuthorizedExecutionWakeTriggerKind::CheckAccepted
+            }
+            AuthorizedExecutionWaitConditionKind::CapabilityUnavailable => {
+                AuthorizedExecutionWakeTriggerKind::CapabilityAvailabilityChanged
+            }
+            _ => {
+                return Err(admission_error(
+                    "merge.wait_kind_invalid",
+                    "fixture squash-merge wait kind is unsupported",
+                ));
+            }
+        },
+        status: AuthorizedExecutionWaitStatus::Waiting,
+    })?;
+    input.lifecycle_store.append(
+        operation.operation_id(),
+        snapshot.cursor(),
+        &ExternalActionTransitionLifecycleCommand::RegisterWait {
+            wait_condition: Box::new(wait),
+        },
+        input.evaluated_at,
+    )?;
+    Ok(ExternalActionFixtureSquashMergeOutcome {
+        posture: merge_wait_posture(kind)?,
+        successor_binding,
+        wait_condition_id: Some(condition_id),
+        provider_receipt_commitment: None,
+        exact_merge_result: None,
+    })
+}
+
+fn merge_wait_posture(
+    kind: AuthorizedExecutionWaitConditionKind,
+) -> Result<ExternalActionFixtureSquashMergePosture, WorkflowOsError> {
+    match kind {
+        AuthorizedExecutionWaitConditionKind::CheckRequired => {
+            Ok(ExternalActionFixtureSquashMergePosture::WaitingForEvidence)
+        }
+        AuthorizedExecutionWaitConditionKind::CapabilityUnavailable => {
+            Ok(ExternalActionFixtureSquashMergePosture::WaitingForConnector)
+        }
+        _ => Err(admission_error(
+            "merge.wait_kind_invalid",
+            "fixture squash-merge wait kind is unsupported",
+        )),
+    }
+}
+
 fn derive_attempt_id(
     operation: &ExternalActionTransitionOperation,
     snapshot: &crate::ExternalActionTransitionLifecycleSnapshot,
@@ -1252,11 +1936,21 @@ fn existing_lifecycle_outcome(
         ExternalActionTransitionLifecycleStatus::OutcomeSucceeded
             | ExternalActionTransitionLifecycleStatus::ReconciledSucceeded
             | ExternalActionTransitionLifecycleStatus::Consumed
-            | ExternalActionTransitionLifecycleStatus::Denied
-            | ExternalActionTransitionLifecycleStatus::Revoked
     ) {
         return Some(ExternalActionConnectorAdmissionOutcome {
             posture: ExternalActionConnectorAdmissionPosture::ExistingTerminal,
+            status,
+        });
+    }
+    if status == ExternalActionTransitionLifecycleStatus::Denied {
+        return Some(ExternalActionConnectorAdmissionOutcome {
+            posture: ExternalActionConnectorAdmissionPosture::ExistingTerminalDenied,
+            status,
+        });
+    }
+    if status == ExternalActionTransitionLifecycleStatus::Revoked {
+        return Some(ExternalActionConnectorAdmissionOutcome {
+            posture: ExternalActionConnectorAdmissionPosture::ExistingTerminalRevoked,
             status,
         });
     }
@@ -1734,7 +2428,13 @@ mod tests {
         fn compare_and_apply(
             &self,
             operation: &ExternalActionFixtureProviderOperation,
-        ) -> Result<ExternalActionFixtureProviderApplyResult, WorkflowOsError> {
+        ) -> Result<
+            (
+                ExternalActionFixtureProviderDispatchOutcome,
+                Option<ExternalActionFixtureProviderApplyResult>,
+            ),
+            WorkflowOsError,
+        > {
             if self.armed.swap(false, Ordering::SeqCst) {
                 return match self.race {
                     ProviderRaceKind::ChecksRegressed => {
@@ -1763,8 +2463,97 @@ mod tests {
         fn lookup_operation(
             &self,
             operation: &ExternalActionFixtureProviderOperation,
-        ) -> Result<Option<ExternalActionFixtureProviderApplyResult>, WorkflowOsError> {
+        ) -> Result<ExternalActionFixtureProviderLookupOutcome, WorkflowOsError> {
             self.inner.lookup_operation(operation)
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum AmbiguousLookupBehavior {
+        AuthoritativeNotFound,
+        Inconclusive,
+        Unavailable,
+        SubstitutedResult,
+    }
+
+    struct LookupControlledAmbiguousProvider {
+        inner: InMemoryExternalActionFixtureProvider,
+        behavior: AmbiguousLookupBehavior,
+        compare_calls: AtomicU64,
+        lookup_calls: AtomicU64,
+    }
+
+    impl LookupControlledAmbiguousProvider {
+        fn new(observed_at: Timestamp, behavior: AmbiguousLookupBehavior) -> Self {
+            Self {
+                inner: InMemoryExternalActionFixtureProvider::new(observed_at),
+                behavior,
+                compare_calls: AtomicU64::new(0),
+                lookup_calls: AtomicU64::new(0),
+            }
+        }
+
+        fn compare_calls(&self) -> u64 {
+            self.compare_calls.load(Ordering::SeqCst)
+        }
+
+        fn lookup_calls(&self) -> u64 {
+            self.lookup_calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl ExternalActionFixtureProviderSource for LookupControlledAmbiguousProvider {
+        fn observe(&self) -> Result<ExternalActionFixtureProviderObservation, WorkflowOsError> {
+            self.inner.observe()
+        }
+
+        fn compare_and_apply(
+            &self,
+            _operation: &ExternalActionFixtureProviderOperation,
+        ) -> Result<
+            (
+                ExternalActionFixtureProviderDispatchOutcome,
+                Option<ExternalActionFixtureProviderApplyResult>,
+            ),
+            WorkflowOsError,
+        > {
+            self.compare_calls.fetch_add(1, Ordering::SeqCst);
+            Ok((
+                ExternalActionFixtureProviderDispatchOutcome::MayHaveStartedAmbiguous,
+                None,
+            ))
+        }
+
+        fn lookup_operation(
+            &self,
+            operation: &ExternalActionFixtureProviderOperation,
+        ) -> Result<ExternalActionFixtureProviderLookupOutcome, WorkflowOsError> {
+            self.lookup_calls.fetch_add(1, Ordering::SeqCst);
+            let observation = self.inner.observe()?;
+            let coverage =
+                crate::external_action_fixture_lifecycle::ExternalActionFixtureLookupCoverage::new(
+                    operation,
+                    observation.provider_revision().clone(),
+                )?;
+            match self.behavior {
+                AmbiguousLookupBehavior::AuthoritativeNotFound => Ok(
+                    ExternalActionFixtureProviderLookupOutcome::AuthoritativeNotFound { coverage },
+                ),
+                AmbiguousLookupBehavior::Inconclusive => {
+                    Ok(ExternalActionFixtureProviderLookupOutcome::Inconclusive { coverage })
+                }
+                AmbiguousLookupBehavior::Unavailable => {
+                    Ok(ExternalActionFixtureProviderLookupOutcome::Unavailable)
+                }
+                AmbiguousLookupBehavior::SubstitutedResult => {
+                    Ok(ExternalActionFixtureProviderLookupOutcome::ExactFound {
+                        result: ExternalActionFixtureProviderApplyResult::substituted_create_result(
+                            timestamp("2026-07-26T10:24:00Z"),
+                        ),
+                        coverage,
+                    })
+                }
+            }
         }
     }
 
@@ -1782,6 +2571,7 @@ mod tests {
         resource: GitHubExternalActionResourceBinding,
         evidence: Vec<ExternalActionEvidencePredicate>,
         ready_evidence: Vec<ExternalActionEvidencePredicate>,
+        merge_evidence: Vec<ExternalActionEvidencePredicate>,
     }
 
     fn timestamp(value: &str) -> Timestamp {
@@ -1900,6 +2690,7 @@ mod tests {
             ],
         )
         .expect("merge transition");
+        let merge_evidence = merge_transition.evidence_predicates().to_vec();
         let strict_non_goals = vec!["No live provider access".to_owned()];
         let strict_non_goals_commitment = commitment(
             "external-action-presentation-non-goals-v1",
@@ -2047,6 +2838,7 @@ mod tests {
             resource,
             evidence,
             ready_evidence,
+            merge_evidence,
         }
     }
 
@@ -2150,6 +2942,25 @@ mod tests {
         })
     }
 
+    fn merge_fact_source(
+        fixture: &Fixture,
+        revocation_posture: ExternalActionFixtureRevocationPosture,
+        current_resource: GitHubExternalActionResourceBinding,
+    ) -> InMemoryExternalActionFixtureDraftSource {
+        InMemoryExternalActionFixtureDraftSource::new(ExternalActionFixtureDraftSourceDefinition {
+            approval_presentation: fixture.presentation.clone(),
+            approval_decision: fixture.decision.clone(),
+            policy_decision_event_id: fixture.policy_event_id.clone(),
+            governance_assessment_commitment: fixture.governance_commitment.clone(),
+            execution_window_id: fixture.window_id.clone(),
+            execution_window_posture: ExternalActionFixtureExecutionWindowPosture::Open,
+            revocation_source_commitment: fixture.revocation_commitment.clone(),
+            revocation_posture,
+            current_resource,
+            evidence: fixture.merge_evidence.clone(),
+        })
+    }
+
     fn execute_draft_with_source<
         P: ExternalActionFixtureProviderSource,
         S: ExternalActionSuccessorBindingStore,
@@ -2218,6 +3029,35 @@ mod tests {
             evaluated_at: timestamp("2026-07-26T10:25:00Z"),
             redaction: &redaction,
             fact_source,
+            provider,
+            successor_store,
+        })
+    }
+
+    fn execute_merge<
+        P: ExternalActionFixtureProviderSource,
+        S: ExternalActionSuccessorBindingStore,
+    >(
+        fixture: &Fixture,
+        lifecycle_store: &LocalExternalActionTransitionLifecycleStore,
+        provider: &P,
+        successor_store: &S,
+    ) -> Result<ExternalActionFixtureSquashMergeOutcome, WorkflowOsError> {
+        let fact_source = merge_fact_source(
+            fixture,
+            ExternalActionFixtureRevocationPosture::Current,
+            fixture.resource.clone(),
+        );
+        let redaction = RedactionMetadata::empty();
+        execute_fixture_squash_merge(&ExternalActionFixtureSquashMergeInput {
+            projection: &fixture.projection,
+            authority_source: &fixture.source,
+            execution_binding: &fixture.binding,
+            required_context_contract: &fixture.contract,
+            lifecycle_store,
+            evaluated_at: timestamp("2026-07-26T10:25:00Z"),
+            redaction: &redaction,
+            fact_source: &fact_source,
             provider,
             successor_store,
         })
@@ -2690,6 +3530,169 @@ mod tests {
     }
 
     #[test]
+    fn phase_5d_merges_exact_unchanged_head_and_replays_without_provider_redispatch() {
+        let fixture = fixture(CapabilityGrantLifecycle::Active);
+        let root = TestRoot::new();
+        let lifecycle_store = LocalExternalActionTransitionLifecycleStore::new(&root.0);
+        let provider =
+            InMemoryExternalActionFixtureProvider::new(timestamp("2026-07-26T10:24:00Z"));
+        let successor_store = InMemoryExternalActionSuccessorBindingStore::default();
+
+        execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect("draft created");
+        provider
+            .set_required_checks_posture(ExternalActionFixtureRequiredChecksPosture::TerminalGreen)
+            .expect("checks green");
+        execute_ready(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect("marked ready");
+
+        let merged =
+            execute_merge(&fixture, &lifecycle_store, &provider, &successor_store).expect("merged");
+        assert_eq!(
+            merged.posture(),
+            ExternalActionFixtureSquashMergePosture::Merged
+        );
+        assert!(merged.exact_merge_result().is_some());
+        assert_eq!(provider.compare_and_apply_count().expect("dispatches"), 3);
+
+        let replay = execute_merge(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect("merge replay");
+        assert_eq!(
+            replay.posture(),
+            ExternalActionFixtureSquashMergePosture::ExactReplay
+        );
+        assert_eq!(replay.exact_merge_result(), merged.exact_merge_result());
+        assert_eq!(provider.compare_and_apply_count().expect("dispatches"), 3);
+        assert_eq!(provider.lookup_count().expect("lookups"), 1);
+    }
+
+    #[test]
+    fn phase_5d_reconciles_ambiguous_create_ready_and_merge_without_redispatch() {
+        let fixture = fixture(CapabilityGrantLifecycle::Active);
+        let root = TestRoot::new();
+        let lifecycle_store = LocalExternalActionTransitionLifecycleStore::new(&root.0);
+        let provider =
+            InMemoryExternalActionFixtureProvider::new(timestamp("2026-07-26T10:24:00Z"));
+        let successor_store = InMemoryExternalActionSuccessorBindingStore::default();
+
+        provider.make_next_apply_ambiguous().expect("arm create");
+        let create_error = execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect_err("ambiguous create");
+        assert_eq!(
+            create_error.code(),
+            "external_action_connector_admission.draft.outcome_ambiguous"
+        );
+        let created = execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect("reconciled create");
+        assert_eq!(
+            created.posture(),
+            ExternalActionFixtureDraftCreationPosture::ReconciledSuccessor
+        );
+        assert_eq!(provider.compare_and_apply_count().expect("dispatches"), 1);
+
+        provider
+            .set_required_checks_posture(ExternalActionFixtureRequiredChecksPosture::TerminalGreen)
+            .expect("checks green");
+        provider.make_next_apply_ambiguous().expect("arm ready");
+        let ready_error = execute_ready(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect_err("ambiguous ready");
+        assert_eq!(
+            ready_error.code(),
+            "external_action_connector_admission.ready.outcome_ambiguous"
+        );
+        let ready = execute_ready(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect("reconciled ready");
+        assert_eq!(
+            ready.posture(),
+            ExternalActionFixtureMarkReadyPosture::ExactReplay
+        );
+        assert_eq!(provider.compare_and_apply_count().expect("dispatches"), 2);
+
+        provider.make_next_apply_ambiguous().expect("arm merge");
+        let merge_error = execute_merge(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect_err("ambiguous merge");
+        assert_eq!(
+            merge_error.code(),
+            "external_action_connector_admission.merge.outcome_ambiguous"
+        );
+        let merged = execute_merge(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect("reconciled merge");
+        assert_eq!(
+            merged.posture(),
+            ExternalActionFixtureSquashMergePosture::Reconciled
+        );
+        assert!(merged.exact_merge_result().is_some());
+        assert_eq!(provider.compare_and_apply_count().expect("dispatches"), 3);
+        assert_eq!(provider.lookup_count().expect("lookups"), 3);
+    }
+
+    #[test]
+    fn phase_5d_typed_lookup_outcomes_never_redispatch_ambiguous_create() {
+        for (behavior, expected_code) in [
+            (
+                AmbiguousLookupBehavior::AuthoritativeNotFound,
+                "external_action_connector_admission.draft.reconciled_not_found",
+            ),
+            (
+                AmbiguousLookupBehavior::Inconclusive,
+                "external_action_connector_admission.draft.reconciliation_inconclusive",
+            ),
+            (
+                AmbiguousLookupBehavior::Unavailable,
+                "external_action_connector_admission.draft.reconciliation_unavailable",
+            ),
+        ] {
+            let fixture = fixture(CapabilityGrantLifecycle::Active);
+            let root = TestRoot::new();
+            let lifecycle_store = LocalExternalActionTransitionLifecycleStore::new(&root.0);
+            let provider =
+                LookupControlledAmbiguousProvider::new(timestamp("2026-07-26T10:24:00Z"), behavior);
+            let successor_store = InMemoryExternalActionSuccessorBindingStore::default();
+
+            execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+                .expect_err("initial ambiguity");
+            let reconciled = execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+                .expect_err("typed reconciliation posture");
+            assert_eq!(reconciled.code(), expected_code);
+            assert_eq!(provider.compare_calls(), 1);
+            assert_eq!(provider.lookup_calls(), 1);
+
+            if matches!(
+                behavior,
+                AmbiguousLookupBehavior::Inconclusive | AmbiguousLookupBehavior::Unavailable
+            ) {
+                execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+                    .expect_err("ambiguity remains bounded");
+                assert_eq!(provider.compare_calls(), 1);
+                assert_eq!(provider.lookup_calls(), 2);
+            }
+        }
+    }
+
+    #[test]
+    fn phase_5d_rejects_substituted_lookup_result_without_provider_redispatch() {
+        let fixture = fixture(CapabilityGrantLifecycle::Active);
+        let root = TestRoot::new();
+        let lifecycle_store = LocalExternalActionTransitionLifecycleStore::new(&root.0);
+        let provider = LookupControlledAmbiguousProvider::new(
+            timestamp("2026-07-26T10:24:00Z"),
+            AmbiguousLookupBehavior::SubstitutedResult,
+        );
+        let successor_store = InMemoryExternalActionSuccessorBindingStore::default();
+
+        execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect_err("initial ambiguity");
+        let error = execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+            .expect_err("substituted lookup result");
+        assert_eq!(
+            error.code(),
+            "external_action_fixture_lifecycle.provider.result_binding_mismatch"
+        );
+        assert_eq!(provider.compare_calls(), 1);
+        assert_eq!(provider.lookup_calls(), 1);
+    }
+
+    #[test]
     fn current_authority_capability_enters_fixture_once_and_terminal_replay_does_not_reinvoke() {
         let fixture = fixture(CapabilityGrantLifecycle::Active);
         let root = TestRoot::new();
@@ -2714,6 +3717,57 @@ mod tests {
             ExternalActionConnectorAdmissionPosture::ExistingTerminal
         );
         assert_eq!(connector.calls, 1);
+    }
+
+    #[test]
+    fn denied_and_revoked_terminal_states_are_not_successful_provider_receipts() {
+        for (revoke, expected_posture) in [
+            (
+                false,
+                ExternalActionConnectorAdmissionPosture::ExistingTerminalDenied,
+            ),
+            (
+                true,
+                ExternalActionConnectorAdmissionPosture::ExistingTerminalRevoked,
+            ),
+        ] {
+            let fixture = fixture(CapabilityGrantLifecycle::Active);
+            let root = TestRoot::new();
+            let store = LocalExternalActionTransitionLifecycleStore::new(&root.0);
+            let operation = ExternalActionTransitionOperation::from_projection(
+                &fixture.projection,
+                ExternalActionTransitionKind::GitHubPullRequestCreateDraft,
+            )
+            .expect("operation");
+            store
+                .initialize(&operation, timestamp("2026-07-26T10:25:00Z"))
+                .expect("initialize");
+            let initialized = store
+                .read_snapshot(operation.operation_id())
+                .expect("initialized snapshot");
+            let command = if revoke {
+                ExternalActionTransitionLifecycleCommand::Revoke {
+                    revocation_commitment: SpecContentHash::from_text("revoked"),
+                }
+            } else {
+                ExternalActionTransitionLifecycleCommand::Deny {
+                    refusal: crate::ExternalActionTransitionLifecycleRefusalKind::AuthorityDenied,
+                    decision_commitment: SpecContentHash::from_text("denied"),
+                }
+            };
+            store
+                .append(
+                    operation.operation_id(),
+                    initialized.cursor(),
+                    &command,
+                    timestamp("2026-07-26T10:25:00Z"),
+                )
+                .expect("terminal transition");
+            let mut connector = RecordingConnector::default();
+            let outcome = execute(&fixture, &store, &mut connector).expect("terminal replay");
+            assert_eq!(outcome.posture(), expected_posture);
+            assert_eq!(connector.calls, 0);
+        }
     }
 
     #[test]
