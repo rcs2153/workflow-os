@@ -83,6 +83,30 @@ Corrected:
 - the head or revocation posture changes before re-entry; and
 - re-entry rejects before ready connector mutation.
 
+### 5. Exact-head CI exposed an overstrict concurrent reinvocation assertion
+
+The first exact-head CI run failed the existing concurrent explicit
+TimeWindow reinvocation test. The durable at-most-once guarantees held: one
+caller entered the executor, the other entered zero times, and the final
+continuation disposition was terminal. The test nevertheless required every
+successful caller to observe terminal posture immediately. A lawful losing
+caller can exact-replay the committed wake while the winning caller is still
+inside the executor and therefore observe bounded `Blocked` posture before the
+winner commits terminal state.
+
+Corrected:
+
+- a transitioned caller must observe terminal posture and exactly one executor
+  entry;
+- an exact-replay caller may observe bounded blocked or terminal posture and
+  must enter the executor zero times;
+- security rejection remains invalid for this accepted path; and
+- the aggregate single-entry and final durable-terminal assertions remain
+  mandatory.
+
+The corrected test passed twenty consecutive all-feature repetitions before
+the full suite was rerun.
+
 ## Accepted Boundaries
 
 - The projection contains create, ready, and later merge scope before the
@@ -105,6 +129,8 @@ Passed after correction:
 - focused external-action tests, including wait-proof substitution,
   successor-replay substitution, post-wait head/revocation drift, and
   dispatch-time refusal/check regression;
+- twenty consecutive all-feature repetitions of the corrected concurrent
+  explicit TimeWindow reinvocation test;
 - all 754 all-feature `workflow-core` library tests;
 - strict all-target, all-feature `workflow-core` Clippy;
 - `cargo fmt --all -- --check`;
