@@ -37,6 +37,73 @@ jobs:
       - name: Cargo lockfile validation
         run: cargo metadata --locked --format-version 1
 
+  release-packaging-rehearsal:
+    name: Release Packaging Rehearsal
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ env.SOURCE_COMMIT }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Test release packaging contract
+        run: npm run test:release-package
+
+      - name: Install native musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+
+      - name: Build Linux x86_64 release binary
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+        run: cargo build --release -p workflow-cli --bin workflow-os --target x86_64-unknown-linux-musl
+
+      - name: Package provisional Linux archive
+        run: >-
+          npm run package:release --
+          --target x86_64-unknown-linux-musl
+          --binary target/x86_64-unknown-linux-musl/release/workflow-os
+          --output-dir dist/rehearsal
+          --source-commit "${SOURCE_COMMIT}"
+          --provisional
+
+      - name: Verify checksum, install, and uninstall contracts
+        run: |
+          mapfile -t archives < <(find dist/rehearsal -maxdepth 1 -type f -name '*.tar.gz' -print)
+          test "${#archives[@]}" -eq 1
+          archive="${archives[0]}"
+          archive_dir="$(dirname "${archive}")"
+          archive_name="$(basename "${archive}")"
+          (cd "${archive_dir}" && sha256sum --check "${archive_name}.sha256")
+          rehearsal_root="$(mktemp -d)"
+          package_name="$(tar -tzf "${archive}" | head -n 1 | sed 's:/$::')"
+          tar -xzf "${archive}" -C "${rehearsal_root}"
+          package_root="${rehearsal_root}/${package_name}"
+          version="$(node -p 'require("./package.json").version')"
+          WORKFLOW_OS_INSTALL_DIR="${rehearsal_root}/bin" "${package_root}/install.sh"
+          test "$("${rehearsal_root}/bin/workflow-os" --version)" = "workflow-os ${version}"
+          if WORKFLOW_OS_INSTALL_DIR="${rehearsal_root}/bin" "${package_root}/install.sh"; then
+            echo "install unexpectedly replaced an existing binary" >&2
+            exit 1
+          fi
+          WORKFLOW_OS_INSTALL_DIR="${rehearsal_root}/bin" "${package_root}/uninstall.sh"
+          test ! -e "${rehearsal_root}/bin/workflow-os"
+
   postgresql-state:
     name: Shared PostgreSQL State
     runs-on: ubuntu-latest

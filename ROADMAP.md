@@ -543,6 +543,23 @@ archives from the exact post-composition commit. Generic handler registration,
 parallel runtime, provider fixtures, package-manager execution, and publication
 remain unauthorized. See the [Phase 0 focused
 review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PLAN_REVIEW.md).
+Phase 1 packaging-contract implementation is complete subject to terminal-green
+exact-head CI. It adds deterministic provisional native archives for Apple
+Silicon macOS and musl Linux x86-64, exact source-commit and native-version
+verification, checksums, bounded install/uninstall behavior, local-state
+preservation, focused tests, and a non-uploading native Linux CI rehearsal. The
+local macOS rehearsal passed and truthfully records a dirty provisional
+checkout; the macOS archive is not promotable. Artifact publication, final
+candidate claims, additional platforms, package managers, signing, and Phase 2
+composition remain unauthorized. Final candidates must be rebuilt from the
+exact clean post-composition commit. See the [Phase 1
+report](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_1_REPORT.md) and [native
+archive contract](docs/release/NATIVE_ARCHIVE_CONTRACT.md). Focused review
+corrected workspace-wide version verification, fork-origin exact-head checkout,
+and installer argument handling; no P0 or unresolved P1 remains locally. Merge
+still requires terminal-green exact-head CI, including native Linux packaging.
+See the [Phase 1 focused
+review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_1_REVIEW.md).
 
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
