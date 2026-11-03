@@ -723,12 +723,60 @@ impl ExternalActionAuthorizationProjection {
         &self.run_id
     }
 
+    pub(crate) const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    pub(crate) const fn approval_reference_id(&self) -> &ApprovalReferenceId {
+        &self.approval_reference_id
+    }
+
+    pub(crate) const fn presentation_id(&self) -> &ApprovalPresentationId {
+        &self.presentation_id
+    }
+
+    pub(crate) const fn presentation_content_hash(&self) -> &ApprovalPresentationContentHash {
+        &self.presentation_content_hash
+    }
+
+    pub(crate) const fn capability_grant_id(&self) -> &CapabilityGrantId {
+        &self.capability_grant_id
+    }
+
+    pub(crate) const fn policy_decision_event_id(&self) -> &EventId {
+        &self.policy_decision_event_id
+    }
+
+    pub(crate) const fn governance_assessment_commitment(&self) -> &SpecContentHash {
+        &self.governance_assessment_commitment
+    }
+
     pub(crate) const fn execution_window_id(&self) -> &AuthorizedExecutionWindowId {
         &self.execution_window_id
     }
 
     pub(crate) const fn actor(&self) -> &ActorId {
         &self.actor
+    }
+
+    pub(crate) const fn immutable_run_bundle_commitment(&self) -> &SpecContentHash {
+        &self.immutable_run_bundle_commitment
+    }
+
+    pub(crate) const fn strict_non_goals_commitment(&self) -> &SpecContentHash {
+        &self.strict_non_goals_commitment
+    }
+
+    pub(crate) const fn revocation_source_commitment(&self) -> &SpecContentHash {
+        &self.revocation_source_commitment
+    }
+
+    pub(crate) const fn not_before(&self) -> Timestamp {
+        self.not_before
+    }
+
+    pub(crate) const fn sensitivity(&self) -> WorkReportSensitivity {
+        self.sensitivity
     }
 
     #[must_use]

@@ -32,6 +32,8 @@ mod error;
 mod evidence;
 mod executor;
 mod external_action_authorization;
+#[allow(dead_code)]
+mod external_action_connector_admission;
 mod external_action_transition_lifecycle;
 mod github;
 mod governance_decision_authority_receipt;

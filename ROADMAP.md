@@ -347,9 +347,13 @@ and the preceding [Phase 2 focused
 review](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_CORE_PRIVATE_AUTHORITY_LIFECYCLE_REVIEW.md).
 The authoritative post-compaction understanding lane and its two fresh-rerun
 P1 acceptance fixes are complete. Core-private same-call connector authority
-verification with a fixture connector is therefore the next authorized
-increment. Connector credentials, live GitHub behavior, provider writes,
-scheduler claims, and any parallel permission system remain excluded.
+verification with a fixture connector is implemented and accepted after
+focused review correction. The next authorized connector increment is one
+end-to-end fixture-backed pull-request lifecycle proof, including replay,
+ambiguity, wait recovery, and authoritative source composition for facts that
+remain fixture-injected in the accepted admission slice. Connector credentials,
+live GitHub behavior, provider writes, scheduler claims, and any parallel
+permission system remain excluded.
 
 Before broader provider mutation families, nested harness work, or claims of
 continuous delegated-maintainer autonomy, complete the P0 [Delegated Authority
@@ -388,7 +392,23 @@ payload-free, non-authorizing, and no-write. See the [lifecycle
 report](docs/concepts/EXTERNAL_ACTION_TRANSITION_LIFECYCLE_REPORT.md) and
 [focused review](docs/concepts/EXTERNAL_ACTION_TRANSITION_LIFECYCLE_REVIEW.md).
 Core-private same-call current-authority verification and a fixture connector
-remain the next connector increment after the active P0 preemption closes.
+are implemented and accepted after focused maintainer/security review corrected
+local retry attempt identity, known-failure classification, and fixture-fact
+claim clarity. The dark Core
+boundary reloads registered current authority, verifies the exact projected
+grant, approval-presentation proof, resource, execution window, revocation
+source, policy/governance commitments, and fresh evidence before one injected
+fixture connector receives a borrowed payload-free use capability. Durable
+lifecycle admission prevents terminal or ambiguous replay from re-entering the
+connector. The slice has no credentials, network, live GitHub behavior,
+provider writes, public connector API, schema, SDK, CLI, scheduler, or broader
+transition family. See the [implementation
+report](docs/concepts/EXTERNAL_ACTION_CONNECTOR_SAME_CALL_ADMISSION_REPORT.md)
+and [focused
+review](docs/concepts/EXTERNAL_ACTION_CONNECTOR_SAME_CALL_ADMISSION_REVIEW.md).
+The next authorized increment is delivery-sequence Phase 5: one end-to-end
+fixture-backed PR lifecycle proof. No live provider integration or broader
+mutation family is authorized by this acceptance.
 
 After the current delegated-authority connector lane is complete, the next
 authoritative milestone is **Hacker News launch admission**. This is a bounded
