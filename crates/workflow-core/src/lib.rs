@@ -311,6 +311,7 @@ pub use executor::{
     route_core_owned_authoritative_explicit_local_check_profile_governance,
     route_selected_project_validation_governance,
     route_selected_project_validation_governance_with_resolved_context,
+    route_selected_project_validation_governance_with_resolved_context_reference,
     ApprovalPresentationDefaultEnforcementMode, ApprovalPresentationDefaultEnforcementPolicy,
     ApprovalPresentationSensitiveActionPosture, AuthoritativeDocsCheckReportReferenceInputs,
     AuthoritativeGovernanceArtifactPersistenceInput,
@@ -399,8 +400,9 @@ pub use executor::{
     LocalSelectedProjectValidationResolvedContextApprovalResult,
     LocalSelectedProjectValidationResolvedContextReassessmentInput,
     LocalSelectedProjectValidationResolvedContextReassessmentResult,
-    LocalSelectedProjectValidationResolvedContextRequest, LocalSkillRegistry, LocalTimeoutPolicy,
-    SkillHandler, SkillInput, SkillOutput,
+    LocalSelectedProjectValidationResolvedContextRequest,
+    LocalSelectedProjectValidationResolvedContextRouteResult, LocalSkillRegistry,
+    LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
 };
 #[cfg(feature = "trusted-host-application-spi")]
 #[doc(hidden)]

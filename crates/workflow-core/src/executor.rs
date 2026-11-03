@@ -2220,6 +2220,50 @@ pub struct LocalSelectedProjectValidationResolvedContextRequest {
     pub resolved_context_commitment: crate::SpecContentHash,
 }
 
+/// Resolved-context route plus its exact same-call local-check reference.
+///
+/// This additive result preserves route truth while making the authoritative
+/// validation evidence available to bounded report and artifact consumers.
+pub struct LocalSelectedProjectValidationResolvedContextRouteResult {
+    route: LocalExecutionWithAuthoritativeGovernanceRouteResult,
+    local_check_result_reference: crate::LocalCheckResultReference,
+}
+
+impl LocalSelectedProjectValidationResolvedContextRouteResult {
+    /// Returns the governed route.
+    #[must_use]
+    pub const fn route(&self) -> &LocalExecutionWithAuthoritativeGovernanceRouteResult {
+        &self.route
+    }
+
+    /// Returns the exact same-call project-validation reference.
+    #[must_use]
+    pub const fn local_check_result_reference(&self) -> &crate::LocalCheckResultReference {
+        &self.local_check_result_reference
+    }
+
+    /// Consumes the result into its route and exact check reference.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        LocalExecutionWithAuthoritativeGovernanceRouteResult,
+        crate::LocalCheckResultReference,
+    ) {
+        (self.route, self.local_check_result_reference)
+    }
+}
+
+impl fmt::Debug for LocalSelectedProjectValidationResolvedContextRouteResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalSelectedProjectValidationResolvedContextRouteResult")
+            .field("route", &self.route)
+            .field("local_check_result_reference", &"[REDACTED]")
+            .finish()
+    }
+}
+
 impl fmt::Debug for LocalSelectedProjectValidationResolvedContextRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -2842,6 +2886,15 @@ impl fmt::Debug for AuthoritativeDocsCheckReportReferenceInputs {
             .field("redaction", &"[REDACTED]")
             .field("sensitivity", &self.sensitivity)
             .finish()
+    }
+}
+
+impl AuthoritativeDocsCheckReportReferenceInputs {
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        crate::local_check::validate_local_check_result_reference_metadata(
+            self.output_reference.as_deref(),
+            &self.redaction,
+        )
     }
 }
 
@@ -15347,6 +15400,49 @@ where
     )
 }
 
+/// Routes selected project validation with resolved context and returns the
+/// exact same-call check reference.
+///
+/// The existing route API remains unchanged. This additive consumer is for
+/// report and artifact paths that must cite the authoritative validation result
+/// rather than reconstructing provenance outside Core.
+///
+/// # Errors
+///
+/// Returns the existing route errors or a stable non-leaking error when the
+/// same-call check result cannot be resolved to its immutable derived identity.
+pub fn route_selected_project_validation_governance_with_resolved_context_reference<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalSelectedProjectValidationResolvedContextRequest,
+    local_check_reference: &AuthoritativeDocsCheckReportReferenceInputs,
+) -> Result<LocalSelectedProjectValidationResolvedContextRouteResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    local_check_reference.validate()?;
+    let route = route_selected_project_validation_governance_with_resolved_context(
+        executor,
+        store,
+        profile,
+        visible_dependencies,
+        request,
+    )?;
+    let reference = selected_project_validation_route_reference(
+        &route,
+        store,
+        &request.execution.selected_step_id,
+        profile.handler(),
+        local_check_reference,
+    )?;
+    Ok(LocalSelectedProjectValidationResolvedContextRouteResult {
+        route,
+        local_check_result_reference: reference,
+    })
+}
+
 /// Reassesses one existing terminal project-validation run with resolved context.
 ///
 /// This path reruns only the canonical bounded project-validation check. It does
@@ -15391,6 +15487,28 @@ where
             "existing_terminal_required",
         ));
     }
+    let reference = selected_project_validation_route_reference(
+        &route,
+        store,
+        &execution.selected_step_id,
+        profile.handler(),
+        &local_check_reference,
+    )?;
+    Ok(
+        LocalSelectedProjectValidationResolvedContextReassessmentResult {
+            route,
+            local_check_result_reference: reference,
+        },
+    )
+}
+
+fn selected_project_validation_route_reference(
+    route: &LocalExecutionWithAuthoritativeGovernanceRouteResult,
+    store: &crate::LocalImmutableRunBundleStore,
+    selected_step_id: &StepId,
+    handler: &dyn AuthoritativeLocalCheckHandler,
+    inputs: &AuthoritativeDocsCheckReportReferenceInputs,
+) -> Result<crate::LocalCheckResultReference, WorkflowOsError> {
     let [local_check_result] = route.local_check_results() else {
         return Err(selected_project_validation_consumer_error(
             "result_ambiguous",
@@ -15407,29 +15525,20 @@ where
         &route.run().snapshot.identity.run_id,
         bundle_binding.bundle_id(),
     )?;
-    let (_, identities) = authoritative_docs_check_preflight_material(
-        &stored,
-        &execution.selected_step_id,
-        profile.handler(),
-    )?;
-    let reference = crate::LocalCheckResultReference::from_result(
+    let (_, identities) =
+        authoritative_docs_check_preflight_material(&stored, selected_step_id, handler)?;
+    crate::LocalCheckResultReference::from_result(
         identities.result_id,
         local_check_result,
         route.run().snapshot.identity.workflow_id.clone(),
         route.run().snapshot.identity.run_id.clone(),
-        local_check_reference.workflow_event_id,
-        local_check_reference.audit_event_id,
-        local_check_reference.output_reference,
-        local_check_reference.redaction,
-        local_check_reference.sensitivity,
+        inputs.workflow_event_id.clone(),
+        inputs.audit_event_id.clone(),
+        inputs.output_reference.clone(),
+        inputs.redaction.clone(),
+        inputs.sensitivity,
     )
-    .map_err(|_| selected_project_validation_consumer_error("reference_invalid"))?;
-    Ok(
-        LocalSelectedProjectValidationResolvedContextReassessmentResult {
-            route,
-            local_check_result_reference: reference,
-        },
-    )
+    .map_err(|_| selected_project_validation_consumer_error("reference_invalid"))
 }
 
 fn route_authoritative_local_check_governance<B>(

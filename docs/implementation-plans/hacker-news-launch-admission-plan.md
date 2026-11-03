@@ -290,6 +290,18 @@ and default UX. Reuse existing authority, policy, proportional-governance,
 continuity, evidence, and report contracts. Then rebuild and checksum final
 native candidates from the exact post-composition commit before Phase 3.
 
+Implementation status: complete and accepted by focused maintainer review,
+subject to terminal-green exact-head CI. Generated onboarding and first-run output now
+recommend the real report-artifact operation, the initial authoritative
+project-validation result is preserved as a typed WorkReport citation, and
+bounded human and JSON `inspect` output expose report section and citation
+posture. Core returns the exact same-call validation reference through an
+additive resolved-context route result; the CLI does not reconstruct evidence.
+Recovery remains drift-rejecting and `next-action` remains nonterminal-only.
+Review corrected fail-before-mutation ordering for caller-controlled reference
+metadata. See the [Phase 2 report](../concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_2_REPORT.md)
+and [focused review](../concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_2_REVIEW.md).
+
 ### Phase 3: Clean-Room Evaluation
 
 Execute the exact packaged path against two unrelated repositories, preserve
