@@ -1434,7 +1434,33 @@ history. It is reference material, not a second delivery queue.
    precedence, run/workflow scope shape, and transitive bundle/understanding
    commitments. See the [model
    review](docs/concepts/AUTHORITATIVE_CONTINUATION_CONTEXT_MODEL_REVIEW.md).
-   Purpose-specific trusted collector-expectation profile planning is next.
+   Purpose-specific trusted collector-expectation profile planning is now
+   documented in [Continuation Context Coverage Profile
+   Plan](docs/implementation-plans/continuation-context-coverage-profile-plan.md).
+   Focused maintainer/security review accepts the trusted pre-run and run-bound
+   matrices for one private model increment, with an explicit downstream
+   blocker: collector expectation ownership closes only one caller-downgrade
+   path. Core must also own the required semantic-claim profile and source
+   necessity posture before an operational consumer may claim authoritative
+   post-compaction understanding. See the [coverage-profile plan
+   review](docs/concepts/CONTINUATION_CONTEXT_COVERAGE_PROFILE_PLAN_REVIEW.md).
+   The private expectation-profile implementation is complete. Core now
+   derives one closed profile identity from continuation purpose and validated
+   pre-run or run-bound scope, owns every source-class expectation, rejects
+   caller substitutions before outcome evaluation, and binds the profile,
+   scope posture, expectations, and outcomes into the coverage commitment. It
+   also rejects outcome labels that contradict Core-owned expectation posture.
+   Thirty-one focused continuation-context tests pass. See the [coverage
+   profile implementation
+   report](docs/concepts/AUTHORITATIVE_CONTINUATION_CONTEXT_COVERAGE_PROFILE_REPORT.md).
+   Focused implementation/security review accepts the increment after one
+   fix-forward correction rejected outcome labels that contradicted the
+   Core-owned expectation matrix. See the [coverage profile implementation
+   review](docs/concepts/AUTHORITATIVE_CONTINUATION_CONTEXT_COVERAGE_PROFILE_REVIEW.md).
+   Caller-carried required claims and per-source necessity remain an explicit
+   blocker to any operational authoritative-understanding claim. The next P0
+   phase is a Core-owned semantic-obligation profile plan and focused review;
+   collectors and runtime consumers remain later.
    Collectors, persistence, accepted-intent capture, CLI preview, runtime
    integration, compaction adapters, delivery receipts, Salsa, and
    replacement-executor proof remain unimplemented.

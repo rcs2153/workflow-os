@@ -278,6 +278,24 @@ pub enum ContinuationContextCollectorOutcome {
     IntentionallyOmitted,
 }
 
+/// Core-owned identity of one purpose- and scope-bound coverage profile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationContextCoverageProfileId {
+    PreRunPlanning,
+    PreRunImplementation,
+    PreRunApprovalReview,
+    PreRunProviderReconciliation,
+    PreRunChildHandoff,
+    PreRunMaterialContinuation,
+    RunBoundPlanning,
+    RunBoundImplementation,
+    RunBoundApprovalReview,
+    RunBoundProviderReconciliation,
+    RunBoundChildHandoff,
+    RunBoundMaterialContinuation,
+}
+
 /// One declared collector-coverage entry.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -292,6 +310,8 @@ pub struct ContinuationContextSourceCoverageEntry {
 #[serde(deny_unknown_fields)]
 pub struct ContinuationContextSourceCoverage {
     purpose: ContinuationContextPurpose,
+    profile_id: ContinuationContextCoverageProfileId,
+    run_bound: bool,
     entries: Vec<ContinuationContextSourceCoverageEntry>,
     complete: bool,
     degraded_optional: bool,
@@ -302,6 +322,16 @@ impl ContinuationContextSourceCoverage {
     #[must_use]
     pub const fn purpose(&self) -> ContinuationContextPurpose {
         self.purpose
+    }
+
+    #[must_use]
+    const fn profile_id(&self) -> ContinuationContextCoverageProfileId {
+        self.profile_id
+    }
+
+    #[must_use]
+    pub const fn is_run_bound(&self) -> bool {
+        self.run_bound
     }
 
     #[must_use]
@@ -762,13 +792,21 @@ pub fn derive_continuation_context(
     reject_duplicate_coverage(&input.coverage)?;
     reject_duplicate_sources(&input.sources)?;
     reject_duplicate_intents(&input.accepted_intents)?;
+    validate_scope(&input.scope)?;
+    let coverage_profile = coverage_profile_id(input.purpose, input.scope.run_id.is_some());
     validate_source_coverage(&input)?;
+    validate_coverage_expectations(coverage_profile, &input.coverage)?;
+    validate_expectation_outcome_compatibility(&input.coverage)?;
     validate_coverage_outcomes(&input)?;
     validate_source_claims(&input.scope, &input.sources)?;
-    validate_scope(&input.scope)?;
     validate_intent_scope(&input.scope, &input.accepted_intents)?;
 
-    let coverage = derive_coverage(input.purpose, &input.coverage)?;
+    let coverage = derive_coverage(
+        input.purpose,
+        coverage_profile,
+        input.scope.run_id.is_some(),
+        &input.coverage,
+    )?;
     let mut sources = input.sources;
     sources.extend(intent_sources(&input.accepted_intents)?);
     sources.sort_by(|left, right| left.source_id.cmp(&right.source_id));
@@ -1006,6 +1044,48 @@ fn validate_source_coverage(
     Ok(())
 }
 
+fn validate_coverage_expectations(
+    profile_id: ContinuationContextCoverageProfileId,
+    coverage: &[ContinuationContextSourceCoverageEntry],
+) -> Result<(), WorkflowOsError> {
+    for entry in coverage {
+        if entry.expectation != coverage_profile_expectation(profile_id, entry.source_class) {
+            return Err(context_error(
+                "coverage.expectation_mismatch",
+                "collector expectation does not match the Core-owned coverage profile",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_expectation_outcome_compatibility(
+    coverage: &[ContinuationContextSourceCoverageEntry],
+) -> Result<(), WorkflowOsError> {
+    for entry in coverage {
+        let incompatible = match entry.expectation {
+            ContinuationContextCollectorExpectation::Required => matches!(
+                entry.outcome,
+                ContinuationContextCollectorOutcome::SkippedOptional
+                    | ContinuationContextCollectorOutcome::Inapplicable
+            ),
+            ContinuationContextCollectorExpectation::Optional => {
+                entry.outcome == ContinuationContextCollectorOutcome::Inapplicable
+            }
+            ContinuationContextCollectorExpectation::Inapplicable => {
+                entry.outcome != ContinuationContextCollectorOutcome::Inapplicable
+            }
+        };
+        if incompatible {
+            return Err(context_error(
+                "coverage.outcome_expectation_mismatch",
+                "collector outcome is incompatible with the Core-owned expectation",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_coverage_outcomes(
     input: &ContinuationContextDecisionInput,
 ) -> Result<(), WorkflowOsError> {
@@ -1167,6 +1247,8 @@ fn validate_scope(scope: &ContinuationContextScope) -> Result<(), WorkflowOsErro
 
 fn derive_coverage(
     purpose: ContinuationContextPurpose,
+    profile_id: ContinuationContextCoverageProfileId,
+    run_bound: bool,
     entries: &[ContinuationContextSourceCoverageEntry],
 ) -> Result<ContinuationContextSourceCoverage, WorkflowOsError> {
     let complete = entries.iter().all(|entry| match entry.expectation {
@@ -1193,11 +1275,121 @@ fn derive_coverage(
     });
     Ok(ContinuationContextSourceCoverage {
         purpose,
+        profile_id,
+        run_bound,
         entries: entries.to_vec(),
         complete,
         degraded_optional,
-        commitment: canonical_commitment("source-coverage", &(purpose, entries))?,
+        commitment: canonical_commitment(
+            "source-coverage",
+            &(purpose, profile_id, run_bound, entries),
+        )?,
     })
+}
+
+const fn coverage_profile_id(
+    purpose: ContinuationContextPurpose,
+    run_bound: bool,
+) -> ContinuationContextCoverageProfileId {
+    match (purpose, run_bound) {
+        (ContinuationContextPurpose::Planning, false) => {
+            ContinuationContextCoverageProfileId::PreRunPlanning
+        }
+        (ContinuationContextPurpose::Implementation, false) => {
+            ContinuationContextCoverageProfileId::PreRunImplementation
+        }
+        (ContinuationContextPurpose::ApprovalReview, false) => {
+            ContinuationContextCoverageProfileId::PreRunApprovalReview
+        }
+        (ContinuationContextPurpose::ProviderReconciliation, false) => {
+            ContinuationContextCoverageProfileId::PreRunProviderReconciliation
+        }
+        (ContinuationContextPurpose::ChildHandoff, false) => {
+            ContinuationContextCoverageProfileId::PreRunChildHandoff
+        }
+        (ContinuationContextPurpose::MaterialContinuation, false) => {
+            ContinuationContextCoverageProfileId::PreRunMaterialContinuation
+        }
+        (ContinuationContextPurpose::Planning, true) => {
+            ContinuationContextCoverageProfileId::RunBoundPlanning
+        }
+        (ContinuationContextPurpose::Implementation, true) => {
+            ContinuationContextCoverageProfileId::RunBoundImplementation
+        }
+        (ContinuationContextPurpose::ApprovalReview, true) => {
+            ContinuationContextCoverageProfileId::RunBoundApprovalReview
+        }
+        (ContinuationContextPurpose::ProviderReconciliation, true) => {
+            ContinuationContextCoverageProfileId::RunBoundProviderReconciliation
+        }
+        (ContinuationContextPurpose::ChildHandoff, true) => {
+            ContinuationContextCoverageProfileId::RunBoundChildHandoff
+        }
+        (ContinuationContextPurpose::MaterialContinuation, true) => {
+            ContinuationContextCoverageProfileId::RunBoundMaterialContinuation
+        }
+    }
+}
+
+const fn coverage_profile_expectation(
+    profile_id: ContinuationContextCoverageProfileId,
+    source_class: ContinuationContextSourceClass,
+) -> ContinuationContextCollectorExpectation {
+    if is_run_bound_profile(profile_id) {
+        return match source_class {
+            ContinuationContextSourceClass::AgentAdvisory => {
+                ContinuationContextCollectorExpectation::Optional
+            }
+            ContinuationContextSourceClass::ProviderObservation
+                if !matches!(
+                    profile_id,
+                    ContinuationContextCoverageProfileId::RunBoundProviderReconciliation
+                ) =>
+            {
+                ContinuationContextCollectorExpectation::Optional
+            }
+            _ => ContinuationContextCollectorExpectation::Required,
+        };
+    }
+
+    match source_class {
+        ContinuationContextSourceClass::ValidatedDeclaration
+        | ContinuationContextSourceClass::Policy
+        | ContinuationContextSourceClass::RequiredContext
+        | ContinuationContextSourceClass::AcceptedIntent
+        | ContinuationContextSourceClass::GitObservation
+        | ContinuationContextSourceClass::OperatingDocument => {
+            ContinuationContextCollectorExpectation::Required
+        }
+        ContinuationContextSourceClass::Evidence
+        | ContinuationContextSourceClass::Check
+        | ContinuationContextSourceClass::WorkReport
+        | ContinuationContextSourceClass::TypedHandoff
+        | ContinuationContextSourceClass::ProviderObservation
+        | ContinuationContextSourceClass::AgentAdvisory => {
+            ContinuationContextCollectorExpectation::Optional
+        }
+        ContinuationContextSourceClass::ImmutableRunBundle
+        | ContinuationContextSourceClass::DurableRunState
+        | ContinuationContextSourceClass::EventHistory
+        | ContinuationContextSourceClass::Approval
+        | ContinuationContextSourceClass::Capability
+        | ContinuationContextSourceClass::SideEffect => {
+            ContinuationContextCollectorExpectation::Inapplicable
+        }
+    }
+}
+
+const fn is_run_bound_profile(profile_id: ContinuationContextCoverageProfileId) -> bool {
+    matches!(
+        profile_id,
+        ContinuationContextCoverageProfileId::RunBoundPlanning
+            | ContinuationContextCoverageProfileId::RunBoundImplementation
+            | ContinuationContextCoverageProfileId::RunBoundApprovalReview
+            | ContinuationContextCoverageProfileId::RunBoundProviderReconciliation
+            | ContinuationContextCoverageProfileId::RunBoundChildHandoff
+            | ContinuationContextCoverageProfileId::RunBoundMaterialContinuation
+    )
 }
 
 fn intent_sources(
@@ -1620,17 +1812,41 @@ mod tests {
     fn complete_coverage(
         observed: impl IntoIterator<Item = ContinuationContextSourceClass>,
     ) -> Vec<ContinuationContextSourceCoverageEntry> {
+        coverage_for(ContinuationContextPurpose::Implementation, true, observed)
+    }
+
+    fn coverage_for(
+        purpose: ContinuationContextPurpose,
+        run_bound: bool,
+        observed: impl IntoIterator<Item = ContinuationContextSourceClass>,
+    ) -> Vec<ContinuationContextSourceCoverageEntry> {
         let observed = observed.into_iter().collect::<BTreeSet<_>>();
+        let profile_id = coverage_profile_id(purpose, run_bound);
         ALL_CONTEXT_SOURCE_CLASSES
             .iter()
             .map(|source_class| {
+                let expectation = coverage_profile_expectation(profile_id, *source_class);
                 if observed.contains(source_class) {
-                    observed_coverage(*source_class)
+                    ContinuationContextSourceCoverageEntry {
+                        source_class: *source_class,
+                        expectation,
+                        outcome: ContinuationContextCollectorOutcome::Observed,
+                    }
                 } else {
                     ContinuationContextSourceCoverageEntry {
                         source_class: *source_class,
-                        expectation: ContinuationContextCollectorExpectation::Inapplicable,
-                        outcome: ContinuationContextCollectorOutcome::Inapplicable,
+                        expectation,
+                        outcome: match expectation {
+                            ContinuationContextCollectorExpectation::Required => {
+                                ContinuationContextCollectorOutcome::Empty
+                            }
+                            ContinuationContextCollectorExpectation::Optional => {
+                                ContinuationContextCollectorOutcome::SkippedOptional
+                            }
+                            ContinuationContextCollectorExpectation::Inapplicable => {
+                                ContinuationContextCollectorOutcome::Inapplicable
+                            }
+                        },
                     }
                 }
             })
@@ -1706,6 +1922,7 @@ mod tests {
         second
             .required_claims
             .insert(ContinuationUnderstandingClaimKind::Scope);
+        second.coverage.reverse();
 
         let first = derive_continuation_context(first).expect("first decision");
         let second = derive_continuation_context(second).expect("second decision");
@@ -1860,13 +2077,13 @@ mod tests {
     }
 
     #[test]
-    fn accepted_intent_objective_precedes_immutable_candidate_before_a_run_exists() {
-        let immutable = source(
-            "source/immutable-objective",
-            ContinuationContextSourceClass::ImmutableRunBundle,
-            ContinuationContextAuthorityDomain::ImmutableRunInput,
+    fn accepted_intent_objective_precedes_operating_document_before_a_run_exists() {
+        let document = source(
+            "source/planning-document",
+            ContinuationContextSourceClass::OperatingDocument,
+            ContinuationContextAuthorityDomain::OperatingDocument,
             ContinuationUnderstandingClaimKind::Objective,
-            "candidate run objective",
+            "documented objective",
         );
         let intent = source(
             "source/new-intent",
@@ -1875,9 +2092,17 @@ mod tests {
             ContinuationUnderstandingClaimKind::Objective,
             "planning objective",
         );
-        let mut input = input(vec![immutable, intent]);
+        let mut input = input(vec![document, intent]);
         input.purpose = ContinuationContextPurpose::Planning;
         input.scope.run_id = None;
+        input.coverage = coverage_for(
+            ContinuationContextPurpose::Planning,
+            false,
+            [
+                ContinuationContextSourceClass::OperatingDocument,
+                ContinuationContextSourceClass::AcceptedIntent,
+            ],
+        );
 
         let decision = derive_continuation_context(input).expect("planning decision");
         let objective = decision
@@ -2036,6 +2261,282 @@ mod tests {
         assert_eq!(
             error.code(),
             "continuation_context.coverage.class_unaccounted"
+        );
+    }
+
+    #[test]
+    fn every_purpose_and_scope_posture_has_a_distinct_complete_profile() {
+        let purposes = [
+            ContinuationContextPurpose::Planning,
+            ContinuationContextPurpose::Implementation,
+            ContinuationContextPurpose::ApprovalReview,
+            ContinuationContextPurpose::ProviderReconciliation,
+            ContinuationContextPurpose::ChildHandoff,
+            ContinuationContextPurpose::MaterialContinuation,
+        ];
+        let mut profile_ids = BTreeSet::new();
+
+        for purpose in purposes {
+            for run_bound in [false, true] {
+                let profile_id = coverage_profile_id(purpose, run_bound);
+                assert_eq!(is_run_bound_profile(profile_id), run_bound);
+                assert!(profile_ids.insert(profile_id));
+                let matrix = ALL_CONTEXT_SOURCE_CLASSES
+                    .iter()
+                    .map(|source_class| coverage_profile_expectation(profile_id, *source_class))
+                    .collect::<Vec<_>>();
+                assert_eq!(matrix.len(), ALL_CONTEXT_SOURCE_CLASSES.len());
+                assert!(matrix.iter().all(|expectation| matches!(
+                    expectation,
+                    ContinuationContextCollectorExpectation::Required
+                        | ContinuationContextCollectorExpectation::Optional
+                        | ContinuationContextCollectorExpectation::Inapplicable
+                )));
+            }
+        }
+
+        assert_eq!(profile_ids.len(), 12);
+    }
+
+    #[test]
+    fn profile_matrices_match_the_reviewed_pre_run_and_run_bound_baselines() {
+        let pre_run = coverage_profile_id(ContinuationContextPurpose::Planning, false);
+        for source_class in [
+            ContinuationContextSourceClass::ValidatedDeclaration,
+            ContinuationContextSourceClass::Policy,
+            ContinuationContextSourceClass::RequiredContext,
+            ContinuationContextSourceClass::AcceptedIntent,
+            ContinuationContextSourceClass::GitObservation,
+            ContinuationContextSourceClass::OperatingDocument,
+        ] {
+            assert_eq!(
+                coverage_profile_expectation(pre_run, source_class),
+                ContinuationContextCollectorExpectation::Required
+            );
+        }
+        for source_class in [
+            ContinuationContextSourceClass::ImmutableRunBundle,
+            ContinuationContextSourceClass::DurableRunState,
+            ContinuationContextSourceClass::EventHistory,
+            ContinuationContextSourceClass::Approval,
+            ContinuationContextSourceClass::Capability,
+            ContinuationContextSourceClass::SideEffect,
+        ] {
+            assert_eq!(
+                coverage_profile_expectation(pre_run, source_class),
+                ContinuationContextCollectorExpectation::Inapplicable
+            );
+        }
+
+        let run_bound = coverage_profile_id(ContinuationContextPurpose::Implementation, true);
+        for source_class in ALL_CONTEXT_SOURCE_CLASSES {
+            let expected = if matches!(
+                source_class,
+                ContinuationContextSourceClass::ProviderObservation
+                    | ContinuationContextSourceClass::AgentAdvisory
+            ) {
+                ContinuationContextCollectorExpectation::Optional
+            } else {
+                ContinuationContextCollectorExpectation::Required
+            };
+            assert_eq!(
+                coverage_profile_expectation(run_bound, source_class),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn caller_cannot_downgrade_required_expectation() {
+        let mut input = input(Vec::new());
+        input
+            .coverage
+            .iter_mut()
+            .find(|entry| entry.source_class == ContinuationContextSourceClass::ImmutableRunBundle)
+            .expect("immutable run coverage")
+            .expectation = ContinuationContextCollectorExpectation::Optional;
+
+        let error = derive_continuation_context(input).expect_err("must reject downgrade");
+
+        assert_eq!(
+            error.code(),
+            "continuation_context.coverage.expectation_mismatch"
+        );
+    }
+
+    #[test]
+    fn caller_cannot_activate_inapplicable_pre_run_class() {
+        let mut input = input(Vec::new());
+        input.purpose = ContinuationContextPurpose::Planning;
+        input.scope.run_id = None;
+        input.coverage = coverage_for(ContinuationContextPurpose::Planning, false, []);
+        input
+            .coverage
+            .iter_mut()
+            .find(|entry| entry.source_class == ContinuationContextSourceClass::Approval)
+            .expect("approval coverage")
+            .expectation = ContinuationContextCollectorExpectation::Required;
+
+        let error = derive_continuation_context(input).expect_err("must reject substitution");
+
+        assert_eq!(
+            error.code(),
+            "continuation_context.coverage.expectation_mismatch"
+        );
+    }
+
+    #[test]
+    fn caller_cannot_relabel_optional_or_required_collection_through_outcomes() {
+        let mut optional = input(Vec::new());
+        optional
+            .coverage
+            .iter_mut()
+            .find(|entry| entry.source_class == ContinuationContextSourceClass::AgentAdvisory)
+            .expect("advisory coverage")
+            .outcome = ContinuationContextCollectorOutcome::Inapplicable;
+        let optional_error =
+            derive_continuation_context(optional).expect_err("optional cannot be inapplicable");
+        assert_eq!(
+            optional_error.code(),
+            "continuation_context.coverage.outcome_expectation_mismatch"
+        );
+
+        let mut required = input(Vec::new());
+        required
+            .coverage
+            .iter_mut()
+            .find(|entry| entry.source_class == ContinuationContextSourceClass::EventHistory)
+            .expect("event history coverage")
+            .outcome = ContinuationContextCollectorOutcome::SkippedOptional;
+        let required_error =
+            derive_continuation_context(required).expect_err("required cannot be skipped optional");
+        assert_eq!(
+            required_error.code(),
+            "continuation_context.coverage.outcome_expectation_mismatch"
+        );
+    }
+
+    #[test]
+    fn inapplicable_pre_run_class_requires_exact_inapplicable_outcome() {
+        let mut input = input(Vec::new());
+        input.purpose = ContinuationContextPurpose::Planning;
+        input.scope.run_id = None;
+        input.coverage = coverage_for(ContinuationContextPurpose::Planning, false, []);
+        input
+            .coverage
+            .iter_mut()
+            .find(|entry| entry.source_class == ContinuationContextSourceClass::Approval)
+            .expect("approval coverage")
+            .outcome = ContinuationContextCollectorOutcome::Empty;
+
+        let error = derive_continuation_context(input).expect_err("must reject outcome relabel");
+
+        assert_eq!(
+            error.code(),
+            "continuation_context.coverage.outcome_expectation_mismatch"
+        );
+    }
+
+    #[test]
+    fn pre_run_and_run_bound_profiles_have_distinct_commitments() {
+        let mut run_bound = input(Vec::new());
+        run_bound.required_claims.clear();
+        let run_bound = derive_continuation_context(run_bound).expect("run-bound decision");
+
+        let mut pre_run = input(Vec::new());
+        pre_run.purpose = ContinuationContextPurpose::Planning;
+        pre_run.scope.run_id = None;
+        pre_run.required_claims.clear();
+        pre_run.coverage = coverage_for(ContinuationContextPurpose::Planning, false, []);
+        let pre_run = derive_continuation_context(pre_run).expect("pre-run decision");
+
+        assert!(run_bound.coverage().is_run_bound());
+        assert!(!pre_run.coverage().is_run_bound());
+        assert_ne!(
+            run_bound.coverage().profile_id(),
+            pre_run.coverage().profile_id()
+        );
+        assert_ne!(
+            run_bound.coverage().commitment(),
+            pre_run.coverage().commitment()
+        );
+    }
+
+    #[test]
+    fn provider_observation_is_required_only_for_run_bound_reconciliation() {
+        for purpose in [
+            ContinuationContextPurpose::Planning,
+            ContinuationContextPurpose::Implementation,
+            ContinuationContextPurpose::ApprovalReview,
+            ContinuationContextPurpose::ChildHandoff,
+            ContinuationContextPurpose::MaterialContinuation,
+        ] {
+            assert_eq!(
+                coverage_profile_expectation(
+                    coverage_profile_id(purpose, true),
+                    ContinuationContextSourceClass::ProviderObservation,
+                ),
+                ContinuationContextCollectorExpectation::Optional
+            );
+        }
+        assert_eq!(
+            coverage_profile_expectation(
+                coverage_profile_id(ContinuationContextPurpose::ProviderReconciliation, true),
+                ContinuationContextSourceClass::ProviderObservation,
+            ),
+            ContinuationContextCollectorExpectation::Required
+        );
+        assert_eq!(
+            coverage_profile_expectation(
+                coverage_profile_id(ContinuationContextPurpose::ProviderReconciliation, false),
+                ContinuationContextSourceClass::ProviderObservation,
+            ),
+            ContinuationContextCollectorExpectation::Optional
+        );
+    }
+
+    #[test]
+    fn required_empty_is_complete_but_required_failure_blocks() {
+        let mut complete = input(Vec::new());
+        complete.required_claims.clear();
+        let complete = derive_continuation_context(complete).expect("complete empty coverage");
+        assert!(complete.coverage().is_complete());
+
+        let mut failed = input(Vec::new());
+        failed.required_claims.clear();
+        failed
+            .coverage
+            .iter_mut()
+            .find(|entry| entry.source_class == ContinuationContextSourceClass::EventHistory)
+            .expect("event history coverage")
+            .outcome = ContinuationContextCollectorOutcome::Failed;
+        let failed = derive_continuation_context(failed).expect("failed coverage decision");
+
+        assert!(!failed.coverage().is_complete());
+        assert_eq!(
+            failed.posture(),
+            ContinuationContextDecisionPosture::Blocked
+        );
+    }
+
+    #[test]
+    fn optional_failure_is_degraded_without_breaking_completeness() {
+        let mut input = input(Vec::new());
+        input.required_claims.clear();
+        input
+            .coverage
+            .iter_mut()
+            .find(|entry| entry.source_class == ContinuationContextSourceClass::AgentAdvisory)
+            .expect("advisory coverage")
+            .outcome = ContinuationContextCollectorOutcome::Failed;
+
+        let decision = derive_continuation_context(input).expect("degraded decision");
+
+        assert!(decision.coverage().is_complete());
+        assert!(decision.coverage().has_degraded_optional());
+        assert_eq!(
+            decision.posture(),
+            ContinuationContextDecisionPosture::ReadyForAuthorityResolution
         );
     }
 
