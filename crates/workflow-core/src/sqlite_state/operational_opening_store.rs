@@ -5692,14 +5692,20 @@ mod tests {
             1
         );
         assert!(outcomes.iter().all(|outcome| match outcome {
-            Ok(outcome) => {
-                matches!(
-                    outcome.wake_status,
-                    crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::Transitioned
-                        | crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::ExactReplay
-                ) && outcome.execution.stop_reason == TrustedHostRedispatchStopReason::Terminal
-                    && outcome.execution.executor_entries <= 1
-            }
+            Ok(outcome) => match outcome.wake_status {
+                crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::Transitioned => {
+                    outcome.execution.stop_reason == TrustedHostRedispatchStopReason::Terminal
+                        && outcome.execution.executor_entries == 1
+                }
+                crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::ExactReplay => {
+                    matches!(
+                        outcome.execution.stop_reason,
+                        TrustedHostRedispatchStopReason::Blocked
+                            | TrustedHostRedispatchStopReason::Terminal
+                    ) && outcome.execution.executor_entries == 0
+                }
+                crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::SecurityRejected => false,
+            },
             Err(error) => matches!(
                 error.code(),
                 "trusted_host_redispatch.directive_replayed"

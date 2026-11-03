@@ -422,6 +422,24 @@ impl AuthorizedExecutionWaitCondition {
     pub(crate) const fn attempt_id(&self) -> &AuthorizedExecutionAttemptId {
         &self.attempt_id
     }
+    pub(crate) const fn condition_version(&self) -> u32 {
+        self.condition_version
+    }
+    pub(crate) const fn expected_sequence_number(&self) -> &EventSequenceNumber {
+        &self.expected_sequence_number
+    }
+    pub(crate) const fn expected_event_id(&self) -> &EventId {
+        &self.expected_event_id
+    }
+    pub(crate) const fn required_reference(&self) -> &AuthorizedExecutionResourceReference {
+        &self.required_reference
+    }
+    pub(crate) const fn deadline(&self) -> Option<Timestamp> {
+        self.deadline
+    }
+    pub(crate) const fn wake_trigger(&self) -> AuthorizedExecutionWakeTriggerKind {
+        self.wake_trigger
+    }
     /// Returns the typed dependency class.
     #[must_use]
     pub const fn kind(&self) -> AuthorizedExecutionWaitConditionKind {

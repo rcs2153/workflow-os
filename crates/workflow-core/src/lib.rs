@@ -427,7 +427,7 @@ pub use external_action_transition_lifecycle::{
     ExternalActionTransitionLifecycleOutcome, ExternalActionTransitionLifecycleRefusalKind,
     ExternalActionTransitionLifecycleSnapshot, ExternalActionTransitionLifecycleStatus,
     ExternalActionTransitionOperation, ExternalActionTransitionOperationId,
-    LocalExternalActionTransitionLifecycleStore,
+    ExternalActionWaitResolutionProof, LocalExternalActionTransitionLifecycleStore,
 };
 pub use governance_decision_authority_receipt::{
     GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptClaimVerificationPosture,

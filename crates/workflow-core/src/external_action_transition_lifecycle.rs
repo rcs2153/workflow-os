@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     state::with_local_state_shared_writer_guard, ActorId, AuthorizedExecutionAttemptId,
-    AuthorizedExecutionWaitCondition, AuthorizedExecutionWaitConditionId,
-    AuthorizedExecutionWaitStatus, AuthorizedExecutionWindowId,
+    AuthorizedExecutionResourceReference, AuthorizedExecutionWaitCondition,
+    AuthorizedExecutionWaitConditionId, AuthorizedExecutionWaitStatus,
+    AuthorizedExecutionWakeTriggerKind, AuthorizedExecutionWindowId, EventId, EventSequenceNumber,
     ExternalActionAuthorizationProjection, ExternalActionAuthorizationProjectionId,
     ExternalActionTransition, ExternalActionTransitionKind, SpecContentHash, Timestamp,
     WorkflowOsError, WorkflowRunId,
@@ -300,6 +301,144 @@ pub enum ExternalActionTransitionLifecycleEventKind {
     Revoked,
 }
 
+/// Payload-free proof that one exact durable wait was reassessed against a
+/// named source observation.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ExternalActionWaitResolutionProof {
+    condition_id: AuthorizedExecutionWaitConditionId,
+    condition_version: u32,
+    expected_sequence_number: EventSequenceNumber,
+    expected_event_id: EventId,
+    required_reference: AuthorizedExecutionResourceReference,
+    wake_trigger: AuthorizedExecutionWakeTriggerKind,
+    source_observation_commitment: SpecContentHash,
+    status: AuthorizedExecutionWaitStatus,
+    resolved_at: Timestamp,
+    proof_commitment: SpecContentHash,
+}
+
+impl ExternalActionWaitResolutionProof {
+    pub(crate) fn new(
+        wait: &AuthorizedExecutionWaitCondition,
+        source_observation_commitment: SpecContentHash,
+        status: AuthorizedExecutionWaitStatus,
+        resolved_at: Timestamp,
+    ) -> Result<Self, WorkflowOsError> {
+        if status == AuthorizedExecutionWaitStatus::Waiting {
+            return Err(lifecycle_error(
+                "wait_resolution.status_invalid",
+                "external action wait resolution must be terminal",
+            ));
+        }
+        if status == AuthorizedExecutionWaitStatus::Satisfied
+            && wait
+                .deadline()
+                .is_some_and(|deadline| resolved_at > deadline)
+        {
+            return Err(lifecycle_error(
+                "wait_resolution.deadline_expired",
+                "external action wait cannot be satisfied after its deadline",
+            ));
+        }
+        if status == AuthorizedExecutionWaitStatus::Expired
+            && wait
+                .deadline()
+                .map_or(true, |deadline| resolved_at < deadline)
+        {
+            return Err(lifecycle_error(
+                "wait_resolution.expiry_invalid",
+                "external action wait cannot expire before its deadline",
+            ));
+        }
+        let proof_commitment = wait_resolution_proof_commitment(
+            wait,
+            &source_observation_commitment,
+            status,
+            resolved_at,
+        )?;
+        Ok(Self {
+            condition_id: wait.condition_id().clone(),
+            condition_version: wait.condition_version(),
+            expected_sequence_number: *wait.expected_sequence_number(),
+            expected_event_id: wait.expected_event_id().clone(),
+            required_reference: wait.required_reference().clone(),
+            wake_trigger: wait.wake_trigger(),
+            source_observation_commitment,
+            status,
+            resolved_at,
+            proof_commitment,
+        })
+    }
+
+    fn validate(
+        &self,
+        wait: &AuthorizedExecutionWaitCondition,
+        recorded_at: Timestamp,
+    ) -> Result<(), WorkflowOsError> {
+        let expected = Self::new(
+            wait,
+            self.source_observation_commitment.clone(),
+            self.status,
+            recorded_at,
+        )?;
+        if self != &expected || self.resolved_at != recorded_at {
+            return Err(lifecycle_error(
+                "wait_resolution.proof_mismatch",
+                "external action wait resolution proof does not match the active condition",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) const fn condition_id(&self) -> &AuthorizedExecutionWaitConditionId {
+        &self.condition_id
+    }
+
+    pub(crate) const fn status(&self) -> AuthorizedExecutionWaitStatus {
+        self.status
+    }
+
+    pub(crate) const fn proof_commitment(&self) -> &SpecContentHash {
+        &self.proof_commitment
+    }
+}
+
+fn wait_resolution_proof_commitment(
+    wait: &AuthorizedExecutionWaitCondition,
+    source_observation_commitment: &SpecContentHash,
+    status: AuthorizedExecutionWaitStatus,
+    resolved_at: Timestamp,
+) -> Result<SpecContentHash, WorkflowOsError> {
+    #[derive(Serialize)]
+    struct Input<'a> {
+        domain: &'static str,
+        condition_id: &'a AuthorizedExecutionWaitConditionId,
+        condition_version: u32,
+        expected_sequence_number: &'a EventSequenceNumber,
+        expected_event_id: &'a EventId,
+        required_reference: &'a AuthorizedExecutionResourceReference,
+        wake_trigger: AuthorizedExecutionWakeTriggerKind,
+        source_observation_commitment: &'a SpecContentHash,
+        status: AuthorizedExecutionWaitStatus,
+        resolved_at: Timestamp,
+    }
+    Ok(SpecContentHash::from_bytes(canonical_bytes(
+        &Input {
+            domain: "workflow-os.external-action-wait-resolution.v1",
+            condition_id: wait.condition_id(),
+            condition_version: wait.condition_version(),
+            expected_sequence_number: wait.expected_sequence_number(),
+            expected_event_id: wait.expected_event_id(),
+            required_reference: wait.required_reference(),
+            wake_trigger: wait.wake_trigger(),
+            source_observation_commitment,
+            status,
+            resolved_at,
+        },
+        "wait resolution proof commitment failed",
+    )?))
+}
+
 /// One explicit lifecycle transition command. All commitments are payload-free.
 #[allow(missing_docs)]
 #[derive(Clone, Eq, PartialEq)]
@@ -329,9 +468,7 @@ pub enum ExternalActionTransitionLifecycleCommand {
         wait_condition: Box<AuthorizedExecutionWaitCondition>,
     },
     ResolveWait {
-        condition_id: AuthorizedExecutionWaitConditionId,
-        status: AuthorizedExecutionWaitStatus,
-        resolution_commitment: SpecContentHash,
+        proof: ExternalActionWaitResolutionProof,
     },
     Deny {
         refusal: ExternalActionTransitionLifecycleRefusalKind,
@@ -382,8 +519,7 @@ pub struct ExternalActionTransitionLifecycleEvent {
     outcome: Option<ExternalActionTransitionLifecycleOutcome>,
     refusal: Option<ExternalActionTransitionLifecycleRefusalKind>,
     wait_condition: Option<AuthorizedExecutionWaitCondition>,
-    resolved_wait_condition_id: Option<AuthorizedExecutionWaitConditionId>,
-    resolved_wait_status: Option<AuthorizedExecutionWaitStatus>,
+    wait_resolution_proof: Option<ExternalActionWaitResolutionProof>,
     recorded_at: Timestamp,
     event_commitment: SpecContentHash,
 }
@@ -449,6 +585,30 @@ impl ExternalActionTransitionLifecycleSnapshot {
     #[must_use]
     pub fn events(&self) -> &[ExternalActionTransitionLifecycleEvent] {
         &self.events
+    }
+
+    /// Returns the active attempt bound to the current lifecycle posture.
+    #[must_use]
+    pub(crate) const fn active_attempt_id(&self) -> Option<&AuthorizedExecutionAttemptId> {
+        self.active_attempt_id.as_ref()
+    }
+
+    /// Returns the active durable wait when the transition is suspended.
+    #[must_use]
+    pub(crate) const fn active_wait(&self) -> Option<&AuthorizedExecutionWaitCondition> {
+        self.active_wait.as_ref()
+    }
+
+    /// Returns the attempt from a structurally verified satisfied-wait event.
+    #[must_use]
+    pub(crate) fn verified_wait_resume_attempt_id(&self) -> Option<&AuthorizedExecutionAttemptId> {
+        let event = self.events.last()?;
+        let proof = event.wait_resolution_proof.as_ref()?;
+        (self.status == ExternalActionTransitionLifecycleStatus::Reserved
+            && proof.status() == AuthorizedExecutionWaitStatus::Satisfied
+            && event.event_kind == ExternalActionTransitionLifecycleEventKind::WaitResolved)
+            .then_some(event.attempt_id.as_ref())
+            .flatten()
     }
 }
 
@@ -527,7 +687,6 @@ impl LocalExternalActionTransitionLifecycleStore {
                 None,
                 None,
                 operation.operation_definition_commitment().clone(),
-                None,
                 None,
                 None,
                 None,
@@ -705,7 +864,7 @@ fn build_next_event(
     let previous = Some(snapshot.cursor.head_commitment.clone());
     let prior = Some(snapshot.status);
     let operation = &snapshot.operation;
-    let (kind, resulting, attempt, detail, outcome, refusal, wait, wait_condition_id, wait_status) =
+    let (kind, resulting, attempt, detail, outcome, refusal, wait, wait_resolution_proof) =
         match command {
             ExternalActionTransitionLifecycleCommand::Reserve { attempt_id } => {
                 if !matches!(
@@ -721,7 +880,6 @@ fn build_next_event(
                     ExternalActionTransitionLifecycleStatus::Reserved,
                     Some(attempt_id.clone()),
                     SpecContentHash::from_text(attempt_id.as_str()),
-                    None,
                     None,
                     None,
                     None,
@@ -746,7 +904,6 @@ fn build_next_event(
                     None,
                     None,
                     None,
-                    None,
                 )
             }
             ExternalActionTransitionLifecycleCommand::MarkAttempted {
@@ -763,7 +920,6 @@ fn build_next_event(
                     ExternalActionTransitionLifecycleStatus::Attempted,
                     Some(attempt_id.clone()),
                     attempt_commitment.clone(),
-                    None,
                     None,
                     None,
                     None,
@@ -790,7 +946,6 @@ fn build_next_event(
                     None,
                     None,
                     None,
-                    None,
                 )
             }
             ExternalActionTransitionLifecycleCommand::ReconcileOutcome {
@@ -810,7 +965,6 @@ fn build_next_event(
                     Some(attempt_id.clone()),
                     reconciliation_commitment.clone(),
                     Some(*outcome),
-                    None,
                     None,
                     None,
                     None,
@@ -836,25 +990,20 @@ fn build_next_event(
                     None,
                     Some((**wait_condition).clone()),
                     None,
-                    None,
                 )
             }
-            ExternalActionTransitionLifecycleCommand::ResolveWait {
-                condition_id,
-                status,
-                resolution_commitment,
-            } => {
+            ExternalActionTransitionLifecycleCommand::ResolveWait { proof } => {
                 let active = snapshot
                     .active_wait
                     .as_ref()
                     .ok_or_else(illegal_transition)?;
                 if snapshot.status != ExternalActionTransitionLifecycleStatus::Waiting
-                    || active.condition_id() != condition_id
-                    || *status == AuthorizedExecutionWaitStatus::Waiting
+                    || active.condition_id() != proof.condition_id()
                 {
                     return Err(illegal_transition());
                 }
-                let resulting = if *status == AuthorizedExecutionWaitStatus::Satisfied {
+                proof.validate(active, recorded_at)?;
+                let resulting = if proof.status() == AuthorizedExecutionWaitStatus::Satisfied {
                     snapshot.suspended_status.ok_or_else(illegal_transition)?
                 } else {
                     ExternalActionTransitionLifecycleStatus::Denied
@@ -863,12 +1012,11 @@ fn build_next_event(
                     ExternalActionTransitionLifecycleEventKind::WaitResolved,
                     resulting,
                     Some(active.attempt_id().clone()),
-                    resolution_commitment.clone(),
+                    proof.proof_commitment().clone(),
                     None,
                     None,
                     None,
-                    Some(condition_id.clone()),
-                    Some(*status),
+                    Some(proof.clone()),
                 )
             }
             ExternalActionTransitionLifecycleCommand::Deny {
@@ -897,7 +1045,6 @@ fn build_next_event(
                     Some(*refusal),
                     None,
                     None,
-                    None,
                 )
             }
             ExternalActionTransitionLifecycleCommand::Consume {
@@ -921,7 +1068,6 @@ fn build_next_event(
                     ExternalActionTransitionLifecycleStatus::Consumed,
                     Some(attempt_id.clone()),
                     consumption_commitment.clone(),
-                    None,
                     None,
                     None,
                     None,
@@ -954,7 +1100,6 @@ fn build_next_event(
                     None,
                     None,
                     None,
-                    None,
                 )
             }
         };
@@ -970,8 +1115,7 @@ fn build_next_event(
         outcome,
         refusal,
         wait,
-        wait_condition_id,
-        wait_status,
+        wait_resolution_proof,
         recorded_at,
     )
 }
@@ -989,8 +1133,7 @@ fn build_event(
     outcome: Option<ExternalActionTransitionLifecycleOutcome>,
     refusal: Option<ExternalActionTransitionLifecycleRefusalKind>,
     wait_condition: Option<AuthorizedExecutionWaitCondition>,
-    resolved_wait_condition_id: Option<AuthorizedExecutionWaitConditionId>,
-    resolved_wait_status: Option<AuthorizedExecutionWaitStatus>,
+    wait_resolution_proof: Option<ExternalActionWaitResolutionProof>,
     recorded_at: Timestamp,
 ) -> Result<ExternalActionTransitionLifecycleEvent, WorkflowOsError> {
     #[derive(Serialize)]
@@ -1008,8 +1151,7 @@ fn build_event(
         outcome: Option<ExternalActionTransitionLifecycleOutcome>,
         refusal: Option<ExternalActionTransitionLifecycleRefusalKind>,
         wait_condition: &'a Option<AuthorizedExecutionWaitCondition>,
-        resolved_wait_condition_id: &'a Option<AuthorizedExecutionWaitConditionId>,
-        resolved_wait_status: Option<AuthorizedExecutionWaitStatus>,
+        wait_resolution_proof: &'a Option<ExternalActionWaitResolutionProof>,
         recorded_at: Timestamp,
     }
     let mut event = ExternalActionTransitionLifecycleEvent {
@@ -1025,8 +1167,7 @@ fn build_event(
         outcome,
         refusal,
         wait_condition,
-        resolved_wait_condition_id,
-        resolved_wait_status,
+        wait_resolution_proof,
         recorded_at,
         event_commitment: SpecContentHash::from_text("pending"),
     };
@@ -1044,8 +1185,7 @@ fn build_event(
         outcome: event.outcome,
         refusal: event.refusal,
         wait_condition: &event.wait_condition,
-        resolved_wait_condition_id: &event.resolved_wait_condition_id,
-        resolved_wait_status: event.resolved_wait_status,
+        wait_resolution_proof: &event.wait_resolution_proof,
         recorded_at: event.recorded_at,
     };
     event.event_commitment =
@@ -1085,8 +1225,7 @@ fn rehydrate(
             event.outcome,
             event.refusal,
             event.wait_condition.clone(),
-            event.resolved_wait_condition_id.clone(),
-            event.resolved_wait_status,
+            event.wait_resolution_proof.clone(),
             event.recorded_at,
         )?;
         if &expected != event
@@ -1155,11 +1294,27 @@ fn validate_wait(
     wait: &AuthorizedExecutionWaitCondition,
 ) -> Result<(), WorkflowOsError> {
     let expected_action = format!("external-action/{}", operation.operation_id.as_str());
+    let expected_event = format!(
+        "event/external-action/{}",
+        snapshot.cursor.head_commitment.as_str()
+    );
+    let condition_suffix = wait
+        .condition_id()
+        .as_str()
+        .strip_prefix("external-action-wait/");
+    let required_suffix = wait
+        .required_reference()
+        .as_str()
+        .strip_prefix("external-action-requirement/");
     if wait.status() != AuthorizedExecutionWaitStatus::Waiting
         || wait.run_id() != &operation.run_id
         || wait.window_id() != &operation.execution_window_id
         || wait.action_reference().as_str() != expected_action
         || snapshot.active_attempt_id.as_ref() != Some(wait.attempt_id())
+        || wait.expected_sequence_number().get() != snapshot.cursor.sequence
+        || wait.expected_event_id().as_str() != expected_event
+        || condition_suffix.is_none()
+        || condition_suffix != required_suffix
     {
         return Err(lifecycle_error(
             "wait.binding_mismatch",
@@ -1230,22 +1385,37 @@ fn validate_rehydrated_transition(
                     && wait.action_reference().as_str()
                         == format!("external-action/{}", operation.operation_id.as_str())
                     && active_attempt_id == Some(wait.attempt_id())
+                    && wait.expected_sequence_number().get() + 1 == event.sequence
+                    && event
+                        .previous_event_commitment
+                        .as_ref()
+                        .is_some_and(|commitment| {
+                            wait.expected_event_id().as_str()
+                                == format!("event/external-action/{}", commitment.as_str())
+                        })
+                    && wait
+                        .condition_id()
+                        .as_str()
+                        .strip_prefix("external-action-wait/")
+                        == wait
+                            .required_reference()
+                            .as_str()
+                            .strip_prefix("external-action-requirement/")
             })
         }
         ExternalActionTransitionLifecycleEventKind::WaitResolved => {
             current == ExternalActionTransitionLifecycleStatus::Waiting
                 && active_wait.is_some_and(|wait| {
-                    event.resolved_wait_condition_id.as_ref() == Some(wait.condition_id())
+                    event.wait_resolution_proof.as_ref().is_some_and(|proof| {
+                        proof.condition_id() == wait.condition_id()
+                            && proof.validate(wait, event.recorded_at).is_ok()
+                    })
                 })
-                && matches!(
-                    event.resolved_wait_status,
-                    Some(
-                        AuthorizedExecutionWaitStatus::Satisfied
-                            | AuthorizedExecutionWaitStatus::Expired
-                            | AuthorizedExecutionWaitStatus::Superseded
-                    )
-                )
-                && match event.resolved_wait_status {
+                && match event
+                    .wait_resolution_proof
+                    .as_ref()
+                    .map(ExternalActionWaitResolutionProof::status)
+                {
                     Some(AuthorizedExecutionWaitStatus::Satisfied) => {
                         event.resulting_status == suspended_status.unwrap_or(current)
                     }
@@ -1902,8 +2072,10 @@ mod tests {
         let (attempt, reserved) = reserve(&store, &operation);
         let wait =
             AuthorizedExecutionWaitCondition::new(AuthorizedExecutionWaitConditionDefinition {
-                condition_id: AuthorizedExecutionWaitConditionId::new("wait/connector")
-                    .expect("condition"),
+                condition_id: AuthorizedExecutionWaitConditionId::new(
+                    "external-action-wait/connector",
+                )
+                .expect("condition"),
                 condition_version: 1,
                 kind: AuthorizedExecutionWaitConditionKind::CapabilityUnavailable,
                 workflow_id: WorkflowId::new("dg/pr").expect("workflow"),
@@ -1918,9 +2090,15 @@ mod tests {
                 attempt_id: attempt,
                 expected_sequence_number: EventSequenceNumber::new(reserved.cursor().sequence())
                     .expect("sequence"),
-                expected_event_id: EventId::new("event/wait").expect("event"),
-                required_reference: AuthorizedExecutionResourceReference::new("capability/github")
-                    .expect("resource"),
+                expected_event_id: EventId::new(format!(
+                    "event/external-action/{}",
+                    reserved.cursor().head_commitment().as_str()
+                ))
+                .expect("event"),
+                required_reference: AuthorizedExecutionResourceReference::new(
+                    "external-action-requirement/connector",
+                )
+                .expect("resource"),
                 created_at: time("2026-11-02T20:02:00Z"),
                 deadline: Some(time("2026-11-02T21:00:00Z")),
                 wake_trigger: AuthorizedExecutionWakeTriggerKind::CapabilityAvailabilityChanged,
@@ -1939,13 +2117,41 @@ mod tests {
             waiting.status(),
             ExternalActionTransitionLifecycleStatus::Waiting
         );
+        let mut mismatched_proof = ExternalActionWaitResolutionProof::new(
+            &wait,
+            hash("wait-satisfied-source"),
+            AuthorizedExecutionWaitStatus::Satisfied,
+            time("2026-11-02T20:03:00Z"),
+        )
+        .expect("resolution proof");
+        mismatched_proof.required_reference =
+            AuthorizedExecutionResourceReference::new("external-action-requirement/substituted")
+                .expect("substituted resource");
+        assert_eq!(
+            store
+                .append(
+                    operation.operation_id(),
+                    waiting.cursor(),
+                    &ExternalActionTransitionLifecycleCommand::ResolveWait {
+                        proof: mismatched_proof,
+                    },
+                    time("2026-11-02T20:03:00Z"),
+                )
+                .expect_err("mismatched proof rejected")
+                .code(),
+            "external_action_transition_lifecycle.wait_resolution.proof_mismatch"
+        );
         let resumed = append(
             &store,
             &operation,
             &ExternalActionTransitionLifecycleCommand::ResolveWait {
-                condition_id: wait.condition_id().clone(),
-                status: AuthorizedExecutionWaitStatus::Satisfied,
-                resolution_commitment: hash("wait-satisfied"),
+                proof: ExternalActionWaitResolutionProof::new(
+                    &wait,
+                    hash("wait-satisfied-source"),
+                    AuthorizedExecutionWaitStatus::Satisfied,
+                    time("2026-11-02T20:03:00Z"),
+                )
+                .expect("resolution proof"),
             },
             "2026-11-02T20:03:00Z",
         );
