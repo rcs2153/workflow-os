@@ -13,10 +13,11 @@ use std::{
 use serde::Serialize;
 
 use crate::continuation_context::{
-    canonical_commitment, collector_expectation_for, empty_accounting_claims_for,
-    ContinuationClaimAccountingEntry, ContinuationClaimAccountingOutcome,
-    ContinuationContextAccess, ContinuationContextAuthorityDomain,
-    ContinuationContextCollectorExpectation, ContinuationContextCollectorOutcome,
+    canonical_commitment, collector_expectation_for, derive_continuation_context,
+    empty_accounting_claims_for, ContinuationClaimAccountingEntry,
+    ContinuationClaimAccountingOutcome, ContinuationContextAccess,
+    ContinuationContextAuthorityDomain, ContinuationContextCollectorExpectation,
+    ContinuationContextCollectorOutcome, ContinuationContextDecision,
     ContinuationContextDecisionInput, ContinuationContextFreshness, ContinuationContextIntegrity,
     ContinuationContextPurpose, ContinuationContextScope, ContinuationContextSensitivity,
     ContinuationContextSourceClass, ContinuationContextSourceCoverageEntry,
@@ -385,6 +386,98 @@ trait ContinuationContextCollector {
     ) -> Result<ContinuationCollectionObservation, WorkflowOsError>;
 }
 
+/// Commitment chain for one complete private aggregate composition.
+///
+/// This proves which stable request, anchor, observation set, coverage result,
+/// understanding projection, and decision were composed together. It is not a
+/// capability, approval, delivery receipt, or proof that an external collector
+/// implementation was side-effect free.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationAggregateCollectorAccountingPosture {
+    Complete,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationAggregateRequiredCoveragePosture {
+    Complete,
+    Incomplete,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationAggregateObservationMode {
+    NonConsuming,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ContinuationAggregateAuthorityPosture {
+    NonAuthorizing,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ContinuationAggregateCompositionProof {
+    request_commitment: SpecContentHash,
+    collector_contract_commitment: SpecContentHash,
+    pre_collection_anchor_commitment: SpecContentHash,
+    post_collection_anchor_commitment: SpecContentHash,
+    observation_set_commitment: SpecContentHash,
+    coverage_commitment: SpecContentHash,
+    understanding_commitment: SpecContentHash,
+    decision_commitment: SpecContentHash,
+    collector_kinds_accounted: usize,
+    collector_accounting: ContinuationAggregateCollectorAccountingPosture,
+    required_source_coverage: ContinuationAggregateRequiredCoveragePosture,
+    observation_mode: ContinuationAggregateObservationMode,
+    authority_posture: ContinuationAggregateAuthorityPosture,
+    commitment: SpecContentHash,
+}
+
+impl fmt::Debug for ContinuationAggregateCompositionProof {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ContinuationAggregateCompositionProof")
+            .field("request_commitment", &"[REDACTED]")
+            .field("collector_contract_commitment", &"[REDACTED]")
+            .field("pre_collection_anchor_commitment", &"[REDACTED]")
+            .field("post_collection_anchor_commitment", &"[REDACTED]")
+            .field("observation_set_commitment", &"[REDACTED]")
+            .field("coverage_commitment", &"[REDACTED]")
+            .field("understanding_commitment", &"[REDACTED]")
+            .field("decision_commitment", &"[REDACTED]")
+            .field("collector_kinds_accounted", &self.collector_kinds_accounted)
+            .field("collector_accounting", &self.collector_accounting)
+            .field("required_source_coverage", &self.required_source_coverage)
+            .field("observation_mode", &self.observation_mode)
+            .field("authority_posture", &self.authority_posture)
+            .field("commitment", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// One private non-authorizing aggregate decision and its exact proof chain.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ContinuationAggregateComposition {
+    decision: ContinuationContextDecision,
+    proof: ContinuationAggregateCompositionProof,
+}
+
+impl fmt::Debug for ContinuationAggregateComposition {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ContinuationAggregateComposition")
+            .field("decision_posture", &self.decision.posture())
+            .field("claim_count", &self.decision.understanding().claims().len())
+            .field("gap_count", &self.decision.gaps().len())
+            .field("proof", &self.proof)
+            .finish()
+    }
+}
+
 /// Test-only reference registry. Production registration remains unavailable.
 struct InMemoryContinuationCollectorRegistry {
     collectors: BTreeMap<ContinuationCollectorKind, Box<dyn ContinuationContextCollector>>,
@@ -420,9 +513,26 @@ impl InMemoryContinuationCollectorRegistry {
         request: ContinuationCollectionRequest,
         after_anchor: &ContinuationCollectionAnchor,
     ) -> Result<ContinuationContextDecisionInput, WorkflowOsError> {
+        let observations = self.collect_observations(&request)?;
+        compose_collection(request, after_anchor, observations)
+    }
+
+    fn compose(
+        &self,
+        request: ContinuationCollectionRequest,
+        after_anchor: &ContinuationCollectionAnchor,
+    ) -> Result<ContinuationAggregateComposition, WorkflowOsError> {
+        let observations = self.collect_observations(&request)?;
+        compose_aggregate(request, after_anchor, observations)
+    }
+
+    fn collect_observations(
+        &self,
+        request: &ContinuationCollectionRequest,
+    ) -> Result<Vec<ContinuationCollectionObservation>, WorkflowOsError> {
         let mut observations = Vec::with_capacity(self.collectors.len());
         for (expected_kind, collector) in &self.collectors {
-            let observation = collector.collect(&request)?;
+            let observation = collector.collect(request)?;
             if observation.kind != *expected_kind {
                 return Err(collection_error(
                     "collector.kind_substitution",
@@ -431,8 +541,97 @@ impl InMemoryContinuationCollectorRegistry {
             }
             observations.push(observation);
         }
-        compose_collection(request, after_anchor, observations)
+        Ok(observations)
     }
+}
+
+fn compose_aggregate(
+    request: ContinuationCollectionRequest,
+    after_anchor: &ContinuationCollectionAnchor,
+    mut observations: Vec<ContinuationCollectionObservation>,
+) -> Result<ContinuationAggregateComposition, WorkflowOsError> {
+    observations.sort_by_key(|item| item.kind);
+    validate_complete_kinds(observations.iter().map(|item| item.kind), "observation")?;
+    let observation_set_commitment = collection_commitment("observation-set", &observations)?;
+    let request_commitment = request.commitment.clone();
+    let collector_contract_commitment = closed_collector_contract_commitment()?;
+    let pre_collection_anchor_commitment = request.anchor.commitment.clone();
+    let post_collection_anchor_commitment = after_anchor.commitment.clone();
+    let input = compose_collection(request, after_anchor, observations)?;
+    let decision = derive_continuation_context(input)?;
+
+    if ContinuationContextDecision::authorizes_execution()
+        || !decision.bundle().is_non_authorizing()
+        || !decision.understanding().is_non_authorizing()
+    {
+        return Err(collection_error(
+            "aggregate.authority_invalid",
+            "aggregate continuation composition must remain non-authorizing",
+        ));
+    }
+
+    let collector_kinds_accounted = decision.coverage().entries().len();
+    if collector_kinds_accounted != ALL_COLLECTOR_KINDS.len() {
+        return Err(collection_error(
+            "aggregate.coverage_incomplete",
+            "aggregate continuation composition must account for every collector class",
+        ));
+    }
+    let collector_accounting = ContinuationAggregateCollectorAccountingPosture::Complete;
+
+    let coverage_commitment = decision.coverage().commitment().clone();
+    let understanding_commitment = decision.understanding().commitment().clone();
+    let decision_commitment = decision.commitment().clone();
+    let required_source_coverage = if decision.coverage().is_complete() {
+        ContinuationAggregateRequiredCoveragePosture::Complete
+    } else {
+        ContinuationAggregateRequiredCoveragePosture::Incomplete
+    };
+    let observation_mode = ContinuationAggregateObservationMode::NonConsuming;
+    let authority_posture = ContinuationAggregateAuthorityPosture::NonAuthorizing;
+    let commitment = collection_commitment(
+        "aggregate-composition-proof",
+        &(
+            &request_commitment,
+            &collector_contract_commitment,
+            &pre_collection_anchor_commitment,
+            &post_collection_anchor_commitment,
+            &observation_set_commitment,
+            &coverage_commitment,
+            &understanding_commitment,
+            &decision_commitment,
+            collector_kinds_accounted,
+            collector_accounting,
+            required_source_coverage,
+            observation_mode,
+            authority_posture,
+        ),
+    )?;
+    let proof = ContinuationAggregateCompositionProof {
+        request_commitment,
+        collector_contract_commitment,
+        pre_collection_anchor_commitment,
+        post_collection_anchor_commitment,
+        observation_set_commitment,
+        coverage_commitment,
+        understanding_commitment,
+        decision_commitment,
+        collector_kinds_accounted,
+        collector_accounting,
+        required_source_coverage,
+        observation_mode,
+        authority_posture,
+        commitment,
+    };
+    Ok(ContinuationAggregateComposition { decision, proof })
+}
+
+fn closed_collector_contract_commitment() -> Result<SpecContentHash, WorkflowOsError> {
+    let contract = ALL_COLLECTOR_KINDS
+        .iter()
+        .map(|kind| (*kind, kind.source_class(), kind.authority_domain()))
+        .collect::<Vec<_>>();
+    collection_commitment("closed-collector-contract", &contract)
 }
 
 fn compose_collection(
@@ -915,6 +1114,24 @@ mod tests {
         registry_with_order(request, false)
     }
 
+    fn registry_with_posture(
+        request: &ContinuationCollectionRequest,
+        kind: ContinuationCollectorKind,
+        posture: ContinuationCollectionResultPosture,
+    ) -> InMemoryContinuationCollectorRegistry {
+        let collectors = ALL_COLLECTOR_KINDS
+            .iter()
+            .map(|candidate| {
+                let mut collector = default_collector(*candidate, request);
+                if *candidate == kind {
+                    collector.posture = posture;
+                }
+                Box::new(collector) as Box<dyn ContinuationContextCollector>
+            })
+            .collect();
+        InMemoryContinuationCollectorRegistry::new(collectors).expect("registry")
+    }
+
     #[test]
     fn closed_collector_mapping_is_complete_and_bijective() {
         let source_classes = ALL_COLLECTOR_KINDS
@@ -982,6 +1199,183 @@ mod tests {
             ContinuationContextDecisionPosture::Blocked
         );
         assert!(!crate::continuation_context::ContinuationContextDecision::authorizes_execution());
+    }
+
+    #[test]
+    fn aggregate_composition_binds_complete_coverage_and_projection() {
+        let request = request(false);
+        let aggregate = registry(&request)
+            .compose(request.clone(), &request.anchor)
+            .expect("aggregate composition");
+
+        assert_eq!(
+            aggregate.proof.collector_kinds_accounted,
+            ALL_COLLECTOR_KINDS.len()
+        );
+        assert_eq!(
+            aggregate.proof.collector_accounting,
+            ContinuationAggregateCollectorAccountingPosture::Complete
+        );
+        assert_eq!(
+            aggregate.proof.required_source_coverage,
+            if aggregate.decision.coverage().is_complete() {
+                ContinuationAggregateRequiredCoveragePosture::Complete
+            } else {
+                ContinuationAggregateRequiredCoveragePosture::Incomplete
+            }
+        );
+        assert_eq!(
+            aggregate.proof.coverage_commitment,
+            *aggregate.decision.coverage().commitment()
+        );
+        assert_eq!(
+            aggregate.proof.understanding_commitment,
+            *aggregate.decision.understanding().commitment()
+        );
+        assert_eq!(
+            aggregate.proof.decision_commitment,
+            *aggregate.decision.commitment()
+        );
+        assert_eq!(
+            aggregate.proof.collector_contract_commitment,
+            closed_collector_contract_commitment().expect("collector contract")
+        );
+        assert_eq!(
+            aggregate.proof.observation_mode,
+            ContinuationAggregateObservationMode::NonConsuming
+        );
+        assert_eq!(
+            aggregate.proof.authority_posture,
+            ContinuationAggregateAuthorityPosture::NonAuthorizing
+        );
+        assert!(!ContinuationContextDecision::authorizes_execution());
+    }
+
+    #[test]
+    fn aggregate_composition_is_order_independent_and_byte_stable() {
+        let request = request(false);
+        let forward = registry_with_order(&request, false)
+            .compose(request.clone(), &request.anchor)
+            .expect("forward aggregate");
+        let reverse = registry_with_order(&request, true)
+            .compose(request.clone(), &request.anchor)
+            .expect("reverse aggregate");
+
+        assert_eq!(forward, reverse);
+        assert_eq!(forward.proof.commitment, reverse.proof.commitment);
+    }
+
+    #[test]
+    fn aggregate_commitment_changes_when_a_collector_posture_changes() {
+        let request = request(false);
+        let unsupported = registry(&request)
+            .compose(request.clone(), &request.anchor)
+            .expect("unsupported aggregate");
+        let unavailable = registry_with_posture(
+            &request,
+            ContinuationCollectorKind::ValidatedDeclaration,
+            ContinuationCollectionResultPosture::Unavailable,
+        )
+        .compose(request.clone(), &request.anchor)
+        .expect("unavailable aggregate");
+
+        assert_ne!(
+            unsupported.proof.observation_set_commitment,
+            unavailable.proof.observation_set_commitment
+        );
+        assert_ne!(
+            unsupported.proof.coverage_commitment,
+            unavailable.proof.coverage_commitment
+        );
+        assert_ne!(unsupported.proof.commitment, unavailable.proof.commitment);
+    }
+
+    #[test]
+    fn aggregate_composition_projects_current_accepted_intent_with_provenance() {
+        let request = request(false);
+        let mut collectors = ALL_COLLECTOR_KINDS
+            .iter()
+            .map(|kind| default_collector(*kind, &request))
+            .collect::<Vec<_>>();
+        let accepted_intent = collectors
+            .iter_mut()
+            .find(|collector| collector.kind == ContinuationCollectorKind::AcceptedIntent)
+            .expect("accepted-intent collector");
+        accepted_intent.posture = ContinuationCollectionResultPosture::Observed;
+        accepted_intent.accepted_intents = vec![AcceptedIntentRecord {
+            record_id: AcceptedIntentRecordId::new("intent/objective").expect("intent"),
+            actor: ActorId::new("user/maintainer").expect("actor"),
+            directive_commitment: hash("directive"),
+            scope: request.scope.clone(),
+            kind: AcceptedIntentKind::Objective,
+            meaning: ContinuationContextText::new("implement aggregate composition")
+                .expect("meaning"),
+            supersedes: Vec::new(),
+            supersession: AcceptedIntentSupersession::Current,
+        }];
+        let registry = InMemoryContinuationCollectorRegistry::new(
+            collectors
+                .into_iter()
+                .map(|collector| Box::new(collector) as Box<dyn ContinuationContextCollector>)
+                .collect(),
+        )
+        .expect("registry");
+
+        let aggregate = registry
+            .compose(request.clone(), &request.anchor)
+            .expect("aggregate composition");
+        let objective = aggregate
+            .decision
+            .understanding()
+            .claims()
+            .iter()
+            .find(|claim| claim.kind() == ContinuationUnderstandingClaimKind::Objective)
+            .expect("objective claim");
+        assert_eq!(
+            objective.posture(),
+            crate::continuation_context::ContinuationUnderstandingClaimPosture::Authoritative
+        );
+        assert_eq!(
+            objective.value().map(ContinuationContextText::as_str),
+            Some("implement aggregate composition")
+        );
+        assert_eq!(objective.source_ids().len(), 1);
+    }
+
+    #[test]
+    fn aggregate_composition_rejects_post_collection_anchor_drift() {
+        let request = request(true);
+        let mut after = request.anchor.clone();
+        after.source_revisions[0].revision = hash("aggregate-drift");
+        after.commitment = collection_commitment(
+            "anchor",
+            &(
+                &after.immutable_bundle,
+                &after.event_cursor,
+                &after.source_revisions,
+            ),
+        )
+        .expect("commitment");
+
+        let error = registry(&request)
+            .compose(request, &after)
+            .expect_err("drift must reject aggregate composition");
+        assert_eq!(error.code(), "continuation_collection.anchor.drifted");
+    }
+
+    #[test]
+    fn aggregate_debug_redacts_commitments_and_semantic_values() {
+        let request = request(false);
+        let request_commitment = request.commitment.as_str().to_owned();
+        let aggregate = registry(&request)
+            .compose(request.clone(), &request.anchor)
+            .expect("aggregate composition");
+        let decision_commitment = aggregate.decision.commitment().as_str().to_owned();
+        let debug = format!("{aggregate:?}");
+
+        assert!(debug.contains("[REDACTED]"));
+        assert!(!debug.contains(&request_commitment));
+        assert!(!debug.contains(&decision_commitment));
     }
 
     #[test]
