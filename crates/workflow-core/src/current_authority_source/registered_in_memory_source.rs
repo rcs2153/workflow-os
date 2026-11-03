@@ -123,6 +123,16 @@ pub(crate) struct RegisteredCurrentAuthorityUseInput<'a> {
     pub(crate) redaction: &'a RedactionMetadata,
 }
 
+pub(crate) struct RegisteredExactGrantVerificationInput<'a> {
+    pub(crate) grant_id: &'a CapabilityGrantId,
+    pub(crate) expected_capability: &'a CapabilityReference,
+    pub(crate) expected_resource_kind: CapabilityResourceKind,
+    pub(crate) expected_resource_reference: &'a str,
+    pub(crate) execution_binding: &'a RequiredContextExecutionBinding,
+    pub(crate) evaluated_at: Timestamp,
+    pub(crate) requested_sensitivity: WorkReportSensitivity,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RegisteredCurrentAuthorityUsePosture {
     BlockedBeforeUse,
@@ -148,6 +158,8 @@ pub(crate) struct RegisteredCurrentAuthorityUseOutcome {
 
 pub(crate) struct RegisteredCurrentAuthorityUseCapability<'call> {
     assessment: &'call RegisteredCurrentAuthorityResolutionAssessment,
+    grants: &'call [CapabilityGrant],
+    availability_records: &'call [CapabilityAvailabilityRecord],
 }
 
 pub(super) struct CurrentAuthorityWorkReportMetadataReadInput<'a> {
@@ -352,6 +364,71 @@ impl fmt::Debug for RegisteredCurrentAuthorityUseCapability<'_> {
 }
 
 impl RegisteredCurrentAuthorityUseCapability<'_> {
+    pub(crate) fn verify_exact_grant(
+        &self,
+        input: &RegisteredExactGrantVerificationInput<'_>,
+    ) -> Result<SpecContentHash, WorkflowOsError> {
+        let grant = self
+            .grants
+            .iter()
+            .find(|grant| grant.grant_id() == input.grant_id)
+            .ok_or_else(|| {
+                registered_source_error(
+                    "use.grant_missing",
+                    "registered current authority use is missing the projected grant",
+                )
+            })?;
+        if grant.capability() != input.expected_capability
+            || grant.resource().kind() != input.expected_resource_kind
+            || grant.resource().reference() != input.expected_resource_reference
+        {
+            return Err(registered_source_error(
+                "use.grant_scope_mismatch",
+                "registered current authority grant does not match the projected operation",
+            ));
+        }
+        let resolution = resolve_capability_authority(&CapabilityResolutionInput {
+            capability: input.expected_capability,
+            resource: grant.resource(),
+            actor: input.execution_binding.actor(),
+            workflow_id: input.execution_binding.workflow_id(),
+            run_id: input.execution_binding.run_id(),
+            step_id: input.execution_binding.step_id(),
+            harness_contract_id: Some(input.execution_binding.harness_contract_id()),
+            requested_sensitivity: input.requested_sensitivity,
+            evaluated_at: input.evaluated_at,
+            availability_records: self.availability_records,
+            grants: self.grants,
+        })
+        .map_err(|_| {
+            registered_source_error(
+                "use.grant_resolution_failed",
+                "registered current authority grant resolution failed",
+            )
+        })?;
+        if resolution.posture() != CapabilityResolutionPosture::Authorized
+            || resolution.selected_grant_id() != Some(input.grant_id)
+        {
+            return Err(registered_source_error(
+                "use.grant_not_authorized",
+                "registered current authority grant is not currently authorized",
+            ));
+        }
+        hash_serializable(
+            "registered-current-authority-external-action-grant-v1",
+            &(
+                self.assessment.source_snapshot_commitment(),
+                self.assessment.fact_set_commitment(),
+                self.assessment.assessment_commitment(),
+                input.execution_binding.binding_hash(),
+                input.grant_id,
+                input.expected_capability,
+                grant.resource(),
+                resolution,
+            ),
+        )
+    }
+
     pub(crate) fn continuation_governance_commitment(
         &self,
     ) -> Result<SpecContentHash, WorkflowOsError> {
@@ -791,6 +868,8 @@ impl RegisteredInMemoryCurrentAuthoritySource {
 
         let capability = RegisteredCurrentAuthorityUseCapability {
             assessment: &assessment,
+            grants: &self.grants,
+            availability_records: &self.availability_records,
         };
         let posture = match consumer(&capability) {
             RegisteredCurrentAuthorityConsumerResult::Succeeded => {
@@ -1896,7 +1975,7 @@ pub(crate) mod tests {
         (contract, binding)
     }
 
-    fn availability(
+    pub(crate) fn availability(
         contract: &RequiredContextContractBinding,
     ) -> Vec<CapabilityAvailabilityRecord> {
         contract
@@ -1921,7 +2000,9 @@ pub(crate) mod tests {
             .collect()
     }
 
-    fn references(contract: &RequiredContextContractBinding) -> Vec<GovernedContextReference> {
+    pub(crate) fn references(
+        contract: &RequiredContextContractBinding,
+    ) -> Vec<GovernedContextReference> {
         contract
             .requirements()
             .iter()
@@ -1937,7 +2018,7 @@ pub(crate) mod tests {
             .collect()
     }
 
-    fn grant(contract: &RequiredContextContractBinding) -> CapabilityGrant {
+    pub(crate) fn grant(contract: &RequiredContextContractBinding) -> CapabilityGrant {
         grant_for(
             contract,
             0,
@@ -1995,7 +2076,7 @@ pub(crate) mod tests {
         .expect("grant")
     }
 
-    fn grants_with_first_lifecycle(
+    pub(crate) fn grants_with_first_lifecycle(
         contract: &RequiredContextContractBinding,
         lifecycle: CapabilityGrantLifecycle,
     ) -> Vec<CapabilityGrant> {
@@ -2028,7 +2109,7 @@ pub(crate) mod tests {
         )
     }
 
-    fn source_with_inventory(
+    pub(crate) fn source_with_inventory(
         _contract: &RequiredContextContractBinding,
         observed_at: &str,
         grants: Vec<CapabilityGrant>,

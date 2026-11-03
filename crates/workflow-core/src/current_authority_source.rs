@@ -27,15 +27,21 @@ pub(crate) use registered_in_memory_source::RegisteredInMemoryCurrentAuthoritySo
 pub(crate) use registered_in_memory_source::{
     CurrentAuthorityGitHubRepositoryReadInput, CurrentAuthorityGitHubRepositoryReadOutcome,
     PreparedGitHubRepositoryRead, RegisteredCurrentAuthorityConsumerResult,
-    RegisteredCurrentAuthorityUseInput, RegisteredCurrentAuthorityUsePosture,
+    RegisteredCurrentAuthorityUseCapability, RegisteredCurrentAuthorityUseInput,
+    RegisteredCurrentAuthorityUsePosture, RegisteredExactGrantVerificationInput,
     RegisteredInMemoryCurrentAuthoritySource, SuccessfulCapabilityUseProof,
     SuccessfulWorkReportMetadataReadProof,
 };
 
 #[cfg(all(test, feature = "trusted-host-application-spi"))]
+pub(crate) use registered_in_memory_source::tests::ready_source as registered_current_authority_test_source;
+#[cfg(test)]
 pub(crate) use registered_in_memory_source::tests::{
+    availability as registered_current_authority_test_availability,
     fixture as registered_current_authority_test_fixture,
-    ready_source as registered_current_authority_test_source,
+    grants_with_first_lifecycle as registered_current_authority_test_grants_with_first_lifecycle,
+    references as registered_current_authority_test_references,
+    source_with_inventory as registered_current_authority_test_source_with_inventory,
 };
 
 const SOURCE_ID_MAX_BYTES: usize = 128;
