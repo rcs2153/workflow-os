@@ -316,6 +316,10 @@ impl ExternalActionFixtureProviderOperation {
         &self.operation_id
     }
 
+    pub(crate) const fn expected_provider_revision(&self) -> &SpecContentHash {
+        &self.expected_provider_revision
+    }
+
     pub(crate) fn operation_content_commitment(&self) -> Result<SpecContentHash, WorkflowOsError> {
         commitment(
             "workflow-os/external-action-fixture-provider-operation/v1",
@@ -520,6 +524,20 @@ impl ExternalActionFixtureLookupCoverage {
             return Err(fixture_error(
                 "provider.lookup_coverage_mismatch",
                 "fixture provider lookup coverage does not match the exact operation",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_authoritative_not_found_for_operation(
+        &self,
+        operation: &ExternalActionFixtureProviderOperation,
+    ) -> Result<(), WorkflowOsError> {
+        self.validate_for_operation(operation)?;
+        if &self.provider_revision != operation.expected_provider_revision() {
+            return Err(fixture_error(
+                "provider.lookup_coverage_not_authoritative",
+                "fixture provider absence lookup does not close the attempted revision window",
             ));
         }
         Ok(())
@@ -1475,12 +1493,17 @@ mod tests {
         );
         assert_eq!(replay.exact_merge_result(), applied.exact_merge_result());
         assert_eq!(provider.operation_count().expect("operation count"), 3);
-        let looked_up = match provider.lookup_operation(&merge).expect("lookup") {
+        let lookup = provider.lookup_operation(&merge).expect("lookup");
+        assert!(matches!(
+            lookup,
+            ExternalActionFixtureProviderLookupOutcome::ExactFound { .. }
+        ));
+        let looked_up = match lookup {
             ExternalActionFixtureProviderLookupOutcome::ExactFound { result, coverage } => {
                 coverage.validate_for_operation(&merge).expect("coverage");
                 result
             }
-            outcome => panic!("expected exact receipt, got {outcome:?}"),
+            _ => return,
         };
         assert_eq!(
             looked_up.posture(),

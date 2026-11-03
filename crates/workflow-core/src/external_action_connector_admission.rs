@@ -613,7 +613,7 @@ fn reconcile_provider_operation<P: ExternalActionFixtureProviderSource>(
             Ok(FixtureReconciliationOutcome::Found(result))
         }
         ExternalActionFixtureProviderLookupOutcome::AuthoritativeNotFound { coverage } => {
-            coverage.validate_for_operation(operation)?;
+            coverage.validate_authoritative_not_found_for_operation(operation)?;
             let reconciliation_commitment = commitment(
                 "external-action-fixture-reconciliation-not-found-v1",
                 &(
@@ -2302,6 +2302,7 @@ fn admission_error(code: &'static str, message: &'static str) -> WorkflowOsError
 mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::Mutex;
 
     use super::*;
     use crate::current_authority_source::{
@@ -2468,9 +2469,10 @@ mod tests {
         }
     }
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Eq, PartialEq)]
     enum AmbiguousLookupBehavior {
         AuthoritativeNotFound,
+        AuthoritativeNotFoundAfterRevisionDrift,
         Inconclusive,
         Unavailable,
         SubstitutedResult,
@@ -2481,6 +2483,7 @@ mod tests {
         behavior: AmbiguousLookupBehavior,
         compare_calls: AtomicU64,
         lookup_calls: AtomicU64,
+        compare_operation_commitments: Mutex<Vec<SpecContentHash>>,
     }
 
     impl LookupControlledAmbiguousProvider {
@@ -2490,6 +2493,7 @@ mod tests {
                 behavior,
                 compare_calls: AtomicU64::new(0),
                 lookup_calls: AtomicU64::new(0),
+                compare_operation_commitments: Mutex::new(Vec::new()),
             }
         }
 
@@ -2500,6 +2504,13 @@ mod tests {
         fn lookup_calls(&self) -> u64 {
             self.lookup_calls.load(Ordering::SeqCst)
         }
+
+        fn compare_operation_commitments(&self) -> Vec<SpecContentHash> {
+            self.compare_operation_commitments
+                .lock()
+                .expect("compare operation commitments")
+                .clone()
+        }
     }
 
     impl ExternalActionFixtureProviderSource for LookupControlledAmbiguousProvider {
@@ -2509,7 +2520,7 @@ mod tests {
 
         fn compare_and_apply(
             &self,
-            _operation: &ExternalActionFixtureProviderOperation,
+            operation: &ExternalActionFixtureProviderOperation,
         ) -> Result<
             (
                 ExternalActionFixtureProviderDispatchOutcome,
@@ -2518,6 +2529,14 @@ mod tests {
             WorkflowOsError,
         > {
             self.compare_calls.fetch_add(1, Ordering::SeqCst);
+            self.compare_operation_commitments
+                .lock()
+                .expect("compare operation commitments")
+                .push(
+                    operation
+                        .operation_content_commitment()
+                        .expect("operation commitment"),
+                );
             Ok((
                 ExternalActionFixtureProviderDispatchOutcome::MayHaveStartedAmbiguous,
                 None,
@@ -2529,6 +2548,16 @@ mod tests {
             operation: &ExternalActionFixtureProviderOperation,
         ) -> Result<ExternalActionFixtureProviderLookupOutcome, WorkflowOsError> {
             self.lookup_calls.fetch_add(1, Ordering::SeqCst);
+            if matches!(
+                self.behavior,
+                AmbiguousLookupBehavior::AuthoritativeNotFoundAfterRevisionDrift
+            ) {
+                self.inner
+                    .set_connector_posture(
+                        ExternalActionFixtureConnectorPosture::RefusedBeforeDispatch,
+                    )
+                    .expect("advance provider revision");
+            }
             let observation = self.inner.observe()?;
             let coverage =
                 crate::external_action_fixture_lifecycle::ExternalActionFixtureLookupCoverage::new(
@@ -2536,7 +2565,8 @@ mod tests {
                     observation.provider_revision().clone(),
                 )?;
             match self.behavior {
-                AmbiguousLookupBehavior::AuthoritativeNotFound => Ok(
+                AmbiguousLookupBehavior::AuthoritativeNotFound
+                | AmbiguousLookupBehavior::AuthoritativeNotFoundAfterRevisionDrift => Ok(
                     ExternalActionFixtureProviderLookupOutcome::AuthoritativeNotFound { coverage },
                 ),
                 AmbiguousLookupBehavior::Inconclusive => {
@@ -3627,11 +3657,15 @@ mod tests {
     }
 
     #[test]
-    fn phase_5d_typed_lookup_outcomes_never_redispatch_ambiguous_create() {
+    fn phase_5d_typed_lookup_outcomes_bound_ambiguous_create_recovery() {
         for (behavior, expected_code) in [
             (
                 AmbiguousLookupBehavior::AuthoritativeNotFound,
                 "external_action_connector_admission.draft.reconciled_not_found",
+            ),
+            (
+                AmbiguousLookupBehavior::AuthoritativeNotFoundAfterRevisionDrift,
+                "external_action_fixture_lifecycle.provider.lookup_coverage_not_authoritative",
             ),
             (
                 AmbiguousLookupBehavior::Inconclusive,
@@ -3657,7 +3691,18 @@ mod tests {
             assert_eq!(provider.compare_calls(), 1);
             assert_eq!(provider.lookup_calls(), 1);
 
-            if matches!(
+            if behavior == AmbiguousLookupBehavior::AuthoritativeNotFound {
+                let retry = execute_draft(&fixture, &lifecycle_store, &provider, &successor_store)
+                    .expect_err("proven absence permits one fresh ambiguous attempt");
+                assert_eq!(
+                    retry.code(),
+                    "external_action_connector_admission.draft.outcome_ambiguous"
+                );
+                assert_eq!(provider.compare_calls(), 2);
+                let operations = provider.compare_operation_commitments();
+                assert_eq!(operations.len(), 2);
+                assert_eq!(operations[0], operations[1]);
+            } else if matches!(
                 behavior,
                 AmbiguousLookupBehavior::Inconclusive | AmbiguousLookupBehavior::Unavailable
             ) {

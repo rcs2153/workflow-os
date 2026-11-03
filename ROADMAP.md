@@ -476,9 +476,26 @@ connector mutation. See the [Phase 5C implementation
 report](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5C_REPORT.md) and
 [focused
 review](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5C_REVIEW.md).
-Phase 5D exact unchanged-head merge, replay, and accepted ambiguity recovery is
-the next authorized increment. Phase 5E and live connector work remain
-unauthorized until Phase 5D is implemented and review-accepted.
+Phase 5D exact unchanged-head merge, replay, and bounded ambiguity recovery is
+implemented and accepted after focused maintainer/security review corrected an
+authoritative-negative-lookup blocker. Squash merge requires the exact
+Core-owned successor, unchanged reviewed head, ready posture, terminal-green
+checks, current authority, and the expected provider revision in one atomic
+fixture operation. Success records a payload-free exact merge result and exact
+terminal replay never redispatches the mutation. Ambiguous create, ready, and
+merge outcomes require typed lookup: exact found reconciles success;
+inconclusive or unavailable preserves ambiguity; and authoritative not-found
+may become known failure only when coverage binds the exact operation and the
+provider remains at the attempted pre-dispatch revision. A lawful retry then
+uses a distinct local attempt while retaining stable provider-operation
+identity. Substituted results, revision-drifted negative coverage, and
+denied/revoked terminal states fail closed. See the [Phase 5D implementation
+report](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5D_REPORT.md) and
+[focused
+review](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5D_REVIEW.md).
+Phase 5E end-to-end conformance and review is the next authorized increment.
+Live connector work remains unauthorized until Phase 5E is implemented and
+review-accepted.
 
 After the current delegated-authority connector lane is complete, the next
 authoritative milestone is **Hacker News launch admission**. This is a bounded

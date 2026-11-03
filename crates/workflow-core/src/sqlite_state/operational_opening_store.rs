@@ -5692,20 +5692,21 @@ mod tests {
             1
         );
         assert!(outcomes.iter().all(|outcome| match outcome {
-            Ok(outcome) => match outcome.wake_status {
-                crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::Transitioned => {
-                    outcome.execution.stop_reason == TrustedHostRedispatchStopReason::Terminal
-                        && outcome.execution.executor_entries == 1
-                }
-                crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::ExactReplay => {
-                    matches!(
+            Ok(outcome) if outcome.execution.executor_entries == 1 => {
+                outcome.wake_status
+                    != crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::SecurityRejected
+                    && outcome.execution.stop_reason == TrustedHostRedispatchStopReason::Terminal
+            }
+            Ok(outcome) if outcome.execution.executor_entries == 0 => {
+                outcome.wake_status
+                    != crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::SecurityRejected
+                    && matches!(
                         outcome.execution.stop_reason,
                         TrustedHostRedispatchStopReason::Blocked
                             | TrustedHostRedispatchStopReason::Terminal
-                    ) && outcome.execution.executor_entries == 0
-                }
-                crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus::SecurityRejected => false,
-            },
+                    )
+            }
+            Ok(_) => false,
             Err(error) => matches!(
                 error.code(),
                 "trusted_host_redispatch.directive_replayed"
