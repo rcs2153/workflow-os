@@ -1458,9 +1458,19 @@ history. It is reference material, not a second delivery queue.
    Core-owned expectation matrix. See the [coverage profile implementation
    review](docs/concepts/AUTHORITATIVE_CONTINUATION_CONTEXT_COVERAGE_PROFILE_REVIEW.md).
    Caller-carried required claims and per-source necessity remain an explicit
-   blocker to any operational authoritative-understanding claim. The next P0
-   phase is a Core-owned semantic-obligation profile plan and focused review;
-   collectors and runtime consumers remain later.
+   blocker to any operational authoritative-understanding claim. The
+   [Core-owned semantic-obligation profile
+   plan](docs/implementation-plans/continuation-context-semantic-obligation-profile-plan.md)
+   is now accepted after focused architecture/security review in the
+   [semantic-obligation profile plan
+   review](docs/concepts/CONTINUATION_CONTEXT_SEMANTIC_OBLIGATION_PROFILE_PLAN_REVIEW.md).
+   The plan separates collector coverage from semantic completeness, replaces
+   caller-selected required claims and source necessity with twelve private
+   purpose/scope profiles, distinguishes required values from typed required
+   accounting, and adds Core-owned singleton versus set-valued resolution so
+   legitimate multi-item work is not misclassified as conflict. The next P0
+   phase is the private model-only implementation with focused tests, report,
+   and implementation review; collectors and runtime consumers remain later.
    Collectors, persistence, accepted-intent capture, CLI preview, runtime
    integration, compaction adapters, delivery receipts, Salsa, and
    replacement-executor proof remain unimplemented.
