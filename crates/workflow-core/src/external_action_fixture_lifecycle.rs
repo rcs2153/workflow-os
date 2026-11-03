@@ -351,6 +351,7 @@ pub(crate) struct ExternalActionFixtureProviderApplyResult {
     provider_revision: SpecContentHash,
     provider_receipt_commitment: SpecContentHash,
     created_successor: Option<ExternalActionFixtureCreatedSuccessor>,
+    exact_merge_result: Option<ExternalActionFixtureExactMergeResult>,
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize)]
@@ -369,6 +370,32 @@ impl ExternalActionFixtureCreatedSuccessor {
     }
 }
 
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub(crate) struct ExternalActionFixtureExactMergeResult {
+    merge_sha_commitment: SpecContentHash,
+    merge_result_commitment: SpecContentHash,
+}
+
+impl ExternalActionFixtureExactMergeResult {
+    pub(crate) const fn merge_sha_commitment(&self) -> &SpecContentHash {
+        &self.merge_sha_commitment
+    }
+
+    pub(crate) const fn merge_result_commitment(&self) -> &SpecContentHash {
+        &self.merge_result_commitment
+    }
+}
+
+impl fmt::Debug for ExternalActionFixtureExactMergeResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ExternalActionFixtureExactMergeResult")
+            .field("merge_sha_commitment", &"[REDACTED]")
+            .field("merge_result_commitment", &"[REDACTED]")
+            .finish()
+    }
+}
+
 impl ExternalActionFixtureProviderApplyResult {
     pub(crate) const fn posture(&self) -> ExternalActionFixtureProviderApplyPosture {
         self.posture
@@ -381,6 +408,12 @@ impl ExternalActionFixtureProviderApplyResult {
     pub(crate) const fn created_successor(&self) -> Option<&ExternalActionFixtureCreatedSuccessor> {
         self.created_successor.as_ref()
     }
+
+    pub(crate) const fn exact_merge_result(
+        &self,
+    ) -> Option<&ExternalActionFixtureExactMergeResult> {
+        self.exact_merge_result.as_ref()
+    }
 }
 
 impl fmt::Debug for ExternalActionFixtureProviderApplyResult {
@@ -391,6 +424,7 @@ impl fmt::Debug for ExternalActionFixtureProviderApplyResult {
             .field("provider_revision", &"[REDACTED]")
             .field("provider_receipt_commitment", &"[REDACTED]")
             .field("created_successor", &self.created_successor.is_some())
+            .field("exact_merge_result", &self.exact_merge_result.is_some())
             .finish()
     }
 }
@@ -427,6 +461,7 @@ struct FixturePullRequest {
     number: u64,
     reviewed_head_commitment: SpecContentHash,
     ready: bool,
+    exact_merge_result: Option<ExternalActionFixtureExactMergeResult>,
 }
 
 struct FixtureProviderReceipt {
@@ -434,6 +469,7 @@ struct FixtureProviderReceipt {
     receipt_commitment: SpecContentHash,
     resulting_revision: SpecContentHash,
     created_successor: Option<ExternalActionFixtureCreatedSuccessor>,
+    exact_merge_result: Option<ExternalActionFixtureExactMergeResult>,
 }
 
 pub(crate) struct InMemoryExternalActionFixtureProvider {
@@ -575,6 +611,7 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
                 provider_revision: receipt.resulting_revision.clone(),
                 provider_receipt_commitment: receipt.receipt_commitment.clone(),
                 created_successor: receipt.created_successor.clone(),
+                exact_merge_result: receipt.exact_merge_result.clone(),
             });
         }
         if state.revision != operation.expected_provider_revision {
@@ -623,6 +660,32 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
                     ));
                 }
             }
+            ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead => {
+                let Some(pull_request) = state.pull_request.as_ref() else {
+                    return Err(fixture_error(
+                        "provider.successor_missing",
+                        "fixture provider successor is missing",
+                    ));
+                };
+                if operation.expected_successor_number != Some(pull_request.number)
+                    || pull_request.reviewed_head_commitment != state.reviewed_head_commitment
+                    || !pull_request.ready
+                    || pull_request.exact_merge_result.is_some()
+                {
+                    return Err(fixture_error(
+                        "provider.successor_conflict",
+                        "fixture provider successor does not match the squash-merge operation",
+                    ));
+                }
+                if state.required_checks_posture
+                    != ExternalActionFixtureRequiredChecksPosture::TerminalGreen
+                {
+                    return Err(fixture_error(
+                        "provider.checks_not_green",
+                        "fixture provider required checks are not terminal green",
+                    ));
+                }
+            }
             _ => {
                 return Err(fixture_error(
                     "provider.transition_unsupported",
@@ -656,6 +719,7 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
                 number: successor.pull_request_number,
                 reviewed_head_commitment: state.reviewed_head_commitment.clone(),
                 ready: false,
+                exact_merge_result: None,
             });
         } else if operation.transition_kind
             == ExternalActionTransitionKind::GitHubPullRequestMarkReadyAfterTerminalGreen
@@ -668,6 +732,49 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
             };
             pull_request.ready = true;
         }
+        let exact_merge_result = if operation.transition_kind
+            == ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead
+        {
+            let pull_request = state.pull_request.as_ref().ok_or_else(|| {
+                fixture_error(
+                    "provider.successor_missing",
+                    "fixture provider successor is missing",
+                )
+            })?;
+            let merge_sha_commitment = commitment(
+                "workflow-os/external-action-fixture-merge-sha/v1",
+                &(
+                    &operation_content_commitment,
+                    pull_request.number,
+                    &pull_request.reviewed_head_commitment,
+                ),
+            )?;
+            let merge_result_commitment = commitment(
+                "workflow-os/external-action-fixture-exact-merge-result/v1",
+                &(
+                    &operation_content_commitment,
+                    pull_request.number,
+                    &pull_request.reviewed_head_commitment,
+                    &merge_sha_commitment,
+                    &resulting_revision,
+                ),
+            )?;
+            Some(ExternalActionFixtureExactMergeResult {
+                merge_sha_commitment,
+                merge_result_commitment,
+            })
+        } else {
+            None
+        };
+        if let Some(result) = &exact_merge_result {
+            let pull_request = state.pull_request.as_mut().ok_or_else(|| {
+                fixture_error(
+                    "provider.successor_missing",
+                    "fixture provider successor is missing",
+                )
+            })?;
+            pull_request.exact_merge_result = Some(result.clone());
+        }
         let receipt = commitment(
             PROVIDER_RECEIPT_DOMAIN,
             &(
@@ -676,6 +783,7 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
                 &prior_revision,
                 &resulting_revision,
                 &created_successor,
+                &exact_merge_result,
             ),
         )?;
         state.revision.clone_from(&resulting_revision);
@@ -686,6 +794,7 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
                 receipt_commitment: receipt.clone(),
                 resulting_revision: resulting_revision.clone(),
                 created_successor: created_successor.clone(),
+                exact_merge_result: exact_merge_result.clone(),
             },
         );
         Ok(ExternalActionFixtureProviderApplyResult {
@@ -693,6 +802,7 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
             provider_revision: resulting_revision,
             provider_receipt_commitment: receipt,
             created_successor,
+            exact_merge_result,
         })
     }
 
@@ -719,6 +829,7 @@ impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvid
             provider_revision: receipt.resulting_revision.clone(),
             provider_receipt_commitment: receipt.receipt_commitment.clone(),
             created_successor: receipt.created_successor.clone(),
+            exact_merge_result: receipt.exact_merge_result.clone(),
         }))
     }
 }
@@ -876,6 +987,53 @@ mod tests {
             operation.transition_kind(),
             revision,
         )
+    }
+
+    fn fixture_successor_operation(
+        projection: &ExternalActionAuthorizationProjection,
+        transition_kind: ExternalActionTransitionKind,
+        revision: SpecContentHash,
+        successor_number: u64,
+    ) -> ExternalActionFixtureProviderOperation {
+        let operation =
+            ExternalActionTransitionOperation::from_projection(projection, transition_kind)
+                .expect("operation");
+        ExternalActionFixtureProviderOperation::for_successor(
+            operation.operation_id().clone(),
+            operation.transition_kind(),
+            revision,
+            successor_number,
+        )
+    }
+
+    fn create_and_mark_ready(
+        provider: &InMemoryExternalActionFixtureProvider,
+        projection: &ExternalActionAuthorizationProjection,
+    ) {
+        let create = fixture_operation(
+            projection,
+            ExternalActionTransitionKind::GitHubPullRequestCreateDraft,
+            provider
+                .observe()
+                .expect("observe create")
+                .provider_revision()
+                .clone(),
+        );
+        provider.compare_and_apply(&create).expect("create draft");
+        provider
+            .set_required_checks_posture(ExternalActionFixtureRequiredChecksPosture::TerminalGreen)
+            .expect("checks green");
+        let ready = fixture_successor_operation(
+            projection,
+            ExternalActionTransitionKind::GitHubPullRequestMarkReadyAfterTerminalGreen,
+            provider
+                .observe()
+                .expect("observe ready")
+                .provider_revision()
+                .clone(),
+            42,
+        );
+        provider.compare_and_apply(&ready).expect("mark ready");
     }
 
     #[test]
@@ -1047,6 +1205,195 @@ mod tests {
             .filter(|succeeded| *succeeded)
             .count();
         assert_eq!(successes, 1);
+    }
+
+    #[test]
+    fn provider_squash_merge_records_payload_free_result_and_replays_exactly() {
+        let provider = InMemoryExternalActionFixtureProvider::new(time("2026-11-01T20:10:00Z"));
+        let projection = projection();
+        create_and_mark_ready(&provider, &projection);
+        let merge = fixture_successor_operation(
+            &projection,
+            ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead,
+            provider
+                .observe()
+                .expect("observe merge")
+                .provider_revision()
+                .clone(),
+            42,
+        );
+
+        let applied = provider.compare_and_apply(&merge).expect("squash merge");
+        assert_eq!(
+            applied.posture(),
+            ExternalActionFixtureProviderApplyPosture::Applied
+        );
+        assert!(applied.created_successor().is_none());
+        let result = applied.exact_merge_result().expect("exact merge result");
+        assert_ne!(
+            result.merge_sha_commitment(),
+            result.merge_result_commitment()
+        );
+        assert_eq!(provider.operation_count().expect("operation count"), 3);
+
+        let replay = provider.compare_and_apply(&merge).expect("exact replay");
+        assert_eq!(
+            replay.posture(),
+            ExternalActionFixtureProviderApplyPosture::ExactReplay
+        );
+        assert_eq!(replay.provider_revision, applied.provider_revision);
+        assert_eq!(
+            replay.provider_receipt_commitment(),
+            applied.provider_receipt_commitment()
+        );
+        assert_eq!(replay.exact_merge_result(), applied.exact_merge_result());
+        assert_eq!(provider.operation_count().expect("operation count"), 3);
+        let looked_up = provider
+            .lookup_operation(&merge)
+            .expect("lookup")
+            .expect("receipt");
+        assert_eq!(
+            looked_up.posture(),
+            ExternalActionFixtureProviderApplyPosture::ExactReplay
+        );
+        assert_eq!(looked_up.provider_revision, applied.provider_revision);
+        assert_eq!(
+            looked_up.provider_receipt_commitment(),
+            applied.provider_receipt_commitment()
+        );
+        assert_eq!(looked_up.exact_merge_result(), applied.exact_merge_result());
+
+        let substituted = fixture_successor_operation(
+            &projection,
+            ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead,
+            SpecContentHash::from_text("irrelevant-replay-revision"),
+            43,
+        );
+        assert_eq!(
+            provider
+                .compare_and_apply(&substituted)
+                .expect_err("successor substitution rejected")
+                .code(),
+            "external_action_fixture_lifecycle.provider.operation_conflict"
+        );
+        assert_eq!(
+            provider
+                .lookup_operation(&substituted)
+                .expect_err("lookup substitution rejected")
+                .code(),
+            "external_action_fixture_lifecycle.provider.operation_conflict"
+        );
+    }
+
+    #[test]
+    fn provider_squash_merge_requires_ready_unchanged_head_and_green_checks() {
+        let projection = projection();
+
+        let not_ready = InMemoryExternalActionFixtureProvider::new(time("2026-11-01T20:10:00Z"));
+        let create = fixture_operation(
+            &projection,
+            ExternalActionTransitionKind::GitHubPullRequestCreateDraft,
+            not_ready
+                .observe()
+                .expect("observe create")
+                .provider_revision()
+                .clone(),
+        );
+        not_ready.compare_and_apply(&create).expect("create draft");
+        let merge = fixture_successor_operation(
+            &projection,
+            ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead,
+            not_ready
+                .observe()
+                .expect("observe merge")
+                .provider_revision()
+                .clone(),
+            42,
+        );
+        assert_eq!(
+            not_ready
+                .compare_and_apply(&merge)
+                .expect_err("draft pull request rejected")
+                .code(),
+            "external_action_fixture_lifecycle.provider.successor_conflict"
+        );
+
+        let changed_head = InMemoryExternalActionFixtureProvider::new(time("2026-11-01T20:10:00Z"));
+        create_and_mark_ready(&changed_head, &projection);
+        changed_head
+            .set_reviewed_head_commitment(SpecContentHash::from_text("changed-head"))
+            .expect("change head");
+        let merge = fixture_successor_operation(
+            &projection,
+            ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead,
+            changed_head
+                .observe()
+                .expect("observe changed head")
+                .provider_revision()
+                .clone(),
+            42,
+        );
+        assert_eq!(
+            changed_head
+                .compare_and_apply(&merge)
+                .expect_err("changed head rejected")
+                .code(),
+            "external_action_fixture_lifecycle.provider.successor_conflict"
+        );
+
+        let failed_checks =
+            InMemoryExternalActionFixtureProvider::new(time("2026-11-01T20:10:00Z"));
+        create_and_mark_ready(&failed_checks, &projection);
+        failed_checks
+            .set_required_checks_posture(ExternalActionFixtureRequiredChecksPosture::Failed)
+            .expect("checks failed");
+        let merge = fixture_successor_operation(
+            &projection,
+            ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead,
+            failed_checks
+                .observe()
+                .expect("observe failed checks")
+                .provider_revision()
+                .clone(),
+            42,
+        );
+        assert_eq!(
+            failed_checks
+                .compare_and_apply(&merge)
+                .expect_err("failed checks rejected")
+                .code(),
+            "external_action_fixture_lifecycle.provider.checks_not_green"
+        );
+    }
+
+    #[test]
+    fn provider_squash_merge_atomically_rejects_revision_drift_without_mutation() {
+        let provider = InMemoryExternalActionFixtureProvider::new(time("2026-11-01T20:10:00Z"));
+        let projection = projection();
+        create_and_mark_ready(&provider, &projection);
+        let merge = fixture_successor_operation(
+            &projection,
+            ExternalActionTransitionKind::GitHubPullRequestSquashMergeUnchangedHead,
+            provider
+                .observe()
+                .expect("observe merge")
+                .provider_revision()
+                .clone(),
+            42,
+        );
+        provider
+            .set_connector_posture(ExternalActionFixtureConnectorPosture::RefusedBeforeDispatch)
+            .expect("advance revision");
+
+        assert_eq!(
+            provider
+                .compare_and_apply(&merge)
+                .expect_err("stale revision rejected")
+                .code(),
+            "external_action_fixture_lifecycle.provider.revision_drift"
+        );
+        assert_eq!(provider.operation_count().expect("operation count"), 2);
+        assert!(provider.lookup_operation(&merge).expect("lookup").is_none());
     }
 
     #[test]
