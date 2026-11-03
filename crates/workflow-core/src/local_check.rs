@@ -3035,11 +3035,10 @@ impl LocalCheckResultReference {
     ///
     /// Returns a stable non-leaking error when the reference is invalid.
     pub fn validate(&self) -> Result<(), WorkflowOsError> {
-        if let Some(output_reference) = &self.output_reference {
-            validate_identifier("local check result output reference", output_reference)?;
-        }
-        validate_reference_redaction_metadata(&self.redaction)?;
-        Ok(())
+        validate_local_check_result_reference_metadata(
+            self.output_reference.as_deref(),
+            &self.redaction,
+        )
     }
 
     /// Returns the local check result reference ID.
@@ -4066,9 +4065,13 @@ fn validate_citation_kinds(
     Ok(())
 }
 
-fn validate_reference_redaction_metadata(
+pub(crate) fn validate_local_check_result_reference_metadata(
+    output_reference: Option<&str>,
     redaction: &RedactionMetadata,
 ) -> Result<(), WorkflowOsError> {
+    if let Some(output_reference) = output_reference {
+        validate_identifier("local check result output reference", output_reference)?;
+    }
     if redaction.redacted_fields.len() > LOCAL_CHECK_ENV_MAX_COUNT
         || redaction.field_states.len() > LOCAL_CHECK_ENV_MAX_COUNT
     {

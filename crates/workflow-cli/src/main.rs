@@ -24,13 +24,13 @@ use workflow_core::{
     preview_governed_continuation, propose_workflow_catalog_repairs,
     reassess_selected_project_validation_governance_with_resolved_context,
     review_workflow_catalog_repair_proposal, review_workflow_draft_for_promotion,
-    route_selected_project_validation_governance_with_resolved_context, validate_loaded_project,
-    validate_project_bundle, ActorId, AdapterOperationMode, AdapterPolicyPrecheck, AdapterRunScope,
-    AdapterTelemetryRecord, ApprovalDecisionKind, ApprovalPresentationChannel,
-    ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
-    ApprovalPresentationRecordStore, ApprovalPresentationSensitivity,
-    AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeExecutionConfiguration,
-    AuthoritativeGovernanceArtifactPersistenceInput,
+    route_selected_project_validation_governance_with_resolved_context_reference,
+    validate_loaded_project, validate_project_bundle, ActorId, AdapterOperationMode,
+    AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, ApprovalDecisionKind,
+    ApprovalPresentationChannel, ApprovalPresentationId, ApprovalPresentationRecord,
+    ApprovalPresentationRecordDefinition, ApprovalPresentationRecordStore,
+    ApprovalPresentationSensitivity, AuthoritativeDocsCheckReportReferenceInputs,
+    AuthoritativeExecutionConfiguration, AuthoritativeGovernanceArtifactPersistenceInput,
     AuthoritativeGovernanceArtifactPersistenceResult, AuthoritativeGovernanceArtifactPosture,
     AuthoritativeGovernanceReportPosture, BackendHealthCheck, CorrelationId, Diagnostic,
     DiagnosticSeverity, EventLogStore, ExplicitLocalCheckProfileSelection,
@@ -73,12 +73,13 @@ use workflow_core::{
     SqliteStateBackend, StateBackend, StateMigrationDestinationId, StateMigrationId,
     StateMigrationPlan, StateMigrationVerificationReceipt, Timestamp, WorkReport,
     WorkReportArtifactHighAssuranceRequirement, WorkReportArtifactStore, WorkReportCitation,
-    WorkReportCitationDefinition, WorkReportCitationTarget, WorkReportContractId,
-    WorkReportContractVersion, WorkReportDefinition, WorkReportGenerationContext,
-    WorkReportHandoffNote, WorkReportId, WorkReportIncompleteWorkDisclosure,
-    WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
-    WorkReportSensitivity, WorkReportStableReference, WorkReportStatus, WorkflowArchiveRecord,
-    WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
+    WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationTarget,
+    WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
+    WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
+    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
+    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
+    WorkReportStatus, WorkflowArchiveRecord, WorkflowArchiveRecordDefinition,
+    WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
     WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflict, WorkflowCatalogConflictSeverity,
     WorkflowCatalogDraftSummary, WorkflowCatalogIndex, WorkflowCatalogIndexInput,
     WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
@@ -2893,12 +2894,18 @@ fn inspect_from_backend<B: StateBackend + WorkReportArtifactStore>(
             println!("work_report_artifacts: {}", report_artifacts.len());
             for artifact in &report_artifacts {
                 let metadata = artifact.metadata();
+                let (citation_count, missing_citation_count, local_check_citation_count) =
+                    report_artifact_citation_counts(artifact);
                 println!(
-                    "  report_id={} terminal_status={:?} generated_at={} sensitivity={:?}",
+                    "  report_id={} terminal_status={:?} generated_at={} sensitivity={:?} sections={} citations={} missing_citations={} local_check_citations={}",
                     metadata.report_id(),
                     metadata.terminal_run_status(),
                     metadata.generated_at(),
-                    metadata.sensitivity()
+                    metadata.sensitivity(),
+                    artifact.work_report().sections().len(),
+                    citation_count,
+                    missing_citation_count,
+                    local_check_citation_count,
                 );
             }
         }
@@ -3214,7 +3221,10 @@ fn init_repo_governance_command(
     print_scaffold_authoritative_governance_posture(authoritative_governance);
     println!("next_step: workflow-os validate");
     println!("next_step: workflow-os first-run");
-    println!("next_step: workflow-os --mock-all-local-skills run local/first-run-governance");
+    println!(
+        "next_step: workflow-os first-run --write-report-artifact --run-id launch-first-run-v1"
+    );
+    println!("optional_demo: workflow-os --mock-all-local-skills run local/first-run-governance");
     Ok(())
 }
 
@@ -3416,7 +3426,7 @@ fn first_run_report_artifact_command(
         execution: inputs.execution,
         resolved_context_commitment: snapshot.commitment.clone(),
     };
-    let result = route_selected_project_validation_governance_with_resolved_context(
+    let result = route_selected_project_validation_governance_with_resolved_context_reference(
         &executor,
         &authoritative_immutable_bundle_store(invocation),
         &profile,
@@ -3425,8 +3435,9 @@ fn first_run_report_artifact_command(
             &disclosure_handler,
         )?),
         &request,
+        &inputs.local_check_reference,
     )?;
-    let run = result.run();
+    let run = result.route().run();
     if run.snapshot.status == WorkflowRunStatus::WaitingForApproval {
         let presentation =
             persist_first_run_artifact_approval_presentation(invocation, &backend, run)?;
@@ -3449,8 +3460,8 @@ fn first_run_report_artifact_command(
         &workflow,
         run,
         &snapshot,
-        authoritative_route_label(&result),
-        None,
+        authoritative_route_label(result.route()),
+        Some(result.local_check_result_reference()),
         verbose,
     )
 }
@@ -8410,9 +8421,7 @@ fn print_first_run_text(context: &FirstRunReportReadyContext, verbose: bool) {
         println!("  - assign ownership, escalation, evidence, and validation obligations");
     }
     println!("  - the mock first-run workflow is optional and demonstrates approval/audit mechanics only");
-    println!(
-        "recommended_next_action: review first-run findings and assign ownership/check obligations"
-    );
+    println!("recommended_next_action: workflow-os first-run --write-report-artifact --run-id launch-first-run-v1");
     print_recommendation_next_actions(&context.recommendation_next_actions);
     print_authoring_command_guidance(&context.workflow_discovery_recommendations);
     println!("optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance");
@@ -8521,7 +8530,9 @@ fn print_first_run_verbose_text(context: &FirstRunReportReadyContext) {
     for recommendation in &context.recommendations {
         println!("  - {recommendation}");
     }
-    println!("next_step: workflow-os --mock-all-local-skills run local/first-run-governance");
+    println!(
+        "next_step: workflow-os first-run --write-report-artifact --run-id launch-first-run-v1"
+    );
 }
 
 fn print_first_run_proportional_governance_assessments(
@@ -13216,8 +13227,10 @@ fn inspect_json(
         .iter()
         .map(|artifact| {
             let metadata = artifact.metadata();
+            let (citation_count, missing_citation_count, local_check_citation_count) =
+                report_artifact_citation_counts(artifact);
             format!(
-                "{{\"report_id\":\"{}\",\"workflow_id\":\"{}\",\"workflow_version\":\"{}\",\"schema_version\":\"{}\",\"spec_hash\":\"{}\",\"run_id\":\"{}\",\"terminal_status\":\"{}\",\"generated_at\":\"{}\",\"sensitivity\":\"{}\"}}",
+                "{{\"report_id\":\"{}\",\"workflow_id\":\"{}\",\"workflow_version\":\"{}\",\"schema_version\":\"{}\",\"spec_hash\":\"{}\",\"run_id\":\"{}\",\"terminal_status\":\"{}\",\"generated_at\":\"{}\",\"sensitivity\":\"{}\",\"section_count\":{},\"citation_count\":{},\"missing_citation_count\":{},\"local_check_citation_count\":{}}}",
                 json_escape(metadata.report_id().as_str()),
                 json_escape(metadata.workflow_id().as_str()),
                 json_escape(metadata.workflow_version().as_str()),
@@ -13227,6 +13240,10 @@ fn inspect_json(
                 work_report_status_label(metadata.terminal_run_status()),
                 metadata.generated_at(),
                 work_report_sensitivity_label(metadata.sensitivity()),
+                artifact.work_report().sections().len(),
+                citation_count,
+                missing_citation_count,
+                local_check_citation_count,
             )
         })
         .collect::<Vec<_>>()
@@ -13245,6 +13262,28 @@ fn inspect_json(
         adapter_audit.len(),
         adapter_observability.len(),
         report_artifacts
+    )
+}
+
+fn report_artifact_citation_counts(
+    artifact: &workflow_core::WorkReportArtifactRecord,
+) -> (usize, usize, usize) {
+    let citations = artifact
+        .work_report()
+        .sections()
+        .iter()
+        .flat_map(WorkReportSection::citations)
+        .collect::<Vec<_>>();
+    (
+        citations.len(),
+        citations
+            .iter()
+            .filter(|citation| citation.missing())
+            .count(),
+        citations
+            .iter()
+            .filter(|citation| citation.citation_kind() == WorkReportCitationKind::LocalCheckResult)
+            .count(),
     )
 }
 

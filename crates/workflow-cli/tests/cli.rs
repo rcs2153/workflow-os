@@ -1087,6 +1087,8 @@ fn init_repo_governance_creates_valid_local_project() {
         .exists());
     assert!(stdout(&output).contains("workflow-os validate"));
     assert!(stdout(&output).contains("workflow-os first-run"));
+    assert!(stdout(&output)
+        .contains("workflow-os first-run --write-report-artifact --run-id launch-first-run-v1"));
     assert!(stdout(&output).contains("local/first-run-governance"));
     assert!(stdout(&output).contains("authoritative_execution: enabled"));
     let manifest =
@@ -1580,7 +1582,7 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
         "  - the mock first-run workflow is optional and demonstrates approval/audit mechanics only"
     ));
     assert!(out.contains(
-        "recommended_next_action: review first-run findings and assign ownership/check obligations"
+        "recommended_next_action: workflow-os first-run --write-report-artifact --run-id launch-first-run-v1"
     ));
     assert!(out.contains("recommendation_next_actions:"));
     assert!(out.contains(
@@ -1676,6 +1678,26 @@ fn first_run_explicit_artifact_path_quietly_persists_and_replays_exactly() {
     assert!(!handoff
         .summary()
         .is_some_and(|summary| summary.contains("workflow-os run")));
+
+    let inspect = workflow_os(&project, &["inspect", run_id]);
+    assert!(inspect.status.success(), "{}", stderr(&inspect));
+    assert!(
+        stdout(&inspect).contains("citations=1 missing_citations=0 local_check_citations=1"),
+        "{}",
+        stdout(&inspect)
+    );
+    let inspect_json_output = workflow_os(&project, &["--json", "inspect", run_id]);
+    assert!(
+        inspect_json_output.status.success(),
+        "{}",
+        stderr(&inspect_json_output)
+    );
+    let inspect_json: serde_json::Value =
+        serde_json::from_str(stdout(&inspect_json_output).trim()).expect("inspect JSON parses");
+    let projected_artifact = &inspect_json["work_report_artifacts"][0];
+    assert_eq!(projected_artifact["citation_count"], 1);
+    assert_eq!(projected_artifact["missing_citation_count"], 0);
+    assert_eq!(projected_artifact["local_check_citation_count"], 1);
 
     let retry = workflow_os(
         &project,

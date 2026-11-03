@@ -560,6 +560,18 @@ and installer argument handling; no P0 or unresolved P1 remains locally. Merge
 still requires terminal-green exact-head CI, including native Linux packaging.
 See the [Phase 1 focused
 review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_1_REVIEW.md).
+Phase 2 golden-path composition is implemented and accepted by focused
+maintainer review, subject to terminal-green exact-head CI. Generated onboarding now recommends
+the real credential-free first-run report-artifact operation rather than mock
+execution. The initial authoritative project-validation result survives as a
+typed WorkReport citation, bounded `inspect` output exposes report and citation
+posture in human and JSON forms, recovery remains context-drift rejecting, and
+terminal `next-action` remains non-authoritative. The exact same-call check
+reference is returned through an additive Core result; the CLI does not
+reconstruct validation provenance. Review corrected reference-metadata
+validation ordering so malformed caller metadata fails before route mutation.
+See the [Phase 2 report](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_2_REPORT.md)
+and [focused review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_2_REVIEW.md).
 
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
