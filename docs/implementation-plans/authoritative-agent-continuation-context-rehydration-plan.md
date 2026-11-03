@@ -14,7 +14,13 @@ and a test-only executable reference conformance store. Durable backend
 transactions, runtime events, a supervisor, typed child runtime behavior, and
 operational source configuration remain deferred.
 
-P0 follow-up status: accepted direction, implementation not started. A live
+P0 comprehensive-context status: implementation in progress under the
+authoritative Active Delivery Queue. The pure model, closed collector model,
+store-backed collectors, bounded local observers, accepted-intent capture,
+aggregate proof, integrated private conformance composition, and exact private
+projection delivery and recipient acknowledgment are implemented and
+focused-review accepted.
+The local end-to-end replacement-executor proof remains unimplemented. A live
 post-compaction failure showed that an agent can receive or reconstruct stale
 conversation context and answer it as current. The required correction is
 broader than conversation replay detection. Workflow OS must reconstruct the
