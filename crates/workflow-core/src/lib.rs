@@ -27,6 +27,7 @@ mod durable_state_contract;
 mod error;
 mod evidence;
 mod executor;
+mod external_action_authorization;
 mod github;
 mod governance_decision_authority_receipt;
 mod governance_decision_authority_receipt_store;
@@ -399,6 +400,15 @@ pub use executor::{
     GitHubRepositoryMetadataFixtureExecutionPosture,
     GitHubRepositoryMetadataFixtureExecutionRequest,
     GitHubRepositoryMetadataFixtureExecutionResult,
+};
+pub use external_action_authorization::{
+    compute_external_action_approval_scope_commitment, derive_external_action_successor_binding,
+    ExternalActionAuthorizationProjection, ExternalActionAuthorizationProjectionDefinition,
+    ExternalActionAuthorizationProjectionId, ExternalActionAuthorizationProjectionVersion,
+    ExternalActionEvidencePredicate, ExternalActionEvidencePredicateKind,
+    ExternalActionPayloadClass, ExternalActionSuccessorBinding, ExternalActionSuccessorBindingId,
+    ExternalActionTransition, ExternalActionTransitionKind, ExternalConnectorKind,
+    GitHubExternalActionResourceBinding,
 };
 pub use governance_decision_authority_receipt::{
     GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptClaimVerificationPosture,

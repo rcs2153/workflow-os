@@ -182,11 +182,39 @@ review](docs/concepts/DELEGATED_AUTHORITY_EXTERNAL_CONNECTOR_PROJECTION_PLAN_REV
 The plan integrates existing scoped runtime authority, approval-presentation
 proof, same-call current-authority resolution, authorized-execution
 continuity, provider reconciliation, proportional governance, and durable wait
-conditions. The next phase is model-only: immutable external-action projection,
-closed PR transition vocabulary, successor-resource binding, deterministic
-commitment, and validation. It must not add connector execution, credentials,
-live GitHub behavior, provider writes, scheduler claims, or a parallel
-permission system.
+conditions. The first model-only slice is implemented: immutable
+external-action projection, closed PR transition vocabulary, exact
+resource/payload/evidence commitments, successor-resource binding,
+canonicalization, deterministic commitment, validated deserialization, and
+redaction-safe diagnostics. It remains non-authorizing, non-persistent, and
+no-write. See the [model
+report](docs/concepts/EXTERNAL_ACTION_AUTHORIZATION_PROJECTION_MODEL_REPORT.md).
+Focused maintainer/security review accepted the model after correcting exact
+approval-scope/non-goal binding, ready-before-merge dependency, GitHub resource
+validation, and successor observation timing. See the [focused
+review](docs/concepts/EXTERNAL_ACTION_AUTHORIZATION_PROJECTION_MODEL_REVIEW.md).
+Durable transition lifecycle model and local state composition is next.
+Connector execution, credentials, live GitHub behavior, provider writes,
+scheduler claims, and any parallel permission system remain excluded.
+
+After the current delegated-authority connector lane is complete, evaluate one
+future **Governed Obligation Plan reconciliation** lane. The purpose is to test
+whether existing Workflow OS workflows, policies, required context, checks,
+approvals, SideEffects, and report contracts can derive one deterministic,
+inspectable obligation plan without creating a second source language,
+evaluator, authority system, or completion model. Core remains the only
+governance and completion authority; any derived plan is non-authorizing,
+rebuildable projection data bound to canonical inputs. The lane must begin with
+an architecture-to-existing-Core reconciliation matrix, then proceed only
+through a model-only derived plan, deterministic explanation and differential
+validation, and one separately reviewed opt-in runtime composition. Incremental
+computation may be considered only after measured clean-derivation and
+reevaluation costs demonstrate a material need. Salsa is not selected,
+authorized, or placed on the roadmap by this lane; no dependency or MSRV change
+is permitted without a later evidence-backed architecture decision. A separate
+`WorkContract` language, public GWP ABI, competing evaluator, optimizer, and
+compiler-specific SDK/CLI remain deferred. See the [Governed Obligation Plan
+Reconciliation Plan](docs/implementation-plans/governed-obligation-plan-reconciliation-plan.md).
 See the
 [post-0.3 queue selection
 report](docs/concepts/POST_0_3_ROADMAP_QUEUE_SELECTION_REPORT.md) and the
