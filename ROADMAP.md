@@ -444,9 +444,24 @@ See the [Phase 5A implementation
 report](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5A_REPORT.md) and
 [focused
 review](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5A_REVIEW.md).
-Phase 5B draft creation and exact successor binding is the next authorized
-increment. Later lifecycle transitions remain unauthorized until Phase 5B is
-implemented and review-accepted.
+Phase 5B fixture-backed draft creation and exact successor binding is now
+implemented and accepted after focused maintainer/security review corrected
+two blockers. The private entrypoint accepts only stable bindings and source
+interfaces, derives complete Phase 5A coverage and admission facts in the same
+call, enters the accepted same-call current-authority and durable lifecycle
+path, atomically compares provider revision, derives the successor from the
+exact provider receipt, persists and rereads it through the Core-owned store,
+and repairs provider-success/local-persistence read or write ambiguity without
+redispatch. Focused tests prove one create, terminal replay, write and read
+persistence repair, provider/local successor conflict rejection, and fixture-
+source substitution rejection before provider mutation. See the [Phase 5B
+implementation
+report](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5B_REPORT.md) and
+[focused
+review](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5B_REVIEW.md).
+Phase 5C evidence wait and exact-successor mark-ready is the next authorized
+increment. Merge and later lifecycle work remain unauthorized until Phase 5C
+is implemented and review-accepted.
 
 After the current delegated-authority connector lane is complete, the next
 authoritative milestone is **Hacker News launch admission**. This is a bounded

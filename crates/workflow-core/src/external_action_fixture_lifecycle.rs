@@ -228,6 +228,10 @@ impl ExternalActionFixtureProviderObservation {
     pub(crate) const fn provider_revision(&self) -> &SpecContentHash {
         &self.provider_revision
     }
+
+    pub(crate) const fn observation_commitment(&self) -> &SpecContentHash {
+        &self.observation_commitment
+    }
 }
 
 impl fmt::Debug for ExternalActionFixtureProviderObservation {
@@ -273,6 +277,37 @@ pub(crate) struct ExternalActionFixtureProviderApplyResult {
     posture: ExternalActionFixtureProviderApplyPosture,
     provider_revision: SpecContentHash,
     provider_receipt_commitment: SpecContentHash,
+    created_successor: Option<ExternalActionFixtureCreatedSuccessor>,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub(crate) struct ExternalActionFixtureCreatedSuccessor {
+    pull_request_number: u64,
+    observed_at: Timestamp,
+}
+
+impl ExternalActionFixtureCreatedSuccessor {
+    pub(crate) const fn pull_request_number(&self) -> u64 {
+        self.pull_request_number
+    }
+
+    pub(crate) const fn observed_at(&self) -> Timestamp {
+        self.observed_at
+    }
+}
+
+impl ExternalActionFixtureProviderApplyResult {
+    pub(crate) const fn posture(&self) -> ExternalActionFixtureProviderApplyPosture {
+        self.posture
+    }
+
+    pub(crate) const fn provider_receipt_commitment(&self) -> &SpecContentHash {
+        &self.provider_receipt_commitment
+    }
+
+    pub(crate) const fn created_successor(&self) -> Option<&ExternalActionFixtureCreatedSuccessor> {
+        self.created_successor.as_ref()
+    }
 }
 
 impl fmt::Debug for ExternalActionFixtureProviderApplyResult {
@@ -282,6 +317,7 @@ impl fmt::Debug for ExternalActionFixtureProviderApplyResult {
             .field("posture", &self.posture)
             .field("provider_revision", &"[REDACTED]")
             .field("provider_receipt_commitment", &"[REDACTED]")
+            .field("created_successor", &self.created_successor.is_some())
             .finish()
     }
 }
@@ -293,6 +329,165 @@ pub(crate) trait ExternalActionFixtureProviderSource {
         &self,
         operation: &ExternalActionFixtureProviderOperation,
     ) -> Result<ExternalActionFixtureProviderApplyResult, WorkflowOsError>;
+
+    fn lookup_operation(
+        &self,
+        operation_id: &ExternalActionTransitionOperationId,
+    ) -> Result<Option<ExternalActionFixtureProviderApplyResult>, WorkflowOsError>;
+}
+
+struct FixtureProviderState {
+    revision_sequence: u64,
+    revision: SpecContentHash,
+    next_pull_request_number: u64,
+    receipts: BTreeMap<ExternalActionTransitionOperationId, FixtureProviderReceipt>,
+}
+
+struct FixtureProviderReceipt {
+    transition_kind: ExternalActionTransitionKind,
+    receipt_commitment: SpecContentHash,
+    resulting_revision: SpecContentHash,
+    created_successor: Option<ExternalActionFixtureCreatedSuccessor>,
+}
+
+pub(crate) struct InMemoryExternalActionFixtureProvider {
+    state: Mutex<FixtureProviderState>,
+    observed_at: Timestamp,
+}
+
+impl InMemoryExternalActionFixtureProvider {
+    pub(crate) fn new(observed_at: Timestamp) -> Self {
+        Self {
+            state: Mutex::new(FixtureProviderState {
+                revision_sequence: 0,
+                revision: SpecContentHash::from_text("provider-revision-0"),
+                next_pull_request_number: 42,
+                receipts: BTreeMap::new(),
+            }),
+            observed_at,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn operation_count(&self) -> Result<usize, WorkflowOsError> {
+        self.state
+            .lock()
+            .map(|state| state.receipts.len())
+            .map_err(|_| fixture_error("provider.unavailable", "fixture provider unavailable"))
+    }
+}
+
+impl ExternalActionFixtureProviderSource for InMemoryExternalActionFixtureProvider {
+    fn observe(&self) -> Result<ExternalActionFixtureProviderObservation, WorkflowOsError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| fixture_error("provider.unavailable", "fixture provider unavailable"))?;
+        ExternalActionFixtureProviderObservation::new(
+            state.revision.clone(),
+            SpecContentHash::from_text("repository"),
+            SpecContentHash::from_text("base"),
+            SpecContentHash::from_text("head"),
+            SpecContentHash::from_text("checks"),
+            SpecContentHash::from_text("pull-request-state"),
+            self.observed_at,
+        )
+    }
+
+    fn compare_and_apply(
+        &self,
+        operation: &ExternalActionFixtureProviderOperation,
+    ) -> Result<ExternalActionFixtureProviderApplyResult, WorkflowOsError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| fixture_error("provider.unavailable", "fixture provider unavailable"))?;
+        if let Some(receipt) = state.receipts.get(&operation.operation_id) {
+            if receipt.transition_kind != operation.transition_kind {
+                return Err(fixture_error(
+                    "provider.operation_conflict",
+                    "fixture provider operation identity conflicts with prior content",
+                ));
+            }
+            return Ok(ExternalActionFixtureProviderApplyResult {
+                posture: ExternalActionFixtureProviderApplyPosture::ExactReplay,
+                provider_revision: receipt.resulting_revision.clone(),
+                provider_receipt_commitment: receipt.receipt_commitment.clone(),
+                created_successor: receipt.created_successor.clone(),
+            });
+        }
+        if state.revision != operation.expected_provider_revision {
+            return Err(fixture_error(
+                "provider.revision_drift",
+                "fixture provider revision changed before operation",
+            ));
+        }
+        let prior_revision = state.revision.clone();
+        state.revision_sequence += 1;
+        let resulting_revision = commitment(
+            PROVIDER_REVISION_DOMAIN,
+            &(
+                &prior_revision,
+                &operation.operation_id,
+                operation.transition_kind,
+                state.revision_sequence,
+            ),
+        )?;
+        let created_successor = (operation.transition_kind
+            == ExternalActionTransitionKind::GitHubPullRequestCreateDraft)
+            .then(|| {
+                let successor = ExternalActionFixtureCreatedSuccessor {
+                    pull_request_number: state.next_pull_request_number,
+                    observed_at: self.observed_at,
+                };
+                state.next_pull_request_number += 1;
+                successor
+            });
+        let receipt = commitment(
+            PROVIDER_RECEIPT_DOMAIN,
+            &(
+                &operation.operation_id,
+                operation.transition_kind,
+                &prior_revision,
+                &resulting_revision,
+                &created_successor,
+            ),
+        )?;
+        state.revision.clone_from(&resulting_revision);
+        state.receipts.insert(
+            operation.operation_id.clone(),
+            FixtureProviderReceipt {
+                transition_kind: operation.transition_kind,
+                receipt_commitment: receipt.clone(),
+                resulting_revision: resulting_revision.clone(),
+                created_successor: created_successor.clone(),
+            },
+        );
+        Ok(ExternalActionFixtureProviderApplyResult {
+            posture: ExternalActionFixtureProviderApplyPosture::Applied,
+            provider_revision: resulting_revision,
+            provider_receipt_commitment: receipt,
+            created_successor,
+        })
+    }
+
+    fn lookup_operation(
+        &self,
+        operation_id: &ExternalActionTransitionOperationId,
+    ) -> Result<Option<ExternalActionFixtureProviderApplyResult>, WorkflowOsError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| fixture_error("provider.unavailable", "fixture provider unavailable"))?;
+        Ok(state.receipts.get(operation_id).map(|receipt| {
+            ExternalActionFixtureProviderApplyResult {
+                posture: ExternalActionFixtureProviderApplyPosture::ExactReplay,
+                provider_revision: receipt.resulting_revision.clone(),
+                provider_receipt_commitment: receipt.receipt_commitment.clone(),
+                created_successor: receipt.created_successor.clone(),
+            }
+        }))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -301,14 +496,27 @@ pub(crate) enum ExternalActionSuccessorBindingWritePosture {
     ExactReplay,
 }
 
+pub(crate) trait ExternalActionSuccessorBindingStore {
+    fn put_exact(
+        &self,
+        projection: &ExternalActionAuthorizationProjection,
+        binding: &ExternalActionSuccessorBinding,
+    ) -> Result<ExternalActionSuccessorBindingWritePosture, WorkflowOsError>;
+
+    fn read_exact(
+        &self,
+        projection: &ExternalActionAuthorizationProjection,
+    ) -> Result<Option<ExternalActionSuccessorBinding>, WorkflowOsError>;
+}
+
 #[derive(Default)]
 pub(crate) struct InMemoryExternalActionSuccessorBindingStore {
     entries:
         Mutex<BTreeMap<ExternalActionAuthorizationProjectionId, ExternalActionSuccessorBinding>>,
 }
 
-impl InMemoryExternalActionSuccessorBindingStore {
-    pub(crate) fn put_exact(
+impl ExternalActionSuccessorBindingStore for InMemoryExternalActionSuccessorBindingStore {
+    fn put_exact(
         &self,
         projection: &ExternalActionAuthorizationProjection,
         binding: &ExternalActionSuccessorBinding,
@@ -335,7 +543,7 @@ impl InMemoryExternalActionSuccessorBindingStore {
         }
     }
 
-    pub(crate) fn read_exact(
+    fn read_exact(
         &self,
         projection: &ExternalActionAuthorizationProjection,
     ) -> Result<Option<ExternalActionSuccessorBinding>, WorkflowOsError> {
@@ -389,115 +597,6 @@ mod tests {
         derive_external_action_successor_binding, external_action_authorization,
         ExternalActionTransitionOperation,
     };
-
-    struct ProviderState {
-        revision_sequence: u64,
-        revision: SpecContentHash,
-        receipts: BTreeMap<ExternalActionTransitionOperationId, ProviderReceipt>,
-    }
-
-    struct ProviderReceipt {
-        transition_kind: ExternalActionTransitionKind,
-        receipt_commitment: SpecContentHash,
-        resulting_revision: SpecContentHash,
-    }
-
-    struct RevisionedFixtureProvider {
-        state: Mutex<ProviderState>,
-        observed_at: Timestamp,
-    }
-
-    impl RevisionedFixtureProvider {
-        fn new() -> Self {
-            Self {
-                state: Mutex::new(ProviderState {
-                    revision_sequence: 0,
-                    revision: SpecContentHash::from_text("provider-revision-0"),
-                    receipts: BTreeMap::new(),
-                }),
-                observed_at: time("2026-11-01T20:10:00Z"),
-            }
-        }
-    }
-
-    impl ExternalActionFixtureProviderSource for RevisionedFixtureProvider {
-        fn observe(&self) -> Result<ExternalActionFixtureProviderObservation, WorkflowOsError> {
-            let state = self.state.lock().map_err(|_| {
-                fixture_error("provider.unavailable", "fixture provider unavailable")
-            })?;
-            ExternalActionFixtureProviderObservation::new(
-                state.revision.clone(),
-                SpecContentHash::from_text("repository"),
-                SpecContentHash::from_text("base"),
-                SpecContentHash::from_text("head"),
-                SpecContentHash::from_text("checks"),
-                SpecContentHash::from_text("pull-request-state"),
-                self.observed_at,
-            )
-        }
-
-        fn compare_and_apply(
-            &self,
-            operation: &ExternalActionFixtureProviderOperation,
-        ) -> Result<ExternalActionFixtureProviderApplyResult, WorkflowOsError> {
-            let mut state = self.state.lock().map_err(|_| {
-                fixture_error("provider.unavailable", "fixture provider unavailable")
-            })?;
-            if let Some(receipt) = state.receipts.get(&operation.operation_id) {
-                if receipt.transition_kind != operation.transition_kind {
-                    return Err(fixture_error(
-                        "provider.operation_conflict",
-                        "fixture provider operation identity conflicts with prior content",
-                    ));
-                }
-                return Ok(ExternalActionFixtureProviderApplyResult {
-                    posture: ExternalActionFixtureProviderApplyPosture::ExactReplay,
-                    provider_revision: receipt.resulting_revision.clone(),
-                    provider_receipt_commitment: receipt.receipt_commitment.clone(),
-                });
-            }
-            if state.revision != operation.expected_provider_revision {
-                return Err(fixture_error(
-                    "provider.revision_drift",
-                    "fixture provider revision changed before operation",
-                ));
-            }
-            let prior_revision = state.revision.clone();
-            state.revision_sequence += 1;
-            let resulting_revision = commitment(
-                PROVIDER_REVISION_DOMAIN,
-                &(
-                    &prior_revision,
-                    &operation.operation_id,
-                    operation.transition_kind,
-                    state.revision_sequence,
-                ),
-            )?;
-            let receipt = commitment(
-                PROVIDER_RECEIPT_DOMAIN,
-                &(
-                    &operation.operation_id,
-                    operation.transition_kind,
-                    &prior_revision,
-                    &resulting_revision,
-                ),
-            )?;
-            state.revision.clone_from(&resulting_revision);
-            state.receipts.insert(
-                operation.operation_id.clone(),
-                ProviderReceipt {
-                    transition_kind: operation.transition_kind,
-                    receipt_commitment: receipt.clone(),
-                    resulting_revision: resulting_revision.clone(),
-                },
-            );
-            Ok(ExternalActionFixtureProviderApplyResult {
-                posture: ExternalActionFixtureProviderApplyPosture::Applied,
-                provider_revision: resulting_revision,
-                provider_receipt_commitment: receipt,
-            })
-        }
-    }
 
     fn time(value: &str) -> Timestamp {
         Timestamp::parse_rfc3339(value).expect("time")
@@ -599,7 +698,7 @@ mod tests {
 
     #[test]
     fn provider_compare_and_operate_rejects_drift_and_replays_exact_operation() {
-        let provider = RevisionedFixtureProvider::new();
+        let provider = InMemoryExternalActionFixtureProvider::new(time("2026-11-01T20:10:00Z"));
         let projection_value = projection();
         let observed = provider.observe().expect("observe");
         let operation = fixture_operation(
@@ -650,7 +749,9 @@ mod tests {
 
     #[test]
     fn provider_compare_and_operate_admits_only_one_concurrent_mutation() {
-        let provider = Arc::new(RevisionedFixtureProvider::new());
+        let provider = Arc::new(InMemoryExternalActionFixtureProvider::new(time(
+            "2026-11-01T20:10:00Z",
+        )));
         let projection = projection();
         let revision = provider
             .observe()
