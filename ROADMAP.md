@@ -493,9 +493,24 @@ denied/revoked terminal states fail closed. See the [Phase 5D implementation
 report](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5D_REPORT.md) and
 [focused
 review](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5D_REVIEW.md).
-Phase 5E end-to-end conformance and review is the next authorized increment.
-Live connector work remains unauthorized until Phase 5E is implemented and
-review-accepted.
+Phase 5E end-to-end conformance is implemented and accepted after focused
+maintainer/security review. One Core-private entrypoint now admits exactly the
+closed create-draft, mark-ready, and squash-merge transition set; resolves a
+distinct current-authority, evidence, and evaluation-time context for every
+transition; carries payload-free source-anchor commitments; returns durable
+typed wait posture for create, ready, and merge without collapsing lawful
+re-entry into an error; and
+inspects the exact successor and successful lifecycle records on completion.
+Focused tests prove complete execution, exact replay without duplicate
+mutation, zero-mutation rejection of pre-create resource drift and extra
+projected transitions, late authority rejection, wrong-evidence rejection,
+typed wait resumption, authority-gated lifecycle writes, and zero-write
+rejection when current authority is revoked. See the [Phase 5E implementation
+report](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5E_REPORT.md) and
+[focused
+review](docs/concepts/EXTERNAL_ACTION_FIXTURE_LIFECYCLE_PHASE_5E_REVIEW.md).
+Live connector work remains unauthorized; Phase 5E acceptance does not select
+or authorize a live provider mutation lane.
 
 After the current delegated-authority connector lane is complete, the next
 authoritative milestone is **Hacker News launch admission**. This is a bounded

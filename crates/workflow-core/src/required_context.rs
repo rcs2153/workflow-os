@@ -257,6 +257,7 @@ impl RequiredContextContractBinding {
         Ok(binding)
     }
 
+    #[cfg(feature = "trusted-host-application-spi")]
     pub(crate) fn explicit_none_for_github_repository_metadata(
         contract_id: HarnessContractId,
         contract_version: HarnessContractVersion,
