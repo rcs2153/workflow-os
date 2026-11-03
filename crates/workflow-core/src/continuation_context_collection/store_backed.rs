@@ -23,7 +23,7 @@ use crate::{
     WorkflowOsError, WorkflowRunEvent, WorkflowRunSnapshot, WorkflowRunStatus,
 };
 
-const STORE_BACKED_KINDS: [ContinuationCollectorKind; 12] = [
+pub(super) const STORE_BACKED_KINDS: [ContinuationCollectorKind; 12] = [
     ContinuationCollectorKind::ValidatedDeclaration,
     ContinuationCollectorKind::ImmutableRunBundle,
     ContinuationCollectorKind::DurableRunState,
@@ -39,7 +39,7 @@ const STORE_BACKED_KINDS: [ContinuationCollectorKind; 12] = [
 ];
 
 /// Existing read contracts required by the first store-backed batch.
-trait ContinuationStateReadStore:
+pub(super) trait ContinuationStateReadStore:
     EventLogStore
     + RunSnapshotStore
     + crate::ApprovalPresentationRecordStore
@@ -59,7 +59,7 @@ impl<T> ContinuationStateReadStore for T where
 
 /// Private source set. It borrows existing stores and cannot write through any
 /// of the interfaces exposed here.
-struct StoreBackedContinuationSourceSet<'a, S, B> {
+pub(super) struct StoreBackedContinuationSourceSet<'a, S, B> {
     state: &'a S,
     bundles: &'a B,
 }
@@ -69,11 +69,11 @@ where
     S: ContinuationStateReadStore,
     B: ImmutableRunBundleStore,
 {
-    const fn new(state: &'a S, bundles: &'a B) -> Self {
+    pub(super) const fn new(state: &'a S, bundles: &'a B) -> Self {
         Self { state, bundles }
     }
 
-    fn collector(
+    pub(super) fn collector(
         &'a self,
         kind: ContinuationCollectorKind,
     ) -> Result<StoreBackedContinuationCollector<'a, S, B>, WorkflowOsError> {
@@ -89,7 +89,7 @@ where
         })
     }
 
-    fn capture_anchor(
+    pub(super) fn capture_anchor(
         &self,
         purpose: crate::continuation_context::ContinuationContextPurpose,
         scope: &crate::continuation_context::ContinuationContextScope,
@@ -518,7 +518,7 @@ where
     }
 }
 
-struct StoreBackedContinuationCollector<'a, S, B> {
+pub(super) struct StoreBackedContinuationCollector<'a, S, B> {
     kind: ContinuationCollectorKind,
     sources: &'a StoreBackedContinuationSourceSet<'a, S, B>,
 }
@@ -773,6 +773,12 @@ fn fixed_revision(
     posture: &str,
 ) -> Result<SpecContentHash, WorkflowOsError> {
     collection_commitment("store-backed-posture", &(kind, posture))
+}
+
+pub(super) fn outside_batch_revision(
+    kind: ContinuationCollectorKind,
+) -> Result<SpecContentHash, WorkflowOsError> {
+    fixed_revision(kind, "outside-phase-b")
 }
 
 fn revision_for(

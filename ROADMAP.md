@@ -202,13 +202,24 @@ Projection delivery and replacement-executor work remain unauthorized until
 the integrated private Phase E conformance composition is implemented and
 focused-review accepted.
 
+The integrated private Phase E conformance composition is now implemented and
+accepted after focused maintainer/security review. One private source set layers the
+accepted store-backed anchor, bounded local-observer anchor, and accepted-intent
+anchor; invokes those accepted collectors plus explicit closed provider and
+agent-advisory postures; rereads the complete layered anchor; and enters the
+accepted aggregate proof only when the pre- and post-collection anchors match.
+Focused tests prove stable-state composition and reject cross-source drift. This
+remains conformance integration rather than a production registry or runtime
+consumer. See the [integrated conformance implementation
+report](docs/concepts/CONTINUATION_CONTEXT_INTEGRATED_CONFORMANCE_REPORT.md) and
+[focused review](docs/concepts/CONTINUATION_CONTEXT_INTEGRATED_CONFORMANCE_REVIEW.md).
+The focused review is an owner-conducted repository review, not independent
+external security assurance.
+
 The remaining authorized sequence is:
 
-1. integrated private conformance composition across the accepted store-backed,
-   bounded-local-observer, accepted-intent, and explicit closed-posture source
-   contracts under one stable anchor and aggregate proof;
-2. exact post-compaction projection delivery and acknowledgment; and
-3. one local end-to-end replacement-executor proof showing that completed work
+1. exact post-compaction projection delivery and acknowledgment; and
+2. one local end-to-end replacement-executor proof showing that completed work
    is not repeated, superseded direction is not revived, missing or conflicting
    understanding is disclosed, and fresh authority is resolved separately at
    the next material boundary.

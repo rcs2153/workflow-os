@@ -25,7 +25,7 @@ const MAX_DOCUMENT_BYTES: u64 = 256 * 1024;
 const MAX_DOCUMENT_TOTAL_BYTES: u64 = 512 * 1024;
 const MAX_CHANGE_COUNT: u32 = 100_000;
 
-const LOCAL_OBSERVER_KINDS: [ContinuationCollectorKind; 3] = [
+pub(super) const LOCAL_OBSERVER_KINDS: [ContinuationCollectorKind; 3] = [
     ContinuationCollectorKind::TypedHandoff,
     ContinuationCollectorKind::GitObservation,
     ContinuationCollectorKind::OperatingDocument,
@@ -33,12 +33,12 @@ const LOCAL_OBSERVER_KINDS: [ContinuationCollectorKind; 3] = [
 
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct LocalObservationRequest {
-    purpose: crate::continuation_context::ContinuationContextPurpose,
-    scope: crate::continuation_context::ContinuationContextScope,
-    actor: ActorId,
-    observer_contract: SpecContentHash,
-    commitment: SpecContentHash,
+pub(super) struct LocalObservationRequest {
+    pub(super) purpose: crate::continuation_context::ContinuationContextPurpose,
+    pub(super) scope: crate::continuation_context::ContinuationContextScope,
+    pub(super) actor: ActorId,
+    pub(super) observer_contract: SpecContentHash,
+    pub(super) commitment: SpecContentHash,
 }
 
 impl fmt::Debug for LocalObservationRequest {
@@ -77,14 +77,14 @@ impl LocalObservationRequest {
 
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct GitWorktreeObservation {
-    request_commitment: SpecContentHash,
-    repository_present: bool,
-    head_commitment: Option<SpecContentHash>,
-    worktree_commitment: SpecContentHash,
-    tracked_change_count: u32,
-    untracked_change_count: u32,
-    conflict_count: u32,
+pub(super) struct GitWorktreeObservation {
+    pub(super) request_commitment: SpecContentHash,
+    pub(super) repository_present: bool,
+    pub(super) head_commitment: Option<SpecContentHash>,
+    pub(super) worktree_commitment: SpecContentHash,
+    pub(super) tracked_change_count: u32,
+    pub(super) untracked_change_count: u32,
+    pub(super) conflict_count: u32,
 }
 
 impl fmt::Debug for GitWorktreeObservation {
@@ -107,7 +107,7 @@ impl fmt::Debug for GitWorktreeObservation {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum OperatingDocumentKind {
+pub(super) enum OperatingDocumentKind {
     AgentInstructions,
     EngineeringStandard,
     Roadmap,
@@ -125,13 +125,13 @@ impl OperatingDocumentKind {
 
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct OperatingDocumentObservation {
-    kind: OperatingDocumentKind,
-    content_commitment: SpecContentHash,
-    byte_len: u64,
-    canonical_beneath_project_root: bool,
-    symlink_free: bool,
-    sensitivity: ContinuationContextSensitivity,
+pub(super) struct OperatingDocumentObservation {
+    pub(super) kind: OperatingDocumentKind,
+    pub(super) content_commitment: SpecContentHash,
+    pub(super) byte_len: u64,
+    pub(super) canonical_beneath_project_root: bool,
+    pub(super) symlink_free: bool,
+    pub(super) sensitivity: ContinuationContextSensitivity,
 }
 
 impl fmt::Debug for OperatingDocumentObservation {
@@ -153,9 +153,9 @@ impl fmt::Debug for OperatingDocumentObservation {
 
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct OperatingDocumentObservationSet {
-    request_commitment: SpecContentHash,
-    documents: Vec<OperatingDocumentObservation>,
+pub(super) struct OperatingDocumentObservationSet {
+    pub(super) request_commitment: SpecContentHash,
+    pub(super) documents: Vec<OperatingDocumentObservation>,
 }
 
 impl fmt::Debug for OperatingDocumentObservationSet {
@@ -168,7 +168,7 @@ impl fmt::Debug for OperatingDocumentObservationSet {
     }
 }
 
-trait ContinuationLocalObserver {
+pub(super) trait ContinuationLocalObserver {
     fn contract_commitment(&self) -> SpecContentHash;
 
     fn observe_git_worktree(
@@ -182,7 +182,7 @@ trait ContinuationLocalObserver {
     ) -> Result<OperatingDocumentObservationSet, WorkflowOsError>;
 }
 
-struct BoundedLocalContinuationSourceSet<'a, O> {
+pub(super) struct BoundedLocalContinuationSourceSet<'a, O> {
     observer: &'a O,
 }
 
@@ -190,11 +190,11 @@ impl<'a, O> BoundedLocalContinuationSourceSet<'a, O>
 where
     O: ContinuationLocalObserver,
 {
-    const fn new(observer: &'a O) -> Self {
+    pub(super) const fn new(observer: &'a O) -> Self {
         Self { observer }
     }
 
-    fn collector(
+    pub(super) fn collector(
         &'a self,
         kind: ContinuationCollectorKind,
     ) -> Result<BoundedLocalContinuationCollector<'a, O>, WorkflowOsError> {
@@ -210,7 +210,7 @@ where
         })
     }
 
-    fn capture_anchor(
+    pub(super) fn capture_anchor(
         &self,
         base: &ContinuationCollectionAnchor,
         purpose: crate::continuation_context::ContinuationContextPurpose,
@@ -301,7 +301,7 @@ where
     }
 }
 
-struct BoundedLocalContinuationCollector<'a, O> {
+pub(super) struct BoundedLocalContinuationCollector<'a, O> {
     kind: ContinuationCollectorKind,
     sources: &'a BoundedLocalContinuationSourceSet<'a, O>,
 }
