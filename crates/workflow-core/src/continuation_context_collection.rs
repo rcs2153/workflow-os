@@ -25,6 +25,7 @@ use crate::continuation_context::{
 };
 use crate::{ActorId, SpecContentHash, WorkflowOsError};
 
+mod local_observers;
 mod store_backed;
 
 const COLLECTION_ALGORITHM: &str = "workflow-os/continuation-collection/v1";

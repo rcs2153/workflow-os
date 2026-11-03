@@ -142,14 +142,29 @@ for durable-snapshot drift rejection and unchanged revision stability after
 backend restart. See the [Phase B
 review](docs/concepts/CONTINUATION_CONTEXT_STORE_BACKED_COLLECTORS_REVIEW.md).
 
+Phase C bounded-local-observer implementation is now accepted after focused
+maintainer/security review corrected one producer-substitution blocker. A
+private injected observer contract can supply typed Git/worktree metadata and
+observations for exactly `AGENTS.md`, `docs/ENGINEERING_STANDARD.md`, and
+`ROADMAP.md`. Core validates request binding, source revisions, bounded counts,
+closed document identity, path-safety attestations, size and sensitivity
+ceilings, deterministic ordering, debug redaction, and one payload-free observer
+contract commitment across anchor capture and collection. That commitment binds
+continuity; it does not authenticate or authorize a future host producer. The
+implementation does not shell out to Git, read the filesystem, trust arbitrary
+paths, or register a runtime consumer. No stable typed-handoff store exists, so
+typed handoff remains explicitly `Unsupported` rather than being inferred or
+fabricated. See the [Phase C implementation
+report](docs/concepts/CONTINUATION_CONTEXT_BOUNDED_LOCAL_OBSERVERS_REPORT.md)
+and [focused review](docs/concepts/CONTINUATION_CONTEXT_BOUNDED_LOCAL_OBSERVERS_REVIEW.md).
+
 The remaining authorized sequence is:
 
-1. bounded local Git and allowlisted operating-document observers;
-2. a separately reviewed durable accepted-intent capture boundary;
-3. aggregate non-consuming composition into a claim-level
+1. a separately reviewed durable accepted-intent capture boundary;
+2. aggregate non-consuming composition into a claim-level
    `ContinuationUnderstandingProjection` with complete source-coverage proof;
-4. exact post-compaction projection delivery and acknowledgment; and
-5. one local end-to-end replacement-executor proof showing that completed work
+3. exact post-compaction projection delivery and acknowledgment; and
+4. one local end-to-end replacement-executor proof showing that completed work
    is not repeated, superseded direction is not revived, missing or conflicting
    understanding is disclosed, and fresh authority is resolved separately at
    the next material boundary.
