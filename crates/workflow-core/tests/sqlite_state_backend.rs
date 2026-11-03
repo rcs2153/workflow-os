@@ -109,7 +109,7 @@ fn sqlite_backend_passes_common_conformance_without_overclaiming() {
     );
     assert_eq!(
         contract.schema().adapter_schema_version(),
-        Some(8),
+        Some(9),
         "SQLite schema version is explicit"
     );
     assert_eq!(
@@ -265,7 +265,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
     let secret = "secret-schema-token-marker";
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 9)
+        .pragma_update(None, "user_version", 10)
         .expect("set newer schema");
     drop(connection);
 
@@ -278,7 +278,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 8)
+        .pragma_update(None, "user_version", 9)
         .expect("restore schema version");
     connection
         .execute(
@@ -298,7 +298,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 }
 
 #[test]
-fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v8() {
+fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v9() {
     let fixture = Fixture::new();
     fixture
         .backend
@@ -306,36 +306,34 @@ fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v8() {
         .expect("seed V1-compatible event");
     downgrade_fixture_to_v1(&fixture.path);
 
-    let required = SqliteStateBackend::open(&fixture.path).expect_err("upgrade is explicit");
-    assert_eq!(required.code(), "state.sqlite.schema.upgrade_required");
+    assert_sqlite_upgrade_required(&fixture.path, "V2");
 
     let _v2 = SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(&fixture.path)
         .expect("upgrade exact V1 database");
-    let v3_required = SqliteStateBackend::open(&fixture.path).expect_err("V3 upgrade is explicit");
-    assert_eq!(v3_required.code(), "state.sqlite.schema.upgrade_required");
+    assert_sqlite_upgrade_required(&fixture.path, "V3");
     let v3 = SqliteStateBackend::upgrade_authorized_execution_continuity_v2_to_v3(&fixture.path)
         .expect("upgrade exact empty-continuity V2 database");
-    let v4_required = SqliteStateBackend::open(&fixture.path).expect_err("V4 upgrade is explicit");
-    assert_eq!(v4_required.code(), "state.sqlite.schema.upgrade_required");
+    assert_sqlite_upgrade_required(&fixture.path, "V4");
     let v4 =
         SqliteStateBackend::upgrade_operational_execution_window_opening_v3_to_v4(&fixture.path)
             .expect("upgrade exact empty-continuity V3 database");
-    let v5_required = SqliteStateBackend::open(&fixture.path).expect_err("V5 upgrade is explicit");
-    assert_eq!(v5_required.code(), "state.sqlite.schema.upgrade_required");
+    assert_sqlite_upgrade_required(&fixture.path, "V5");
     let v5 = SqliteStateBackend::upgrade_dispatch_reservation_v4_to_v5(&fixture.path)
         .expect("upgrade exact V4 database");
-    let v6_required = SqliteStateBackend::open(&fixture.path).expect_err("V6 upgrade is explicit");
-    assert_eq!(v6_required.code(), "state.sqlite.schema.upgrade_required");
+    assert_sqlite_upgrade_required(&fixture.path, "V6");
     let v6 = SqliteStateBackend::upgrade_time_window_wait_binding_v5_to_v6(&fixture.path)
         .expect("upgrade exact V5 database");
-    let v7_required = SqliteStateBackend::open(&fixture.path).expect_err("V7 upgrade is explicit");
-    assert_eq!(v7_required.code(), "state.sqlite.schema.upgrade_required");
+    assert_sqlite_upgrade_required(&fixture.path, "V7");
     let _v7 = SqliteStateBackend::upgrade_immutable_run_bundle_v6_to_v7(&fixture.path)
         .expect("upgrade exact V6 database");
-    let v8_required = SqliteStateBackend::open(&fixture.path).expect_err("V8 upgrade is explicit");
-    assert_eq!(v8_required.code(), "state.sqlite.schema.upgrade_required");
-    let upgraded = SqliteStateBackend::upgrade_capability_source_continuity_v7_to_v8(&fixture.path)
+    assert_sqlite_upgrade_required(&fixture.path, "V8");
+    let v8 = SqliteStateBackend::upgrade_capability_source_continuity_v7_to_v8(&fixture.path)
         .expect("upgrade exact V7 database");
+    seed_populated_v8_run_scoped_tables(&fixture.path);
+    assert_sqlite_upgrade_required(&fixture.path, "V9");
+    let upgraded =
+        SqliteStateBackend::upgrade_operational_opening_run_scope_v8_to_v9(&fixture.path)
+            .expect("upgrade exact V8 database");
     let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
     assert_eq!(
         reopened
@@ -363,12 +361,13 @@ fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v8() {
             |row| row.get(0),
         )
         .expect("capability source continuity table");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     assert_eq!(trusted_time_rows, 1);
     assert_eq!(source_continuity_rows, 0);
+    assert_populated_v9_rows(&connection);
 
-    SqliteStateBackend::upgrade_capability_source_continuity_v7_to_v8(&fixture.path)
-        .expect("upgrade is idempotent for exact V8");
+    SqliteStateBackend::upgrade_operational_opening_run_scope_v8_to_v9(&fixture.path)
+        .expect("upgrade is idempotent for exact V9");
     assert_eq!(
         v3.read_events(&fixture.created.run_id)
             .expect("V3 handle remains readable"),
@@ -385,6 +384,11 @@ fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v8() {
         vec![fixture.created.clone()]
     );
     assert_eq!(
+        v8.read_events(&fixture.created.run_id)
+            .expect("V8 handle remains readable after upgrade"),
+        vec![fixture.created.clone()]
+    );
+    assert_eq!(
         upgraded
             .read_events(&fixture.created.run_id)
             .expect("upgraded handle remains valid"),
@@ -395,6 +399,174 @@ fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v8() {
             .expect("V5 handle remains readable after upgrade"),
         vec![fixture.created.clone()]
     );
+}
+
+fn seed_populated_v8_run_scoped_tables(path: &Path) {
+    let connection = Connection::open(path).expect("open exact V8 database");
+    seed_v8_continuity_and_opening_rows(&connection);
+    seed_v8_projection_rows(&connection);
+}
+
+fn seed_v8_continuity_and_opening_rows(connection: &Connection) {
+    connection
+        .execute_batch(
+            r"
+            PRAGMA defer_foreign_keys = ON;
+            BEGIN IMMEDIATE;
+
+            INSERT INTO events (event_id, run_id, sequence_number, payload) VALUES
+              ('event/migration-expected', 'run/migration', 10, '{}'),
+              ('event/migration-result', 'run/migration', 11, '{}');
+
+            INSERT INTO continuity_windows (
+              window_id, workflow_id, run_id, step_id, window_binding_commitment,
+              subject_actor_id, immutable_bundle_commitment, governance_commitment,
+              authority_commitment, cursor_sequence, cursor_event_id, state,
+              maximum_attempts, next_attempt_number, expires_seconds, expires_nanos,
+              watermark_seconds, watermark_nanos, trusted_time_epoch_id, revision,
+              active_yield_generation_id, record_json
+            ) VALUES (
+              'window/migration', 'workflow/migration', 'run/migration', 'step/migration',
+              'window-binding/migration', 'actor/migration', 'bundle/migration',
+              'governance/migration', 'authority/migration', 10,
+              'event/migration-expected', 'executing', 1, 2, 200, 0, 100, 0,
+              'epoch/migration', 1, NULL, '{}'
+            );
+
+            INSERT INTO continuity_operations (
+              operation_id, receipt_id, operation_kind, request_commitment,
+              request_json, operation_commitment, disposition, request_window_id,
+              request_attempt_id, success_attempt_id, success_consume_operation_id,
+              result_commitment, trusted_time_source_kind,
+              trusted_time_provenance_commitment, trusted_time_epoch_id,
+              observed_seconds, observed_nanos, trusted_time_commitment, result_json,
+              committed_seconds, committed_nanos
+            ) VALUES (
+              'consume/migration', 'consume-receipt/migration', 'consume_directive',
+              'consume-request/migration', '{}', 'consume-operation/migration',
+              'committed_success', 'window/migration', 'attempt/migration',
+              'attempt/migration', 'consume/migration', 'consume-result/migration',
+              'core_injected_clock_v1', 'clock-provenance/migration',
+              'epoch/migration', 100, 0, 'trusted-time/migration', '{}', 100, 0
+            );
+
+            INSERT INTO continuity_attempts (
+              attempt_id, window_id, attempt_number, subject_actor_id,
+              cursor_sequence, cursor_event_id, authority_commitment,
+              consume_operation_id, consume_operation_kind,
+              consume_operation_disposition, state, revision, record_json
+            ) VALUES (
+              'attempt/migration', 'window/migration', 1, 'actor/migration', 10,
+              'event/migration-expected', 'authority/migration', 'consume/migration',
+              'consume_directive', 'committed_success', 'started', 1, '{}'
+            );
+
+            INSERT INTO operational_opening_operations (
+              operation_id, receipt_id, version, request_commitment, workflow_id,
+              run_id, step_id, window_id, attempt_id, subject_actor_id,
+              authority_commitment, governance_commitment, operation_binding,
+              operation_binding_commitment, expected_snapshot_commitment,
+              expected_event_id, expected_sequence, result_event_id,
+              result_sequence, attempt_number, window_revision, committed_seconds,
+              committed_nanos, record_json
+            ) VALUES (
+              'opening/migration', 'opening-receipt/migration', 'v2',
+              'opening-request/migration', 'workflow/migration', 'run/migration',
+              'step/migration', 'window/migration', 'attempt/migration',
+              'actor/migration', 'authority/migration', 'governance/migration',
+              'invoke_current_step_skill', 'binding/migration',
+              'snapshot/migration', 'event/migration-expected', 10,
+              'event/migration-result', 11, 1, 1, 100, 0, '{}'
+            );
+
+            INSERT INTO operational_opening_attempts (
+              attempt_id, window_id, operation_id, attempt_number,
+              subject_actor_id, authority_commitment,
+              operation_binding_commitment, state, revision, record_json
+            ) VALUES (
+              'attempt/migration', 'window/migration', 'opening/migration', 1,
+              'actor/migration', 'authority/migration', 'binding/migration',
+              'started', 1, '{}'
+            );
+
+            INSERT INTO operational_opening_projection_bindings (
+              operation_id, receipt_id, workflow_id, run_id,
+              projection_commitment, snapshot_commitment, binding_json
+            ) VALUES (
+              'opening/migration', 'opening-receipt/migration',
+              'workflow/migration', 'run/migration', 'opening-projection/migration',
+              'snapshot/migration', '{}'
+            );
+
+            COMMIT;
+            ",
+        )
+        .expect("seed populated exact V8 continuity and opening rows");
+}
+
+fn seed_v8_projection_rows(connection: &Connection) {
+    connection
+        .execute_batch(
+            r"
+            BEGIN IMMEDIATE;
+
+            INSERT INTO dispatch_reservations (
+              attempt_id, window_id, operation_id, receipt_id, request_commitment,
+              reservation_commitment, result_event_id, result_sequence,
+              committed_seconds, committed_nanos, record_json
+            ) VALUES (
+              'attempt/migration', 'window/migration', 'dispatch/migration',
+              'dispatch-receipt/migration', 'dispatch-request/migration',
+              'dispatch-reservation/migration', 'event/migration-result', 11,
+              100, 0, '{}'
+            );
+
+            INSERT INTO dispatch_reservation_projection_bindings (
+              operation_id, receipt_id, projection_commitment,
+              snapshot_commitment, binding_json
+            ) VALUES (
+              'dispatch/migration', 'dispatch-receipt/migration',
+              'dispatch-projection/migration', 'snapshot/migration', '{}'
+            );
+
+            INSERT INTO continuity_projection_bindings (
+              operation_id, receipt_id, operation_kind, disposition, workflow_id,
+              run_id, window_id, request_commitment, projection_commitment,
+              expected_event_id, expected_sequence, result_event_id,
+              result_sequence, snapshot_commitment, target_kind, target_id,
+              target_revision, binding_json
+            ) VALUES (
+              'consume/migration', 'consume-receipt/migration', 'consume_directive',
+              'applied', 'workflow/migration', 'run/migration', 'window/migration',
+              'consume-request/migration', 'continuity-projection/migration',
+              'event/migration-expected', 10, 'event/migration-result', 11,
+              'snapshot/migration', 'directive_attempt', 'attempt/migration', 1, '{}'
+            );
+
+            COMMIT;
+            ",
+        )
+        .expect("seed populated exact V8 projection rows");
+}
+
+fn assert_populated_v9_rows(connection: &Connection) {
+    let preserved_run_scoped_rows: (u32, u32, u32) = connection
+        .query_row(
+            "SELECT
+               (SELECT COUNT(*) FROM operational_opening_operations WHERE run_id = 'run/migration'),
+               (SELECT COUNT(*) FROM dispatch_reservations WHERE run_id = 'run/migration'),
+               (SELECT COUNT(*) FROM continuity_projection_bindings WHERE run_id = 'run/migration')",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("populated V8 rows survive V9 migration");
+    assert_eq!(preserved_run_scoped_rows, (1, 1, 1));
+}
+
+fn assert_sqlite_upgrade_required(path: &Path, target_version: &str) {
+    let error =
+        SqliteStateBackend::open(path).expect_err(&format!("{target_version} upgrade is explicit"));
+    assert_eq!(error.code(), "state.sqlite.schema.upgrade_required");
 }
 
 #[test]
@@ -438,6 +610,8 @@ fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
         .expect("finish explicit V7 upgrade");
     SqliteStateBackend::upgrade_capability_source_continuity_v7_to_v8(&fixture.path)
         .expect("finish explicit V8 upgrade");
+    SqliteStateBackend::upgrade_operational_opening_run_scope_v8_to_v9(&fixture.path)
+        .expect("finish explicit V9 upgrade");
     let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
     assert_eq!(
         reopened
@@ -456,7 +630,7 @@ fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
             |row| row.get(0),
         )
         .expect("trusted time singleton");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     assert_eq!(trusted_time_rows, 1);
 }
 

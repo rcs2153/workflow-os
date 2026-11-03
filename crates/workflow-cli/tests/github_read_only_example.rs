@@ -107,6 +107,7 @@ fn repository_metadata_fixture_completes_through_public_cli_without_network() {
     assert!(waiting_output.contains("provider_mode: fixture"));
     assert!(waiting_output.contains("live_transport: disabled"));
     assert!(waiting_output.contains("approval_handoff:"));
+    assert!(waiting_output.contains("A WorkReport artifact, live transport"));
     let run_id = run_id(&waiting);
     let approval_id = approval_id(&waiting);
 
@@ -160,6 +161,78 @@ fn repository_metadata_fixture_completes_through_public_cli_without_network() {
             "example/github-repository-metadata-fixture",
             "--run-id",
             &run_id,
+        ],
+    );
+    assert!(replay.status.success(), "{}", stderr(&replay));
+    assert!(stdout(&replay).contains("provider_posture: terminal_replay"));
+}
+
+#[test]
+fn repository_metadata_fixture_supports_two_runs_in_one_state_and_terminal_replay_after_restart() {
+    let state = state_root("repository-metadata-fixture-two-runs");
+    let project = state_root("repository-metadata-fixture-two-runs-project");
+    copy_dir(&repository_metadata_fixture_root(), &project);
+    let mut completed_run_ids = Vec::new();
+
+    for reason in ["reviewed first fixture run", "reviewed second fixture run"] {
+        let waiting = workflow_os(
+            &project,
+            &state,
+            &["run", "example/github-repository-metadata-fixture"],
+        );
+        assert!(waiting.status.success(), "{}", stderr(&waiting));
+        let current_run_id = run_id(&waiting);
+        let current_approval_id = approval_id(&waiting);
+
+        let approved = workflow_os(
+            &project,
+            &state,
+            &[
+                "approve",
+                &current_run_id,
+                &current_approval_id,
+                "--actor",
+                "user/example-reviewer",
+                "--reason",
+                reason,
+            ],
+        );
+        assert!(approved.status.success(), "{}", stderr(&approved));
+
+        let completed = workflow_os(
+            &project,
+            &state,
+            &[
+                "run",
+                "example/github-repository-metadata-fixture",
+                "--run-id",
+                &current_run_id,
+            ],
+        );
+        assert!(completed.status.success(), "{}", stderr(&completed));
+        assert!(stdout(&completed).contains("status: Completed"));
+        completed_run_ids.push(current_run_id);
+    }
+
+    assert_ne!(completed_run_ids[0], completed_run_ids[1]);
+    for completed_run_id in &completed_run_ids {
+        let inspected = workflow_os(&project, &state, &["inspect", completed_run_id]);
+        assert!(inspected.status.success(), "{}", stderr(&inspected));
+        let output = stdout(&inspected);
+        assert!(output.contains("status: Completed"));
+        assert!(output.contains("adapter_telemetry: 1"));
+    }
+
+    fs::remove_file(project.join("fixtures/github/repository.json"))
+        .expect("fixture removed after both runs completed");
+    let replay = workflow_os(
+        &project,
+        &state,
+        &[
+            "run",
+            "example/github-repository-metadata-fixture",
+            "--run-id",
+            &completed_run_ids[1],
         ],
     );
     assert!(replay.status.success(), "{}", stderr(&replay));
@@ -235,6 +308,7 @@ fn repository_metadata_fixture_can_be_denied_after_fixture_is_removed() {
     assert!(denied.status.success(), "{}", stderr(&denied));
     assert!(stdout(&denied).contains("decision: denied"));
     assert!(stdout(&denied).contains("status: Failed"));
+    assert!(stdout(&denied).contains(&format!("next_action: workflow-os inspect {run_id}")));
 
     let inspect = workflow_os(&project, &state, &["inspect", &run_id]);
     assert!(inspect.status.success(), "{}", stderr(&inspect));

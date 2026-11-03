@@ -238,18 +238,18 @@ pub fn execute_github_repository_metadata_fixture(
     }
 
     let run = backend.rehydrate_run(&run_id)?;
-    validate_existing_fixture_run(
-        backend,
-        &run,
-        &request.execution.execution.project_root,
-        &request.fixture_json,
-    )?;
     if run.snapshot.status.is_terminal() {
         return Ok(result(
             run,
             GitHubRepositoryMetadataFixtureExecutionPosture::ExistingTerminal,
         ));
     }
+    validate_existing_fixture_run(
+        backend,
+        &run,
+        &request.execution.execution.project_root,
+        &request.fixture_json,
+    )?;
     match run.snapshot.status {
         WorkflowRunStatus::WaitingForApproval => {
             return Ok(result(
@@ -583,12 +583,14 @@ fn execute_fixture_attempt(
             },
         })?;
     let (session, _cancellation) = prepared.into_parts();
-    let outcome = session.run().map_err(|_| {
-        fixture_error(
-            "session_failed",
-            "fixture provider session failed before a bounded outcome was available",
-        )
-    })?;
+    let outcome = match session.run() {
+        Ok(outcome) => outcome,
+        Err(_failure) => {
+            let current = backend.rehydrate_run(&run.snapshot.identity.run_id)?;
+            let posture = posture_after_opaque_session_failure(current.snapshot.status);
+            return Ok(result(current, posture));
+        }
+    };
     let run = backend.rehydrate_run(&run.snapshot.identity.run_id)?;
     let posture = match outcome {
         crate::TrustedHostLocalApplicationOutcome::EntryStopped(
@@ -603,6 +605,16 @@ fn execute_fixture_attempt(
         _ => GitHubRepositoryMetadataFixtureExecutionPosture::Blocked,
     };
     Ok(result(run, posture))
+}
+
+fn posture_after_opaque_session_failure(
+    status: WorkflowRunStatus,
+) -> GitHubRepositoryMetadataFixtureExecutionPosture {
+    if status.is_terminal() {
+        GitHubRepositoryMetadataFixtureExecutionPosture::ExistingTerminal
+    } else {
+        GitHubRepositoryMetadataFixtureExecutionPosture::RecoveryRequired
+    }
 }
 
 fn validate_fixture_plan(
@@ -646,4 +658,33 @@ fn fixture_error(suffix: &'static str, message: &'static str) -> WorkflowOsError
         format!("executor.github_repository_metadata.fixture.{suffix}"),
         message,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opaque_session_failure_never_invents_a_terminal_outcome() {
+        for status in [
+            WorkflowRunStatus::Running,
+            WorkflowRunStatus::Retrying,
+            WorkflowRunStatus::WaitingForExternalEvent,
+        ] {
+            assert_eq!(
+                posture_after_opaque_session_failure(status),
+                GitHubRepositoryMetadataFixtureExecutionPosture::RecoveryRequired
+            );
+        }
+    }
+
+    #[test]
+    fn opaque_session_failure_respects_an_already_terminal_projection() {
+        for status in [WorkflowRunStatus::Completed, WorkflowRunStatus::Failed] {
+            assert_eq!(
+                posture_after_opaque_session_failure(status),
+                GitHubRepositoryMetadataFixtureExecutionPosture::ExistingTerminal
+            );
+        }
+    }
 }
