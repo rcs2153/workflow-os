@@ -756,6 +756,22 @@ Independent release/security assurance and scoped candidate transfer remain
 open. These gates precede a separate publication decision; no tag, GitHub
 Release, registry publication, announcement, or v1 claim is next by default.
 
+The bounded scoped-transfer design is now captured in the
+[`0.4.0-preview.1` Scoped Candidate Transfer
+Plan](docs/implementation-plans/0.4.0-preview.1-scoped-candidate-transfer-plan.md).
+Focused maintainer/security review rejected the initial draft-release staging
+design because it created the future publication object early and introduced
+an avoidable accidental-publish surface. Current GitHub-hosted public runners
+provide native arm64 macOS, so the corrected plan adds one manual read-only
+macOS candidate workflow, reuses the Linux workflow, and rebuilds both targets
+from one exact post-merge commit into immutable seven-day Actions artifacts.
+The earlier candidate pair remains superseded evidence. See the [focused plan
+review](docs/concepts/0.4.0-preview.1_SCOPED_CANDIDATE_TRANSFER_PLAN_REVIEW.md).
+Planning and review do not authorize workflow dispatch, artifact production,
+tag creation, publication, or an independent-assurance claim. The next
+authorized phase is implementation of the macOS workflow and symmetric
+contract tests only.
+
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
 whether existing Workflow OS workflows, policies, required context, checks,
