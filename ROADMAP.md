@@ -740,6 +740,18 @@ Focused maintainer review accepts the clean-room procedure, evaluator-error
 disclosure, and no-code-change decision with no unresolved P0/P1 finding in
 that bounded scope. See the [focused
 review](docs/concepts/FRESH_CLONE_NPM_CHECK_SELF_CONTAINMENT_REVIEW.md).
+The complete frozen release-validation matrix then passed on exact candidate
+source `33a77cb27fb989cb4e1695788df5eee591695aa6` in an isolated clean
+checkout. All deterministic release-checklist commands passed; guarded live
+tests remained explicitly classified and unexecuted; RustSec reported no
+vulnerability plus the documented allowed `unsafe-libyaml` maintenance
+warning; and npm audit reported zero vulnerabilities. See the [frozen candidate
+validation
+report](docs/concepts/0.4.0-preview.1_FROZEN_CANDIDATE_VALIDATION_REPORT.md).
+Focused maintainer/release review accepts the exact-source evidence and the two
+checklist gate closures while preserving the independent-assurance boundary.
+See the [focused
+review](docs/concepts/0.4.0-preview.1_FROZEN_CANDIDATE_VALIDATION_REVIEW.md).
 Independent release/security assurance and scoped candidate transfer remain
 open. These gates precede a separate publication decision; no tag, GitHub
 Release, registry publication, announcement, or v1 claim is next by default.
