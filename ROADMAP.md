@@ -572,17 +572,21 @@ reconstruct validation provenance. Review corrected reference-metadata
 validation ordering so malformed caller metadata fails before route mutation.
 See the [Phase 2 report](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_2_REPORT.md)
 and [focused review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_2_REVIEW.md).
-The first Phase 3 clean-room pass completed the packaged macOS path against
-unrelated TypeScript- and Rust-shaped repositories, preserved existing agent
-instructions, produced real ten-event runs and cited WorkReports, replayed
-without duplicate work, and recovered a terminal run after an injected report
-write failure without editing runtime records. It also found one launch
-admission blocker: `inspect` exposed citation counts but not the stable local
-check reference required for independent review. A narrow additive human/JSON
-projection of the already validated payload-free reference is implemented
-locally. Phase 3 remains open until focused review, exact-head merge, artifact
-rebuild from that merged commit, and repeat clean-room evidence are complete.
-See the [Phase 3 blocker-fix
+Phase 3 final clean-room evaluation is complete and focused review accepts the
+evidence pending terminal-green exact-head CI. A provisional package built from
+the exact clean corrected merge passed unrelated TypeScript- and Rust-shaped
+repository paths,
+preserved existing agent instructions, produced real ten-event runs and cited
+WorkReports, exposed stable citation references in human and JSON inspection,
+and replayed without duplicate work. A faulted terminal report-artifact write
+recovered on exact replay without editing runtime records, and uninstall
+preserved every repository state file. No mock, fixture, provider credential,
+network call, repository-specific command, artifact upload, or publication was
+used. See the [Phase 3 clean-room
+report](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_3_CLEAN_ROOM_REPORT.md)
+and [focused
+review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_3_CLEAN_ROOM_REVIEW.md),
+plus the preceding [blocker-fix
 report](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_3_INSPECT_REFERENCE_BLOCKER_FIX_REPORT.md).
 
 After Hacker News launch admission is accepted, evaluate one future **Governed

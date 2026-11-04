@@ -307,16 +307,20 @@ and [focused review](../concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_2_REVIEW.md)
 Execute the exact packaged path against two unrelated repositories, preserve
 the evidence, and fix only admission-blocking findings.
 
-First-pass status: the exact merged Phase 2 macOS package completed the
-TypeScript- and Rust-shaped clean-room paths, but the pass found one admission
-blocker. Human and JSON `inspect` output proved that one local-check citation
-existed without exposing its stable reference. The narrow correction projects
-only the validated payload-free stable reference already stored in the
-WorkReport. No report body, command output, source content, or evidence payload
-is exposed. See the [Phase 3 blocker-fix
+Implementation status: final clean-room evaluation complete and focused review
+accepted; terminal-green exact-head CI required. The exact corrected merged
+commit was built and packaged from a separate clean clone, then installed into
+an isolated prefix. Unrelated TypeScript- and Rust-shaped repositories preserved existing
+agent guidance, completed the non-mock artifact path, exposed stable validation
+references in human and JSON inspection, and replayed without duplicate events
+or artifacts. A faulted terminal artifact write recovered on exact replay
+without state edits, and uninstall preserved all repository state. See the
+[Phase 3 clean-room
+report](../concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_3_CLEAN_ROOM_REPORT.md)
+and [focused
+review](../concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_3_CLEAN_ROOM_REVIEW.md),
+plus the preceding [blocker-fix
 report](../concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_3_INSPECT_REFERENCE_BLOCKER_FIX_REPORT.md).
-Phase 3 remains incomplete until focused review, exact-head merge, artifact
-rebuild from the corrected merged commit, and repeat clean-room evaluation.
 
 ### Phase 4: Release-Candidate Review
 
