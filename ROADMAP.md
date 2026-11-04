@@ -727,14 +727,22 @@ P0/P1 finding remains in that bounded scope; publication and independent
 assurance remain unauthorized. See the [focused
 review](docs/concepts/0.4.0-preview.1_NATIVE_CANDIDATE_PRODUCTION_REVIEW.md).
 
-Publication remains unauthorized. A new external evaluation reported that
-top-level `npm run check` may still depend on an ambient debug binary in a
-fresh clone after only a release build. This is an open P1 release-admission
-item until a separate governed phase reproduces and fixes or disproves it.
-Independent release/security assurance and scoped candidate transfer also
-remain open. These gates precede a separate publication decision; no tag,
-GitHub Release, registry publication, announcement, or v1 claim is next by
-default.
+Publication remains unauthorized. A governed clean-room replay disproved the
+later external report that current top-level `npm run check` depends on an
+ambient debug binary after only a release build. Exact current `main` completed
+the advertised command from a new clone with `target/debug/workflow-os` absent
+at command start; the SDK suite built the binary through its maintained test
+path. No product change was required. This is distinct from the earlier real
+dry-run helper defect, which remains fixed and covered. See the [fresh-clone
+self-containment reproduction
+report](docs/concepts/FRESH_CLONE_NPM_CHECK_SELF_CONTAINMENT_REPRODUCTION_REPORT.md).
+Focused maintainer review accepts the clean-room procedure, evaluator-error
+disclosure, and no-code-change decision with no unresolved P0/P1 finding in
+that bounded scope. See the [focused
+review](docs/concepts/FRESH_CLONE_NPM_CHECK_SELF_CONTAINMENT_REVIEW.md).
+Independent release/security assurance and scoped candidate transfer remain
+open. These gates precede a separate publication decision; no tag, GitHub
+Release, registry publication, announcement, or v1 claim is next by default.
 
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
