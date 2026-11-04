@@ -625,6 +625,28 @@ final-candidate packaging path. Owner-conducted review remains distinct from
 independent external security assurance. See the [Phase 5 focused
 review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_5_PUBLICATION_IDENTITY_REVIEW.md).
 
+Planning for the next bounded lane is captured in the
+[`0.4.0-preview.1` Release Identity And Final Packaging
+Plan](docs/implementation-plans/0.4.0-preview.1-release-identity-and-final-packaging-plan.md).
+The lane separates version identity alignment, final-packaging implementation,
+native exact-commit candidate production, and publication into distinct
+governed boundaries. It requires an explicit closed package posture,
+clean-checkout and native-binary admission, a payload-minimal v1 package
+manifest, no-overwrite output safety, two-target exact-commit evidence, and a
+new publication decision. Planning does not authorize a version change, code
+change, artifact, tag, release, registry publication, or announcement. Focused
+plan review is the next required action.
+Focused review accepts the corrected plan after closing one P0 final-admission
+bypass and three P1 inventory, candidate-freeze, and workflow-supply-chain
+gaps. Final posture must reject every verification bypass through exported
+APIs; all active provider identities must be version-derived; source changes
+invalidate both native candidates; and candidate workflows/actions require
+immutable revision binding plus separately scoped upload authority. Phase B,
+Version Identity Alignment, is the next authorized implementation increment.
+Final-packaging implementation remains a later separate phase. See the [focused
+plan
+review](docs/concepts/0.4.0-preview.1-release-identity-and-final-packaging-plan-review.md).
+
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
 whether existing Workflow OS workflows, policies, required context, checks,
