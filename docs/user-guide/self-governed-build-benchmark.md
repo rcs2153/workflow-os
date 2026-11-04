@@ -102,8 +102,11 @@ live material phase starts, and a failed build stops before project validation,
 run creation, approval creation, or phase-state persistence. The successful
 path prints `kernel_freshness: rebuilt_from_current_checkout`. Dry-run phase
 starts print `kernel_freshness: not_applicable_dry_run` and do not require a
-build because they cannot create governed state. Non-phase helper commands keep
-their existing build behavior.
+build or an existing kernel binary because they cannot create governed state or
+execute the kernel. This keeps `npm run check` reproducible in a fresh clone.
+Live `--no-build` commands still fail closed when the binary is absent, and
+live material phase starts still reject `--no-build`. Non-phase helper commands
+keep their existing live build behavior.
 
 The emitted non-scope is phase-aware. Ordinary phases prohibit schema changes.
 Only `spec-field-operationalization` may authorize schema work, and its handoff

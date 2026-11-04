@@ -647,6 +647,16 @@ Final-packaging implementation remains a later separate phase. See the [focused
 plan
 review](docs/concepts/0.4.0-preview.1-release-identity-and-final-packaging-plan-review.md).
 
+A fresh-clone external rerun then identified one P1 validation reproducibility
+defect before Phase B: `npm run check` depended on an ambient
+`target/debug/workflow-os` because six dry-run helper tests used `--no-build`
+and the helper incorrectly required the non-executed binary to exist. The
+focused blocker fix makes dry-run binary-independent while preserving missing
+binary rejection for live `--no-build` commands and mandatory current-checkout
+rebuilds for live material phases. Clean-clone replay and focused review must
+accept the fix before Version Identity Alignment begins. See the [blocker fix
+report](docs/concepts/FRESH_CLONE_NPM_CHECK_DRY_RUN_BINARY_BLOCKER_FIX_REPORT.md).
+
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
 whether existing Workflow OS workflows, policies, required context, checks,

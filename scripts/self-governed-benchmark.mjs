@@ -850,6 +850,9 @@ function safeDisclosureValue(value) {
 
 function ensureWorkflowOsBinary(options, { requireCurrentCheckoutBuild = false } = {}) {
   const bin = workflowOsPath();
+  if (options.dryRun) {
+    return bin;
+  }
   if (!requireCurrentCheckoutBuild && existsSync(bin)) {
     return bin;
   }
@@ -869,9 +872,6 @@ function ensureWorkflowOsBinary(options, { requireCurrentCheckoutBuild = false }
   const cargo = cargoPath();
   const buildCommand = [cargo, "build", "-p", "workflow-cli", "--bin", "workflow-os"];
   console.log(`build: ${displayCommand(buildCommand)}`);
-  if (options.dryRun) {
-    return bin;
-  }
   const result = spawnSync(cargo, ["build", "-p", "workflow-cli", "--bin", "workflow-os"], {
     cwd: repoRoot,
     env: commandEnv(),
