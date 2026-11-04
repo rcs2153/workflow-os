@@ -26,10 +26,12 @@ Before any release:
 
 Native archive layout, target verification, install, uninstall, checksum, and
 state-preservation requirements are defined in
-[Native Archive Contract](NATIVE_ARCHIVE_CONTRACT.md). The launch-admission
-Phase 1 rehearsal produces provisional archives only. Final candidates must be
-rebuilt from the exact post-composition commit and require a separate governed
-publication decision.
+[Native Archive Contract](NATIVE_ARCHIVE_CONTRACT.md). The packager requires
+explicit `--provisional` or `--final-candidate` posture. Final posture cannot
+disable native-binary or exact-clean-checkout verification through the exported
+API. Supporting final admission does not authorize candidate production:
+candidates must be rebuilt after merge from one frozen exact commit under a
+separate governed release phase, followed by a separate publication decision.
 
 For the v0 readiness baseline, see [V0_READINESS.md](V0_READINESS.md) and [V0_KNOWN_LIMITATIONS.md](V0_KNOWN_LIMITATIONS.md).
 

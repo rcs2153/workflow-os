@@ -1,12 +1,13 @@
 # Native Archive Contract
 
-Status: provisional launch-admission packaging contract
+Status: reviewed implementation contract; final candidate production remains
+separately governed
 
 Workflow OS native archives are a local-first distribution shape for the
 `workflow-os` CLI. This contract does not authorize publication and does not
 claim production readiness.
 
-## Supported Rehearsal Targets
+## Supported Native Targets
 
 The Hacker News launch-admission rehearsal selects:
 
@@ -41,9 +42,10 @@ uninstall.sh
 workflow-os
 ```
 
-`PACKAGE-MANIFEST.json` records the release-package schema, version, target,
-exact source commit, provisional posture, binary SHA-256, install defaults,
-and state posture. The archive has a sibling `.sha256` file using the common
+`PACKAGE-MANIFEST.json` uses `workflowos.dev/release-package/v1` and records
+the version, target, exact source commit, explicit package posture, clean-tree
+fact, binary SHA-256, install defaults, and state posture. The archive has a
+sibling `.sha256` file using the common
 `<digest>  <filename>` format.
 
 The packager produces deterministic tar headers, ordering, timestamps,
@@ -55,14 +57,40 @@ identical inputs must produce the same checksum.
 Before writing an archive, the packager must:
 
 1. confirm all Rust crate, root package, and TypeScript SDK versions match;
-2. confirm `file` identifies the binary as the requested native target;
+2. confirm `file` identifies the binary as the requested native target,
+   including static linkage for the Linux musl target;
 3. execute `workflow-os --version` on the native host; and
 4. require the exact output `workflow-os <VERSION>`.
 
-An exact 40-character source commit is mandatory and must equal checkout
-`HEAD`. The manifest records whether the working tree was clean. A package
-produced from a dirty checkout may be used only as a disclosed provisional
-rehearsal and must never be promoted as a final candidate.
+An exact 40-character source commit is mandatory. All active Rust and npm
+manifests and their lockfiles must agree on the version.
+
+The packager requires exactly one explicit posture:
+
+```text
+--provisional
+--final-candidate
+```
+
+Missing or conflicting posture fails before binary reads or output creation.
+`provisional_rehearsal` may use explicitly disclosed verification bypasses for
+contract tests and non-publishing CI. `final_candidate` categorically rejects
+every binary or repository verification bypass through the exported API. It
+requires checkout `HEAD` to equal the requested source commit, a clean tracked
+and untracked worktree, a matching native host and binary, and exact
+`workflow-os <VERSION>` output.
+
+A provisional archive can never be promoted into a final candidate merely by
+renaming it because the manifest posture is content-bound into the archive and
+checksum. Final candidates must be rebuilt under final admission.
+
+## Output Safety
+
+All admission and archive construction completes before the output directory
+is created. Existing archive or checksum paths fail closed. The packager writes
+private temporary files and links them into their final names without replacing
+existing files; an incomplete pair is removed on packager failure. Identical
+inputs in distinct output directories produce identical archives and checksums.
 
 ## Install Contract
 
@@ -85,7 +113,7 @@ Uninstall never removes repository `.workflow-os` directories, local runtime
 state, reports, evidence, logs, user configuration, or project files. Users
 must review and remove those separately when appropriate.
 
-## Phase 1 Rehearsal Posture
+## Provisional Rehearsal And Final-Candidate Boundaries
 
 Phase 1 archives are provisional and must not be published. The macOS arm64
 archive is rehearsed locally. The Linux x86-64 archive is rehearsed in the
@@ -93,6 +121,9 @@ non-publishing CI job on a native Linux runner. CI verifies checksum, archive
 creation, install, version, overwrite refusal, and uninstall behavior without
 uploading the archive.
 
-Phase 2 changes the selected golden path. Final native candidates therefore
-must be rebuilt from the exact post-composition commit and revalidated before
-clean-room evaluation.
+Final-candidate support in the packager is an admission mechanism, not
+authority to produce or publish a real release candidate. Candidate production
+requires a separate governed release phase after the implementation is merged,
+from one frozen exact clean commit. Tagging, GitHub Release creation, asset or
+registry upload, and announcement remain separately authorized external
+mutations.

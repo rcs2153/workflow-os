@@ -1,14 +1,33 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
 
 const supportedTargets = new Map([
   ["aarch64-apple-darwin", { hostPlatform: "darwin", hostArch: "arm64", filePattern: /Mach-O.*arm64/i }],
-  ["x86_64-unknown-linux-musl", { hostPlatform: "linux", hostArch: "x64", filePattern: /ELF.*x86-64/i }],
+  [
+    "x86_64-unknown-linux-musl",
+    { hostPlatform: "linux", hostArch: "x64", filePattern: /ELF.*x86-64.*static/i },
+  ],
 ]);
+
+export const releasePackagePostures = Object.freeze({
+  provisionalRehearsal: "provisional_rehearsal",
+  finalCandidate: "final_candidate",
+});
+
+const validPostures = new Set(Object.values(releasePackagePostures));
 
 function sha256(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
@@ -63,6 +82,25 @@ function deterministicTarGzip(rootName, files) {
   return gzipSync(Buffer.concat(chunks), { level: 9, mtime: 0 });
 }
 
+function cargoLockVersions(projectDir) {
+  const selectedCrates = new Set(["workflow-cli", "workflow-core", "workflow-hosted", "workflow-local-host"]);
+  const versions = new Map();
+  const cargoLock = readFileSync(join(projectDir, "Cargo.lock"), "utf8");
+  for (const block of cargoLock.split("[[package]]").slice(1)) {
+    const name = block.match(/^name = "([^"]+)"$/m)?.[1];
+    const version = block.match(/^version = "([^"]+)"$/m)?.[1];
+    if (name && version && selectedCrates.has(name)) {
+      versions.set(`lock:cargo:${name}`, version);
+    }
+  }
+  for (const crate of selectedCrates) {
+    if (!versions.has(`lock:cargo:${crate}`)) {
+      versions.set(`lock:cargo:${crate}`, "missing");
+    }
+  }
+  return versions;
+}
+
 function releaseVersion(projectDir) {
   const versions = new Map();
   for (const crate of ["workflow-cli", "workflow-core", "workflow-hosted", "workflow-local-host"]) {
@@ -71,6 +109,16 @@ function releaseVersion(projectDir) {
   }
   for (const packagePath of ["package.json", "packages/sdk-typescript/package.json"]) {
     versions.set(`package:${packagePath}`, JSON.parse(readFileSync(join(projectDir, packagePath), "utf8")).version);
+  }
+  const packageLock = JSON.parse(readFileSync(join(projectDir, "package-lock.json"), "utf8"));
+  versions.set("lock:npm:top-level", packageLock.version ?? "missing");
+  versions.set("lock:npm:root", packageLock.packages?.[""]?.version ?? "missing");
+  versions.set(
+    "lock:npm:packages/sdk-typescript",
+    packageLock.packages?.["packages/sdk-typescript"]?.version ?? "missing",
+  );
+  for (const [name, version] of cargoLockVersions(projectDir)) {
+    versions.set(name, version);
   }
   const uniqueVersions = new Set(versions.values());
   if (uniqueVersions.size !== 1 || uniqueVersions.has("missing")) {
@@ -143,10 +191,21 @@ export function packageRelease({
   outputDir,
   target,
   sourceCommit,
-  provisional = true,
+  posture,
   verifyBinary = true,
   verifyRepository = true,
 }) {
+  if (!validPostures.has(posture)) {
+    throw new Error(
+      `release package posture must be exactly one of: ${[...validPostures].join(", ")}`,
+    );
+  }
+  if (
+    posture === releasePackagePostures.finalCandidate &&
+    (!verifyBinary || !verifyRepository)
+  ) {
+    throw new Error("final candidate admission cannot disable binary or repository verification");
+  }
   if (!/^[0-9a-f]{40}$/i.test(sourceCommit)) {
     throw new Error("source commit must be an exact 40-character Git commit SHA");
   }
@@ -159,18 +218,21 @@ export function packageRelease({
   }
   const version = releaseVersion(projectDir);
   const workingTreeClean = verifyRepository ? verifySourceCheckout(projectDir, sourceCommit) : false;
+  if (posture === releasePackagePostures.finalCandidate && !workingTreeClean) {
+    throw new Error("final candidate requires a clean exact source checkout");
+  }
   if (verifyBinary) {
     verifyNativeBinary(binaryPath, target, version);
   }
   const rootName = `workflow-os-v${version}-${target}`;
   const manifest = {
-    schema_version: "workflowos.dev/release-package/v0",
+    schema_version: "workflowos.dev/release-package/v1",
     product: "workflow-os",
     version,
     target,
     source_commit: sourceCommit.toLowerCase(),
     working_tree_clean: workingTreeClean,
-    provisional,
+    posture,
     binary_sha256: sha256(binary),
     install_default: "$HOME/.local/bin/workflow-os",
     install_override: "WORKFLOW_OS_INSTALL_DIR",
@@ -184,21 +246,58 @@ export function packageRelease({
     { path: "uninstall.sh", mode: 0o755, content: uninstallScript(version) },
     { path: "workflow-os", mode: 0o755, content: binary },
   ]);
-  mkdirSync(outputDir, { recursive: true });
   const archiveName = `${rootName}.tar.gz`;
   const archivePath = join(outputDir, archiveName);
+  const checksumPath = `${archivePath}.sha256`;
+  if (existsSync(archivePath) || existsSync(checksumPath)) {
+    throw new Error(`release output already exists: ${existsSync(archivePath) ? archivePath : checksumPath}`);
+  }
   const checksum = sha256(archive);
-  writeFileSync(archivePath, archive);
-  writeFileSync(`${archivePath}.sha256`, `${checksum}  ${archiveName}\n`, "utf8");
+  mkdirSync(outputDir, { recursive: true });
+  const temporarySuffix = `.tmp-${process.pid}-${randomUUID()}`;
+  const temporaryArchivePath = `${archivePath}${temporarySuffix}`;
+  const temporaryChecksumPath = `${checksumPath}${temporarySuffix}`;
+  let archiveLinked = false;
+  let checksumLinked = false;
+  try {
+    writeFileSync(temporaryArchivePath, archive, { flag: "wx" });
+    writeFileSync(temporaryChecksumPath, `${checksum}  ${archiveName}\n`, { encoding: "utf8", flag: "wx" });
+    linkSync(temporaryArchivePath, archivePath);
+    archiveLinked = true;
+    linkSync(temporaryChecksumPath, checksumPath);
+    checksumLinked = true;
+    rmSync(temporaryArchivePath);
+    rmSync(temporaryChecksumPath);
+  } catch (error) {
+    rmSync(temporaryArchivePath, { force: true });
+    rmSync(temporaryChecksumPath, { force: true });
+    if (archiveLinked) {
+      rmSync(archivePath, { force: true });
+    }
+    if (checksumLinked) {
+      rmSync(checksumPath, { force: true });
+    }
+    throw error;
+  }
   return { archivePath, checksum, manifest };
 }
 
 function parseArguments(argv) {
-  const options = { provisional: false };
+  const options = { posture: undefined };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--provisional") {
-      options.provisional = true;
+      if (options.posture) {
+        throw new Error("release package posture flags are mutually exclusive");
+      }
+      options.posture = releasePackagePostures.provisionalRehearsal;
+      continue;
+    }
+    if (argument === "--final-candidate") {
+      if (options.posture) {
+        throw new Error("release package posture flags are mutually exclusive");
+      }
+      options.posture = releasePackagePostures.finalCandidate;
       continue;
     }
     if (!["--binary", "--output-dir", "--source-commit", "--target"].includes(argument)) {
@@ -216,8 +315,8 @@ function parseArguments(argv) {
       throw new Error(`missing required option --${required.replaceAll("_", "-")}`);
     }
   }
-  if (!options.provisional) {
-    throw new Error("Phase 1 packaging requires --provisional; final release packaging is not authorized");
+  if (!options.posture) {
+    throw new Error("exactly one release package posture is required: --provisional or --final-candidate");
   }
   return options;
 }
@@ -231,14 +330,14 @@ function main() {
     outputDir: resolve(options.output_dir),
     target: options.target,
     sourceCommit: options.source_commit,
-    provisional: true,
+    posture: options.posture,
   });
   chmodSync(result.archivePath, 0o644);
   console.log(`archive: ${result.archivePath}`);
   console.log(`sha256: ${result.checksum}`);
   console.log(`target: ${result.manifest.target}`);
   console.log(`version: ${result.manifest.version}`);
-  console.log("posture: provisional_not_for_publication");
+  console.log(`posture: ${result.manifest.posture}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
