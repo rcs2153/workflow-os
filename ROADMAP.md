@@ -772,6 +772,28 @@ tag creation, publication, or an independent-assurance claim. The next
 authorized phase is implementation of the macOS workflow and symmetric
 contract tests only.
 
+The native macOS workflow implementation is now complete pending focused
+maintainer/release-security review and exact-head CI. The manual workflow uses
+read-only permission, exact candidate/workflow-definition equality, native
+arm64 host admission, pinned toolchains and actions, final-candidate packaging,
+bounded package verification, payload-minimal evidence, and immutable
+seven-day artifact storage. Symmetric tests cover the shared Linux and macOS
+contract plus target-specific native requirements. No workflow was dispatched
+and no artifact, release, tag, or publication authority was created. See the
+[implementation
+report](docs/concepts/0.4.0-preview.1_MACOS_CANDIDATE_WORKFLOW_REPORT.md).
+The next phase is focused review; candidate dispatch remains unauthorized.
+
+Focused maintainer/release-security review accepts the workflow after
+correcting one admission blocker: the workflow now fails closed unless the
+archive has the exact target-derived filename and the packaged binary is an
+arm64 Mach-O executable, rather than merely recording those facts. The
+workflow remains manual, read-only, exact-source bound, pinned, native, and
+non-publishing. See the [focused
+review](docs/concepts/0.4.0-preview.1_MACOS_CANDIDATE_WORKFLOW_REVIEW.md).
+Merge remains subject to terminal-green exact-head CI; neither review nor merge
+authorizes either candidate dispatch.
+
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
 whether existing Workflow OS workflows, policies, required context, checks,
