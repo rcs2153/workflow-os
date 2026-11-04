@@ -50,6 +50,13 @@ hosting, a general agent runtime, broad provider writes, arbitrary command
 execution, an autonomous scheduler, enterprise administration, or Level 3/4
 autonomy.
 
+The first governed authority and repository adoption preview version is
+`0.4.0-preview.1`. It carries the current kernel, onboarding, authoring,
+continuation, authority-projection, and bounded provider-proof work under a new
+immutable identity because the public `v0.3.0-preview.1` tag remains bound to
+its original source commit. Version alignment does not itself authorize a tag,
+artifact, package, GitHub Release, or announcement.
+
 A local-kernel-preview release is acceptable when:
 
 - the release is clearly labeled as a local kernel preview

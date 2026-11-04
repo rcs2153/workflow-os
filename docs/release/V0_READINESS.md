@@ -9,7 +9,7 @@ and read-only integration previews.
 Workflow OS v0 is ready to be described as a **public governed-execution and
 continuity preview**.
 
-Current preview version: `0.3.0-preview.1`.
+Current preparation identity: `0.4.0-preview.1`.
 
 That means the project is suitable for public evaluation of the local-first
 kernel: specs, validation, sequential local execution, event-sourced state,
@@ -19,9 +19,12 @@ evidence-reference attachment paths, and early work-report model/helper APIs.
 
 The `0.1.0-preview.1` layer established the local kernel preview. The
 `0.2.0-preview.1` posture added narrow public read-only integrations.
-`0.3.0-preview.1` composes governed execution, immutable run and approval
+`0.3.0-preview.1` established governed execution, immutable run and approval
 integrity, proportional governance, reporting, continuity, and bounded
-alpha/proof host and provider paths.
+alpha/proof host and provider paths. `0.4.0-preview.1` prepares the current
+governed authority and repository adoption surface under a distinct immutable
+identity; it is not published until a separate candidate and publication
+decision succeeds.
 
 It must not be described as a production deployment platform, production
 hosted service, production distributed runtime, adapter-complete framework,

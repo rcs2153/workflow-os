@@ -6,6 +6,45 @@ This project follows the versioning policy in [docs/release/SEMVER.md](docs/rele
 
 ## Unreleased
 
+## 0.4.0-preview.1 - Governed Authority And Repository Adoption Preview
+
+This preparation identity carries current `main` forward without moving or
+reusing the published `v0.3.0-preview.1` tag. Publication remains blocked until
+the separately governed final-candidate and publication phases succeed.
+
+### Added
+
+- Proof-backed approval presentation, delegated authority projection, scoped
+  capabilities, current-fact reassessment, and fail-closed resume integrity.
+- Authoritative continuation context, source coverage, replacement-executor
+  delivery, and bounded post-compaction understanding foundations.
+- Existing-repository metadata discovery, concise first-run posture, concrete
+  workflow recommendations, inactive authoring drafts, stewardship,
+  promotion, catalog inspection, repair proposals, and archival.
+- A real first-run report-artifact path with authoritative project validation,
+  durable WorkReport evidence, and terminal replay.
+- Shared PostgreSQL state, hosted recovery, trusted-host execution boundaries,
+  and narrow GitHub fixture/write proofs with explicit product limits.
+
+### Changed
+
+- All Rust crates, npm packages, CLI version output, active provider user
+  agents, and current product documentation align on `0.4.0-preview.1`.
+- Active GitHub, Jira, GitHub Actions, and draft-PR provider user agents derive
+  from the Rust crate version instead of manually synchronized literals.
+- Fresh-clone top-level validation no longer depends on an ambient debug
+  binary for non-executing dogfood helper dry-runs.
+
+### Compatibility And Boundaries
+
+- This remains a v0 preview with experimental Rust, CLI JSON, state, schema,
+  SDK, hosted, and adapter contracts.
+- The release does not claim production hosting, broad provider writes,
+  arbitrary repository command execution, enterprise identity, an autonomous
+  scheduler, agent swarms, or Level 3/4 autonomy.
+- Historical `0.3.0-preview.1` records and public release identity remain
+  immutable evidence.
+
 ## 0.3.0-preview.1 - Governed Execution And Continuity Preview
 
 This release advances Workflow OS from a local/read-only foundation into a

@@ -21,7 +21,7 @@ what may happen next from durable state.
 
 ## Maturity
 
-- **Release identity:** `0.3.0-preview.1`.
+- **Release preparation identity:** `0.4.0-preview.1`.
 - **Repository maturity:** active governed-execution and continuity preview.
 - **Strongest supported posture:** local governed execution and evaluation.
 - **Hosted posture:** reviewed single-tenant, no-write alpha; not production or

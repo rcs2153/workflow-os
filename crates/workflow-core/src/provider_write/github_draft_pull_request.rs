@@ -29,6 +29,7 @@ use crate::{
     SideEffectTargetKind, SideEffectTargetReference, StepId, Timestamp, WorkReportArtifactRecord,
     WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationTarget,
     WorkReportSensitivity, WorkflowOsError, WorkflowRun, WorkflowRunEventKind,
+    WORKFLOW_OS_DRAFT_PR_USER_AGENT,
 };
 
 const BRANCH_MAX_BYTES: usize = 255;
@@ -41,7 +42,6 @@ const EXACT_CAPABILITY: &str = "github.pull_request.create";
 const GITHUB_API_BASE_URL: &str = "https://api.github.com";
 const GITHUB_API_VERSION: &str = "2026-03-10";
 const GITHUB_ACCEPT: &str = "application/vnd.github+json";
-const GITHUB_USER_AGENT: &str = "workflow-os/0.3.0-preview.1 draft-pr-sandbox";
 const GITHUB_SANDBOX_OWNER: &str = "rcs2153";
 const GITHUB_SANDBOX_REPOSITORY: &str = "workflow-os-sandbox";
 const HTTP_RESPONSE_BODY_MAX_BYTES: usize = 256 * 1024;
@@ -993,7 +993,7 @@ impl GitHubDraftPullRequestHttpTransport for GitHubComDraftPullRequestHttpTransp
         }
         .set("Accept", GITHUB_ACCEPT)
         .set("Authorization", &request.authorization_header)
-        .set("User-Agent", GITHUB_USER_AGENT)
+        .set("User-Agent", WORKFLOW_OS_DRAFT_PR_USER_AGENT)
         .set("X-GitHub-Api-Version", GITHUB_API_VERSION);
         if request.body.is_some() {
             provider_request = provider_request.set("Content-Type", "application/json");

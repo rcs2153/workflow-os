@@ -657,6 +657,13 @@ rebuilds for live material phases. Clean-clone replay and focused review must
 accept the fix before Version Identity Alignment begins. See the [blocker fix
 report](docs/concepts/FRESH_CLONE_NPM_CHECK_DRY_RUN_BINARY_BLOCKER_FIX_REPORT.md).
 
+Phase B **Version Identity Alignment** is now implemented for focused
+validation and review. Active Rust and npm identities, CLI posture, provider
+user agents, current product documentation, changelog, and new `0.4` release
+records align on `0.4.0-preview.1` while published `0.3` evidence remains
+immutable. This does not authorize final packaging or publication. See the
+[implementation report](docs/concepts/0.4.0-preview.1_VERSION_IDENTITY_ALIGNMENT_REPORT.md).
+
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
 whether existing Workflow OS workflows, policies, required context, checks,
