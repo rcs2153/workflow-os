@@ -1,0 +1,185 @@
+name: Final Candidate macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact 40-character commit to admit as the candidate source
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: final-candidate-macos-${{ inputs.source_commit }}
+  cancel-in-progress: false
+
+jobs:
+  macos-candidate:
+    name: macOS arm64 candidate
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      ARTIFACT_NAME: workflow-os-v0.4.0-preview.1-macos-${{ inputs.source_commit }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      TARGET: aarch64-apple-darwin
+      WORKFLOW_DEFINITION_COMMIT: ${{ github.workflow_sha }}
+      WORKFLOW_RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: Reject ambiguous source input
+        shell: bash
+        run: |
+          if [[ ! "${SOURCE_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source_commit must be an exact lowercase 40-character Git commit" >&2
+            exit 1
+          fi
+          if [[ "${SOURCE_COMMIT}" != "${WORKFLOW_DEFINITION_COMMIT}" ]]; then
+            echo "candidate source must equal the reviewed workflow definition commit" >&2
+            exit 1
+          fi
+
+      - name: Checkout exact candidate source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+
+      - name: Verify exact clean native source
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${SOURCE_COMMIT}"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test "$(uname -m)" = "arm64"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-apple-darwin
+
+      - name: Setup pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20.19.5
+          cache: npm
+
+      - name: Verify candidate version identity
+        run: test "$(node -p 'require("./package.json").version')" = "0.4.0-preview.1"
+
+      - name: Install locked JavaScript dependencies
+        run: npm ci
+
+      - name: Build native macOS candidate binary
+        run: cargo build --locked --release -p workflow-cli --bin workflow-os --target "${TARGET}"
+
+      - name: Package exact final candidate
+        run: >-
+          npm run package:release --
+          --target "${TARGET}"
+          --binary "target/${TARGET}/release/workflow-os"
+          --output-dir dist/final
+          --source-commit "${SOURCE_COMMIT}"
+          --final-candidate
+
+      - name: Verify candidate contract and write bounded evidence
+        shell: bash
+        run: |
+          archives=(dist/final/*.tar.gz)
+          test "${#archives[@]}" -eq 1
+          archive="${archives[0]}"
+          test -f "${archive}"
+          archive_dir="$(dirname "${archive}")"
+          archive_name="$(basename "${archive}")"
+          checksum_file="${archive}.sha256"
+          (cd "${archive_dir}" && shasum -a 256 --check "${archive_name}.sha256")
+
+          candidate_root="$(mktemp -d)"
+          package_name="$(tar -tzf "${archive}" | head -n 1 | sed 's:/$::')"
+          tar -xzf "${archive}" -C "${candidate_root}"
+          package_root="${candidate_root}/${package_name}"
+          manifest="${package_root}/PACKAGE-MANIFEST.json"
+          version="$(node -p 'require("./package.json").version')"
+          test "${archive_name}" = "workflow-os-v${version}-${TARGET}.tar.gz"
+
+          MANIFEST="${manifest}" node -e '
+            const { readFileSync } = require("node:fs");
+            const manifest = JSON.parse(readFileSync(process.env.MANIFEST, "utf8"));
+            const expected = {
+              schema_version: "workflowos.dev/release-package/v1",
+              posture: "final_candidate",
+              source_commit: process.env.SOURCE_COMMIT,
+              working_tree_clean: true,
+              target: process.env.TARGET,
+              version: process.env.CANDIDATE_VERSION,
+            };
+            for (const [key, value] of Object.entries(expected)) {
+              if (manifest[key] !== value) {
+                throw new Error(`manifest ${key} mismatch`);
+              }
+            }
+          '
+
+          install_root="$(mktemp -d)"
+          state_root="$(mktemp -d)"
+          mkdir -p "${state_root}/.workflow-os"
+          printf 'preserve\n' > "${state_root}/.workflow-os/state-marker"
+          WORKFLOW_OS_INSTALL_DIR="${install_root}/bin" "${package_root}/install.sh"
+          test "$("${install_root}/bin/workflow-os" --version)" = "workflow-os ${version}"
+          if WORKFLOW_OS_INSTALL_DIR="${install_root}/bin" "${package_root}/install.sh"; then
+            echo "install unexpectedly replaced an existing binary" >&2
+            exit 1
+          fi
+          WORKFLOW_OS_INSTALL_DIR="${install_root}/bin" "${package_root}/uninstall.sh"
+          WORKFLOW_OS_INSTALL_DIR="${install_root}/bin" "${package_root}/uninstall.sh"
+          test ! -e "${install_root}/bin/workflow-os"
+          test "$(cat "${state_root}/.workflow-os/state-marker")" = "preserve"
+
+          checksum="$(cut -d ' ' -f 1 "${checksum_file}")"
+          binary_checksum="$(shasum -a 256 "${package_root}/workflow-os" | cut -d ' ' -f 1)"
+          binary_shape="$(file -b "${package_root}/workflow-os")"
+          case "${binary_shape}" in
+            *"Mach-O 64-bit executable arm64"*) ;;
+            *)
+              echo "candidate binary is not a native arm64 Mach-O executable" >&2
+              exit 1
+              ;;
+          esac
+          CANDIDATE_VERSION="${version}" ARCHIVE_NAME="${archive_name}" ARCHIVE_SHA256="${checksum}" BINARY_SHA256="${binary_checksum}" BINARY_SHAPE="${binary_shape}" NATIVE_MACHINE="$(uname -m)" RUSTC_VERSION="$(rustc --version)" NODE_VERSION="$(node --version)" node -e '
+            const { writeFileSync } = require("node:fs");
+            const evidence = {
+              schema_version: "workflowos.dev/final-candidate-evidence/v1",
+              version: process.env.CANDIDATE_VERSION,
+              target: process.env.TARGET,
+              source_commit: process.env.SOURCE_COMMIT,
+              workflow_definition_commit: process.env.WORKFLOW_DEFINITION_COMMIT,
+              workflow_run_id: process.env.WORKFLOW_RUN_ID,
+              storage_artifact_name: process.env.ARTIFACT_NAME,
+              archive_name: process.env.ARCHIVE_NAME,
+              archive_sha256: process.env.ARCHIVE_SHA256,
+              binary_sha256: process.env.BINARY_SHA256,
+              binary_shape: process.env.BINARY_SHAPE,
+              native_machine: process.env.NATIVE_MACHINE,
+              rustc_version: process.env.RUSTC_VERSION,
+              node_version: process.env.NODE_VERSION,
+              retention_days: 7,
+              publication_authorized: false,
+            };
+            writeFileSync("dist/final/candidate-evidence.json", `${JSON.stringify(evidence, null, 2)}\n`);
+          '
+        env:
+          CANDIDATE_VERSION: 0.4.0-preview.1
+
+      - name: Upload bounded candidate evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            dist/final/*.tar.gz
+            dist/final/*.sha256
+            dist/final/candidate-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
