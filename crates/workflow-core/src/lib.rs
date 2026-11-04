@@ -4,6 +4,30 @@
 #![doc = "This crate contains the canonical local-first kernel foundation described"]
 #![doc = "in the project charter."]
 
+pub(crate) const WORKFLOW_OS_USER_AGENT: &str = concat!("workflow-os/", env!("CARGO_PKG_VERSION"));
+pub(crate) const WORKFLOW_OS_DRAFT_PR_USER_AGENT: &str = concat!(
+    "workflow-os/",
+    env!("CARGO_PKG_VERSION"),
+    " draft-pr-sandbox"
+);
+
+#[cfg(test)]
+mod release_identity_tests {
+    use super::{WORKFLOW_OS_DRAFT_PR_USER_AGENT, WORKFLOW_OS_USER_AGENT};
+
+    #[test]
+    fn provider_user_agents_derive_from_the_crate_version() {
+        assert_eq!(
+            WORKFLOW_OS_USER_AGENT,
+            format!("workflow-os/{}", env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(
+            WORKFLOW_OS_DRAFT_PR_USER_AGENT,
+            format!("workflow-os/{} draft-pr-sandbox", env!("CARGO_PKG_VERSION"))
+        );
+    }
+}
+
 mod adapters;
 mod approval_presentation;
 mod audit;

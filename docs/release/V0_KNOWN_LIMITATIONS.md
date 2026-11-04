@@ -33,7 +33,7 @@ Workflow OS v0 is a public governed-execution and continuity preview built on a 
 - Adapter contracts are documented and modeled; GitHub, Jira, and GitHub Actions read-only implementations are public preview integrations, not production integrations.
 - Adapter telemetry starts as contract-level adapter telemetry in Phase 2. Controlled fixture-backed CLI examples map redacted adapter invocation and observability records into local runtime-visible adapter telemetry records, but this is not generic adapter execution, live adapter execution by default, production telemetry export, SIEM integration, or OpenTelemetry integration.
 - No marketplace or package registry behavior exists.
-- The `0.3.0-preview.1` release does not broaden the narrow GitHub sandbox proofs into branch creation, arbitrary pull-request mutation, general comments, Jira writes, CI writes, OAuth app flows, webhook ingestion, or production provider automation.
+- The `0.4.0-preview.1` preparation identity does not broaden the narrow GitHub sandbox proofs into branch creation, arbitrary pull-request mutation, general comments, Jira writes, CI writes, OAuth app flows, webhook ingestion, or production provider automation.
 - Read-only adapter support and narrow sandbox proofs must not imply distributed-worker readiness, production database readiness, or Level 3/4 autonomy enablement.
 
 ## State And Operations
@@ -75,7 +75,7 @@ Workflow OS v0 is a public governed-execution and continuity preview built on a 
 - No IdP integration exists.
 - No real secret provider exists.
 - `secret.read` is denied by default.
-- Maintainer decision through `0.3.0-preview.1`: `serde_yaml` is accepted for trusted local project files only, despite being deprecated and depending on `unsafe-libyaml`.
+- Maintainer decision through `0.4.0-preview.1`: `serde_yaml` is accepted for trusted local project files only, despite being deprecated and depending on `unsafe-libyaml`.
 - v0 does not claim hardened malicious-spec parsing, remote YAML ingestion safety, parser sandboxing, or production-grade parser isolation.
 - `YAML-001` tracks replacing or isolating the YAML parser before any production-readiness or adversarial-input hardening claim.
 
@@ -107,7 +107,7 @@ Workflow OS v0 is a public governed-execution and continuity preview built on a 
   recommendation active governance.
 - `workflow-os run` and approval resume fail closed when no local handler is registered, unless `--mock-all-local-skills` is explicitly provided for mock execution.
 - Local mock handlers are trusted local preview tooling only; they are not a production skill plugin system.
-- CLI `--json` output remains experimental through `0.3.0-preview.1` and is not yet a versioned stable machine-output contract.
+- CLI `--json` output remains experimental through `0.4.0-preview.1` and is not yet a versioned stable machine-output contract.
 - The CLI does not implement docs generation, generic live adapter execution
   commands, distributed worker commands, hosted operation, or production
   deployment commands.

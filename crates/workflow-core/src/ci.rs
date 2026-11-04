@@ -168,7 +168,7 @@ impl GitHubActionsReadOnlyClient for GitHubActionsLiveReadOnlyClient {
         let url = format!("{}{}", self.config.base_url.trim_end_matches('/'), path);
         let mut request = ureq::get(&url)
             .set("accept", accept)
-            .set("user-agent", "workflow-os/0.1.0-preview.1");
+            .set("user-agent", crate::WORKFLOW_OS_USER_AGENT);
 
         if let Some(token) = &self.config.token {
             request = request.set(

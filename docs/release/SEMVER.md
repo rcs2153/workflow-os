@@ -10,6 +10,8 @@ Version format:
 - The first public read-only integration preview uses `0.2.0-preview.1`.
 - The first governed-execution and continuity preview uses
   `0.3.0-preview.1`.
+- The first governed authority and repository adoption preview uses
+  `0.4.0-preview.1`.
 
 ## Major Versions
 
@@ -35,7 +37,7 @@ Patch versions may include backward-compatible bug fixes, documentation correcti
 
 Before `1.0.0`, public contracts may still evolve. Even during v0, breaking changes must be documented and must not be hidden inside unrelated work.
 
-Rust crates and TypeScript packages should share the same preview version for coherent repository releases. The first preview release is `0.1.0-preview.1`; the first read-only integration preview release is `0.2.0-preview.1`; the first governed-execution and continuity preview is `0.3.0-preview.1`.
+Rust crates and TypeScript packages should share the same preview version for coherent repository releases. The first preview release is `0.1.0-preview.1`; the first read-only integration preview release is `0.2.0-preview.1`; the first governed-execution and continuity preview is `0.3.0-preview.1`; and the first governed authority and repository adoption preview is `0.4.0-preview.1`.
 
 The v0 local kernel preview treats the following as public preview surfaces:
 
@@ -63,6 +65,6 @@ Experimental surfaces may change in minor v0 releases with explicit release note
 
 ## CLI JSON Output
 
-`--json` output exists for preview automation and tests. It remains experimental through `0.3.0-preview.1` and is not yet a versioned stable machine-output contract. Changes to JSON fields, enum formatting, or response shape must still be documented during v0, but consumers should treat CLI JSON as preview-level until a future release explicitly promotes it.
+`--json` output exists for preview automation and tests. It remains experimental through `0.4.0-preview.1` and is not yet a versioned stable machine-output contract. Changes to JSON fields, enum formatting, or response shape must still be documented during v0, but consumers should treat CLI JSON as preview-level until a future release explicitly promotes it.
 
 Before CLI JSON can be promoted to a stable contract, Workflow OS must define a versioned response envelope, document compatibility rules, and add contract tests for every command that supports JSON output.
