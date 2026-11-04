@@ -1,0 +1,166 @@
+name: Final Candidate Linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact 40-character commit to admit as the candidate source
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: final-candidate-linux-${{ inputs.source_commit }}
+  cancel-in-progress: false
+
+jobs:
+  linux-candidate:
+    name: Linux x86-64 musl candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ARTIFACT_NAME: workflow-os-v0.4.0-preview.1-linux-${{ inputs.source_commit }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      TARGET: x86_64-unknown-linux-musl
+      WORKFLOW_DEFINITION_COMMIT: ${{ github.workflow_sha }}
+      WORKFLOW_RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: Reject ambiguous source input
+        shell: bash
+        run: |
+          if [[ ! "${SOURCE_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source_commit must be an exact lowercase 40-character Git commit" >&2
+            exit 1
+          fi
+          if [[ "${SOURCE_COMMIT}" != "${WORKFLOW_DEFINITION_COMMIT}" ]]; then
+            echo "candidate source must equal the reviewed workflow definition commit" >&2
+            exit 1
+          fi
+
+      - name: Checkout exact candidate source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+
+      - name: Verify exact clean source
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${SOURCE_COMMIT}"
+          test -z "$(git status --porcelain --untracked-files=all)"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: 1.99.0
+          targets: x86_64-unknown-linux-musl
+
+      - name: Setup pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20.19.5
+          cache: npm
+
+      - name: Verify candidate version identity
+        run: test "$(node -p 'require("./package.json").version')" = "0.4.0-preview.1"
+
+      - name: Install locked JavaScript dependencies
+        run: npm ci
+
+      - name: Install native musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+
+      - name: Build native Linux candidate binary
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+        run: cargo build --locked --release -p workflow-cli --bin workflow-os --target "${TARGET}"
+
+      - name: Package exact final candidate
+        run: >-
+          npm run package:release --
+          --target "${TARGET}"
+          --binary "target/${TARGET}/release/workflow-os"
+          --output-dir dist/final
+          --source-commit "${SOURCE_COMMIT}"
+          --final-candidate
+
+      - name: Verify candidate contract and write bounded evidence
+        shell: bash
+        run: |
+          mapfile -t archives < <(find dist/final -maxdepth 1 -type f -name '*.tar.gz' -print)
+          test "${#archives[@]}" -eq 1
+          archive="${archives[0]}"
+          archive_dir="$(dirname "${archive}")"
+          archive_name="$(basename "${archive}")"
+          checksum_file="${archive}.sha256"
+          (cd "${archive_dir}" && sha256sum --check "${archive_name}.sha256")
+
+          candidate_root="$(mktemp -d)"
+          package_name="$(tar -tzf "${archive}" | head -n 1 | sed 's:/$::')"
+          tar -xzf "${archive}" -C "${candidate_root}"
+          package_root="${candidate_root}/${package_name}"
+          manifest="${package_root}/PACKAGE-MANIFEST.json"
+          version="$(node -p 'require("./package.json").version')"
+
+          test "$(jq -r '.schema_version' "${manifest}")" = "workflowos.dev/release-package/v1"
+          test "$(jq -r '.posture' "${manifest}")" = "final_candidate"
+          test "$(jq -r '.source_commit' "${manifest}")" = "${SOURCE_COMMIT}"
+          test "$(jq -r '.working_tree_clean' "${manifest}")" = "true"
+          test "$(jq -r '.target' "${manifest}")" = "${TARGET}"
+          test "$(jq -r '.version' "${manifest}")" = "${version}"
+
+          install_root="$(mktemp -d)"
+          state_root="$(mktemp -d)"
+          mkdir -p "${state_root}/.workflow-os"
+          printf 'preserve\n' > "${state_root}/.workflow-os/state-marker"
+          WORKFLOW_OS_INSTALL_DIR="${install_root}/bin" "${package_root}/install.sh"
+          test "$("${install_root}/bin/workflow-os" --version)" = "workflow-os ${version}"
+          if WORKFLOW_OS_INSTALL_DIR="${install_root}/bin" "${package_root}/install.sh"; then
+            echo "install unexpectedly replaced an existing binary" >&2
+            exit 1
+          fi
+          WORKFLOW_OS_INSTALL_DIR="${install_root}/bin" "${package_root}/uninstall.sh"
+          WORKFLOW_OS_INSTALL_DIR="${install_root}/bin" "${package_root}/uninstall.sh"
+          test ! -e "${install_root}/bin/workflow-os"
+          test "$(cat "${state_root}/.workflow-os/state-marker")" = "preserve"
+
+          checksum="$(cut -d ' ' -f 1 "${checksum_file}")"
+          CANDIDATE_VERSION="${version}" ARCHIVE_NAME="${archive_name}" ARCHIVE_SHA256="${checksum}" RUSTC_VERSION="$(rustc --version)" NODE_VERSION="$(node --version)" MUSL_CC_VERSION="$(musl-gcc --version | head -n 1)" node -e '
+            const { writeFileSync } = require("node:fs");
+            const evidence = {
+              schema_version: "workflowos.dev/final-candidate-evidence/v1",
+              version: process.env.CANDIDATE_VERSION,
+              target: process.env.TARGET,
+              source_commit: process.env.SOURCE_COMMIT,
+              workflow_definition_commit: process.env.WORKFLOW_DEFINITION_COMMIT,
+              workflow_run_id: process.env.WORKFLOW_RUN_ID,
+              storage_artifact_name: process.env.ARTIFACT_NAME,
+              archive_name: process.env.ARCHIVE_NAME,
+              archive_sha256: process.env.ARCHIVE_SHA256,
+              rustc_version: process.env.RUSTC_VERSION,
+              node_version: process.env.NODE_VERSION,
+              musl_cc_version: process.env.MUSL_CC_VERSION,
+              retention_days: 7,
+              publication_authorized: false,
+            };
+            writeFileSync("dist/final/candidate-evidence.json", `${JSON.stringify(evidence, null, 2)}\n`);
+          '
+
+      - name: Upload bounded candidate evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            dist/final/*.tar.gz
+            dist/final/*.sha256
+            dist/final/candidate-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
