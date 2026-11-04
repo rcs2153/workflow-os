@@ -347,6 +347,28 @@ Tagging, publishing release artifacts, making a GitHub Release, and submitting
 to Hacker News require a separate governed release action. Admission does not
 automatically authorize publication.
 
+Phase 5 discovered that `v0.3.0-preview.1` was already published from commit
+`48403d6718eb3ee23dc6365f53541cf492508b68`, before the accepted
+launch-admission work. The existing public tag is immutable and must not be
+moved or recreated. Thirty-nine material commits separate it from the accepted
+Phase 4 commit, so the repository's semantic-versioning policy selects a new
+minor preview rather than a patch prerelease.
+
+Publication is therefore denied under the current identity and evidence set.
+The next bounded lane is a separately governed `0.4.0-preview.1`
+release-identity and final-packaging plan. That lane must preserve the
+historical `0.3.0-preview.1` release, replace provisional-only packaging with a
+reviewed fail-closed final-candidate path, and return for a new publication
+decision after exact-commit artifacts and terminal-green evidence exist. See
+the [Phase 5 publication identity
+decision](../concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_5_PUBLICATION_IDENTITY_DECISION.md).
+Focused review accepts the denial and `0.4.0-preview.1` preparation identity
+with no P0 or P1 blocker. The review does not authorize the version change or
+publication, preserves the owner-conducted assurance limitation, and requires
+a separately reviewed final-packaging path rather than weakening the
+provisional guard. See the [Phase 5 focused
+review](../concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_5_PUBLICATION_IDENTITY_REVIEW.md).
+
 ## 11. Strict Non-Goals
 
 This lane does not authorize:

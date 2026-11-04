@@ -603,6 +603,28 @@ report](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_4_RELEASE_CANDIDATE_REP
 See the [focused
 review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_4_RELEASE_CANDIDATE_REVIEW.md).
 
+Phase 5 separate publication review is complete and denies publication under
+the current release identity. `v0.3.0-preview.1` is already a published,
+immutable prerelease at commit
+`48403d6718eb3ee23dc6365f53541cf492508b68`; it must not be moved, replaced,
+or reused for artifacts built from the accepted Phase 4 commit. Thirty-nine
+material commits add continuation, connector-authority, fixture-lifecycle, and
+launch-admission capabilities after that tag, so the semantic-versioning policy
+selects `0.4.0-preview.1` rather than `0.3.0-preview.2`. The lawful next lane is
+a separately governed release-identity and final-packaging plan. It must align
+versions and release records, promote provisional-only archive tooling through
+focused review, build native artifacts from one exact clean commit, and return
+for another publication decision. No version change, tag mutation, artifact
+upload, registry publication, or Hacker News submission is authorized by this
+decision. See the [Phase 5 publication identity
+decision](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_5_PUBLICATION_IDENTITY_DECISION.md).
+Focused review accepts this fail-closed decision and the proposed
+`0.4.0-preview.1` preparation identity with no P0 or P1 blocker. It explicitly
+does not authorize a version change or publication and requires a new reviewed
+final-candidate packaging path. Owner-conducted review remains distinct from
+independent external security assurance. See the [Phase 5 focused
+review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_5_PUBLICATION_IDENTITY_REVIEW.md).
+
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
 whether existing Workflow OS workflows, policies, required context, checks,
