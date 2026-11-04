@@ -6,8 +6,41 @@
     "ROADMAP.md",
     "docs/concepts/0.4.0-preview.1_FINAL_PACKAGING_IMPLEMENTATION_REPORT.md",
     "docs/concepts/0.4.0-preview.1_LINUX_CANDIDATE_WORKFLOW_IMPLEMENTATION_REPORT.md",
+    "docs/concepts/0.4.0-preview.1_NATIVE_CANDIDATE_PRODUCTION_REPORT.md",
+    "docs/concepts/0.4.0-preview.1_NATIVE_CANDIDATE_PRODUCTION_REVIEW.md",
     "docs/implementation-plans/0.4.0-preview.1-release-identity-and-final-packaging-plan.md",
     "docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md"
+  ],
+  "candidate_source_commit": "33a77cb27fb989cb4e1695788df5eee591695aa6",
+  "candidate_ci_run_id": 41896138868,
+  "candidates": [
+    {
+      "target": "aarch64-apple-darwin",
+      "source_commit": "33a77cb27fb989cb4e1695788df5eee591695aa6",
+      "archive_name": "workflow-os-v0.4.0-preview.1-aarch64-apple-darwin.tar.gz",
+      "archive_sha256": "3cda58ab8736479660a0805686426eb872fe869f120f9ff229f202df0b4afd7e",
+      "binary_sha256": "39d97041ece529c3ae9c7bc78e524e435ce535f877f5750e0d1d6e1dacfab32c",
+      "posture": "final_candidate",
+      "working_tree_clean": true,
+      "storage_posture": "local_ignored_dist",
+      "publication_authorized": false
+    },
+    {
+      "target": "x86_64-unknown-linux-musl",
+      "source_commit": "33a77cb27fb989cb4e1695788df5eee591695aa6",
+      "workflow_definition_commit": "33a77cb27fb989cb4e1695788df5eee591695aa6",
+      "workflow_run_id": 41903586104,
+      "artifact_id": 13358439075,
+      "storage_artifact_name": "workflow-os-v0.4.0-preview.1-linux-33a77cb27fb989cb4e1695788df5eee591695aa6",
+      "archive_name": "workflow-os-v0.4.0-preview.1-x86_64-unknown-linux-musl.tar.gz",
+      "archive_sha256": "f153e68c71067b4b9147344699a213adc749c8cde2048bd6275384d613bf1120",
+      "binary_sha256": "4bd7e37d5f50cb9f92eb458a8c09aba6494e2db897fbecd10c6ab74b965e6bb4",
+      "posture": "final_candidate",
+      "working_tree_clean": true,
+      "retention_days": 7,
+      "expires_at": "2026-11-11T20:11:42Z",
+      "publication_authorized": false
+    }
   ],
   "transitions": [
     {

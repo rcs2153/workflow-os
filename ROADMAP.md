@@ -709,6 +709,33 @@ P0/P1 finding while preserving the independent-assurance requirement; see the
 [release-state closure blocker fix
 review](docs/concepts/0.4.0-preview.1_RELEASE_STATE_CLOSURE_BLOCKER_FIX_REVIEW.md).
 
+Phase E **Native Candidate Production** is complete for the selected targets.
+Both candidates were built from exact clean source commit
+`33a77cb27fb989cb4e1695788df5eee591695aa6`; exact-source main CI run
+`41896138868` completed all eight required checks, and Linux workflow run
+`41903586104` produced bounded seven-day evidence. The macOS archive remains
+in ignored local evidence storage, while the Linux archive was retrieved from
+the bounded workflow artifact and independently rechecked. The active release
+state now fails closed on source drift, missing or duplicate targets, posture,
+cleanliness, checksums, archive identity, Linux workflow binding, artifact
+identity, retention, report citations, or accidental publication authority.
+See the [native candidate production
+report](docs/concepts/0.4.0-preview.1_NATIVE_CANDIDATE_PRODUCTION_REPORT.md).
+Focused release/security review accepts the persisted evidence after aligning
+its storage vocabulary exactly with the source evidence records. No unresolved
+P0/P1 finding remains in that bounded scope; publication and independent
+assurance remain unauthorized. See the [focused
+review](docs/concepts/0.4.0-preview.1_NATIVE_CANDIDATE_PRODUCTION_REVIEW.md).
+
+Publication remains unauthorized. A new external evaluation reported that
+top-level `npm run check` may still depend on an ambient debug binary in a
+fresh clone after only a release build. This is an open P1 release-admission
+item until a separate governed phase reproduces and fixes or disproves it.
+Independent release/security assurance and scoped candidate transfer also
+remain open. These gates precede a separate publication decision; no tag,
+GitHub Release, registry publication, announcement, or v1 claim is next by
+default.
+
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
 whether existing Workflow OS workflows, policies, required context, checks,
