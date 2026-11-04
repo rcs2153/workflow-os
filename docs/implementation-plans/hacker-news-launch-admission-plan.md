@@ -328,6 +328,19 @@ Run the full required test matrix, dependency and documentation checks,
 security review, release checklist, and exact-commit CI. Confirm announcement
 language matches implemented behavior.
 
+Implementation status: local release-candidate review complete and focused
+review accepted, pending terminal-green exact-head pull-request CI. The full Rust, Node,
+documentation, contracts, integration, dependency-audit, identity, and diff
+matrix passes. External fresh-rerun findings against an earlier commit were
+reconciled: the roadmap-authority P0, portable generated-guidance P1, and
+provider-fixture `next-action` P1 are fixed on current `main`; owner-conducted
+focused reviews remain explicitly distinct from independent external security
+assurance. See the [Phase 4 release-candidate
+report](../concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_4_RELEASE_CANDIDATE_REPORT.md)
+and [focused
+review](../concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_4_RELEASE_CANDIDATE_REVIEW.md),
+plus the [final release review](../release/0.3.0-preview.1_FINAL_RELEASE_REVIEW.md).
+
 ### Phase 5: Separate Publication Decision
 
 Tagging, publishing release artifacts, making a GitHub Release, and submitting

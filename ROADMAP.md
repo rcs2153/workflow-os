@@ -589,6 +589,20 @@ review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_3_CLEAN_ROOM_REVIEW.md)
 plus the preceding [blocker-fix
 report](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_3_INSPECT_REFERENCE_BLOCKER_FIX_REPORT.md).
 
+Phase 4 local release-candidate review is complete and focused review accepts
+the evidence, pending terminal-green exact-head pull-request CI. The required Rust, Node,
+documentation, contract, integration, dependency-audit, release-identity, and
+diff gates pass. External fresh-rerun findings against an earlier commit were
+reconciled against current `main`: roadmap queue authority, generated agent
+guidance portability, and provider-fixture `next-action` routing are fixed and
+covered by focused regression tests. Owner-conducted focused review remains
+explicitly distinct from independent external security assurance. Publication,
+tagging, package upload, and a broad v1 or production-readiness claim remain
+unauthorized. See the [Phase 4 release-candidate
+report](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_4_RELEASE_CANDIDATE_REPORT.md).
+See the [focused
+review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_4_RELEASE_CANDIDATE_REVIEW.md).
+
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
 whether existing Workflow OS workflows, policies, required context, checks,
