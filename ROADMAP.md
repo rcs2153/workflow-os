@@ -665,8 +665,9 @@ published `0.3` evidence remains immutable. This does not authorize final
 packaging or publication. See the [implementation
 report](docs/concepts/0.4.0-preview.1_VERSION_IDENTITY_ALIGNMENT_REPORT.md).
 
-Phase C **Final Packaging Implementation** is implemented and accepted by a
-focused release/security review, with merge pending. The exported packager and
+Phase C **Final Packaging Implementation** is implemented, accepted by a
+focused release/security review, merged through terminal-green exact-head CI,
+and available on `main`. The exported packager and
 CLI require an explicit closed posture; final-candidate admission cannot
 disable native-binary or exact-clean-checkout verification; the v1 manifest
 records posture; outputs refuse replacement; and focused native fixtures prove
@@ -676,6 +677,17 @@ checksum-only collision, Cargo lock drift, and native binary-shape coverage. No
 real candidate, tag, release, upload, publication, or announcement is
 authorized by this implementation. See the [Phase C
 report](docs/concepts/0.4.0-preview.1_FINAL_PACKAGING_IMPLEMENTATION_REPORT.md).
+
+Phase E candidate production is not yet authorized. Its first increment is a
+manual-dispatch Linux x86-64 musl candidate workflow implemented and accepted
+by focused release/security review, with merge pending. The workflow binds the
+candidate source to its reviewed workflow-definition commit, uses read-only
+repository permission and immutable action revisions, invokes final-candidate
+admission, verifies the package contract, and retains one bounded evidence
+artifact for seven days. It does not tag, publish, announce, or dispatch
+itself. Independent external assurance remains open. See the [candidate
+workflow implementation
+report](docs/concepts/0.4.0-preview.1_LINUX_CANDIDATE_WORKFLOW_IMPLEMENTATION_REPORT.md).
 
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
