@@ -572,6 +572,18 @@ reconstruct validation provenance. Review corrected reference-metadata
 validation ordering so malformed caller metadata fails before route mutation.
 See the [Phase 2 report](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_2_REPORT.md)
 and [focused review](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_2_REVIEW.md).
+The first Phase 3 clean-room pass completed the packaged macOS path against
+unrelated TypeScript- and Rust-shaped repositories, preserved existing agent
+instructions, produced real ten-event runs and cited WorkReports, replayed
+without duplicate work, and recovered a terminal run after an injected report
+write failure without editing runtime records. It also found one launch
+admission blocker: `inspect` exposed citation counts but not the stable local
+check reference required for independent review. A narrow additive human/JSON
+projection of the already validated payload-free reference is implemented
+locally. Phase 3 remains open until focused review, exact-head merge, artifact
+rebuild from that merged commit, and repeat clean-room evidence are complete.
+See the [Phase 3 blocker-fix
+report](docs/concepts/HACKER_NEWS_LAUNCH_ADMISSION_PHASE_3_INSPECT_REFERENCE_BLOCKER_FIX_REPORT.md).
 
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test

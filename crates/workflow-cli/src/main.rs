@@ -2890,25 +2890,7 @@ fn inspect_from_backend<B: StateBackend + WorkReportArtifactStore>(
         if !adapter_observability.is_empty() {
             println!("adapter_observability: {}", adapter_observability.len());
         }
-        if !report_artifacts.is_empty() {
-            println!("work_report_artifacts: {}", report_artifacts.len());
-            for artifact in &report_artifacts {
-                let metadata = artifact.metadata();
-                let (citation_count, missing_citation_count, local_check_citation_count) =
-                    report_artifact_citation_counts(artifact);
-                println!(
-                    "  report_id={} terminal_status={:?} generated_at={} sensitivity={:?} sections={} citations={} missing_citations={} local_check_citations={}",
-                    metadata.report_id(),
-                    metadata.terminal_run_status(),
-                    metadata.generated_at(),
-                    metadata.sensitivity(),
-                    artifact.work_report().sections().len(),
-                    citation_count,
-                    missing_citation_count,
-                    local_check_citation_count,
-                );
-            }
-        }
+        print_work_report_artifacts(&report_artifacts);
         if provider_fixture {
             println!("provider_operation: github.repository.metadata");
             println!("provider_mode: fixture");
@@ -2921,6 +2903,33 @@ fn inspect_from_backend<B: StateBackend + WorkReportArtifactStore>(
         }
     }
     Ok(())
+}
+
+fn print_work_report_artifacts(artifacts: &[workflow_core::WorkReportArtifactRecord]) {
+    if artifacts.is_empty() {
+        return;
+    }
+
+    println!("work_report_artifacts: {}", artifacts.len());
+    for artifact in artifacts {
+        let metadata = artifact.metadata();
+        let (citation_count, missing_citation_count, local_check_citation_count) =
+            report_artifact_citation_counts(artifact);
+        println!(
+            "  report_id={} terminal_status={:?} generated_at={} sensitivity={:?} sections={} citations={} missing_citations={} local_check_citations={}",
+            metadata.report_id(),
+            metadata.terminal_run_status(),
+            metadata.generated_at(),
+            metadata.sensitivity(),
+            artifact.work_report().sections().len(),
+            citation_count,
+            missing_citation_count,
+            local_check_citation_count,
+        );
+        for reference in report_artifact_local_check_references(artifact) {
+            println!("    local_check_reference={}", terminal_escape(reference));
+        }
+    }
 }
 
 fn doctor_command(invocation: &Invocation) -> Result<(), WorkflowOsError> {
@@ -13229,8 +13238,13 @@ fn inspect_json(
             let metadata = artifact.metadata();
             let (citation_count, missing_citation_count, local_check_citation_count) =
                 report_artifact_citation_counts(artifact);
+            let local_check_references = report_artifact_local_check_references(artifact)
+                .iter()
+                .map(|reference| format!("\"{}\"", json_escape(reference)))
+                .collect::<Vec<_>>()
+                .join(",");
             format!(
-                "{{\"report_id\":\"{}\",\"workflow_id\":\"{}\",\"workflow_version\":\"{}\",\"schema_version\":\"{}\",\"spec_hash\":\"{}\",\"run_id\":\"{}\",\"terminal_status\":\"{}\",\"generated_at\":\"{}\",\"sensitivity\":\"{}\",\"section_count\":{},\"citation_count\":{},\"missing_citation_count\":{},\"local_check_citation_count\":{}}}",
+                "{{\"report_id\":\"{}\",\"workflow_id\":\"{}\",\"workflow_version\":\"{}\",\"schema_version\":\"{}\",\"spec_hash\":\"{}\",\"run_id\":\"{}\",\"terminal_status\":\"{}\",\"generated_at\":\"{}\",\"sensitivity\":\"{}\",\"section_count\":{},\"citation_count\":{},\"missing_citation_count\":{},\"local_check_citation_count\":{},\"local_check_references\":[{}]}}",
                 json_escape(metadata.report_id().as_str()),
                 json_escape(metadata.workflow_id().as_str()),
                 json_escape(metadata.workflow_version().as_str()),
@@ -13244,6 +13258,7 @@ fn inspect_json(
                 citation_count,
                 missing_citation_count,
                 local_check_citation_count,
+                local_check_references,
             )
         })
         .collect::<Vec<_>>()
@@ -13285,6 +13300,24 @@ fn report_artifact_citation_counts(
             .filter(|citation| citation.citation_kind() == WorkReportCitationKind::LocalCheckResult)
             .count(),
     )
+}
+
+fn report_artifact_local_check_references(
+    artifact: &workflow_core::WorkReportArtifactRecord,
+) -> Vec<&str> {
+    let mut references = artifact
+        .work_report()
+        .sections()
+        .iter()
+        .flat_map(WorkReportSection::citations)
+        .filter_map(|citation| match citation.target() {
+            WorkReportCitationTarget::LocalCheckResult { reference } => Some(reference.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    references.sort_unstable();
+    references.dedup();
+    references
 }
 
 fn work_report_status_label(status: workflow_core::WorkReportStatus) -> &'static str {
@@ -13488,10 +13521,31 @@ fn option_u32(value: Option<u32>) -> String {
 }
 
 fn json_escape(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\u{08}' => escaped.push_str("\\b"),
+            '\u{0c}' => escaped.push_str("\\f"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character <= '\u{1f}' => {
+                const HEX: &[u8; 16] = b"0123456789abcdef";
+                let value = character as usize;
+                escaped.push_str("\\u00");
+                escaped.push(char::from(HEX[value >> 4]));
+                escaped.push(char::from(HEX[value & 0x0f]));
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn terminal_escape(value: &str) -> String {
+    value.chars().flat_map(char::escape_default).collect()
 }
 
 fn status_word(ok: bool) -> &'static str {
@@ -13532,6 +13586,20 @@ fn usage(message: impl Into<String>) -> WorkflowOsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inspect_reference_escaping_keeps_terminal_and_json_output_single_record_safe() {
+        let reference = "local-check/line\ncarriage\rtab\tcontrol\u{0001}/\\/\"";
+
+        assert_eq!(
+            terminal_escape(reference),
+            "local-check/line\\ncarriage\\rtab\\tcontrol\\u{1}/\\\\/\\\""
+        );
+        assert_eq!(
+            json_escape(reference),
+            "local-check/line\\ncarriage\\rtab\\tcontrol\\u0001/\\\\/\\\""
+        );
+    }
 
     #[test]
     fn first_run_project_reload_honors_durable_contract_identity(

@@ -1678,11 +1678,28 @@ fn first_run_explicit_artifact_path_quietly_persists_and_replays_exactly() {
     assert!(!handoff
         .summary()
         .is_some_and(|summary| summary.contains("workflow-os run")));
+    let local_check_reference = artifact
+        .work_report()
+        .sections()
+        .iter()
+        .flat_map(workflow_core::WorkReportSection::citations)
+        .find_map(|citation| match citation.target() {
+            WorkReportCitationTarget::LocalCheckResult { reference } => {
+                Some(reference.as_str().to_owned())
+            }
+            _ => None,
+        })
+        .expect("local check reference is cited");
 
     let inspect = workflow_os(&project, &["inspect", run_id]);
     assert!(inspect.status.success(), "{}", stderr(&inspect));
     assert!(
         stdout(&inspect).contains("citations=1 missing_citations=0 local_check_citations=1"),
+        "{}",
+        stdout(&inspect)
+    );
+    assert!(
+        stdout(&inspect).contains(&format!("local_check_reference={local_check_reference}")),
         "{}",
         stdout(&inspect)
     );
@@ -1698,6 +1715,10 @@ fn first_run_explicit_artifact_path_quietly_persists_and_replays_exactly() {
     assert_eq!(projected_artifact["citation_count"], 1);
     assert_eq!(projected_artifact["missing_citation_count"], 0);
     assert_eq!(projected_artifact["local_check_citation_count"], 1);
+    assert_eq!(
+        projected_artifact["local_check_references"][0],
+        local_check_reference
+    );
 
     let retry = workflow_os(
         &project,
