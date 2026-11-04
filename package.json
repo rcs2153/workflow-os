@@ -8,9 +8,9 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "npm run check:docs && npm run check:dogfood && npm run test:integration-helper && npm run test:release-package && npm run test:candidate-workflow && npm run check:ts && npm run check:contracts",
+    "check": "npm run check:docs && npm run check:dogfood && npm run test:integration-helper && npm run test:release-package && npm run test:candidate-workflow && npm run test:release-state && npm run check:ts && npm run check:contracts",
     "check:contracts": "npm run build --workspace @workflow-os/sdk-typescript && node scripts/check-contracts.mjs",
-    "check:docs": "node scripts/check-docs.mjs",
+    "check:docs": "node scripts/check-docs.mjs && node scripts/check-release-state.mjs",
     "check:dogfood": "npm run test:dogfood-helper",
     "check:integrations": "node scripts/check-integrations.mjs",
     "check:ts": "npm run typecheck --workspace @workflow-os/sdk-typescript && npm run lint --workspace @workflow-os/sdk-typescript && npm run test --workspace @workflow-os/sdk-typescript",
@@ -23,6 +23,7 @@
     "test:dogfood-helper": "node --test scripts/self-governed-benchmark.test.mjs",
     "test:integration-helper": "node --test scripts/check-integrations.test.mjs",
     "test:candidate-workflow": "node --test scripts/final-candidate-workflow.test.mjs",
+    "test:release-state": "node --test scripts/check-release-state.test.mjs",
     "test:release-package": "node --test scripts/package-release.test.mjs"
   },
   "devDependencies": {

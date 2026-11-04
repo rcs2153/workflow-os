@@ -667,7 +667,8 @@ report](docs/concepts/0.4.0-preview.1_VERSION_IDENTITY_ALIGNMENT_REPORT.md).
 
 Phase C **Final Packaging Implementation** is implemented, accepted by a
 focused release/security review, merged through terminal-green exact-head CI,
-and available on `main`. The exported packager and
+and available on `main` through PR #712 at
+`0d5a9c2ae26f42fc4efa907942a66e49a9e41c59`. The exported packager and
 CLI require an explicit closed posture; final-candidate admission cannot
 disable native-binary or exact-clean-checkout verification; the v1 manifest
 records posture; outputs refuse replacement; and focused native fixtures prove
@@ -679,8 +680,9 @@ authorized by this implementation. See the [Phase C
 report](docs/concepts/0.4.0-preview.1_FINAL_PACKAGING_IMPLEMENTATION_REPORT.md).
 
 Phase E candidate production is not yet authorized. Its first increment is a
-manual-dispatch Linux x86-64 musl candidate workflow implemented and accepted
-by focused release/security review, with merge pending. The workflow binds the
+manual-dispatch Linux x86-64 musl candidate workflow implemented, accepted by
+focused release/security review, and merged through PR #713 at
+`b0bbb4994c8b6b9816e43e38eae8cd17005e908a`. The workflow binds the
 candidate source to its reviewed workflow-definition commit, uses read-only
 repository permission and immutable action revisions, invokes final-candidate
 admission, verifies the package contract, and retains one bounded evidence
@@ -688,6 +690,24 @@ artifact for seven days. It does not tag, publish, announce, or dispatch
 itself. Independent external assurance remains open. See the [candidate
 workflow implementation
 report](docs/concepts/0.4.0-preview.1_LINUX_CANDIDATE_WORKFLOW_IMPLEMENTATION_REPORT.md).
+
+A fresh current-main evaluation found one P1 release-governance truth defect:
+the final-packaging and Linux candidate-workflow changes were present on
+`main`, but active authority still described them as pending and the release
+checklist left the merged workflow gate open. The bounded release-state closure
+fix records exact PR and merge-commit facts, adds a machine-readable
+non-publication state record, and makes documentation validation reject stale
+pending language, non-ancestor merge identities, missing implementation
+surfaces, and an unchecked merged-workflow gate. The earlier local macOS
+candidate attempt from
+`b0bbb4994c8b6b9816e43e38eae8cd17005e908a` is explicitly invalidated for
+publication; both native candidates must be rebuilt from the later exact
+closure merge commit. See the [release-state closure blocker fix
+report](docs/concepts/0.4.0-preview.1_RELEASE_STATE_CLOSURE_BLOCKER_FIX_REPORT.md).
+The focused owner review accepts the bounded closure check with no unresolved
+P0/P1 finding while preserving the independent-assurance requirement; see the
+[release-state closure blocker fix
+review](docs/concepts/0.4.0-preview.1_RELEASE_STATE_CLOSURE_BLOCKER_FIX_REVIEW.md).
 
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test

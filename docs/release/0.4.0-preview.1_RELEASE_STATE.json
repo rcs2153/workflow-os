@@ -1,0 +1,44 @@
+{
+  "schema_version": "workflowos.dev/release-state/v1",
+  "version": "0.4.0-preview.1",
+  "publication_authorized": false,
+  "authority_paths": [
+    "ROADMAP.md",
+    "docs/concepts/0.4.0-preview.1_FINAL_PACKAGING_IMPLEMENTATION_REPORT.md",
+    "docs/concepts/0.4.0-preview.1_LINUX_CANDIDATE_WORKFLOW_IMPLEMENTATION_REPORT.md",
+    "docs/implementation-plans/0.4.0-preview.1-release-identity-and-final-packaging-plan.md",
+    "docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md"
+  ],
+  "transitions": [
+    {
+      "id": "final_packaging_implementation",
+      "status": "merged",
+      "pull_request": 712,
+      "merge_commit": "0d5a9c2ae26f42fc4efa907942a66e49a9e41c59",
+      "required_paths": [
+        "scripts/package-release.mjs",
+        "scripts/package-release.test.mjs"
+      ],
+      "required_mentions": [
+        "docs/concepts/0.4.0-preview.1_FINAL_PACKAGING_IMPLEMENTATION_REPORT.md",
+        "docs/implementation-plans/0.4.0-preview.1-release-identity-and-final-packaging-plan.md",
+        "ROADMAP.md"
+      ]
+    },
+    {
+      "id": "linux_candidate_workflow",
+      "status": "merged",
+      "pull_request": 713,
+      "merge_commit": "b0bbb4994c8b6b9816e43e38eae8cd17005e908a",
+      "required_paths": [
+        ".github/workflows/final-candidate-linux.yml",
+        "scripts/final-candidate-workflow.test.mjs"
+      ],
+      "required_mentions": [
+        "docs/concepts/0.4.0-preview.1_LINUX_CANDIDATE_WORKFLOW_IMPLEMENTATION_REPORT.md",
+        "docs/implementation-plans/0.4.0-preview.1-release-identity-and-final-packaging-plan.md",
+        "ROADMAP.md"
+      ]
+    }
+  ]
+}
