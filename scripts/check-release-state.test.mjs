@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import { validateReleaseStateSnapshot } from "./check-release-state.mjs";
 
@@ -84,4 +85,17 @@ test("rejects active release version drift", () => {
   const input = fixture();
   input.packageManifest.version = "0.4.0-preview.2";
   assert.throws(() => validateReleaseStateSnapshot(input), /does not match package version/);
+});
+
+test("CI gives the release-state documentation check complete Git history", async () => {
+  const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+  const typescriptJob = workflow.match(/\n  typescript:\n(?<body>[\s\S]*?)(?=\n  [a-z][a-z0-9_-]*:\n|$)/)?.groups?.body;
+
+  assert.ok(typescriptJob, "TypeScript And Docs job must exist");
+  assert.match(
+    typescriptJob,
+    /- name: Checkout\n\s+uses: actions\/checkout@v4\n\s+with:\n\s+fetch-depth: 0/,
+    "the ancestry-sensitive documentation job must fetch the complete commit graph",
+  );
+  assert.match(typescriptJob, /- name: Documentation checks\n\s+run: npm run check:docs/);
 });
