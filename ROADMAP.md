@@ -794,6 +794,19 @@ review](docs/concepts/0.4.0-preview.1_MACOS_CANDIDATE_WORKFLOW_REVIEW.md).
 Merge remains subject to terminal-green exact-head CI; neither review nor merge
 authorizes either candidate dispatch.
 
+Fresh-main evaluation then reproduced one P1 validation-contract defect:
+`npm run check` invoked dogfood helper tests that intentionally use
+`target/debug/workflow-os`, but the aggregate command did not build that binary
+on a clean checkout. The aggregate command now names and runs an explicit
+debug-kernel prerequisite before every dependent check. Focused regression
+coverage locks the ordering, and a dedicated clean-checkout CI job proves that
+the advertised command succeeds without inherited build artifacts. This is a
+developer-experience correction only; it does not change runtime, approval,
+provider, release-candidate, or publication semantics. Focused owner review
+found no blocking defect while preserving the independent-assurance boundary.
+See the [P1 implementation
+report](docs/concepts/FRESH_CHECKOUT_AGGREGATE_CHECK_P1_REPORT.md).
+
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
 whether existing Workflow OS workflows, policies, required context, checks,

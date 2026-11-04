@@ -10,6 +10,33 @@ permissions:
   contents: read
 
 jobs:
+  fresh-checkout-aggregate-check:
+    name: Fresh Checkout Aggregate Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prove clean-checkout aggregate validation
+        run: |
+          test ! -e target/debug/workflow-os
+          npm run check
+          test -x target/debug/workflow-os
+
   rust:
     name: Rust
     runs-on: ubuntu-latest

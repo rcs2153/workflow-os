@@ -8,7 +8,8 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "npm run check:docs && npm run check:dogfood && npm run test:integration-helper && npm run test:release-package && npm run test:candidate-workflow && npm run test:release-state && npm run check:ts && npm run check:contracts",
+    "check": "npm run build:check-kernel && npm run check:docs && npm run check:dogfood && npm run test:integration-helper && npm run test:release-package && npm run test:candidate-workflow && npm run test:release-state && npm run check:ts && npm run check:contracts",
+    "build:check-kernel": "cargo build -p workflow-cli --bin workflow-os",
     "check:contracts": "npm run build --workspace @workflow-os/sdk-typescript && node scripts/check-contracts.mjs",
     "check:docs": "node scripts/check-docs.mjs && node scripts/check-release-state.mjs",
     "check:dogfood": "npm run test:dogfood-helper",
