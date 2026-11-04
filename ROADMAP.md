@@ -657,12 +657,25 @@ rebuilds for live material phases. Clean-clone replay and focused review must
 accept the fix before Version Identity Alignment begins. See the [blocker fix
 report](docs/concepts/FRESH_CLONE_NPM_CHECK_DRY_RUN_BINARY_BLOCKER_FIX_REPORT.md).
 
-Phase B **Version Identity Alignment** is now implemented for focused
-validation and review. Active Rust and npm identities, CLI posture, provider
-user agents, current product documentation, changelog, and new `0.4` release
-records align on `0.4.0-preview.1` while published `0.3` evidence remains
-immutable. This does not authorize final packaging or publication. See the
-[implementation report](docs/concepts/0.4.0-preview.1_VERSION_IDENTITY_ALIGNMENT_REPORT.md).
+Phase B **Version Identity Alignment** is implemented, focused-review accepted,
+merged, and validated by terminal-green exact-head CI. Active Rust and npm
+identities, CLI posture, provider user agents, current product documentation,
+changelog, and new `0.4` release records align on `0.4.0-preview.1` while
+published `0.3` evidence remains immutable. This does not authorize final
+packaging or publication. See the [implementation
+report](docs/concepts/0.4.0-preview.1_VERSION_IDENTITY_ALIGNMENT_REPORT.md).
+
+Phase C **Final Packaging Implementation** is implemented and accepted by a
+focused release/security review, with merge pending. The exported packager and
+CLI require an explicit closed posture; final-candidate admission cannot
+disable native-binary or exact-clean-checkout verification; the v1 manifest
+records posture; outputs refuse replacement; and focused native fixtures prove
+deterministic final admission plus fail-closed source, dirtiness, version,
+binary, target, and posture handling. The accepted review added explicit
+checksum-only collision, Cargo lock drift, and native binary-shape coverage. No
+real candidate, tag, release, upload, publication, or announcement is
+authorized by this implementation. See the [Phase C
+report](docs/concepts/0.4.0-preview.1_FINAL_PACKAGING_IMPLEMENTATION_REPORT.md).
 
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
