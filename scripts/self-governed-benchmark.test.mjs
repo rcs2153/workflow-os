@@ -884,6 +884,35 @@ test("missing binary with no-build fails closed", async () => {
   }
 });
 
+test("dry-run with no-build does not require a kernel binary", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "workflow-os-helper-dry-run-no-bin-"));
+  try {
+    mkdirSync(join(tempRoot, "scripts"), { recursive: true });
+    copyFileSync(helperScript, join(tempRoot, "scripts", "self-governed-benchmark.mjs"));
+
+    const result = spawnSync(nodeBin, [
+      join(tempRoot, "scripts", "self-governed-benchmark.mjs"),
+      "phase-start",
+      "--phase",
+      "review",
+      "--dry-run",
+      "--no-build",
+    ], {
+      cwd: tempRoot,
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /kernel_freshness: not_applicable_dry_run/);
+    assert.match(result.stdout, /approval_outcome: not_requested/);
+    assert.doesNotMatch(result.stdout, /build:/);
+    assert.doesNotMatch(result.stderr, /dogfood\.helper\.binary_missing/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 function runHelper(args) {
   return spawnSync(nodeBin, [helperScript, ...args], {
     cwd: repoRoot,
