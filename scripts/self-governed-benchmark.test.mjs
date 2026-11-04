@@ -22,6 +22,22 @@ const repoRoot = resolve(new URL("..", import.meta.url).pathname);
 const helperScript = join(repoRoot, "scripts", "self-governed-benchmark.mjs");
 const nodeBin = process.execPath;
 
+test("aggregate check builds the debug kernel before dogfood helper tests", () => {
+  const packageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+  const ciWorkflow = readFileSync(join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
+
+  assert.equal(
+    packageJson.scripts["build:check-kernel"],
+    "cargo build -p workflow-cli --bin workflow-os",
+  );
+  assert.match(packageJson.scripts.check, /^npm run build:check-kernel && /);
+  assert.match(packageJson.scripts.check, /npm run check:dogfood/);
+  assert.match(
+    ciWorkflow,
+    /fresh-checkout-aggregate-check:[\s\S]*?uses: actions\/checkout@v4\n\s+with:\n\s+fetch-depth: 0/,
+  );
+});
+
 function approvalPresentationRunDir(stateDir, runId) {
   const encodedRunId = createHash("sha256").update(runId).digest("hex");
   return join(stateDir, "approval_presentations", "records", encodedRunId);
