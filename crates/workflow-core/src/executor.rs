@@ -20764,6 +20764,99 @@ fn resolved_execution_context_hash(
     Ok(crate::SpecContentHash::from_bytes(hasher.finalize()))
 }
 
+#[cfg(feature = "trusted-host-application-spi")]
+fn github_repository_metadata_resolved_context_commitment(
+    request: &LocalExecutionRequest,
+    run_id: &WorkflowRunId,
+    approval_id: &str,
+    selected_step_id: &StepId,
+    provider_context_commitment: Option<&crate::SpecContentHash>,
+) -> Result<crate::SpecContentHash, WorkflowOsError> {
+    let plan = LocalExecutor::<crate::SqliteStateBackend>::
+        prepare_execution_with_capability_and_resolved_context(
+            request,
+            run_id.clone(),
+            &ProjectValidationCapability::Default,
+            None,
+        )?;
+    if plan.steps.len() != 1 || &plan.step.id != selected_step_id {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.github_repository_metadata.project_restriction.operation_mismatch",
+            "GitHub repository metadata restriction requires one exact workflow step",
+        ));
+    }
+    let project =
+        load_validated_project_bundle(&request.project_root, ProjectValidationCapability::Default)?;
+    let configuration = project
+        .manifest
+        .definition
+        .governance
+        .as_ref()
+        .and_then(|governance| governance.provider_reads.as_ref())
+        .map(|reads| &reads.github_repository_metadata)
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.github_repository_metadata.project_restriction.missing",
+                "GitHub repository metadata project restriction is unavailable",
+            )
+        })?;
+
+    let mut hasher = Sha256::new();
+    update_idempotency_hash(
+        &mut hasher,
+        "algorithm",
+        "workflow-os/github-repository-metadata-project-restriction/v1",
+    );
+    update_idempotency_hash(&mut hasher, "run", run_id.as_str());
+    update_idempotency_hash(&mut hasher, "approval", approval_id);
+    update_idempotency_hash(
+        &mut hasher,
+        "project",
+        project.manifest.definition.project.id.as_str(),
+    );
+    update_idempotency_hash(&mut hasher, "provider_family", "github_repository_metadata");
+    update_idempotency_hash(
+        &mut hasher,
+        "operation",
+        github_repository_fixture_execution::OPERATION_CODE,
+    );
+    update_idempotency_hash(&mut hasher, "resource_kind", "repository");
+    update_idempotency_hash(
+        &mut hasher,
+        "enabled",
+        if configuration.enabled() {
+            "true"
+        } else {
+            "false"
+        },
+    );
+    update_idempotency_hash(&mut hasher, "endpoint", configuration.endpoint());
+    update_idempotency_hash(
+        &mut hasher,
+        "access_reference",
+        configuration.access_reference(),
+    );
+    let mut resources = configuration.resources().iter().collect::<Vec<_>>();
+    resources.sort_by(|left, right| {
+        (left.owner(), left.repository()).cmp(&(right.owner(), right.repository()))
+    });
+    for resource in resources {
+        update_idempotency_hash(&mut hasher, "resource_owner", resource.owner());
+        update_idempotency_hash(&mut hasher, "resource_repository", resource.repository());
+    }
+    update_idempotency_hash(
+        &mut hasher,
+        "definition_context",
+        plan.resolved_execution_context_hash.as_str(),
+    );
+    if let Some(commitment) = provider_context_commitment {
+        update_idempotency_hash(&mut hasher, "provider_context", commitment.as_str());
+    }
+    Ok(crate::SpecContentHash::from_bytes(hasher.finalize()))
+}
+
 fn approval_expires_after(workflow: &WorkflowDefinition) -> Option<String> {
     workflow
         .approval_requirements

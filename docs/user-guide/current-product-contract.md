@@ -29,13 +29,13 @@ permitted. A replacement executor should not reconstruct authority from chat
 history.
 
 Current `main` does not yet satisfy that contract across every preview surface.
-Three accepted P0 release gates remain open: hosted success must prove approval-
-waiting, dispatch, terminal, or explicit recovery posture; a verified WorkReport
-must be bound to the exact requested storage and run identity; and project-level
-provider resource restrictions must remain committed through approval and
-provider admission. These gates block v1, reliable unattended hosted-runtime,
-sole enterprise audit-authority, and fully committed live-provider approval
-claims. See the [Continuity Of Authority P0 Release Gates
+The hosted dispatch-truth and WorkReport identity-binding P0 gates are closed.
+One accepted gate remains open: project-level provider resource restrictions
+must remain committed through approval and provider admission. Its bounded
+implementation candidate passed focused maintainer/security review and full
+local validation; exact-head CI and independent drift evidence remain. This
+gate blocks v1 and fully committed live-provider approval claims. See the
+[Continuity Of Authority P0 Release Gates
 Plan](../implementation-plans/continuity-of-authority-p0-release-gates-plan.md).
 
 ## Maturity
@@ -112,12 +112,12 @@ Plan](../implementation-plans/continuity-of-authority-p0-release-gates-plan.md).
 Current evidence assurance is path-specific. A closed local-check profile can
 bind the exact selected executable and invocation without proving that an
 operator-selected executable came from a trusted producer. Report artifacts
-retain and enforce a complete body commitment on selected read, inspect,
-metadata, recovery, and reconciliation paths, but a valid artifact can still be
-misplaced under another run's storage slot because external key and internal
-run/report identity are not yet enforced consistently across every backend and
-replay path. A privileged local storage owner remains inside the trust boundary,
-and the product is not a sole enterprise audit authority.
+retain and enforce a complete body commitment plus exact external storage-key,
+internal run/report, and available immutable workflow identity across the
+accepted filesystem, SQLite, PostgreSQL, transaction, inspect, recovery,
+reconciliation, and replay paths. A privileged local storage owner remains
+inside the trust boundary, and the product is not a sole enterprise audit
+authority or storage-owner tamper-resistant ledger.
 
 ### State and hosting
 
@@ -158,11 +158,13 @@ and the product is not a sole enterprise audit authority.
   same-repository branch.
 - Provider outcomes are reconciled through Core-owned gates and records; these
   paths are not enabled automatically by project installation.
-- The GitHub repository-metadata fixture currently has an accepted P0 drift gap:
-  changing the current project repository restriction after presentation does
-  not yet block approval and provider admission for the previously declared
-  target. Do not infer fully committed live-provider authorization from this
-  preview path.
+- The GitHub repository-metadata fixture has a bounded Gate 3 implementation
+  candidate: current project/provider restrictions and relevant definition
+  context are committed at run creation, revalidated before approval acceptance,
+  and revalidated again before atomic fixture/live provider admission. Focused
+  review, drift tests, and full local validation pass, but exact-head CI and
+  independent drift evidence remain required. Do not infer fully committed
+  live-provider authorization until Gate 3 closes.
 
 ## CLI Contract
 

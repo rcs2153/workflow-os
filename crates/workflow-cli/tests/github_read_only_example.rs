@@ -92,6 +92,21 @@ fn copy_dir(source: &Path, destination: &Path) {
     }
 }
 
+fn rewrite_manifest(project: &Path, transform: impl FnOnce(String) -> String) {
+    let path = project.join("workflow-os.yml");
+    let source = fs::read_to_string(&path).expect("project manifest read");
+    fs::write(path, transform(source)).expect("project manifest rewritten");
+}
+
+fn assert_no_provider_entry(project: &Path, state: &Path, run_id: &str) {
+    let inspect = workflow_os(project, state, &["inspect", run_id]);
+    assert!(inspect.status.success(), "{}", stderr(&inspect));
+    let output = stdout(&inspect);
+    assert!(!output.contains("ApprovalGranted"));
+    assert!(!output.contains("SkillInvocationRequested"));
+    assert!(!output.contains("adapter_telemetry:"));
+}
+
 fn assert_fixture_next_action_rejects_non_running(project: &Path, state: &Path, run_id: &str) {
     let inspect_before = workflow_os(project, state, &["inspect", run_id]);
     assert!(
@@ -319,6 +334,241 @@ fn repository_metadata_fixture_change_after_presentation_fails_closed() {
     );
     assert!(!approved.status.success());
     assert!(stderr(&approved).contains("executor.approval.resume_context_mismatch"));
+}
+
+type ManifestMutation = fn(String) -> String;
+
+fn project_restriction_drift_cases() -> [(&'static str, ManifestMutation, &'static str); 9] {
+    [
+        (
+            "resource-replaced",
+            |source| source.replace("repository: widgets", "repository: replacement"),
+            "executor.approval.resume_context_mismatch",
+        ),
+        (
+            "resource-broadened",
+            |source| {
+                source.replace(
+                    "        - owner: acme\n          repository: widgets\n",
+                    "        - owner: acme\n          repository: widgets\n        - owner: acme\n          repository: second\n",
+                )
+            },
+            "executor.approval.resume_context_mismatch",
+        ),
+        (
+            "resource-removed",
+            |source| {
+                source.replace(
+                    "      resources:\n        - owner: acme\n          repository: widgets\n",
+                    "      resources: []\n",
+                )
+            },
+            "executor.project.load_failed",
+        ),
+        (
+            "resource-duplicated",
+            |source| {
+                source.replace(
+                    "        - owner: acme\n          repository: widgets\n",
+                    "        - owner: acme\n          repository: widgets\n        - owner: acme\n          repository: widgets\n",
+                )
+            },
+            "executor.project.load_failed",
+        ),
+        (
+            "provider-disabled",
+            |source| source.replace("      enabled: true", "      enabled: false"),
+            "executor.project.load_failed",
+        ),
+        (
+            "endpoint-changed",
+            |source| source.replace("endpoint: github.com", "endpoint: github.example"),
+            "executor.project.load_failed",
+        ),
+        (
+            "access-reference-changed",
+            |source| {
+                source.replace(
+                    "access_reference: env/WORKFLOW_OS_GITHUB_TOKEN",
+                    "access_reference: env/WORKFLOW_OS_GITHUB_TOKEN_SECONDARY",
+                )
+            },
+            "executor.project.load_failed",
+        ),
+        (
+            "project-identity-changed",
+            |source| {
+                source.replace(
+                    "id: examples/github-repository-metadata-fixture",
+                    "id: examples/github-repository-metadata-fixture-replacement",
+                )
+            },
+            "executor.approval.resume_context_mismatch",
+        ),
+        (
+            "policy-changed",
+            |source| source,
+            "executor.approval.resume_context_mismatch",
+        ),
+    ]
+}
+
+#[test]
+fn repository_metadata_project_restriction_drift_before_approval_fails_closed() {
+    for (name, mutate_manifest, expected_code) in project_restriction_drift_cases() {
+        let state = state_root(name);
+        let project = state_root(&format!("{name}-project"));
+        copy_dir(&repository_metadata_fixture_root(), &project);
+        let waiting = workflow_os(
+            &project,
+            &state,
+            &["run", "example/github-repository-metadata-fixture"],
+        );
+        assert!(waiting.status.success(), "{name}: {}", stderr(&waiting));
+        let run_id = run_id(&waiting);
+        let approval_id = approval_id(&waiting);
+        if name == "policy-changed" {
+            fs::write(
+                project.join("policies/read.policy.yml"),
+                "schema_version: workflowos.dev/v0\nid: external/read\nname: External Read Changed\nrules:\n  - id: allow\n    effect: allow_external_read\n",
+            )
+            .expect("policy changed");
+        } else {
+            rewrite_manifest(&project, mutate_manifest);
+        }
+
+        let approved = workflow_os(
+            &project,
+            &state,
+            &[
+                "approve",
+                &run_id,
+                &approval_id,
+                "--actor",
+                "user/example-reviewer",
+                "--reason",
+                "attempt approval after project restriction drift",
+            ],
+        );
+        assert!(!approved.status.success(), "{name} unexpectedly approved");
+        assert!(
+            stderr(&approved).contains(expected_code),
+            "{name}: {}",
+            stderr(&approved)
+        );
+        assert_no_provider_entry(&project, &state, &run_id);
+    }
+}
+
+#[test]
+fn repository_metadata_project_restriction_drift_after_approval_blocks_provider_entry() {
+    let state = state_root("project-restriction-post-approval-drift");
+    let project = state_root("project-restriction-post-approval-drift-project");
+    copy_dir(&repository_metadata_fixture_root(), &project);
+    let waiting = workflow_os(
+        &project,
+        &state,
+        &["run", "example/github-repository-metadata-fixture"],
+    );
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+    let approved = workflow_os(
+        &project,
+        &state,
+        &[
+            "approve",
+            &run_id,
+            &approval_id,
+            "--actor",
+            "user/example-reviewer",
+            "--reason",
+            "reviewed exact project restriction",
+        ],
+    );
+    assert!(approved.status.success(), "{}", stderr(&approved));
+    assert!(stdout(&approved).contains("status: Running"));
+    rewrite_manifest(&project, |source| {
+        source.replace("repository: widgets", "repository: replacement")
+    });
+
+    let resumed = workflow_os(
+        &project,
+        &state,
+        &[
+            "run",
+            "example/github-repository-metadata-fixture",
+            "--run-id",
+            &run_id,
+        ],
+    );
+    assert!(!resumed.status.success());
+    assert!(
+        stderr(&resumed)
+            .contains("executor.github_repository_metadata.atomic.project_restriction_mismatch"),
+        "{}",
+        stderr(&resumed)
+    );
+    let inspect = workflow_os(&project, &state, &["inspect", &run_id]);
+    assert!(inspect.status.success(), "{}", stderr(&inspect));
+    let output = stdout(&inspect);
+    assert!(output.contains("ApprovalGranted"));
+    assert!(!output.contains("SkillInvocationRequested"));
+    assert!(!output.contains("adapter_telemetry:"));
+}
+
+#[test]
+fn repository_metadata_project_restriction_uses_normalized_resource_order() {
+    let state = state_root("project-restriction-normalized-order");
+    let project = state_root("project-restriction-normalized-order-project");
+    copy_dir(&repository_metadata_fixture_root(), &project);
+    rewrite_manifest(&project, |source| {
+        source.replace(
+            "        - owner: acme\n          repository: widgets\n",
+            "        - owner: acme\n          repository: second\n        - owner: acme\n          repository: widgets\n",
+        )
+    });
+    let waiting = workflow_os(
+        &project,
+        &state,
+        &["run", "example/github-repository-metadata-fixture"],
+    );
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+    rewrite_manifest(&project, |source| {
+        source.replace(
+            "        - owner: acme\n          repository: second\n        - owner: acme\n          repository: widgets\n",
+            "        - owner: acme\n          repository: widgets\n        - owner: acme\n          repository: second\n",
+        )
+    });
+
+    let approved = workflow_os(
+        &project,
+        &state,
+        &[
+            "approve",
+            &run_id,
+            &approval_id,
+            "--actor",
+            "user/example-reviewer",
+            "--reason",
+            "reviewed normalized exact resource set",
+        ],
+    );
+    assert!(approved.status.success(), "{}", stderr(&approved));
+    let completed = workflow_os(
+        &project,
+        &state,
+        &[
+            "run",
+            "example/github-repository-metadata-fixture",
+            "--run-id",
+            &run_id,
+        ],
+    );
+    assert!(completed.status.success(), "{}", stderr(&completed));
+    assert!(stdout(&completed).contains("status: Completed"));
 }
 
 #[test]
