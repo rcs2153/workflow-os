@@ -2317,6 +2317,9 @@ pub enum WorkReportBodyCommitmentVersion {
 pub enum WorkReportBodyCommitmentPosture {
     /// A complete-body commitment value is available but is not independently anchored.
     AvailableUnanchored,
+    /// The expected commitment is retained in the create-only artifact envelope
+    /// outside the mutable report body.
+    PersistedEnvelopeAnchor,
     /// A legacy artifact has no complete-body commitment and is unverified.
     LegacyUnverified,
 }
@@ -7833,12 +7836,13 @@ pub struct WorkReportArtifactMetadata {
     generated_at: Timestamp,
     sensitivity: WorkReportSensitivity,
     redaction: RedactionMetadata,
+    body_commitment: Option<WorkReportBodyCommitment>,
 }
 
 impl WorkReportArtifactMetadata {
-    fn from_report(report: &WorkReport) -> Self {
+    fn from_report(report: &WorkReport) -> Result<Self, WorkflowOsError> {
         let context = report.generation_context();
-        Self {
+        Ok(Self {
             report_id: report.report_id().clone(),
             workflow_id: context.workflow_id.clone(),
             workflow_version: context.workflow_version.clone(),
@@ -7849,7 +7853,11 @@ impl WorkReportArtifactMetadata {
             generated_at: context.generated_at,
             sensitivity: report.sensitivity(),
             redaction: report.redaction.clone(),
-        }
+            body_commitment: Some(WorkReportBodyCommitment::from_report(
+                WorkReportBodyCommitmentVersion::V1,
+                report,
+            )?),
+        })
     }
 
     /// Returns the report ID bound to the artifact.
@@ -7906,6 +7914,24 @@ impl WorkReportArtifactMetadata {
         self.sensitivity
     }
 
+    /// Returns the expected complete-body commitment retained by the artifact
+    /// envelope, when present.
+    #[must_use]
+    pub const fn body_commitment(&self) -> Option<&WorkReportBodyCommitment> {
+        self.body_commitment.as_ref()
+    }
+
+    /// Returns the truthful persistence posture for the complete-body
+    /// commitment.
+    #[must_use]
+    pub const fn body_commitment_posture(&self) -> WorkReportBodyCommitmentPosture {
+        if self.body_commitment.is_some() {
+            WorkReportBodyCommitmentPosture::PersistedEnvelopeAnchor
+        } else {
+            WorkReportBodyCommitmentPosture::LegacyUnverified
+        }
+    }
+
     fn validate_against_report(&self, report: &WorkReport) -> Result<(), WorkflowOsError> {
         validate_report_redaction_metadata(&self.redaction)?;
         let context = report.generation_context();
@@ -7942,6 +7968,11 @@ impl fmt::Debug for WorkReportArtifactMetadata {
             .field("generated_at", &self.generated_at)
             .field("sensitivity", &self.sensitivity)
             .field(
+                "body_commitment",
+                &self.body_commitment.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("body_commitment_posture", &self.body_commitment_posture())
+            .field(
                 "redaction",
                 &RedactedRedactionMetadataDebug(&self.redaction),
             )
@@ -7966,6 +7997,8 @@ impl<'de> Deserialize<'de> for WorkReportArtifactMetadata {
             generated_at: Timestamp,
             sensitivity: WorkReportSensitivity,
             redaction: RedactionMetadata,
+            #[serde(default)]
+            body_commitment: Option<WorkReportBodyCommitment>,
         }
 
         let wire = WorkReportArtifactMetadataWire::deserialize(deserializer)?;
@@ -7981,6 +8014,7 @@ impl<'de> Deserialize<'de> for WorkReportArtifactMetadata {
             generated_at: wire.generated_at,
             sensitivity: wire.sensitivity,
             redaction: wire.redaction,
+            body_commitment: wire.body_commitment,
         })
     }
 }
@@ -8001,7 +8035,7 @@ impl WorkReportArtifactRecord {
     /// metadata is invalid.
     pub fn new(work_report: WorkReport) -> Result<Self, WorkflowOsError> {
         work_report.validate()?;
-        let metadata = WorkReportArtifactMetadata::from_report(&work_report);
+        let metadata = WorkReportArtifactMetadata::from_report(&work_report)?;
         let artifact = Self {
             metadata,
             work_report,
@@ -8017,6 +8051,14 @@ impl WorkReportArtifactRecord {
     /// Returns a stable validation error when metadata does not match the
     /// contained report, or when either value fails report validation.
     pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        self.validate_structure()?;
+        if let Some(expected) = self.metadata.body_commitment() {
+            expected.verify_report(&self.work_report)?;
+        }
+        Ok(())
+    }
+
+    fn validate_structure(&self) -> Result<(), WorkflowOsError> {
         self.work_report.validate()?;
         self.metadata.validate_against_report(&self.work_report)
     }
@@ -8072,7 +8114,12 @@ impl<'de> Deserialize<'de> for WorkReportArtifactRecord {
             metadata: wire.metadata,
             work_report: wire.work_report,
         };
-        artifact.validate().map_err(serde::de::Error::custom)?;
+        // Complete-body enforcement across ordinary reads is a separately
+        // reviewed phase. This phase preserves legacy records and retains the
+        // expected envelope commitment without silently broadening read paths.
+        artifact
+            .validate_structure()
+            .map_err(serde::de::Error::custom)?;
         Ok(artifact)
     }
 }

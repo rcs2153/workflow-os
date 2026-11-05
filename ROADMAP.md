@@ -149,14 +149,32 @@ report content cannot verify that content. See the [implementation
 report](docs/concepts/WORK_REPORT_BODY_COMMITMENT_MODEL_REPORT.md) and [accepted
 review](docs/concepts/WORK_REPORT_BODY_COMMITMENT_MODEL_REVIEW.md).
 
-The next phase is the bounded **WorkReport body-commitment persistence anchor**.
-It must bind the expected commitment outside the mutable report body through
-existing terminal artifact state and supported stores, with explicit atomicity
-or crash-reconciliation semantics and legacy-unverified handling. It must not
-yet broaden into read/list/inspect/recovery/replay enforcement, product or CLI
-projection, migration, signing, external witnesses, provider mutation, or a
-claim of storage-owner tamper resistance. Independent security review remains
-required before release admission resumes.
+The bounded **WorkReport body-commitment persistence anchor** is implemented
+and its focused maintainer/security review is accepted. Every newly constructed
+artifact now retains the expected V1 commitment in create-only artifact
+envelope metadata outside the mutable report body. Local filesystem, SQLite,
+and PostgreSQL stores persist the envelope and body in one atomic create-only
+record, so no second-write crash gap is introduced. Artifacts that predate the
+field remain explicitly `legacy_unverified`; no commitment is inferred or
+backfilled. Public artifact validation and all supported write paths reject a
+report-only substitution with the existing payload-free mismatch error. This
+phase deliberately does not make ordinary read, list, inspect, recovery,
+duplicate-reconciliation, or replay paths enforce the retained commitment yet,
+and it does not claim protection from a storage owner capable of rewriting
+both the envelope and body. See the [implementation
+report](docs/concepts/WORK_REPORT_BODY_COMMITMENT_PERSISTENCE_ANCHOR_REPORT.md)
+and [accepted
+review](docs/concepts/WORK_REPORT_BODY_COMMITMENT_PERSISTENCE_ANCHOR_REVIEW.md).
+
+The next phase is bounded **WorkReport body-commitment read-path enforcement**.
+It must compare the complete body against the retained expected commitment
+before returning new-format report content from read and list operations, while
+preserving explicit legacy-unverified behavior and stable non-leaking errors.
+Inspect, metadata projection, recovery, duplicate reconciliation, replay, and
+product/CLI projection remain later separately reviewed composition steps.
+Migration, signing, external witnesses, provider mutation, publication, and
+claims of storage-owner tamper resistance remain out of scope. Independent
+security review remains required before release admission resumes.
 
 The separate deterministic hosted P0 is now implemented. The advertised
 `workflow-os-hosted --worker-once` entry point previously called the
