@@ -52,9 +52,10 @@ Plan](../implementation-plans/continuity-of-authority-p0-release-gates-plan.md).
 - **Release blockers:** two accepted continuity-of-authority P0 gates remain
   open for WorkReport identity binding and project-resource authorization
   continuity. The WorkReport gate has an implementation candidate but remains
-  open pending exact-head CI, credential-backed PostgreSQL execution, an
-  independent misplacement rerun, and post-merge exact-main evidence. Its
-  focused maintainer/security review is accepted after correcting two blockers.
+  open pending an independent misplacement rerun. Its focused
+  maintainer/security review is accepted after correcting two blockers;
+  exact-head CI, credential-backed PostgreSQL execution, and
+  maintainer-operated post-merge exact-main evidence now pass.
 
 ## Implemented Product Surfaces
 
@@ -143,8 +144,9 @@ and the product is not a sole enterprise audit authority.
   are checked before retained body commitment and before projection, recovery,
   reconciliation, or replay. Legacy body-commitment posture does not excuse a
   wrong storage identity. This remains local/backend integrity, not
-  storage-owner tamper resistance, and Gate 2 is not accepted until its pending
-  CI, independent rerun, and post-merge evidence passes.
+  storage-owner tamper resistance. Exact-head CI and maintainer-operated
+  post-merge evidence pass, but Gate 2 is not accepted until its independent
+  backend-misplacement rerun passes.
 - Optional OpenShell no-write provider contracts and pinned CLI inspection
   compatibility. The current CLI compatibility boundary does not satisfy the
   full execution-provider evidence contract.

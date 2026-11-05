@@ -152,10 +152,17 @@ expectation reads that verified body commitment before full immutable identity,
 and hosted metadata endpoints that still used legacy run-only reads. Focused
 filesystem, injected-store, SQLite, combined substitution, legacy, hosted, and
 PostgreSQL relational-key and identity-order coverage exists. Gate 2 remains
-open until exact-head CI, credential-backed PostgreSQL execution, an independent
-backend misplacement rerun, and post-merge exact-main evidence pass. See the
+open. PR #741 merged the unchanged reviewed head after all nine exact-head
+checks passed, including credential-backed PostgreSQL execution. A
+maintainer-operated post-merge rerun on exact `main` confirmed filesystem and
+SQLite misplacement rejection, immutable-identity-before-body ordering, CLI
+inspect/replay rejection before projection, and hosted regressions. This is
+post-merge machine and maintainer evidence, not independent assurance. The
+independent backend-misplacement rerun remains the only unresolved Gate 2
+acceptance item. See the
 [implementation report](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_IMPLEMENTATION_REPORT.md)
-and [focused review](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_REVIEW.md).
+and [focused review](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_REVIEW.md),
+plus the [post-merge evidence report](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_POST_MERGE_EVIDENCE.md).
 Gate 3 and the cross-gate review remain blocked behind Gate 2 acceptance.
 
 A new P0 **evidence provenance and report integrity** preemption is active

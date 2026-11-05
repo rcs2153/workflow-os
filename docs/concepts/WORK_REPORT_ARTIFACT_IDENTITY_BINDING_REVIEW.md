@@ -6,9 +6,9 @@ Accepted as the bounded implementation candidate for continuity-of-authority
 Gate 2, **Verified Means Correctly Bound**, after two review blockers were
 corrected.
 
-This review does not close Gate 2. Exact-head CI with credential-backed
-PostgreSQL execution, an independent backend-misplacement rerun, and post-merge
-exact-main regression evidence remain required.
+This review did not close Gate 2. Exact-head CI with credential-backed
+PostgreSQL execution and maintainer-operated post-merge exact-main regression
+evidence now pass. An independent backend-misplacement rerun remains required.
 
 ## Blockers Found And Corrected
 
@@ -96,8 +96,15 @@ is bound to the durable run identity.
 
 ## Next Acceptance Work
 
-Run the corrected exact commit through all required CI, including PostgreSQL;
-perform an independent filesystem/backend misplacement rerun; verify inspect
-and replay fail before projection or `already_persisted`; merge only an
-unchanged green head; then record post-merge exact-main evidence. Gate 3 remains
-blocked until those requirements close Gate 2.
+PR #741 merged the unchanged reviewed head after all nine exact-head checks
+passed. The credential-backed PostgreSQL job passed. A maintainer-operated
+post-merge rerun on the exact merge commit confirmed filesystem and SQLite
+misplacement rejection, identity-before-body ordering, CLI inspect/replay
+rejection before projection or `already_persisted`, PostgreSQL test compilation,
+and the complete hosted suite. See the [post-merge evidence
+report](WORK_REPORT_ARTIFACT_IDENTITY_BINDING_POST_MERGE_EVIDENCE.md).
+
+The remaining acceptance work is an independent filesystem/backend
+misplacement rerun. Maintainer-operated evidence is not relabeled as
+independent assurance. Gate 3 remains blocked until that final requirement
+passes and Gate 2 is explicitly closed.
