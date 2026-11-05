@@ -83,6 +83,7 @@ mod local_check;
 mod local_check_attestation;
 mod local_check_declaration;
 mod local_check_declaration_set;
+mod local_check_evidence_assurance;
 mod local_check_execution_binding;
 mod observability;
 #[allow(dead_code)]
@@ -1037,6 +1038,13 @@ pub use local_check_declaration_set::{
     CanonicalLocalCheckDeclarationSetAlgorithm, CanonicalLocalCheckDeclarationSetRecord,
     CanonicalLocalCheckDeclarationSetReference, LocalCheckCommandContractInventory,
     ResolveCanonicalLocalCheckDeclarationSetInput,
+};
+pub use local_check_evidence_assurance::{
+    LocalCheckEvidenceAssuranceMinimum, LocalCheckEvidenceAssuranceProjection,
+    LocalCheckEvidenceAssuranceProjectionAlgorithm,
+    LocalCheckEvidenceAssuranceProjectionDefinition, LocalCheckEvidenceAttestationPosture,
+    LocalCheckEvidenceExecutionPosture, LocalCheckEvidenceExternalVerifiabilityPosture,
+    LocalCheckEvidenceProducerPosture,
 };
 pub use local_check_execution_binding::{
     compute_local_check_command_contract_fingerprint, ImmutableLocalCheckExecutionBinding,

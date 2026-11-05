@@ -107,13 +107,26 @@ execution binding, explicitly unverified candidate, and crate-private accepted
 attestation as the source foundations, and identifies the missing boundary as a
 payload-free result-level assurance projection rather than a second evidence
 system. See the [focused review](docs/concepts/EVIDENCE_PROVENANCE_MODEL_PROJECTION_REVIEW.md).
-The next implementation phase is the model-only local-check evidence assurance
-projection: separate closed producer, execution, and attestation posture bound
-to existing execution, handler, result, and immutable-run commitments. It must
-not add runtime integration, persistence, events, CLI, schemas, SDKs, arbitrary
-commands, signing, an external witness, hosted identity, provider expansion, or
-publication. Independent security review is required before release admission
-resumes.
+The model-only local-check evidence assurance projection is implemented and its
+focused maintainer/security review is accepted. It keeps producer provenance,
+execution observation, attestation, and external verifiability distinct; binds
+existing immutable execution, handler selection, resolved execution, result,
+and immutable-run commitments; and accepts stronger attestation posture only
+from the existing verifier-owned proof object. Serialized proof references do
+not recreate accepted assurance. The model adds deterministic framed identity,
+validated weak-posture serde, payload-free debug/error behavior, and
+dimension-specific minimum evaluation without adding runtime integration,
+persistence, events, CLI, schemas, SDKs, arbitrary commands, signing, an
+external witness, hosted identity, provider expansion, WorkReport commitment,
+or publication. See the [implementation
+report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_PROJECTION_REPORT.md) and
+[accepted review](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_PROJECTION_REVIEW.md).
+The next phase is one narrow composition into the closed trusted-host
+project-validation result path. That composition must establish a Core-owned
+source binding before minimum-assurance comparison can participate in any gate;
+a caller-created or deserialized weak projection is representational data, not
+execution authority. Independent security review remains required before
+release admission resumes.
 
 The separate deterministic hosted P0 is now implemented. The advertised
 `workflow-os-hosted --worker-once` entry point previously called the
