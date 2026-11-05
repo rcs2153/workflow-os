@@ -212,6 +212,21 @@ remaining validator-assurance and independent-review blockers, and requires a
 new exact-source release candidate. Provider-mutation and comparative benchmark
 execution remain outside this boundary.
 
+The first reconciliation slice, **product-contract truth correction**, is
+implemented. The current product contract now records all three gate closures
+and the private cross-gate boundary without presenting a production replacement
+executor. Stale non-capability claims were replaced with the actual unsupported
+generalizations, public WorkReport language now distinguishes retained body-
+commitment enforcement from storage-owner tamper resistance, and the release
+checklist marks the existing symmetric candidates as historical exact-source
+evidence rather than current-source publication assets. See the [implementation
+report](docs/concepts/CONTINUITY_PRODUCT_CONTRACT_TRUTH_CORRECTION_REPORT.md).
+Focused review is accepted after correcting one remaining roadmap statement
+that incorrectly left replay enforcement as future work. See the [accepted
+review](docs/concepts/CONTINUITY_PRODUCT_CONTRACT_TRUTH_CORRECTION_REVIEW.md).
+Exact-head PR validation and merge are required before durable validator-
+assurance projection begins.
+
 A new P0 **evidence provenance and report integrity** preemption is active
 before publication, public-positioning expansion, or broader evidence-consuming
 runtime work. Fresh testing proved two distinct trust boundaries that current
@@ -2466,8 +2481,10 @@ history. It is reference material, not a second delivery queue.
    latency, and end-to-end completion. See the [Compact Recovery Checkpoint
    Evaluation Plan](docs/implementation-plans/compact-recovery-checkpoint-evaluation-plan.md).
    This evidence requirement does not reorder the Active Delivery Queue above,
-   authorize runtime integration, or select Salsa; WorkReport body-commitment
-   replay enforcement remains the next runtime phase.
+   authorize runtime integration, or select Salsa. WorkReport body-commitment
+   replay enforcement was absorbed by accepted continuity Gate 2; durable
+   validator-assurance projection and narrow minimum-assurance enforcement are
+   the next runtime slices under the active reconciliation plan.
    The review added a durable cursor-bound single-consumption requirement and
    narrowed the first allowed operation to one local
    `invoke_current_step_skill` `BeforeSkillInvocation` consumer. That opt-in
