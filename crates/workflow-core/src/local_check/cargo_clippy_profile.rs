@@ -478,7 +478,6 @@ impl AuthoritativeLocalCheckHandler for CargoClippyWorkspaceLocalHandler {
         "v0"
     }
 
-    #[cfg(feature = "trusted-host-application-spi")]
     fn executable_content_hash(&self) -> &SpecContentHash {
         &self.execution_identity
     }

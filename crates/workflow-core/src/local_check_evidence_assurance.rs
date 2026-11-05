@@ -352,6 +352,18 @@ impl LocalCheckEvidenceAssuranceProjection {
         self.command_kind
     }
 
+    /// Returns the exact immutable pre-execution binding commitment.
+    #[must_use]
+    pub const fn execution_binding_fingerprint(&self) -> &SpecContentHash {
+        &self.execution_binding_fingerprint
+    }
+
+    /// Returns the exact resolved process-boundary commitment.
+    #[must_use]
+    pub const fn resolved_execution_fingerprint(&self) -> &SpecContentHash {
+        &self.resolved_execution_fingerprint
+    }
+
     /// Returns the exact local-check result identity.
     #[must_use]
     pub const fn result_id(&self) -> &LocalCheckResultId {

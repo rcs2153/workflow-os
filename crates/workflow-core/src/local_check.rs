@@ -1817,7 +1817,6 @@ pub(crate) trait AuthoritativeLocalCheckHandler: fmt::Debug {
     fn contract(&self) -> &LocalCheckCommandContract;
     fn skill_id(&self) -> &'static str;
     fn skill_version(&self) -> &'static str;
-    #[cfg(feature = "trusted-host-application-spi")]
     fn executable_content_hash(&self) -> &crate::SpecContentHash;
     fn build_process_request(&self) -> Result<LocalCheckProcessRequest, WorkflowOsError>;
     fn run_process(
@@ -1839,7 +1838,6 @@ impl AuthoritativeLocalCheckHandler for DocsCheckLocalHandler {
         "v0"
     }
 
-    #[cfg(feature = "trusted-host-application-spi")]
     fn executable_content_hash(&self) -> &crate::SpecContentHash {
         &self.executable_content_hash
     }
@@ -1869,7 +1867,6 @@ impl AuthoritativeLocalCheckHandler for CargoFmtCheckLocalHandler {
         "v0"
     }
 
-    #[cfg(feature = "trusted-host-application-spi")]
     fn executable_content_hash(&self) -> &crate::SpecContentHash {
         &self.execution_identity_hash
     }
@@ -2261,7 +2258,6 @@ impl AuthoritativeLocalCheckHandler for WorkflowOsProjectValidationLocalHandler 
         "v0"
     }
 
-    #[cfg(feature = "trusted-host-application-spi")]
     fn executable_content_hash(&self) -> &crate::SpecContentHash {
         &self.executable_content_hash
     }
@@ -2410,40 +2406,9 @@ impl ResolvedExplicitLocalCheckProfile {
     ) -> Result<crate::SpecContentHash, WorkflowOsError> {
         let handler = self.handler.authoritative();
         let request = handler.build_process_request()?;
-        let mut hasher = Sha256::new();
-        hash_private_commitment_field(
-            &mut hasher,
-            b"domain",
-            b"workflow-os/resolved-local-check-execution/v2",
-        );
-        hash_private_commitment_field(
-            &mut hasher,
-            b"executable",
-            request.executable().as_os_str().as_encoded_bytes(),
-        );
-        for argument in request.arguments() {
-            hash_private_commitment_field(&mut hasher, b"argument", argument.as_bytes());
-        }
-        hash_private_commitment_field(
-            &mut hasher,
-            b"working_directory",
-            request.working_directory().as_os_str().as_encoded_bytes(),
-        );
-        for (name, value) in request.environment() {
-            hash_private_commitment_field(&mut hasher, b"environment_name", name.as_bytes());
-            hash_private_commitment_field(&mut hasher, b"environment_value", value.as_bytes());
-        }
-        hash_private_commitment_field(
-            &mut hasher,
-            b"timeout_millis",
-            &request.timeout().as_millis().to_be_bytes(),
-        );
-        hash_private_commitment_field(
-            &mut hasher,
-            b"executable_content_hash",
-            handler.executable_content_hash().as_str().as_bytes(),
-        );
-        Ok(crate::SpecContentHash::from_bytes(hasher.finalize()))
+        Ok(authoritative_local_check_resolved_execution_fingerprint(
+            handler, &request,
+        ))
     }
 
     /// Executes the resolved closed-profile check exactly once.
@@ -2504,6 +2469,46 @@ impl ResolvedExplicitLocalCheckProfile {
     pub(crate) fn into_handler(self) -> Box<dyn SkillHandler> {
         self.handler.into_skill_handler()
     }
+}
+
+pub(crate) fn authoritative_local_check_resolved_execution_fingerprint(
+    handler: &dyn AuthoritativeLocalCheckHandler,
+    request: &LocalCheckProcessRequest,
+) -> crate::SpecContentHash {
+    let mut hasher = Sha256::new();
+    hash_private_commitment_field(
+        &mut hasher,
+        b"domain",
+        b"workflow-os/resolved-local-check-execution/v2",
+    );
+    hash_private_commitment_field(
+        &mut hasher,
+        b"executable",
+        request.executable().as_os_str().as_encoded_bytes(),
+    );
+    for argument in request.arguments() {
+        hash_private_commitment_field(&mut hasher, b"argument", argument.as_bytes());
+    }
+    hash_private_commitment_field(
+        &mut hasher,
+        b"working_directory",
+        request.working_directory().as_os_str().as_encoded_bytes(),
+    );
+    for (name, value) in request.environment() {
+        hash_private_commitment_field(&mut hasher, b"environment_name", name.as_bytes());
+        hash_private_commitment_field(&mut hasher, b"environment_value", value.as_bytes());
+    }
+    hash_private_commitment_field(
+        &mut hasher,
+        b"timeout_millis",
+        &request.timeout().as_millis().to_be_bytes(),
+    );
+    hash_private_commitment_field(
+        &mut hasher,
+        b"executable_content_hash",
+        handler.executable_content_hash().as_str().as_bytes(),
+    );
+    crate::SpecContentHash::from_bytes(hasher.finalize())
 }
 
 fn hash_private_commitment_field(hasher: &mut Sha256, name: &[u8], value: &[u8]) {

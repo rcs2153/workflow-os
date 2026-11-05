@@ -2397,6 +2397,7 @@ pub struct LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceResult {
     bundle_binding: crate::ImmutableRunBundleBinding,
     governance_assessment_binding: crate::GovernanceAssessmentBinding,
     local_check_results: Vec<crate::LocalCheckResult>,
+    local_check_evidence_assurance_projections: Vec<crate::LocalCheckEvidenceAssuranceProjection>,
     disclosure_receipt: crate::GovernanceDisclosureDeliveryReceipt,
 }
 
@@ -2423,6 +2424,14 @@ impl LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceResult {
     #[must_use]
     pub fn local_check_results(&self) -> &[crate::LocalCheckResult] {
         &self.local_check_results
+    }
+
+    /// Returns Core-owned same-call evidence-assurance projections.
+    #[must_use]
+    pub fn local_check_evidence_assurance_projections(
+        &self,
+    ) -> &[crate::LocalCheckEvidenceAssuranceProjection] {
+        &self.local_check_evidence_assurance_projections
     }
 
     /// Returns the receipt Core constructed from the injected surface result.
@@ -2460,6 +2469,10 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRes
             .field("bundle_binding", &"[REDACTED]")
             .field("local_check_result_count", &self.local_check_results.len())
             .field(
+                "local_check_evidence_assurance_projection_count",
+                &self.local_check_evidence_assurance_projections.len(),
+            )
+            .field(
                 "governance_execution",
                 &self.governance_assessment_binding.execution(),
             )
@@ -2480,6 +2493,7 @@ pub struct LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult {
     governance_assessment_binding: crate::GovernanceAssessmentBinding,
     governance_approval_binding: crate::GovernanceApprovalBinding,
     local_check_results: Vec<crate::LocalCheckResult>,
+    local_check_evidence_assurance_projections: Vec<crate::LocalCheckEvidenceAssuranceProjection>,
 }
 
 impl LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult {
@@ -2512,6 +2526,14 @@ impl LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult {
     pub fn local_check_results(&self) -> &[crate::LocalCheckResult] {
         &self.local_check_results
     }
+
+    /// Returns Core-owned same-call evidence-assurance projections.
+    #[must_use]
+    pub fn local_check_evidence_assurance_projections(
+        &self,
+    ) -> &[crate::LocalCheckEvidenceAssuranceProjection] {
+        &self.local_check_evidence_assurance_projections
+    }
 }
 
 impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult {
@@ -2521,6 +2543,10 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRe
             .field("run_status", &self.run.snapshot.status)
             .field("bundle_binding", &"[REDACTED]")
             .field("local_check_result_count", &self.local_check_results.len())
+            .field(
+                "local_check_evidence_assurance_projection_count",
+                &self.local_check_evidence_assurance_projections.len(),
+            )
             .field(
                 "governance_execution",
                 &self.governance_assessment_binding.execution(),
@@ -2544,6 +2570,7 @@ pub struct LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult {
     bundle_binding: crate::ImmutableRunBundleBinding,
     governance_assessment_binding: crate::GovernanceAssessmentBinding,
     local_check_results: Vec<crate::LocalCheckResult>,
+    local_check_evidence_assurance_projections: Vec<crate::LocalCheckEvidenceAssuranceProjection>,
 }
 
 impl LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult {
@@ -2570,6 +2597,14 @@ impl LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult {
     pub fn local_check_results(&self) -> &[crate::LocalCheckResult] {
         &self.local_check_results
     }
+
+    /// Returns Core-owned same-call evidence-assurance projections.
+    #[must_use]
+    pub fn local_check_evidence_assurance_projections(
+        &self,
+    ) -> &[crate::LocalCheckEvidenceAssuranceProjection] {
+        &self.local_check_evidence_assurance_projections
+    }
 }
 
 impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult {
@@ -2579,6 +2614,10 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResu
             .field("run_status", &self.run.snapshot.status)
             .field("bundle_binding", &"[REDACTED]")
             .field("local_check_result_count", &self.local_check_results.len())
+            .field(
+                "local_check_evidence_assurance_projection_count",
+                &self.local_check_evidence_assurance_projections.len(),
+            )
             .field(
                 "governance_execution",
                 &self.governance_assessment_binding.execution(),
@@ -2598,6 +2637,7 @@ pub struct LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
     bundle_binding: crate::ImmutableRunBundleBinding,
     governance_assessment_binding: crate::GovernanceAssessmentBinding,
     local_check_results: Vec<crate::LocalCheckResult>,
+    local_check_evidence_assurance_projections: Vec<crate::LocalCheckEvidenceAssuranceProjection>,
 }
 
 impl LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
@@ -2623,6 +2663,14 @@ impl LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
     #[must_use]
     pub fn local_check_results(&self) -> &[crate::LocalCheckResult] {
         &self.local_check_results
+    }
+
+    /// Returns Core-owned same-call evidence-assurance projections.
+    #[must_use]
+    pub fn local_check_evidence_assurance_projections(
+        &self,
+    ) -> &[crate::LocalCheckEvidenceAssuranceProjection] {
+        &self.local_check_evidence_assurance_projections
     }
 
     /// Consumes the result into its owned parts.
@@ -2651,6 +2699,10 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
             .field("run_status", &self.run.snapshot.status)
             .field("bundle_binding", &"[REDACTED]")
             .field("local_check_result_count", &self.local_check_results.len())
+            .field(
+                "local_check_evidence_assurance_projection_count",
+                &self.local_check_evidence_assurance_projections.len(),
+            )
             .field(
                 "local_check_result_statuses",
                 &self
@@ -2695,6 +2747,7 @@ pub struct LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult {
     governance_assessment_binding: crate::GovernanceAssessmentBinding,
     reassessment_evaluated_at: Option<Timestamp>,
     local_check_results: Vec<crate::LocalCheckResult>,
+    local_check_evidence_assurance_projections: Vec<crate::LocalCheckEvidenceAssuranceProjection>,
 }
 
 impl LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult {
@@ -2730,6 +2783,14 @@ impl LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult {
     pub fn local_check_results(&self) -> &[crate::LocalCheckResult] {
         &self.local_check_results
     }
+
+    /// Returns Core-owned retry-time evidence-assurance projections.
+    #[must_use]
+    pub fn local_check_evidence_assurance_projections(
+        &self,
+    ) -> &[crate::LocalCheckEvidenceAssuranceProjection] {
+        &self.local_check_evidence_assurance_projections
+    }
 }
 
 impl fmt::Debug for LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult {
@@ -2740,6 +2801,10 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeExistingTerminalGovernanceRes
             .field("bundle_binding", &"[REDACTED]")
             .field("reassessment_evaluated_at", &"[REDACTED]")
             .field("local_check_result_count", &self.local_check_results.len())
+            .field(
+                "local_check_evidence_assurance_projection_count",
+                &self.local_check_evidence_assurance_projections.len(),
+            )
             .field(
                 "governance_execution",
                 &self.governance_assessment_binding.execution(),
@@ -2801,6 +2866,20 @@ impl LocalExecutionWithAuthoritativeGovernanceRouteResult {
             Self::ApprovalRequired(result) => result.local_check_results(),
             Self::Denied(result) => result.local_check_results(),
             Self::ExistingTerminal(result) => result.local_check_results(),
+        }
+    }
+
+    /// Returns Core-owned same-call evidence-assurance projections.
+    #[must_use]
+    pub fn local_check_evidence_assurance_projections(
+        &self,
+    ) -> &[crate::LocalCheckEvidenceAssuranceProjection] {
+        match self {
+            Self::QuietProceed(result) => result.local_check_evidence_assurance_projections(),
+            Self::VisibleProceed(result) => result.local_check_evidence_assurance_projections(),
+            Self::ApprovalRequired(result) => result.local_check_evidence_assurance_projections(),
+            Self::Denied(result) => result.local_check_evidence_assurance_projections(),
+            Self::ExistingTerminal(result) => result.local_check_evidence_assurance_projections(),
         }
     }
 
@@ -15844,6 +15923,8 @@ where
                 governance_assessment_binding: reassessment.binding,
                 reassessment_evaluated_at: reassessment.evaluated_at,
                 local_check_results: reassessment.local_check_results,
+                local_check_evidence_assurance_projections: reassessment
+                    .local_check_evidence_assurance_projections,
             },
         ),
     )
@@ -16048,6 +16129,8 @@ where
         bundle_binding: prepared.bundle_binding,
         governance_assessment_binding: prepared.governance_binding,
         local_check_results: prepared.local_check_results,
+        local_check_evidence_assurance_projections: prepared
+            .local_check_evidence_assurance_projections,
     })
 }
 
@@ -16094,6 +16177,8 @@ where
             bundle_binding: prepared.bundle_binding,
             governance_assessment_binding: prepared.governance_binding,
             local_check_results: prepared.local_check_results,
+            local_check_evidence_assurance_projections: prepared
+                .local_check_evidence_assurance_projections,
             disclosure_receipt,
         },
     )
@@ -16126,6 +16211,8 @@ where
             governance_assessment_binding: prepared.governance_binding,
             governance_approval_binding,
             local_check_results: prepared.local_check_results,
+            local_check_evidence_assurance_projections: prepared
+                .local_check_evidence_assurance_projections,
         },
     )
 }
@@ -16155,6 +16242,8 @@ where
             bundle_binding: prepared.bundle_binding,
             governance_assessment_binding: prepared.governance_binding,
             local_check_results: prepared.local_check_results,
+            local_check_evidence_assurance_projections: prepared
+                .local_check_evidence_assurance_projections,
         },
     )
 }
@@ -16177,6 +16266,7 @@ struct PreparedAuthoritativeDocsCheckGovernance {
     bundle_binding: crate::ImmutableRunBundleBinding,
     governance_binding: crate::GovernanceAssessmentBinding,
     local_check_results: Vec<crate::LocalCheckResult>,
+    local_check_evidence_assurance_projections: Vec<crate::LocalCheckEvidenceAssuranceProjection>,
 }
 
 #[derive(Clone, Copy)]
@@ -16340,7 +16430,7 @@ where
         profile: request.profile,
         runtime_facts: &runtime_facts,
     };
-    let (local_check_results, governance_binding) =
+    let (local_check_results, local_check_evidence_assurance_projections, governance_binding) =
         if let Some(evaluated_at) = options.runtime_fact_source_evaluated_at {
             let outcome = compose_authoritative_local_check_runtime_fact_source_bridge(
                 &AuthoritativeLocalCheckRuntimeFactSourceBridgeInput {
@@ -16350,11 +16440,15 @@ where
             )?;
             (
                 outcome.results().to_vec(),
+                outcome.assurance_projections().to_vec(),
                 outcome.governance_binding().clone(),
             )
         } else {
-            compose_authoritative_local_check_reassessment(&reassessment)?
-                .into_parts(&stored, request.selected_step_id.clone())?
+            let outcome = compose_authoritative_local_check_reassessment(&reassessment)?;
+            let assurance_projections = outcome.assurance_projections().to_vec();
+            let (results, binding) =
+                outcome.into_parts(&stored, request.selected_step_id.clone())?;
+            (results, assurance_projections, binding)
         };
     if request
         .expected_aggregate_fingerprint
@@ -16370,6 +16464,7 @@ where
         bundle_binding,
         governance_binding,
         local_check_results,
+        local_check_evidence_assurance_projections,
     })
 }
 
@@ -17317,6 +17412,7 @@ struct AuthoritativeLocalCheckApprovalReassessment {
     binding: crate::GovernanceAssessmentBinding,
     evaluated_at: Option<Timestamp>,
     local_check_results: Vec<crate::LocalCheckResult>,
+    local_check_evidence_assurance_projections: Vec<crate::LocalCheckEvidenceAssuranceProjection>,
 }
 
 fn decide_authoritative_governance_approval_with_fresh_result<B>(
@@ -17490,12 +17586,13 @@ fn reassess_authoritative_local_check_governance_binding(
         profile: request.profile,
         runtime_facts: &runtime_facts,
     };
-    let (local_check_results, reassessed) = compose_authoritative_reassessment_for_route(
-        reassessment,
-        &stored,
-        request.selected_step_id.clone(),
-        options,
-    )?;
+    let (local_check_results, local_check_evidence_assurance_projections, reassessed) =
+        compose_authoritative_reassessment_for_route(
+            reassessment,
+            &stored,
+            request.selected_step_id.clone(),
+            options,
+        )?;
     if request
         .expected_aggregate_fingerprint
         .as_ref()
@@ -17512,6 +17609,7 @@ fn reassess_authoritative_local_check_governance_binding(
         binding: durable_binding,
         evaluated_at: options.runtime_fact_source_evaluated_at,
         local_check_results,
+        local_check_evidence_assurance_projections,
     })
 }
 
@@ -17545,6 +17643,7 @@ fn compose_authoritative_reassessment_for_route(
 ) -> Result<
     (
         Vec<crate::LocalCheckResult>,
+        Vec<crate::LocalCheckEvidenceAssuranceProjection>,
         crate::GovernanceAssessmentBinding,
     ),
     WorkflowOsError,
@@ -17558,11 +17657,14 @@ fn compose_authoritative_reassessment_for_route(
         )?;
         return Ok((
             outcome.results().to_vec(),
+            outcome.assurance_projections().to_vec(),
             outcome.governance_binding().clone(),
         ));
     }
-    compose_authoritative_local_check_reassessment(&reassessment)?
-        .into_parts(stored, selected_step_id)
+    let outcome = compose_authoritative_local_check_reassessment(&reassessment)?;
+    let assurance_projections = outcome.assurance_projections().to_vec();
+    let (results, binding) = outcome.into_parts(stored, selected_step_id)?;
+    Ok((results, assurance_projections, binding))
 }
 
 fn reassess_governance_assessment_binding(
