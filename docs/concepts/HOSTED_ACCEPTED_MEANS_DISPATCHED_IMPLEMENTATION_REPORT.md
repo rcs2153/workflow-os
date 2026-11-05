@@ -18,9 +18,12 @@ an exact retry reconstructs the reviewed no-write dispatch from the immutable
 run bundle and atomically repairs it. Changed requests, changed dispatch intent,
 incomplete durable dispatch, and unsupported run postures fail closed.
 
-This closes the implementation portion of **Accepted Means Dispatched**. It
-does not close the release gate until exact-head PostgreSQL CI and an independent
-fault-injection rerun pass.
+This closes **Accepted Means Dispatched** on exact main `61de8882`. PR #739
+passed all nine required checks on reviewed head `c2f3640d`, and independent
+exact-main Actions run `42019866185` passed all nine jobs, including the Rust
+scheduling regression, live PostgreSQL trigger and concurrency coverage, and
+Hosted Alpha Recovery. The evidence is bounded to Gate 1 and does not establish
+broader hosted production readiness.
 
 ## 2. Scope Completed
 
@@ -251,8 +254,8 @@ Local evidence after the correction:
 - the complete Core all-features suite passed, including `784` unit tests and
   the full integration and documentation-test matrix.
 
-Gate 1 remains open until this bounded repair passes fresh governed review,
-exact-head pull-request CI, and exact-main post-merge CI.
+The bounded repair passed fresh governed review, exact-head pull-request CI,
+and exact-main post-merge CI. Gate 1 is closed.
 
 Governed blocker phase:
 
@@ -279,3 +282,34 @@ Governed blocker phase:
   full-suite validation, and documentation validation were performed by the
   trusted development host; Workflow OS governed scope and approval but did
   not execute repository writes or shell commands
+
+## 12. Final Gate 1 Acceptance Evidence
+
+- PR: [#739](https://github.com/rcs2153/workflow-os/pull/739)
+- exact reviewed head: `c2f3640d3035482d8451b4fc5c359dc070e76149`
+- exact merged main: `61de8882f8b8dd2a2e2bbb81f5668ece581053b9`
+- exact-head PR Actions run: `42018593801`, all nine jobs passed
+- independent exact-main Actions run: `42019866185`, all nine jobs passed
+- next authorized implementation lane: Gate 2, **Verified Means Correctly
+  Bound**
+
+## 13. Governed Gate Closeout Record
+
+- workflow: `dg/d`
+- run: `run-1793878970169089000-2`
+- approval: `approval/run-1793878970169089000-2/planning-approved`
+- presentation: `presentation/bdc43331b521c8f3`
+- approval outcome: granted by the delegated maintainer with persisted
+  presentation proof
+- phase status: completed
+- event summary: `39` events, including `1` approval request, `1` approval
+  grant, `8` policy decisions, `6` scheduled steps, `6` requested skill
+  invocations, `6` started skill invocations, `6` successful skill
+  invocations, `1` run resume, and `1` run completion; `0` retries and `0`
+  escalations
+- validation summary: repository documentation checks and diff hygiene passed
+- out-of-kernel execution: evidence reconciliation, documentation edits,
+  validation commands, git operations, and subsequent PR actions were or will
+  be performed by the trusted development host; Workflow OS governed scope,
+  approval, and phase closure but did not execute repository writes, shell
+  commands, git operations, or PR actions
