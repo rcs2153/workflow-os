@@ -49,9 +49,11 @@ Plan](../implementation-plans/continuity-of-authority-p0-release-gates-plan.md).
   general provider-write product.
 - **Primary audience today:** maintainers, infrastructure engineers, security
   engineers, and teams evaluating governed agent work.
-- **Release blockers:** three accepted continuity-of-authority P0 gates remain
-  open for hosted dispatch truth, WorkReport identity binding, and project-
-  resource authorization continuity.
+- **Release blockers:** two accepted continuity-of-authority P0 gates remain
+  open for WorkReport identity binding and project-resource authorization
+  continuity. The WorkReport gate has an implementation candidate but remains
+  open pending exact-head CI, PostgreSQL execution, focused review, and an
+  independent misplacement rerun.
 
 ## Implemented Product Surfaces
 
@@ -130,10 +132,18 @@ and the product is not a sole enterprise audit authority.
   acknowledgement. Approval-waiting and terminal exact runs can be returned
   directly; a `Running` run requires one matching queued work item plus pending
   invocation evidence, or an exact retry must atomically repair that dispatch.
-  Changed intent and unsupported durable postures fail closed. Exact-head
-  PostgreSQL CI and an independent fault-injection rerun remain required before
-  the Accepted Means Dispatched release gate passes, so do not yet treat the
-  hosted alpha as reliable unattended execution.
+  Changed intent and unsupported durable postures fail closed. The Accepted
+  Means Dispatched release gate passed exact-head and post-merge CI plus an
+  independent fault-injection rerun. That closes dispatch-truth Gate 1 only; it
+  does not make the hosted alpha a production or reliable unattended execution
+  product.
+- Persisted WorkReport reads now have a bounded identity-binding implementation
+  candidate: physical run/report keys and available immutable workflow identity
+  are checked before retained body commitment and before projection, recovery,
+  reconciliation, or replay. Legacy body-commitment posture does not excuse a
+  wrong storage identity. This remains local/backend integrity, not
+  storage-owner tamper resistance, and Gate 2 is not accepted until its pending
+  review and rerun evidence passes.
 - Optional OpenShell no-write provider contracts and pinned CLI inspection
   compatibility. The current CLI compatibility boundary does not satisfy the
   full execution-provider evidence contract.

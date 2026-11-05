@@ -16,6 +16,7 @@ use crate::state::{
     is_allowed_side_effect_lifecycle_update, same_approval_presentation_run_identity,
     same_side_effect_run_identity, state_error, validate_append_against_history,
     validate_work_report_artifact_on_read, LocalStateMigrationExport,
+    WorkReportArtifactLocationExpectation, WorkReportArtifactLocatorClass,
 };
 use crate::{
     validate_approval_presentation_approval_id,
@@ -3093,16 +3094,13 @@ impl WorkReportArtifactStore for SqliteStateBackend {
         let artifact: Option<WorkReportArtifactRecord> = payload
             .map(|payload| decode_json(&payload, "work report artifact"))
             .transpose()?;
-        if artifact.as_ref().is_some_and(|artifact| {
-            artifact.run_id() != run_id || artifact.report_id() != report_id
-        }) {
-            return Err(sqlite_state_error(
-                "record.identity_mismatch",
-                "SQLite state record identity does not match its relational index",
-            ));
-        }
+        let expectation = WorkReportArtifactLocationExpectation::for_report(
+            run_id.clone(),
+            report_id.clone(),
+            WorkReportArtifactLocatorClass::Sqlite,
+        );
         artifact
-            .map(validate_work_report_artifact_on_read)
+            .map(|artifact| validate_work_report_artifact_on_read(artifact, &expectation))
             .transpose()
     }
 
@@ -3110,23 +3108,53 @@ impl WorkReportArtifactStore for SqliteStateBackend {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError> {
-        let artifacts: Vec<WorkReportArtifactRecord> = read_payloads(
-            &self.connection()?,
-            "SELECT payload FROM work_report_artifacts
-             WHERE run_id = ?1 ORDER BY report_id",
-            run_id.as_str(),
-            "work report artifact",
-        )?;
-        if artifacts.iter().any(|artifact| artifact.run_id() != run_id) {
-            return Err(sqlite_state_error(
-                "record.identity_mismatch",
-                "SQLite state record identity does not match its relational index",
-            ));
-        }
-        artifacts
-            .into_iter()
-            .map(validate_work_report_artifact_on_read)
-            .collect()
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT report_id, payload FROM work_report_artifacts
+                 WHERE run_id = ?1 ORDER BY report_id",
+            )
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "read.failed",
+                    "SQLite work report artifacts could not be read",
+                )
+            })?;
+        let rows = statement
+            .query_map(params![run_id.as_str()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "read.failed",
+                    "SQLite work report artifacts could not be read",
+                )
+            })?;
+        rows.map(|row| {
+            let (stored_report_id, payload) = row.map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "read.failed",
+                    "SQLite work report artifacts could not be read",
+                )
+            })?;
+            let report_id = WorkReportId::new(stored_report_id).map_err(|_| {
+                sqlite_state_error(
+                    "record.identity_mismatch",
+                    "SQLite state record identity does not match its relational index",
+                )
+            })?;
+            let artifact = decode_json(&payload, "work report artifact")?;
+            let expectation = WorkReportArtifactLocationExpectation::for_report(
+                run_id.clone(),
+                report_id,
+                WorkReportArtifactLocatorClass::Sqlite,
+            );
+            validate_work_report_artifact_on_read(artifact, &expectation)
+        })
+        .collect()
     }
 }
 

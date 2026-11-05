@@ -256,6 +256,27 @@ Gate 2 acceptance:
   owner tamper resistance; and
 - exact-head CI plus an independent filesystem/backend misplacement rerun pass.
 
+Implementation status:
+
+- one Core-owned `WorkReportArtifactLocationExpectation` now carries the
+  requested run, optional report, available immutable workflow identity, and a
+  payload-free locator class;
+- filesystem, SQLite, PostgreSQL, PostgreSQL transaction-local, and injected
+  store reads use the common ordered validator;
+- CLI inspect, first-run terminal replay, current-authority metadata,
+  continuation collection, and duplicate reconciliation supply the strongest
+  identity expectation available at their boundary;
+- valid wrong-run, wrong-report, wrong-workflow, combined body-and-location,
+  relational-key, injected-store, and legacy misplacement cases fail closed
+  with `work_report_artifact.read.location_mismatch` before projection or body
+  reuse;
+- body-only substitution remains `work_report_artifact.read.corrupt`; and
+- exact-head CI, focused review, and independent backend misplacement rerun are
+  still required, so this implementation status does not close Gate 2.
+
+See the [Gate 2 implementation
+report](../concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_IMPLEMENTATION_REPORT.md).
+
 ## 5. Gate 3 Implementation: Project Resource Authorization Continuity
 
 Identify every project-level capability and resource restriction that the

@@ -16,6 +16,10 @@ use crate::hosted::{
     HostedExecutionProviderVersion, HostedSkillDispatch, HostedTerminalReportArtifact,
     HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
 };
+use crate::state::{
+    validate_work_report_artifact_on_read, WorkReportArtifactLocationExpectation,
+    WorkReportArtifactLocatorClass,
+};
 use crate::{
     validate_approval_presentation_for_request, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, ApprovalPresentationId, ApprovalPresentationRecord,
@@ -3077,13 +3081,18 @@ impl WorkReportArtifactStore for PostgresStateBackend {
         report_id: &WorkReportId,
     ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError> {
         let mut client = self.connections.connect()?;
+        let expectation = WorkReportArtifactLocationExpectation::for_report(
+            run_id.clone(),
+            report_id.clone(),
+            WorkReportArtifactLocatorClass::Postgres,
+        );
         read_record::<WorkReportArtifactRecord>(
             &mut client,
             "work_report",
             report_id.as_str(),
             run_id.as_str(),
         )?
-        .map(|record| crate::state::validate_work_report_artifact_on_read(record.value))
+        .map(|record| validate_work_report_artifact_on_read(record.value, &expectation))
         .transpose()
     }
 
@@ -3091,9 +3100,30 @@ impl WorkReportArtifactStore for PostgresStateBackend {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError> {
-        self.list_records_by_key2("work_report", run_id.as_str())?
-            .into_iter()
-            .map(crate::state::validate_work_report_artifact_on_read)
+        let mut client = self.connections.connect()?;
+        let rows = client
+            .query(
+                "SELECT key1, payload FROM workflow_os.records
+                  WHERE family = 'work_report' AND key2 = $1 ORDER BY key1",
+                &[&run_id.as_str()],
+            )
+            .map_err(|error| database_error("work_report_list", &error))?;
+        rows.into_iter()
+            .map(|row| {
+                let report_id = WorkReportId::new(row.get::<_, String>(0)).map_err(|_| {
+                    state_error(
+                        "postgres_state.work_report.identity_mismatch",
+                        "PostgreSQL work report artifact identity is invalid",
+                    )
+                })?;
+                let artifact: WorkReportArtifactRecord = decode(row.get::<_, String>(1).as_str())?;
+                let expectation = WorkReportArtifactLocationExpectation::for_report(
+                    run_id.clone(),
+                    report_id,
+                    WorkReportArtifactLocatorClass::Postgres,
+                );
+                validate_work_report_artifact_on_read(artifact, &expectation)
+            })
             .collect()
     }
 }
@@ -6408,13 +6438,12 @@ fn read_work_report_artifact_tx(
         return Ok(None);
     };
     let artifact: WorkReportArtifactRecord = decode(row.get::<_, String>(0).as_str())?;
-    if artifact.report_id() != report_id || artifact.run_id() != run_id {
-        return Err(state_error(
-            "postgres_state.work_report.identity_mismatch",
-            "PostgreSQL work report artifact identity is invalid",
-        ));
-    }
-    Ok(Some(artifact))
+    let expectation = WorkReportArtifactLocationExpectation::for_report(
+        run_id.clone(),
+        report_id.clone(),
+        WorkReportArtifactLocatorClass::PostgresTransaction,
+    );
+    validate_work_report_artifact_on_read(artifact, &expectation).map(Some)
 }
 
 fn validate_hosted_work_item_lease(

@@ -729,7 +729,7 @@ pub use state::{
     LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity,
     LocalStateMigrationExclusiveGuard, LockLease, LockStore, PolicyAuditStore, ProjectStateRecord,
     ProjectStateStore, RunSnapshotStore, SideEffectRecordStore, StateBackend,
-    WorkReportArtifactStore,
+    WorkReportArtifactLocationExpectation, WorkReportArtifactLocatorClass, WorkReportArtifactStore,
 };
 pub use state_migration::{
     StateMigrationAttempt, StateMigrationCompatibilityFinding, StateMigrationDestination,

@@ -19,7 +19,8 @@ use super::{
 use crate::{
     continuation_context::ContinuationContextText, EventLogStore, ImmutableRunBundleDefinitionKind,
     ImmutableRunBundleSensitivity, ImmutableRunBundleStore, RunSnapshotStore,
-    SideEffectRecordStore, SpecContentHash, StoredImmutableRunBundle, WorkReportArtifactStore,
+    SideEffectRecordStore, SpecContentHash, StoredImmutableRunBundle,
+    WorkReportArtifactLocationExpectation, WorkReportArtifactLocatorClass, WorkReportArtifactStore,
     WorkflowOsError, WorkflowRunEvent, WorkflowRunSnapshot, WorkflowRunStatus,
 };
 
@@ -501,7 +502,16 @@ where
                 "run-scope-unavailable",
             );
         };
-        let mut records = self.state.list_work_report_artifacts(run_id)?;
+        let mut expectation = WorkReportArtifactLocationExpectation::for_run(
+            run_id.clone(),
+            WorkReportArtifactLocatorClass::InjectedStore,
+        );
+        if let Some(snapshot) = self.state.load_snapshot(run_id)? {
+            expectation = expectation.with_run_identity(&snapshot.identity);
+        }
+        let mut records = self
+            .state
+            .list_work_report_artifacts_with_expectation(&expectation)?;
         records.sort_by(|left, right| left.report_id().as_str().cmp(right.report_id().as_str()));
         if records.is_empty() {
             return StoreBackedRead::empty(ContinuationCollectorKind::WorkReport, &records);

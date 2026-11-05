@@ -14,11 +14,12 @@ use crate::{
     validate_approval_presentation_approval_id, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, ApprovalPresentationId, ApprovalPresentationRecord,
     ApprovalRequest, EventId, EventSequenceNumber, IdempotencyKey, PolicyAuditRecord, ProjectId,
-    SideEffectId, SideEffectLifecycleState, SideEffectRecord, StateMigrationGuardProtocolVersion,
-    StateMigrationInventory, StateMigrationWriterGuardCapability, StateMigrationWriterGuardMode,
+    SchemaVersion, SideEffectId, SideEffectLifecycleState, SideEffectRecord, SpecContentHash,
+    StateMigrationGuardProtocolVersion, StateMigrationInventory,
+    StateMigrationWriterGuardCapability, StateMigrationWriterGuardMode,
     StateMigrationWriterProtocolVersion, WorkReportArtifactRecord, WorkReportId, WorkflowId,
     WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId,
-    WorkflowRunSnapshot,
+    WorkflowRunIdentity, WorkflowRunSnapshot, WorkflowVersion,
 };
 
 mod migration_inventory;
@@ -234,6 +235,32 @@ pub trait WorkReportArtifactStore {
         report_id: &WorkReportId,
     ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError>;
 
+    /// Reads one artifact and validates it against the caller's complete
+    /// external location and immutable workflow expectation.
+    ///
+    /// This default closes the injected-store boundary: a trait
+    /// implementation cannot satisfy an expectation by returning a valid
+    /// artifact from another run, report slot, or immutable workflow.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable payload-free error when the expectation does not name
+    /// one report or the returned artifact does not match it.
+    fn read_work_report_artifact_with_expectation(
+        &self,
+        expectation: &WorkReportArtifactLocationExpectation,
+    ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError> {
+        let report_id = expectation.report_id().ok_or_else(|| {
+            state_error(
+                "work_report_artifact.read.expectation_invalid",
+                "work report artifact read expectation must identify one report",
+            )
+        })?;
+        self.read_work_report_artifact(expectation.run_id(), report_id)?
+            .map(|artifact| validate_work_report_artifact_on_read(artifact, expectation))
+            .transpose()
+    }
+
     /// Lists work report artifacts for a run.
     ///
     /// # Errors
@@ -244,6 +271,150 @@ pub trait WorkReportArtifactStore {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError>;
+
+    /// Lists artifacts and validates every returned record against the
+    /// caller's run and immutable workflow expectation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable payload-free error when any returned artifact does not
+    /// match the requested run or immutable workflow identity.
+    fn list_work_report_artifacts_with_expectation(
+        &self,
+        expectation: &WorkReportArtifactLocationExpectation,
+    ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError> {
+        self.list_work_report_artifacts(expectation.run_id())?
+            .into_iter()
+            .map(|artifact| validate_work_report_artifact_on_read(artifact, expectation))
+            .collect()
+    }
+}
+
+/// Storage boundary that supplied a `WorkReport` artifact expectation.
+///
+/// The locator is deliberately payload-free. It distinguishes the validation
+/// boundary without exposing a filesystem path, database key, or provider
+/// payload.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkReportArtifactLocatorClass {
+    /// Local create-only filesystem storage.
+    LocalFilesystem,
+    /// Embedded SQLite storage.
+    Sqlite,
+    /// Shared PostgreSQL storage.
+    Postgres,
+    /// PostgreSQL transaction-local replay or reconciliation.
+    PostgresTransaction,
+    /// A caller-supplied trait implementation.
+    InjectedStore,
+}
+
+/// Expected external location and immutable workflow identity for one
+/// `WorkReport` artifact read or listing.
+#[derive(Clone, Eq, PartialEq)]
+pub struct WorkReportArtifactLocationExpectation {
+    run_id: WorkflowRunId,
+    report_id: Option<WorkReportId>,
+    workflow_id: Option<WorkflowId>,
+    workflow_version: Option<WorkflowVersion>,
+    schema_version: Option<SchemaVersion>,
+    spec_content_hash: Option<SpecContentHash>,
+    locator_class: WorkReportArtifactLocatorClass,
+}
+
+impl WorkReportArtifactLocationExpectation {
+    /// Creates an expectation for one exact report slot.
+    #[must_use]
+    pub fn for_report(
+        run_id: WorkflowRunId,
+        report_id: WorkReportId,
+        locator_class: WorkReportArtifactLocatorClass,
+    ) -> Self {
+        Self {
+            run_id,
+            report_id: Some(report_id),
+            workflow_id: None,
+            workflow_version: None,
+            schema_version: None,
+            spec_content_hash: None,
+            locator_class,
+        }
+    }
+
+    /// Creates an expectation for every report physically listed under one
+    /// run key.
+    #[must_use]
+    pub fn for_run(run_id: WorkflowRunId, locator_class: WorkReportArtifactLocatorClass) -> Self {
+        Self {
+            run_id,
+            report_id: None,
+            workflow_id: None,
+            workflow_version: None,
+            schema_version: None,
+            spec_content_hash: None,
+            locator_class,
+        }
+    }
+
+    /// Adds the exact immutable workflow identity captured by a run.
+    #[must_use]
+    pub fn with_run_identity(mut self, identity: &WorkflowRunIdentity) -> Self {
+        self.workflow_id = Some(identity.workflow_id.clone());
+        self.workflow_version = Some(identity.workflow_version.clone());
+        self.schema_version = Some(identity.schema_version.clone());
+        self.spec_content_hash = Some(identity.spec_content_hash.clone());
+        self
+    }
+
+    /// Adds an exact workflow ID when the composing boundary does not possess
+    /// the complete immutable run identity.
+    #[must_use]
+    pub fn with_workflow_id(mut self, workflow_id: WorkflowId) -> Self {
+        self.workflow_id = Some(workflow_id);
+        self
+    }
+
+    /// Returns the expected run key.
+    #[must_use]
+    pub const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    /// Returns the expected report key for an exact read.
+    #[must_use]
+    pub const fn report_id(&self) -> Option<&WorkReportId> {
+        self.report_id.as_ref()
+    }
+
+    /// Returns the payload-free locator class.
+    #[must_use]
+    pub const fn locator_class(&self) -> WorkReportArtifactLocatorClass {
+        self.locator_class
+    }
+}
+
+impl fmt::Debug for WorkReportArtifactLocationExpectation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactLocationExpectation")
+            .field("run_id", &"[REDACTED]")
+            .field("report_id", &self.report_id.as_ref().map(|_| "[REDACTED]"))
+            .field(
+                "workflow_id",
+                &self.workflow_id.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "workflow_version",
+                &self.workflow_version.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("schema_version", &self.schema_version)
+            .field(
+                "spec_content_hash",
+                &self.spec_content_hash.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("locator_class", &self.locator_class)
+            .finish()
+    }
 }
 
 /// Durable `SideEffect` record contract.
@@ -1810,7 +1981,12 @@ impl WorkReportArtifactStore for LocalStateBackend {
                 "work report artifact could not be read or validated",
             )
         })?;
-        validate_work_report_artifact_on_read(artifact).map(Some)
+        let expectation = WorkReportArtifactLocationExpectation::for_report(
+            run_id.clone(),
+            report_id.clone(),
+            WorkReportArtifactLocatorClass::LocalFilesystem,
+        );
+        validate_work_report_artifact_on_read(artifact, &expectation).map(Some)
     }
 
     fn list_work_report_artifacts(
@@ -1830,7 +2006,19 @@ impl WorkReportArtifactStore for LocalStateBackend {
                         "work report artifact could not be read or validated",
                     )
                 })?;
-                validate_work_report_artifact_on_read(artifact)
+                let expected_path = self.work_report_artifact_path(run_id, artifact.report_id());
+                if path != &expected_path {
+                    return Err(state_error(
+                        "work_report_artifact.read.location_mismatch",
+                        "work report artifact does not match its external storage identity",
+                    ));
+                }
+                let expectation = WorkReportArtifactLocationExpectation::for_report(
+                    run_id.clone(),
+                    artifact.report_id().clone(),
+                    WorkReportArtifactLocatorClass::LocalFilesystem,
+                );
+                validate_work_report_artifact_on_read(artifact, &expectation)
             })
             .collect()
     }
@@ -1838,13 +2026,51 @@ impl WorkReportArtifactStore for LocalStateBackend {
 
 pub(crate) fn validate_work_report_artifact_on_read(
     artifact: WorkReportArtifactRecord,
+    expectation: &WorkReportArtifactLocationExpectation,
 ) -> Result<WorkReportArtifactRecord, WorkflowOsError> {
-    artifact.validate().map_err(|_| {
+    artifact.validate_structure().map_err(|_| {
         state_error(
             "work_report_artifact.read.corrupt",
             "work report artifact could not be read or validated",
         )
     })?;
+    let metadata = artifact.metadata();
+    if artifact.run_id() != expectation.run_id()
+        || expectation
+            .report_id()
+            .is_some_and(|report_id| artifact.report_id() != report_id)
+        || expectation
+            .workflow_id
+            .as_ref()
+            .is_some_and(|workflow_id| metadata.workflow_id() != workflow_id)
+        || expectation
+            .workflow_version
+            .as_ref()
+            .is_some_and(|workflow_version| metadata.workflow_version() != workflow_version)
+        || expectation
+            .schema_version
+            .as_ref()
+            .is_some_and(|schema_version| metadata.schema_version() != schema_version)
+        || expectation
+            .spec_content_hash
+            .as_ref()
+            .is_some_and(|spec_content_hash| metadata.spec_hash() != spec_content_hash)
+    {
+        return Err(state_error(
+            "work_report_artifact.read.location_mismatch",
+            "work report artifact does not match its external storage identity",
+        ));
+    }
+    if let Some(expected) = artifact.metadata().body_commitment() {
+        expected
+            .verify_report(artifact.work_report())
+            .map_err(|_| {
+                state_error(
+                    "work_report_artifact.read.corrupt",
+                    "work report artifact could not be read or validated",
+                )
+            })?;
+    }
     Ok(artifact)
 }
 

@@ -245,7 +245,7 @@ fn postgresql_backend_proves_shared_state_milestone() {
     prove_competing_idempotency_intent(&backend);
     prove_atomic_side_effect_families(&backend);
     prove_atomic_approval_family(&backend);
-    prove_immutable_bundle_family(&backend);
+    prove_immutable_bundle_family(&backend, &config);
     prove_authoritative_projection_and_shared_consumer(&backend);
     prove_hosted_project_resource_binding(&backend, &config);
     prove_project_approval_route_persistence(&backend, &config);
@@ -2586,7 +2586,7 @@ fn prepare_collaborative_approval_fixture(
     (scope, principal, decided, presentation, granted_event)
 }
 
-fn prove_immutable_bundle_family(backend: &PostgresStateBackend) {
+fn prove_immutable_bundle_family(backend: &PostgresStateBackend, config: &Config) {
     let project = TestProject::new();
     project.write_valid_project();
     let loaded = workflow_core::load_project(project.path());
@@ -2669,7 +2669,7 @@ fn prove_immutable_bundle_family(backend: &PostgresStateBackend) {
         build.manifest()
     );
     persist_running_bundle_backed_run(backend, build.manifest());
-    prove_hosted_work_item_queue(backend, build.manifest());
+    prove_hosted_work_item_queue(backend, config, build.manifest());
 
     for (suffix, outcome) in [
         ("rejected", HostedUnreceiptedOutcome::RejectedBeforeStart),
@@ -3254,6 +3254,7 @@ fn persist_running_bundle_backed_run_with_suffix(
 
 fn prove_hosted_work_item_queue(
     backend: &PostgresStateBackend,
+    config: &Config,
     manifest: &workflow_core::ImmutableRunBundleManifest,
 ) {
     let correlation_id = CorrelationId::new("correlation-postgres-hosted").expect("correlation");
@@ -3659,6 +3660,47 @@ fn prove_hosted_work_item_queue(
         replay_after_completion,
         PostgresHostedWorkItemCreateResult::Replayed(_)
     ));
+
+    let mut client = config.connect(NoTls).expect("connect location fixture");
+    client
+        .execute(
+            "UPDATE workflow_os.records
+                SET key1 = $1, key2 = $2
+              WHERE family = 'work_report' AND key1 = $3 AND key2 = $4",
+            &[
+                &"report/postgres-other-location",
+                &"run-postgres-other-location",
+                &report_artifact.record().report_id().as_str(),
+                &manifest.run_id().as_str(),
+            ],
+        )
+        .expect("move report artifact relational keys");
+    let misplaced_error = backend
+        .read_work_report_artifact(
+            &WorkflowRunId::new("run-postgres-other-location").expect("run id"),
+            &workflow_core::WorkReportId::new("report/postgres-other-location").expect("report id"),
+        )
+        .expect_err("misplaced PostgreSQL artifact rejected");
+    assert_eq!(
+        misplaced_error.code(),
+        "work_report_artifact.read.location_mismatch"
+    );
+    assert!(!misplaced_error
+        .to_string()
+        .contains("run-postgres-other-location"));
+    client
+        .execute(
+            "UPDATE workflow_os.records
+                SET key1 = $1, key2 = $2
+              WHERE family = 'work_report' AND key1 = $3 AND key2 = $4",
+            &[
+                &report_artifact.record().report_id().as_str(),
+                &manifest.run_id().as_str(),
+                &"report/postgres-other-location",
+                &"run-postgres-other-location",
+            ],
+        )
+        .expect("restore report artifact relational keys");
 }
 
 fn prove_hosted_unreceipted_projection(

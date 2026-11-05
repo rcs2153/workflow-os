@@ -1837,6 +1837,48 @@ fn inspect_rejects_substituted_work_report_before_human_or_json_projection() {
 }
 
 #[test]
+fn inspect_and_terminal_replay_reject_valid_work_report_from_another_run_slot() {
+    let project = TestProject::new("inspect-report-location-substitution");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let run_a = "run-inspect-location-a";
+    let run_b = "run-inspect-location-b";
+    for run_id in [run_a, run_b] {
+        let create = workflow_os(
+            &project,
+            &["first-run", "--write-report-artifact", "--run-id", run_id],
+        );
+        assert!(create.status.success(), "{}", stderr(&create));
+    }
+    let artifact_root = project.state_root().join("work_reports");
+    let artifact_path = |run_id: &str| {
+        artifact_root
+            .join(encode_key(run_id))
+            .join(format!("{}.json", encode_key(&format!("report/{run_id}"))))
+    };
+    fs::copy(artifact_path(run_b), artifact_path(run_a))
+        .expect("valid run B artifact replaces run A physical slot");
+
+    for args in [vec!["inspect", run_a], vec!["--json", "inspect", run_a]] {
+        let inspect = workflow_os(&project, &args);
+        assert!(!inspect.status.success());
+        assert!(stderr(&inspect).contains("work_report_artifact.read.location_mismatch"));
+        assert!(!stdout(&inspect).contains(run_b));
+        assert!(!stderr(&inspect).contains(run_b));
+        assert!(!stdout(&inspect).contains("work_report_artifacts"));
+    }
+
+    let replay = workflow_os(
+        &project,
+        &["first-run", "--write-report-artifact", "--run-id", run_a],
+    );
+    assert!(!replay.status.success());
+    assert!(!stdout(&replay).contains("already_persisted"));
+    assert!(!stdout(&replay).contains(run_b));
+    assert!(!stderr(&replay).contains(run_b));
+}
+
+#[test]
 fn inspect_projects_legacy_work_report_as_explicitly_unverified() {
     let project = TestProject::new("inspect-report-legacy-unverified");
     let init = workflow_os(&project, &["init-repo-governance"]);
