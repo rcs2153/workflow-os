@@ -47,6 +47,7 @@ Related foundations:
 - [Runtime Proportional-Governance Reassessment Plan](runtime-proportional-governance-reassessment-plan.md)
 - [BeforeSkillInvocation Required Checkpoint Plan](before-skill-required-checkpoint-plan.md)
 - [Self-Governed Build Benchmark](../user-guide/self-governed-build-benchmark.md)
+- [Compact Recovery Checkpoint Evaluation Plan](compact-recovery-checkpoint-evaluation-plan.md)
 
 ## 1. Executive Summary
 
@@ -459,6 +460,37 @@ boundary. Rebuilding from an empty cache and the same authoritative inputs must
 produce the same canonical projection commitment. Cache contents cannot grant
 authority, satisfy evidence, or make an operation executable.
 
+### 6.4.3 Compact Recovery Checkpoint Product Requirement
+
+The bounded understanding projection must support a compact recovery-checkpoint
+form suitable for automatic delivery after context loss. The checkpoint is a
+projection of current authoritative state, not a summary authored by the model
+and not an authority credential. It should contain only the minimum permitted
+facts needed to avoid rediscovering current objective, accepted amendments,
+completed and remaining work, blockers, validation/report obligations, and
+lawful next options. Every field remains provenance-backed, purpose-bound,
+freshness-bounded, capability-filtered, and redaction-safe.
+
+Two controlled evaluations report correct recovery decisions with materially
+less gross input/output when a compact current kernel checkpoint accompanied
+the same summary. A fresh-session simulation reported 36,363 fewer tokens
+across four matched cases, or 33.43%. A follow-up under actual Codex compaction
+reported 83,613 fewer tokens across three paired scenarios, or 49.93%, while
+both arms made all nine decisions correctly. The results support the product
+hypothesis that a small authoritative checkpoint can avoid a larger evidence-
+reconstruction turn when conversational memory is stale. They do not establish
+a general production saving: model, task, host, and cut-point coverage remain
+limited; the measure is gross rather than billed tokens; and neither complete
+raw package nor selection evidence is versioned in the repository.
+
+The [Compact Recovery Checkpoint Evaluation
+Plan](compact-recovery-checkpoint-evaluation-plan.md) defines the required
+artifact, claim limits, long-running compaction experiment, conditions, metrics,
+and release gate. Checkpoint generation may become a product output only after
+its canonical source contract, exposure boundary, and non-authorizing posture
+are reviewed. Evaluation data must not be embedded in runtime authority or
+treated as evidence that a recipient understood the checkpoint.
+
 ### 6.5 Selection And Materialization Algorithm
 
 The first pure decision layer should operate only on explicit validated inputs:
@@ -870,6 +902,11 @@ reviewed increments:
 19. Complete adversarial review before claiming compaction-safe delegated
     continuation, cross-agent continuation, or context-independent autonomous
     maintenance.
+20. Preserve the controlled recovery benchmark as a versioned evaluation
+    artifact, reconcile all twenty sessions and pair-selection rules, then run
+    the pre-registered long-running compaction experiment before making a public
+    percentage, billing, latency, or end-to-end productivity claim. This is an
+    evidence and productization gate, not authorization for runtime expansion.
 
 Implementation status for step 16: the private local conformance path composes
 the exact aggregate independently for an original and context-free replacement
@@ -961,6 +998,12 @@ Future tests must cover:
 - existing executor, approval, immutable-run, proportional-governance,
   authority, required-context, typed-handoff, hook, SideEffect, and WorkReport
   tests remain green.
+- summary-only, summary-plus-lookup, and automatically injected checkpoint
+  conditions preserve recovery-decision correctness and expose any duplicate
+  SideEffect, false-authority, stale-intent, latency, or token-cost regression;
+- all controlled-evaluation sessions, selection and exclusion rules, prompts,
+  fixtures, model settings, token accounting, and rerun instructions are
+  versioned before a public efficiency percentage is claimed.
 
 ## 17. Acceptance Criteria
 
@@ -1001,6 +1044,10 @@ Future tests must cover:
 - Low-risk work can remain quiet under proportional governance.
 - No provider mutation broadening, nested harness runtime, schema expansion, or
   hosted claim is introduced by the first slice.
+- Compact checkpoint generation is a named product requirement, but the current
+  controlled result is described only as promising small-scale evidence; no
+  fixed production token, billing, latency, or completion-cost saving is
+  claimed before the broader evaluation passes.
 
 ## 18. Open Questions
 
