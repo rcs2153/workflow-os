@@ -3057,7 +3057,7 @@ fn persisted_envelope_commitment_detects_report_only_substitution_at_validation_
     value["work_report"]["sections"][0]["summary"] = json!("substituted bounded summary");
 
     let substituted: WorkReportArtifactRecord =
-        serde_json::from_value(value).expect("ordinary read enforcement is intentionally deferred");
+        serde_json::from_value(value).expect("serde remains a structure-only boundary");
     let error = substituted
         .validate()
         .expect_err("explicit validation rejects report-only substitution");
@@ -3072,6 +3072,79 @@ fn persisted_envelope_commitment_detects_report_only_substitution_at_validation_
             .commitment()
             .as_str()
     ));
+}
+
+#[test]
+fn local_backend_read_and_list_reject_report_only_substitution_without_leaking_payload() {
+    let backend = temp_state_backend("read-list-body-commitment-mismatch");
+    let artifact = artifact_record();
+    backend
+        .write_work_report_artifact(&artifact)
+        .expect("artifact written");
+    let path = artifact_path(&backend, &artifact);
+    let mut value = serde_json::to_value(&artifact).expect("serialize artifact");
+    value["work_report"]["sections"][0]["summary"] =
+        json!("substituted bounded summary sk-artifact-secret");
+    fs::write(
+        &path,
+        serde_json::to_vec(&value).expect("serialize substituted artifact"),
+    )
+    .expect("substituted artifact written");
+
+    let read_error = backend
+        .read_work_report_artifact(artifact.run_id(), artifact.report_id())
+        .expect_err("read rejects substituted report body");
+    let list_error = backend
+        .list_work_report_artifacts(artifact.run_id())
+        .expect_err("list rejects substituted report body");
+
+    for error in [read_error, list_error] {
+        assert_eq!(error.code(), "work_report_artifact.read.corrupt");
+        assert!(!error.to_string().contains("substituted bounded summary"));
+        assert!(!error.to_string().contains("sk-artifact-secret"));
+        assert!(!error.to_string().contains(
+            artifact
+                .metadata()
+                .body_commitment()
+                .expect("body commitment")
+                .commitment()
+                .as_str()
+        ));
+    }
+}
+
+#[test]
+fn local_backend_read_and_list_preserve_explicit_legacy_unverified_posture() {
+    let backend = temp_state_backend("read-list-legacy-unverified");
+    let artifact = artifact_record();
+    backend
+        .write_work_report_artifact(&artifact)
+        .expect("artifact written");
+    let path = artifact_path(&backend, &artifact);
+    let mut value = serde_json::to_value(&artifact).expect("serialize artifact");
+    value["metadata"]
+        .as_object_mut()
+        .expect("metadata object")
+        .remove("body_commitment");
+    fs::write(
+        &path,
+        serde_json::to_vec(&value).expect("serialize legacy artifact"),
+    )
+    .expect("legacy artifact written");
+
+    let read = backend
+        .read_work_report_artifact(artifact.run_id(), artifact.report_id())
+        .expect("legacy artifact read")
+        .expect("legacy artifact exists");
+    let listed = backend
+        .list_work_report_artifacts(artifact.run_id())
+        .expect("legacy artifacts listed");
+
+    assert_eq!(
+        read.metadata().body_commitment_posture(),
+        WorkReportBodyCommitmentPosture::LegacyUnverified
+    );
+    assert_eq!(listed, vec![read]);
 }
 
 #[test]

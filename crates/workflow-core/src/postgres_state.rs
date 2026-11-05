@@ -3051,20 +3051,24 @@ impl WorkReportArtifactStore for PostgresStateBackend {
         report_id: &WorkReportId,
     ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError> {
         let mut client = self.connections.connect()?;
-        Ok(read_record::<WorkReportArtifactRecord>(
+        read_record::<WorkReportArtifactRecord>(
             &mut client,
             "work_report",
             report_id.as_str(),
             run_id.as_str(),
         )?
-        .map(|record| record.value))
+        .map(|record| crate::state::validate_work_report_artifact_on_read(record.value))
+        .transpose()
     }
 
     fn list_work_report_artifacts(
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError> {
-        self.list_records_by_key2("work_report", run_id.as_str())
+        self.list_records_by_key2("work_report", run_id.as_str())?
+            .into_iter()
+            .map(crate::state::validate_work_report_artifact_on_read)
+            .collect()
     }
 }
 
