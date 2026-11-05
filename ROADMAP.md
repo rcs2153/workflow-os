@@ -827,6 +827,22 @@ scope, while exact-head CI, candidate rebuild, independent assurance, and
 publication remain open. See the [focused blocker
 review](docs/concepts/0.4.0-preview.1_SCOPED_CANDIDATE_TRANSFER_BLOCKER_REVIEW.md).
 
+The corrected symmetric transfer is now complete from exact merge commit
+`21615863b17a49fa14ea0da8e2ad8e327ffa48b1`. Exact-source CI was terminal
+green before dispatch. The reviewed macOS and Linux candidate workflows were
+each dispatched once, completed successfully on attempt 1, and produced one
+immutable seven-day GitHub Actions artifact. Separate out-of-workflow download
+verification matched both GitHub artifact digests, embedded archive checksums,
+manifests, binary checksums, native binary shapes, version identity, and
+install-lifecycle contracts. The machine-readable release state now represents
+the symmetric hosted posture and keeps publication unauthorized. See the
+[scoped candidate transfer
+report](docs/concepts/0.4.0-preview.1_SCOPED_CANDIDATE_TRANSFER_REPORT.md).
+Independent release/security assurance remains open and must precede any
+separately governed publication decision. No tag, GitHub Release, registry
+publication, release asset upload, announcement, or v1 claim is authorized by
+this transfer.
+
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
 whether existing Workflow OS workflows, policies, required context, checks,
