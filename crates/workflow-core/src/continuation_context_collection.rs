@@ -1579,12 +1579,34 @@ mod tests {
         resource: &str,
         revision: &str,
     ) -> cross_gate_lifecycle::CrossGateLifecycleBinding {
+        cross_gate_binding_for_operation(
+            run,
+            context,
+            dispatch,
+            report,
+            resource,
+            revision,
+            "work/replacement-proof",
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn cross_gate_binding_for_operation(
+        run: &str,
+        context: &str,
+        dispatch: &str,
+        report: &str,
+        resource: &str,
+        revision: &str,
+        operation: &str,
+    ) -> cross_gate_lifecycle::CrossGateLifecycleBinding {
         let run_id = WorkflowRunId::new(run).expect("run");
         let context = hash(context);
         let revision = hash(revision);
         let source = CrossGateLifecycleFixtureSource {
             observation: cross_gate_lifecycle::CrossGateLifecycleObservation::new(
                 revision.clone(),
+                hash(operation),
                 cross_gate_lifecycle::AcceptedDispatchObservation::new(
                     run_id.clone(),
                     context.clone(),
@@ -1866,6 +1888,24 @@ mod tests {
             ),
         )
         .expect("replacement request commitment");
+        request
+    }
+
+    fn cross_gate_replacement_request() -> ContinuationCollectionRequest {
+        let mut request = request(true);
+        request.purpose = ContinuationContextPurpose::MaterialContinuation;
+        request.commitment = collection_commitment(
+            "request",
+            &(
+                request.purpose,
+                &request.scope,
+                &request.actor,
+                request.maximum_sensitivity,
+                request.materialization_budget_bytes,
+                &request.anchor.commitment,
+            ),
+        )
+        .expect("cross-gate replacement request commitment");
         request
     }
 
@@ -2653,7 +2693,7 @@ mod tests {
 
     #[test]
     fn cross_gate_replacement_binds_dispatch_report_and_resource_authority() {
-        let request = replacement_request();
+        let request = cross_gate_replacement_request();
         let original_aggregate = replacement_registry(&request, AcceptedIntentKind::Resume, false)
             .compose(request.clone(), &request.anchor)
             .expect("original aggregate");
@@ -2670,7 +2710,7 @@ mod tests {
             posture: IntegratedReceiptPosture::Exact,
         };
         let lifecycle = cross_gate_binding(
-            "run/cross-gate",
+            "run/continuation",
             "context/cross-gate",
             "dispatch/cross-gate",
             "report/cross-gate",
@@ -2706,7 +2746,7 @@ mod tests {
 
     #[test]
     fn cross_gate_replacement_rejects_each_substituted_gate_binding() {
-        let request = replacement_request();
+        let request = cross_gate_replacement_request();
         let original_aggregate = replacement_registry(&request, AcceptedIntentKind::Resume, false)
             .compose(request.clone(), &request.anchor)
             .expect("original aggregate");
@@ -2715,7 +2755,7 @@ mod tests {
                 .compose(request.clone(), &request.anchor)
                 .expect("replacement aggregate");
         let original = cross_gate_binding(
-            "run/cross-gate",
+            "run/continuation",
             "context/cross-gate",
             "dispatch/cross-gate",
             "report/cross-gate",
@@ -2724,7 +2764,7 @@ mod tests {
         );
         let substitutions = [
             cross_gate_binding(
-                "run/cross-gate",
+                "run/continuation",
                 "context/cross-gate",
                 "dispatch/substituted",
                 "report/cross-gate",
@@ -2732,7 +2772,7 @@ mod tests {
                 "revision/cross-gate",
             ),
             cross_gate_binding(
-                "run/cross-gate",
+                "run/continuation",
                 "context/cross-gate",
                 "dispatch/cross-gate",
                 "report/substituted",
@@ -2740,7 +2780,7 @@ mod tests {
                 "revision/cross-gate",
             ),
             cross_gate_binding(
-                "run/cross-gate",
+                "run/continuation",
                 "context/cross-gate",
                 "dispatch/cross-gate",
                 "report/cross-gate",
@@ -2782,6 +2822,100 @@ mod tests {
     }
 
     #[test]
+    fn cross_gate_replacement_rejects_lifecycle_from_another_run_scope() {
+        let request = cross_gate_replacement_request();
+        let original = replacement_registry(&request, AcceptedIntentKind::Resume, false)
+            .compose(request.clone(), &request.anchor)
+            .expect("original aggregate");
+        let replacement = replacement_registry(&request, AcceptedIntentKind::Resume, false)
+            .compose(request.clone(), &request.anchor)
+            .expect("replacement aggregate");
+        let lifecycle = cross_gate_binding(
+            "run/another-lifecycle",
+            "context/cross-gate",
+            "dispatch/cross-gate",
+            "report/cross-gate",
+            "resource/cross-gate",
+            "revision/cross-gate",
+        );
+        let authority = ReplacementAuthorityResolver {
+            calls: Cell::new(0),
+        };
+
+        let error = replacement_executor::prove_cross_gate_replacement_executor_equivalence(
+            &original,
+            &replacement,
+            &IntegratedRecipient {
+                actor: ActorId::new("agent/original-wrong-run").expect("original recipient"),
+                posture: IntegratedReceiptPosture::Exact,
+            },
+            &IntegratedRecipient {
+                actor: ActorId::new("agent/replacement-wrong-run").expect("replacement recipient"),
+                posture: IntegratedReceiptPosture::Exact,
+            },
+            &lifecycle,
+            &lifecycle,
+            &authority,
+        )
+        .err()
+        .expect("another run lifecycle must fail");
+
+        assert_eq!(
+            error.code(),
+            "continuation_collection.replacement_executor.lifecycle_binding.scope_mismatch"
+        );
+        assert_eq!(authority.calls.get(), 0);
+    }
+
+    #[test]
+    fn cross_gate_replacement_rejects_another_lawful_next_operation() {
+        let request = cross_gate_replacement_request();
+        let original = replacement_registry(&request, AcceptedIntentKind::Resume, false)
+            .compose(request.clone(), &request.anchor)
+            .expect("original aggregate");
+        let replacement = replacement_registry(&request, AcceptedIntentKind::Resume, false)
+            .compose(request.clone(), &request.anchor)
+            .expect("replacement aggregate");
+        let lifecycle = cross_gate_binding_for_operation(
+            "run/continuation",
+            "context/cross-gate",
+            "dispatch/cross-gate",
+            "report/cross-gate",
+            "resource/cross-gate",
+            "revision/cross-gate",
+            "work/substituted-operation",
+        );
+        let authority = ReplacementAuthorityResolver {
+            calls: Cell::new(0),
+        };
+
+        let error = replacement_executor::prove_cross_gate_replacement_executor_equivalence(
+            &original,
+            &replacement,
+            &IntegratedRecipient {
+                actor: ActorId::new("agent/original-wrong-operation").expect("original recipient"),
+                posture: IntegratedReceiptPosture::Exact,
+            },
+            &IntegratedRecipient {
+                actor: ActorId::new("agent/replacement-wrong-operation")
+                    .expect("replacement recipient"),
+                posture: IntegratedReceiptPosture::Exact,
+            },
+            &lifecycle,
+            &lifecycle,
+            &authority,
+        )
+        .err()
+        .expect("another lawful-next operation must fail");
+
+        assert_eq!(
+            error.code(),
+            "continuation_collection.replacement_executor.lifecycle_binding.operation_mismatch"
+        );
+        assert_eq!(authority.calls.get(), 0);
+    }
+
+    #[test]
     fn cross_gate_binding_rejects_run_context_dispatch_and_revision_failures() {
         let run = WorkflowRunId::new("run/cross-gate").expect("run");
         let context = hash("context/cross-gate");
@@ -2795,6 +2929,7 @@ mod tests {
         > {
             Ok(cross_gate_lifecycle::CrossGateLifecycleObservation::new(
                 revision.clone(),
+                hash("work/replacement-proof"),
                 cross_gate_lifecycle::AcceptedDispatchObservation::new(
                     run.clone(),
                     context.clone(),
@@ -2879,6 +3014,7 @@ mod tests {
             let source = CrossGateLifecycleFixtureSource {
                 observation: cross_gate_lifecycle::CrossGateLifecycleObservation::new(
                     revision.clone(),
+                    hash("work/replacement-proof"),
                     cross_gate_lifecycle::AcceptedDispatchObservation::new(
                         run.clone(),
                         context.clone(),
@@ -2921,7 +3057,7 @@ mod tests {
     #[test]
     fn cross_gate_pause_stop_and_completed_work_never_resolve_authority() {
         let lifecycle = cross_gate_binding(
-            "run/cross-gate",
+            "run/continuation",
             "context/cross-gate",
             "dispatch/cross-gate",
             "report/cross-gate",
@@ -2929,7 +3065,7 @@ mod tests {
             "revision/cross-gate",
         );
         for control in [AcceptedIntentKind::Pause, AcceptedIntentKind::Stop] {
-            let request = replacement_request();
+            let request = cross_gate_replacement_request();
             let original = replacement_registry(&request, control, false)
                 .compose(request.clone(), &request.anchor)
                 .expect("original aggregate");
@@ -2970,7 +3106,7 @@ mod tests {
             assert_eq!(authority.calls.get(), 0);
         }
 
-        let request = replacement_request();
+        let request = cross_gate_replacement_request();
         let original = replacement_registry(&request, AcceptedIntentKind::Resume, true)
             .compose(request.clone(), &request.anchor)
             .expect("original aggregate");

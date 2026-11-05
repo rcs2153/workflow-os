@@ -9,9 +9,9 @@ use serde::Serialize;
 
 use super::{collection_commitment, collection_error};
 use crate::{
-    EventLogStore, ImmutableRunBundleStore, RunSnapshotStore, SpecContentHash,
+    ImmutableRunBundleStore, RunSnapshotStore, SpecContentHash,
     WorkReportArtifactLocationExpectation, WorkReportArtifactLocatorClass, WorkReportArtifactStore,
-    WorkReportId, WorkflowOsError, WorkflowRun, WorkflowRunEventKind, WorkflowRunId,
+    WorkReportId, WorkflowOsError, WorkflowRunId,
 };
 
 const BINDING_VERSION: &str = "workflow-os/cross-gate-lifecycle-binding/v1";
@@ -103,6 +103,7 @@ impl CurrentResourceAuthorityObservation {
 #[serde(deny_unknown_fields)]
 pub(super) struct CrossGateLifecycleObservation {
     revision: SpecContentHash,
+    lawful_next_operation_identity: SpecContentHash,
     dispatch: AcceptedDispatchObservation,
     report: VerifiedReportObservation,
     resource_authority: CurrentResourceAuthorityObservation,
@@ -111,12 +112,14 @@ pub(super) struct CrossGateLifecycleObservation {
 impl CrossGateLifecycleObservation {
     pub(super) fn new(
         revision: SpecContentHash,
+        lawful_next_operation_identity: SpecContentHash,
         dispatch: AcceptedDispatchObservation,
         report: VerifiedReportObservation,
         resource_authority: CurrentResourceAuthorityObservation,
     ) -> Self {
         Self {
             revision,
+            lawful_next_operation_identity,
             dispatch,
             report,
             resource_authority,
@@ -166,38 +169,125 @@ pub(super) trait CurrentProjectResourceAuthoritySource {
     ) -> Result<CurrentProjectResourceAuthorityRead, WorkflowOsError>;
 }
 
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct CurrentAcceptedDispatchRead {
+    run_id: WorkflowRunId,
+    immutable_context_commitment: SpecContentHash,
+    dispatch_commitments: Vec<SpecContentHash>,
+    revision: SpecContentHash,
+}
+
+impl CurrentAcceptedDispatchRead {
+    pub(super) fn new(
+        run_id: WorkflowRunId,
+        immutable_context_commitment: SpecContentHash,
+        dispatch_commitments: Vec<SpecContentHash>,
+        revision: SpecContentHash,
+    ) -> Self {
+        Self {
+            run_id,
+            immutable_context_commitment,
+            dispatch_commitments,
+            revision,
+        }
+    }
+}
+
+/// Current Gate 1 reader. Implementations must derive accepted dispatch from
+/// the complete durable hosted posture, including queue/work-item evidence,
+/// rather than from run events alone.
+pub(super) trait CurrentAcceptedDispatchSource {
+    fn read_current(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<CurrentAcceptedDispatchRead, WorkflowOsError>;
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct CurrentLawfulNextOperationRead {
+    run_id: WorkflowRunId,
+    operation_identity: SpecContentHash,
+    revision: SpecContentHash,
+}
+
+impl CurrentLawfulNextOperationRead {
+    pub(super) fn new(
+        run_id: WorkflowRunId,
+        operation_identity: SpecContentHash,
+        revision: SpecContentHash,
+    ) -> Self {
+        Self {
+            run_id,
+            operation_identity,
+            revision,
+        }
+    }
+}
+
+/// Current accepted-intent reader for the single lawful-next operation.
+pub(super) trait CurrentLawfulNextOperationSource {
+    fn read_current(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<CurrentLawfulNextOperationRead, WorkflowOsError>;
+}
+
 /// Store-backed source that reconstructs dispatch and report facts from
 /// current durable state and joins them to one current project-resource read.
-pub(super) struct StoreBackedCrossGateLifecycleSource<'a, S, B, R> {
+pub(super) struct CrossGateReportArtifactInput {
+    report_id: WorkReportId,
+    locator_class: WorkReportArtifactLocatorClass,
+}
+
+impl CrossGateReportArtifactInput {
+    pub(super) const fn new(
+        report_id: WorkReportId,
+        locator_class: WorkReportArtifactLocatorClass,
+    ) -> Self {
+        Self {
+            report_id,
+            locator_class,
+        }
+    }
+}
+
+pub(super) struct StoreBackedCrossGateLifecycleSource<'a, S, B, D, O, R> {
     state: &'a S,
     bundles: &'a B,
+    dispatches: &'a D,
+    operations: &'a O,
     resources: &'a R,
     run_id: WorkflowRunId,
     report_id: WorkReportId,
     locator_class: WorkReportArtifactLocatorClass,
 }
 
-impl<'a, S, B, R> StoreBackedCrossGateLifecycleSource<'a, S, B, R>
+impl<'a, S, B, D, O, R> StoreBackedCrossGateLifecycleSource<'a, S, B, D, O, R>
 where
-    S: EventLogStore + RunSnapshotStore + WorkReportArtifactStore,
+    S: RunSnapshotStore + WorkReportArtifactStore,
     B: ImmutableRunBundleStore,
+    D: CurrentAcceptedDispatchSource,
+    O: CurrentLawfulNextOperationSource,
     R: CurrentProjectResourceAuthoritySource,
 {
-    pub(super) const fn new(
+    pub(super) fn new(
         state: &'a S,
         bundles: &'a B,
+        dispatches: &'a D,
+        operations: &'a O,
         resources: &'a R,
         run_id: WorkflowRunId,
-        report_id: WorkReportId,
-        locator_class: WorkReportArtifactLocatorClass,
+        report_artifact: CrossGateReportArtifactInput,
     ) -> Self {
         Self {
             state,
             bundles,
+            dispatches,
+            operations,
             resources,
             run_id,
-            report_id,
-            locator_class,
+            report_id: report_artifact.report_id,
+            locator_class: report_artifact.locator_class,
         }
     }
 
@@ -207,19 +297,6 @@ where
             .state
             .load_snapshot(&self.run_id)?
             .ok_or_else(|| binding_error("run.missing", "cross-gate run state is unavailable"))?;
-        let events = self.state.read_events(&self.run_id)?;
-        let run = WorkflowRun::rehydrate(&events).map_err(|_| {
-            binding_error(
-                "run.history_invalid",
-                "cross-gate run history could not be rehydrated",
-            )
-        })?;
-        if run.snapshot != snapshot {
-            return Err(binding_error(
-                "run.projection_mismatch",
-                "cross-gate run snapshot does not match current event history",
-            ));
-        }
         let bundle_binding = snapshot
             .identity
             .immutable_run_bundle
@@ -245,15 +322,22 @@ where
                 "cross-gate immutable run bundle does not match current run identity",
             ));
         }
-        let dispatch_commitments = events
-            .iter()
-            .filter_map(|event| match &event.kind {
-                WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(dispatch) => {
-                    Some(dispatch.projection_commitment().clone())
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+        let dispatch = self.dispatches.read_current(&self.run_id)?;
+        if dispatch.run_id != self.run_id
+            || dispatch.immutable_context_commitment != *manifest.resolved_execution_context_hash()
+        {
+            return Err(binding_error(
+                "dispatch.mismatch",
+                "current accepted dispatch does not match the immutable run context",
+            ));
+        }
+        let operation = self.operations.read_current(&self.run_id)?;
+        if operation.run_id != self.run_id {
+            return Err(binding_error(
+                "operation.mismatch",
+                "current lawful-next operation does not match the cross-gate run",
+            ));
+        }
         let expectation = WorkReportArtifactLocationExpectation::for_report(
             self.run_id.clone(),
             self.report_id.clone(),
@@ -301,7 +385,10 @@ where
             "cross-gate-current-source-revision",
             &(
                 manifest.root_hash(),
-                &dispatch_commitments,
+                &dispatch.dispatch_commitments,
+                &dispatch.revision,
+                &operation.operation_identity,
+                &operation.revision,
                 &report_binding,
                 &resource.revision,
                 &resource.resource_restriction_commitment,
@@ -309,10 +396,11 @@ where
         )?;
         Ok(CrossGateLifecycleObservation::new(
             revision,
+            operation.operation_identity,
             AcceptedDispatchObservation::new(
                 self.run_id.clone(),
                 manifest.resolved_execution_context_hash().clone(),
-                dispatch_commitments,
+                dispatch.dispatch_commitments,
             )?,
             VerifiedReportObservation::new(
                 self.run_id.clone(),
@@ -328,10 +416,13 @@ where
     }
 }
 
-impl<S, B, R> CrossGateLifecycleSource for StoreBackedCrossGateLifecycleSource<'_, S, B, R>
+impl<S, B, D, O, R> CrossGateLifecycleSource
+    for StoreBackedCrossGateLifecycleSource<'_, S, B, D, O, R>
 where
-    S: EventLogStore + RunSnapshotStore + WorkReportArtifactStore,
+    S: RunSnapshotStore + WorkReportArtifactStore,
     B: ImmutableRunBundleStore,
+    D: CurrentAcceptedDispatchSource,
+    O: CurrentLawfulNextOperationSource,
     R: CurrentProjectResourceAuthoritySource,
 {
     fn observe_current(&self) -> Result<CrossGateLifecycleObservation, WorkflowOsError> {
@@ -349,6 +440,7 @@ pub(super) struct CrossGateLifecycleBinding {
     version: &'static str,
     run_id: WorkflowRunId,
     immutable_context_commitment: SpecContentHash,
+    lawful_next_operation_identity: SpecContentHash,
     dispatch_commitments: Vec<SpecContentHash>,
     report_artifact_location_commitment: SpecContentHash,
     resource_restriction_commitment: SpecContentHash,
@@ -390,6 +482,7 @@ impl CrossGateLifecycleBinding {
                 BINDING_VERSION,
                 run_id,
                 immutable_context,
+                &observation.lawful_next_operation_identity,
                 &observation.dispatch.dispatch_commitments,
                 &observation.report.artifact_location_commitment,
                 &observation
@@ -403,6 +496,7 @@ impl CrossGateLifecycleBinding {
             version: BINDING_VERSION,
             run_id: run_id.clone(),
             immutable_context_commitment: immutable_context.clone(),
+            lawful_next_operation_identity: observation.lawful_next_operation_identity,
             dispatch_commitments: observation.dispatch.dispatch_commitments,
             report_artifact_location_commitment: observation.report.artifact_location_commitment,
             resource_restriction_commitment: observation
@@ -416,6 +510,14 @@ impl CrossGateLifecycleBinding {
 
     pub(super) const fn commitment(&self) -> &SpecContentHash {
         &self.commitment
+    }
+
+    pub(super) const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    pub(super) const fn lawful_next_operation_identity(&self) -> &SpecContentHash {
+        &self.lawful_next_operation_identity
     }
 
     pub(super) const fn is_non_authorizing(&self) -> bool {

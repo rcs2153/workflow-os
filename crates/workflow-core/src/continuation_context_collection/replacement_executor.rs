@@ -275,6 +275,14 @@ where
             "replacement authority requires one exact non-authorizing cross-gate lifecycle binding",
         ));
     }
+    if original_aggregate.scope.run_id.as_ref() != Some(original_lifecycle.run_id())
+        || replacement_aggregate.scope.run_id.as_ref() != Some(replacement_lifecycle.run_id())
+    {
+        return Err(proof_error(
+            "lifecycle_binding.scope_mismatch",
+            "cross-gate lifecycle binding must identify the exact run-bound continuation scope",
+        ));
+    }
     if original_aggregate.scope != replacement_aggregate.scope
         || original_aggregate.proof.commitment != replacement_aggregate.proof.commitment
     {
@@ -434,6 +442,12 @@ fn authority_request_for(
                     "fresh replacement authority requires the current cross-gate lifecycle binding",
                 )
             })?;
+            if cross_gate_lifecycle.lawful_next_operation_identity() != &operation.identity {
+                return Err(proof_error(
+                    "lifecycle_binding.operation_mismatch",
+                    "cross-gate lifecycle binding identifies another lawful-next operation",
+                ));
+            }
             let request = ReplacementFreshAuthorityRequest::new(
                 aggregate,
                 orientation.recipient.clone(),

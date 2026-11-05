@@ -3,8 +3,9 @@
 ## Status
 
 Implemented as a private Core model and store-backed composition boundary.
-Focused maintainer/security review remains required before product-contract or
-release-admission reconciliation.
+Focused maintainer/security review is accepted after correcting event-only
+dispatch inference, cross-run scope composition, and unbound lawful-next
+operation identity.
 
 ## Governed Implementation
 
@@ -41,12 +42,13 @@ for replacement-executor fresh-authority resolution. It commits:
 The store-backed source reconstructs current facts through existing read-only
 contracts. It:
 
-1. reads and rehydrates the current event stream;
-2. requires the durable snapshot to match that event history;
-3. reads the exact immutable run bundle and requires its run binding and
+1. reads the durable run snapshot;
+2. reads the exact immutable run bundle and requires its run binding and
    workflow identity to match the snapshot;
-4. derives dispatch commitments only from durable
-   `AuthorizedExecutionAttemptDispatchAdmitted` events;
+3. requires a dedicated current accepted-dispatch source whose implementation
+   must prove the complete Gate 1 durable posture, including queue/work-item
+   evidence rather than events alone;
+4. requires a dedicated current lawful-next-operation source;
 5. reads the exact WorkReport through
    `WorkReportArtifactLocationExpectation`, requires an envelope-anchored body
    commitment, and commits the report/run/workflow/location identity;
@@ -64,7 +66,9 @@ nor authority.
 The fresh-authority request now commits the exact cross-gate lifecycle binding.
 The cross-gate replacement proof requires original and replacement executors to
 receive the same lifecycle binding in addition to the same continuation
-understanding.
+understanding. It also requires the lifecycle run to equal the run-bound
+continuation scope and the lifecycle lawful-next operation to equal the exact
+operation in the fresh-authority request.
 
 The older private resume proof can no longer resolve fresh authority without
 that binding. It fails with
@@ -84,6 +88,8 @@ Focused tests prove:
 - dispatch substitution fails before authority resolution;
 - report artifact-location substitution fails before authority resolution;
 - project-resource substitution fails before authority resolution;
+- another run scope fails before authority resolution;
+- another lawful-next operation fails before authority resolution;
 - run and immutable-context mismatch fail closed;
 - missing or duplicate dispatch evidence fails closed;
 - dispatch ordering is canonical and commitment-stable;
@@ -97,15 +103,13 @@ Focused tests prove:
 Passed:
 
 - `cargo test -p workflow-core --lib continuation_context_collection`:
-  58 tests;
+  60 tests after review corrections;
 - `cargo clippy -p workflow-core --all-targets --all-features -- -D warnings`;
 - workspace formatting during implementation; and
 - the earlier review-phase documentation and diff checks.
 
-Documentation, formatting, and diff checks must be rerun after this report and
-roadmap update. A focused review must inspect the store-backed source contract,
-revision fence, report-location commitment, and absence of a binding-free
-fresh-authority path.
+The accepted focused review is recorded in [Continuity Of Authority Cross-Gate
+Binding Review](CONTINUITY_OF_AUTHORITY_CROSS_GATE_BINDING_REVIEW.md).
 
 ## Explicit Non-Claims
 
@@ -121,7 +125,7 @@ This increment does not add:
 
 ## Next Required Phase
 
-Perform focused maintainer/security review. Product-contract, hosted,
-integration, release-admission, broader provider mutation, and comparative
-framework benchmark work remain blocked until the review accepts this boundary
-and exact-head validation passes.
+Submit the reviewed boundary through exact-head pull-request validation. After
+merge, product-contract, hosted, integration, and release-admission
+reconciliation may proceed without claiming a production replacement executor
+or concrete cross-gate source activation.
