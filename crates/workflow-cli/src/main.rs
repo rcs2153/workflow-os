@@ -72,14 +72,14 @@ use workflow_core::{
     RedactionMetadata, SkillDefinition, SkillHandler, SkillInput, SkillOutput, SpecContentHash,
     SqliteStateBackend, StateBackend, StateMigrationDestinationId, StateMigrationId,
     StateMigrationPlan, StateMigrationVerificationReceipt, Timestamp, WorkReport,
-    WorkReportArtifactHighAssuranceRequirement, WorkReportArtifactStore, WorkReportCitation,
-    WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationTarget,
-    WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
-    WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
-    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
-    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
-    WorkReportStatus, WorkflowArchiveRecord, WorkflowArchiveRecordDefinition,
-    WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
+    WorkReportArtifactHighAssuranceRequirement, WorkReportArtifactStore,
+    WorkReportBodyCommitmentPosture, WorkReportCitation, WorkReportCitationDefinition,
+    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
+    WorkReportContractVersion, WorkReportDefinition, WorkReportGenerationContext,
+    WorkReportHandoffNote, WorkReportId, WorkReportIncompleteWorkDisclosure,
+    WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
+    WorkReportSensitivity, WorkReportStableReference, WorkReportStatus, WorkflowArchiveRecord,
+    WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
     WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflict, WorkflowCatalogConflictSeverity,
     WorkflowCatalogDraftSummary, WorkflowCatalogIndex, WorkflowCatalogIndexInput,
     WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
@@ -2916,11 +2916,14 @@ fn print_work_report_artifacts(artifacts: &[workflow_core::WorkReportArtifactRec
         let (citation_count, missing_citation_count, local_check_citation_count) =
             report_artifact_citation_counts(artifact);
         println!(
-            "  report_id={} terminal_status={:?} generated_at={} sensitivity={:?} sections={} citations={} missing_citations={} local_check_citations={}",
+            "  report_id={} terminal_status={:?} generated_at={} sensitivity={:?} body_commitment_read_posture={} sections={} citations={} missing_citations={} local_check_citations={}",
             metadata.report_id(),
             metadata.terminal_run_status(),
             metadata.generated_at(),
             metadata.sensitivity(),
+            work_report_body_commitment_read_posture_label(
+                metadata.body_commitment_posture(),
+            ),
             artifact.work_report().sections().len(),
             citation_count,
             missing_citation_count,
@@ -13244,7 +13247,7 @@ fn inspect_json(
                 .collect::<Vec<_>>()
                 .join(",");
             format!(
-                "{{\"report_id\":\"{}\",\"workflow_id\":\"{}\",\"workflow_version\":\"{}\",\"schema_version\":\"{}\",\"spec_hash\":\"{}\",\"run_id\":\"{}\",\"terminal_status\":\"{}\",\"generated_at\":\"{}\",\"sensitivity\":\"{}\",\"section_count\":{},\"citation_count\":{},\"missing_citation_count\":{},\"local_check_citation_count\":{},\"local_check_references\":[{}]}}",
+                "{{\"report_id\":\"{}\",\"workflow_id\":\"{}\",\"workflow_version\":\"{}\",\"schema_version\":\"{}\",\"spec_hash\":\"{}\",\"run_id\":\"{}\",\"terminal_status\":\"{}\",\"generated_at\":\"{}\",\"sensitivity\":\"{}\",\"body_commitment_read_posture\":\"{}\",\"section_count\":{},\"citation_count\":{},\"missing_citation_count\":{},\"local_check_citation_count\":{},\"local_check_references\":[{}]}}",
                 json_escape(metadata.report_id().as_str()),
                 json_escape(metadata.workflow_id().as_str()),
                 json_escape(metadata.workflow_version().as_str()),
@@ -13254,6 +13257,9 @@ fn inspect_json(
                 work_report_status_label(metadata.terminal_run_status()),
                 metadata.generated_at(),
                 work_report_sensitivity_label(metadata.sensitivity()),
+                work_report_body_commitment_read_posture_label(
+                    metadata.body_commitment_posture(),
+                ),
                 artifact.work_report().sections().len(),
                 citation_count,
                 missing_citation_count,
@@ -13327,6 +13333,18 @@ fn work_report_status_label(status: workflow_core::WorkReportStatus) -> &'static
         workflow_core::WorkReportStatus::Canceled => "canceled",
         workflow_core::WorkReportStatus::Escalated => "escalated",
         workflow_core::WorkReportStatus::Blocked => "blocked",
+    }
+}
+
+fn work_report_body_commitment_read_posture_label(
+    posture: WorkReportBodyCommitmentPosture,
+) -> &'static str {
+    match posture {
+        WorkReportBodyCommitmentPosture::AvailableUnanchored => "available_unanchored",
+        WorkReportBodyCommitmentPosture::PersistedEnvelopeAnchor => {
+            "verified_persisted_envelope_anchor"
+        }
+        WorkReportBodyCommitmentPosture::LegacyUnverified => "legacy_unverified",
     }
 }
 

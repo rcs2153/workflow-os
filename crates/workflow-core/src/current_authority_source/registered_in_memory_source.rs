@@ -5196,6 +5196,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn report_body_substitution_fails_before_current_authority_metadata_projection() {
+        let (contract, binding) = fixture();
+        let source = ready_source(&contract);
+        let report_id = WorkReportId::new("report/metadata").expect("report");
+        let artifact = work_report_artifact(
+            "report/metadata",
+            "run-authority",
+            WorkReportSensitivity::Internal,
+        );
+        let mut value = serde_json::to_value(artifact).expect("serialize artifact");
+        value["work_report"]["sections"][0]["summary"] =
+            serde_json::Value::String("substituted bounded summary".to_owned());
+        let substituted: WorkReportArtifactRecord =
+            serde_json::from_value(value).expect("deserialize structurally valid artifact");
+        let store = InstrumentedWorkReportArtifactStore::with_artifact(substituted);
+
+        let outcome = read_work_report_metadata(
+            &source,
+            &binding,
+            &contract,
+            &report_id,
+            "2026-07-26T10:25:00Z",
+            &store,
+        )
+        .expect("bounded failure");
+
+        assert!(matches!(
+            outcome,
+            CurrentAuthorityWorkReportMetadataReadOutcome::StoreFailure
+        ));
+        assert_eq!(store.read_count(), 1);
+        let debug = format!("{outcome:?}");
+        assert!(!debug.contains("substituted bounded summary"));
+    }
+
+    #[test]
     fn repeated_metadata_reads_each_reresolve_and_read_once() {
         let (contract, binding) = fixture();
         let source = ready_source(&contract);
