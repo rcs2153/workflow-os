@@ -3104,6 +3104,40 @@ impl WorkReportArtifactStore for SqliteStateBackend {
             .transpose()
     }
 
+    fn read_work_report_artifact_with_expectation(
+        &self,
+        expectation: &WorkReportArtifactLocationExpectation,
+    ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError> {
+        let report_id = expectation.report_id().ok_or_else(|| {
+            state_error(
+                "work_report_artifact.read.expectation_invalid",
+                "work report artifact read expectation must identify one report",
+            )
+        })?;
+        let payload = self
+            .connection()?
+            .query_row(
+                "SELECT payload FROM work_report_artifacts
+                 WHERE run_id = ?1 AND report_id = ?2",
+                params![expectation.run_id().as_str(), report_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "read.failed",
+                    "SQLite work report artifact could not be read",
+                )
+            })?;
+        let artifact: Option<WorkReportArtifactRecord> = payload
+            .map(|payload| decode_json(&payload, "work report artifact"))
+            .transpose()?;
+        artifact
+            .map(|artifact| validate_work_report_artifact_on_read(artifact, expectation))
+            .transpose()
+    }
+
     fn list_work_report_artifacts(
         &self,
         run_id: &WorkflowRunId,
@@ -3153,6 +3187,60 @@ impl WorkReportArtifactStore for SqliteStateBackend {
                 WorkReportArtifactLocatorClass::Sqlite,
             );
             validate_work_report_artifact_on_read(artifact, &expectation)
+        })
+        .collect()
+    }
+
+    fn list_work_report_artifacts_with_expectation(
+        &self,
+        expectation: &WorkReportArtifactLocationExpectation,
+    ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT report_id, payload FROM work_report_artifacts
+                 WHERE run_id = ?1 ORDER BY report_id",
+            )
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "read.failed",
+                    "SQLite work report artifacts could not be read",
+                )
+            })?;
+        let rows = statement
+            .query_map(params![expectation.run_id().as_str()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "read.failed",
+                    "SQLite work report artifacts could not be read",
+                )
+            })?;
+        rows.map(|row| {
+            let (stored_report_id, payload) = row.map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "read.failed",
+                    "SQLite work report artifacts could not be read",
+                )
+            })?;
+            let stored_report_id = WorkReportId::new(stored_report_id).map_err(|_| {
+                state_error(
+                    "work_report_artifact.read.location_mismatch",
+                    "work report artifact does not match its external storage identity",
+                )
+            })?;
+            let artifact: WorkReportArtifactRecord = decode_json(&payload, "work report artifact")?;
+            if artifact.report_id() != &stored_report_id {
+                return Err(state_error(
+                    "work_report_artifact.read.location_mismatch",
+                    "work report artifact does not match its external storage identity",
+                ));
+            }
+            validate_work_report_artifact_on_read(artifact, expectation)
         })
         .collect()
     }

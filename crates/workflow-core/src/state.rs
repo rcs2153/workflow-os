@@ -1989,6 +1989,29 @@ impl WorkReportArtifactStore for LocalStateBackend {
         validate_work_report_artifact_on_read(artifact, &expectation).map(Some)
     }
 
+    fn read_work_report_artifact_with_expectation(
+        &self,
+        expectation: &WorkReportArtifactLocationExpectation,
+    ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError> {
+        let report_id = expectation.report_id().ok_or_else(|| {
+            state_error(
+                "work_report_artifact.read.expectation_invalid",
+                "work report artifact read expectation must identify one report",
+            )
+        })?;
+        let path = self.work_report_artifact_path(expectation.run_id(), report_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let artifact = read_json::<WorkReportArtifactRecord>(&path).map_err(|_| {
+            state_error(
+                "work_report_artifact.read.corrupt",
+                "work report artifact could not be read or validated",
+            )
+        })?;
+        validate_work_report_artifact_on_read(artifact, expectation).map(Some)
+    }
+
     fn list_work_report_artifacts(
         &self,
         run_id: &WorkflowRunId,
@@ -2019,6 +2042,36 @@ impl WorkReportArtifactStore for LocalStateBackend {
                     WorkReportArtifactLocatorClass::LocalFilesystem,
                 );
                 validate_work_report_artifact_on_read(artifact, &expectation)
+            })
+            .collect()
+    }
+
+    fn list_work_report_artifacts_with_expectation(
+        &self,
+        expectation: &WorkReportArtifactLocationExpectation,
+    ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError> {
+        let directory = self.work_report_run_dir(expectation.run_id());
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+        json_files_in_dir(&directory)?
+            .iter()
+            .map(|path| {
+                let artifact = read_json::<WorkReportArtifactRecord>(path).map_err(|_| {
+                    state_error(
+                        "work_report_artifact.read.corrupt",
+                        "work report artifact could not be read or validated",
+                    )
+                })?;
+                let expected_path =
+                    self.work_report_artifact_path(expectation.run_id(), artifact.report_id());
+                if path != &expected_path {
+                    return Err(state_error(
+                        "work_report_artifact.read.location_mismatch",
+                        "work report artifact does not match its external storage identity",
+                    ));
+                }
+                validate_work_report_artifact_on_read(artifact, expectation)
             })
             .collect()
     }

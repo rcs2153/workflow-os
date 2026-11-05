@@ -63,6 +63,7 @@ The common expectation is enforced at:
 - PostgreSQL transaction-local hosted replay reads;
 - default expectation-aware methods on injected `WorkReportArtifactStore`
   implementations;
+- hosted and collaborative report-metadata projection endpoints;
 - human and JSON inspect;
 - first-run terminal artifact replay;
 - current-authority WorkReport metadata projection;
@@ -82,20 +83,26 @@ Focused tests prove that:
 - a valid artifact physically placed under another filesystem run/report slot
   is rejected by exact read and list;
 - a wrong immutable workflow identity is rejected without identifier leakage;
-- combined location and body substitution fails at location binding first;
+- combined location or immutable-workflow-identity and body substitution fails
+  at location binding first;
 - a legacy-unverified artifact is accepted in its correct slot but rejected in
   the wrong slot;
-- SQLite rejects a valid artifact moved under different relational keys;
-- PostgreSQL CI exercises relational-key misplacement and restoration; and
+- SQLite rejects a valid artifact moved under different relational keys and
+  checks immutable identity before body commitment;
+- PostgreSQL CI exercises relational-key misplacement, immutable-identity plus
+  body substitution, and restoration; and
 - errors and debug output do not disclose run IDs, report IDs, paths, report
   text, or body commitments.
 
-The full WorkReport test target passes 241 tests. The broader Core all-features
+The initial WorkReport test target passed 241 tests. Focused review added
+filesystem and SQLite immutable-identity/body-order regressions, bringing the
+target to 243 tests, and added the corresponding credential-backed PostgreSQL
+scenario. The broader Core all-features
 run exposed one duplicate-reconciliation classification regression; the
 implementation was corrected so location mismatch during duplicate lookup maps
 to the existing duplicate-conflict posture rather than ambiguous persistence.
 The corrected complete Core all-features run then passed, including 784 Core
-unit tests, 348 local-executor tests with one opt-in live test ignored, all 241
+unit tests, 348 local-executor tests with one opt-in live test ignored, all 243
 WorkReport tests, integration targets, and doc tests. The CLI package passed
 its unit, 179 CLI integration, and example targets. Clippy and rustdoc passed
 with warnings denied, and formatting, documentation, release-state, and diff
@@ -123,13 +130,15 @@ identity.
 
 Gate 2 remains open until all of the following pass:
 
-1. focused maintainer/security review of the model, validation order, and every
-   consumer boundary;
-2. exact-head CI, including PostgreSQL execution;
-3. an independent filesystem and backend misplacement rerun;
-4. confirmation that inspect and replay fail before projection or
+1. exact-head CI, including PostgreSQL execution;
+2. an independent filesystem and backend misplacement rerun;
+3. confirmation that inspect and replay fail before projection or
    `already_persisted`; and
-5. post-merge exact-main regression evidence.
+4. post-merge exact-main regression evidence.
+
+The focused maintainer/security review is accepted after correcting validation
+ordering and hosted-projection blockers. See [WorkReport Artifact Identity
+Binding Review](WORK_REPORT_ARTIFACT_IDENTITY_BINDING_REVIEW.md).
 
 Gate 3 and the cross-gate review remain blocked until this acceptance evidence
 is complete.

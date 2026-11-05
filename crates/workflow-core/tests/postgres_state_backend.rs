@@ -14,6 +14,7 @@ use std::thread;
 use std::time::Duration;
 
 use postgres::{Client, Config, NoTls};
+use serde_json::json;
 use workflow_core::{
     build_immutable_run_bundle, compute_approval_presentation_content_hash,
     decide_collaborative_project_approval_with_presentation,
@@ -84,7 +85,8 @@ use workflow_core::{
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
     SkillAttemptId, SkillHandler, SkillId, SkillInput, SkillInvocationId, SkillOutput,
-    SkillVersion, SpecContentHash, StateBackend, StepId, Timestamp, WorkReportArtifactStore,
+    SkillVersion, SpecContentHash, StateBackend, StepId, Timestamp,
+    WorkReportArtifactLocationExpectation, WorkReportArtifactLocatorClass, WorkReportArtifactStore,
     WorkReportSensitivity, WorkflowCatalogRecord, WorkflowCatalogRecordDefinition,
     WorkflowCatalogRecordId, WorkflowId, WorkflowLifecycleStatus, WorkflowOsError, WorkflowRun,
     WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
@@ -3701,6 +3703,58 @@ fn prove_hosted_work_item_queue(
             ],
         )
         .expect("restore report artifact relational keys");
+
+    let mut substituted =
+        serde_json::to_value(report_artifact.record()).expect("serialize report artifact");
+    substituted["metadata"]["workflow_id"] = json!("workflow/postgres-other-identity");
+    substituted["work_report"]["generation_context"]["workflow_id"] =
+        json!("workflow/postgres-other-identity");
+    substituted["work_report"]["sections"][0]["summary"] =
+        json!("altered postgres immutable-identity payload");
+    client
+        .execute(
+            "UPDATE workflow_os.records
+                SET payload = $1
+              WHERE family = 'work_report' AND key1 = $2 AND key2 = $3",
+            &[
+                &serde_json::to_string(&substituted).expect("serialize substituted payload"),
+                &report_artifact.record().report_id().as_str(),
+                &manifest.run_id().as_str(),
+            ],
+        )
+        .expect("substitute report artifact payload");
+    let expectation = WorkReportArtifactLocationExpectation::for_report(
+        manifest.run_id().clone(),
+        report_artifact.record().report_id().clone(),
+        WorkReportArtifactLocatorClass::Postgres,
+    )
+    .with_run_identity(&completed_run.snapshot.identity);
+    let identity_order_error = backend
+        .read_work_report_artifact_with_expectation(&expectation)
+        .expect_err("PostgreSQL immutable identity mismatch wins before body mismatch");
+    assert_eq!(
+        identity_order_error.code(),
+        "work_report_artifact.read.location_mismatch"
+    );
+    assert!(!identity_order_error
+        .to_string()
+        .contains("workflow/postgres-other-identity"));
+    assert!(!identity_order_error
+        .to_string()
+        .contains("altered postgres immutable-identity payload"));
+    client
+        .execute(
+            "UPDATE workflow_os.records
+                SET payload = $1
+              WHERE family = 'work_report' AND key1 = $2 AND key2 = $3",
+            &[
+                &serde_json::to_string(report_artifact.record())
+                    .expect("serialize original report artifact"),
+                &report_artifact.record().report_id().as_str(),
+                &manifest.run_id().as_str(),
+            ],
+        )
+        .expect("restore report artifact payload");
 }
 
 fn prove_hosted_unreceipted_projection(

@@ -3259,6 +3259,40 @@ fn local_backend_checks_location_before_body_commitment_for_combined_substitutio
 }
 
 #[test]
+fn local_expectation_checks_immutable_identity_before_body_commitment() {
+    let backend = temp_state_backend("wrong-immutable-identity-and-body");
+    let artifact = artifact_record();
+    let mut value = serde_json::to_value(&artifact).expect("serialize artifact");
+    value["metadata"]["workflow_id"] = json!("workflow/other-identity");
+    value["work_report"]["generation_context"]["workflow_id"] = json!("workflow/other-identity");
+    value["work_report"]["sections"][0]["summary"] = json!("altered immutable-identity payload");
+    let path = artifact_path(&backend, &artifact);
+    fs::create_dir_all(path.parent().expect("artifact parent"))
+        .expect("artifact directory created");
+    fs::write(
+        &path,
+        serde_json::to_vec(&value).expect("serialize combined substitution"),
+    )
+    .expect("combined substitution written under requested location");
+    let expectation = WorkReportArtifactLocationExpectation::for_report(
+        artifact.run_id().clone(),
+        artifact.report_id().clone(),
+        WorkReportArtifactLocatorClass::LocalFilesystem,
+    )
+    .with_run_identity(&run_identity_for(&artifact));
+
+    let error = backend
+        .read_work_report_artifact_with_expectation(&expectation)
+        .expect_err("immutable identity mismatch wins before body mismatch");
+
+    assert_eq!(error.code(), "work_report_artifact.read.location_mismatch");
+    assert!(!error.to_string().contains("workflow/other-identity"));
+    assert!(!error
+        .to_string()
+        .contains("altered immutable-identity payload"));
+}
+
+#[test]
 fn local_backend_rejects_legacy_artifact_in_wrong_slot_without_using_legacy_as_identity_excuse() {
     let backend = temp_state_backend("legacy-wrong-physical-location");
     let requested = artifact_record();
@@ -3328,6 +3362,54 @@ fn sqlite_backend_rejects_valid_artifact_under_wrong_relational_keys() {
         assert!(!error.to_string().contains("run-other-sqlite-location"));
         assert!(!error.to_string().contains("report/other-sqlite-location"));
     }
+    drop(backend);
+    let _ = fs::remove_file(&path);
+    let _ = fs::remove_file(path.with_extension("sqlite3-shm"));
+    let _ = fs::remove_file(path.with_extension("sqlite3-wal"));
+}
+
+#[test]
+fn sqlite_expectation_checks_immutable_identity_before_body_commitment() {
+    let id = NEXT_ARTIFACT_TEST.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "workflow-os-report-artifact-sqlite-identity-order-{}-{id}.sqlite3",
+        std::process::id()
+    ));
+    let artifact = artifact_record();
+    let backend = SqliteStateBackend::open(&path).expect("SQLite backend");
+    backend
+        .write_work_report_artifact(&artifact)
+        .expect("artifact stored");
+    let mut value = serde_json::to_value(&artifact).expect("serialize artifact");
+    value["metadata"]["workflow_id"] = json!("workflow/other-sqlite-identity");
+    value["work_report"]["generation_context"]["workflow_id"] =
+        json!("workflow/other-sqlite-identity");
+    value["work_report"]["sections"][0]["summary"] =
+        json!("altered sqlite immutable-identity payload");
+    let connection = Connection::open(&path).expect("SQLite mutation connection");
+    connection
+        .execute(
+            "UPDATE work_report_artifacts SET payload = ?1",
+            params![serde_json::to_string(&value).expect("serialize substitution")],
+        )
+        .expect("substituted payload stored");
+    drop(connection);
+    let expectation = WorkReportArtifactLocationExpectation::for_report(
+        artifact.run_id().clone(),
+        artifact.report_id().clone(),
+        WorkReportArtifactLocatorClass::Sqlite,
+    )
+    .with_run_identity(&run_identity_for(&artifact));
+
+    let error = backend
+        .read_work_report_artifact_with_expectation(&expectation)
+        .expect_err("immutable identity mismatch wins before body mismatch");
+
+    assert_eq!(error.code(), "work_report_artifact.read.location_mismatch");
+    assert!(!error.to_string().contains("workflow/other-sqlite-identity"));
+    assert!(!error
+        .to_string()
+        .contains("altered sqlite immutable-identity payload"));
     drop(backend);
     let _ = fs::remove_file(&path);
     let _ = fs::remove_file(path.with_extension("sqlite3-shm"));
