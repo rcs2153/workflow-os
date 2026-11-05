@@ -807,6 +807,26 @@ found no blocking defect while preserving the independent-assurance boundary.
 See the [P1 implementation
 report](docs/concepts/FRESH_CHECKOUT_AGGREGATE_CHECK_P1_REPORT.md).
 
+The first exact-source scoped-transfer attempt produced two valid native
+packages, but independent verification found that the active release-state
+validator still encoded the superseded asymmetric storage posture: local-only
+macOS evidence and one hosted Linux artifact. The pair cannot be admitted
+truthfully, and changing validator code after production invalidates both
+candidates under the accepted transfer contract. Transfer therefore remains
+open and publication remains unauthorized. See the [scoped candidate transfer
+blocker
+report](docs/concepts/0.4.0-preview.1_SCOPED_CANDIDATE_TRANSFER_BLOCKER_REPORT.md).
+The next release subphase is the bounded validator correction and focused
+review. Only after that change is terminal-green and merged may a new governed
+release phase rebuild both candidates from the new exact commit.
+Focused maintainer/release-security review found and corrected one P1
+evidence-completeness gap by requiring workflow path, actor, run creation,
+candidate-evidence schema, and bounded seven-day timing for each hosted target.
+The corrected validator is accepted with no remaining P0/P1 finding in that
+scope, while exact-head CI, candidate rebuild, independent assurance, and
+publication remain open. See the [focused blocker
+review](docs/concepts/0.4.0-preview.1_SCOPED_CANDIDATE_TRANSFER_BLOCKER_REVIEW.md).
+
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test
 whether existing Workflow OS workflows, policies, required context, checks,

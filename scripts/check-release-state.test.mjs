@@ -9,6 +9,7 @@ const workflowCommit = "b0bbb4994c8b6b9816e43e38eae8cd17005e908a";
 const candidateCommit = "33a77cb27fb989cb4e1695788df5eee591695aa6";
 const checklistPath = "docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md";
 const candidateReportPath = "docs/concepts/0.4.0-preview.1_NATIVE_CANDIDATE_PRODUCTION_REPORT.md";
+const transferReportPath = "docs/concepts/0.4.0-preview.1_SCOPED_CANDIDATE_TRANSFER_REPORT.md";
 
 function fixture() {
   const finalReport = "Merged through PR #712 at 0d5a9c2ae26f42fc4efa907942a66e49a9e41c59.";
@@ -103,8 +104,156 @@ function fixture() {
   };
 }
 
+function hostedTransferFixture() {
+  const input = fixture();
+  const priorCommit = input.state.candidate_source_commit;
+  const transferCommit = "e".repeat(40);
+  const reportFacts = [transferCommit, priorCommit, "41896139999"];
+
+  input.state.candidate_source_commit = transferCommit;
+  input.state.candidate_ci_run_id = 41896139999;
+  input.state.candidate_transfer_status = "verified_bounded_actions_artifacts";
+  input.state.supersedes_candidate_source_commit = priorCommit;
+  input.state.candidate_evidence_report_path = transferReportPath;
+  input.state.authority_paths.push(transferReportPath);
+  input.state.candidates = [
+    {
+      target: "aarch64-apple-darwin",
+      source_commit: transferCommit,
+      workflow_definition_path: ".github/workflows/final-candidate-macos.yml",
+      workflow_definition_commit: transferCommit,
+      workflow_run_id: 41945942592,
+      workflow_run_attempt: 1,
+      workflow_run_conclusion: "success",
+      workflow_actor: "maintainer",
+      workflow_run_created_at: "2030-11-05T01:01:00Z",
+      artifact_id: 13378129896,
+      artifact_size_bytes: 5213240,
+      artifact_created_at: "2030-11-05T01:08:56Z",
+      storage_artifact_name: `workflow-os-v0.4.0-preview.1-macos-${transferCommit}`,
+      storage_posture: "bounded_actions_artifact",
+      archive_name: "workflow-os-v0.4.0-preview.1-aarch64-apple-darwin.tar.gz",
+      archive_sha256: "1".repeat(64),
+      binary_sha256: "2".repeat(64),
+      artifact_digest_sha256: "3".repeat(64),
+      candidate_evidence_schema_version: "workflowos.dev/final-candidate-evidence/v1",
+      candidate_evidence_sha256: "4".repeat(64),
+      binary_shape: "Mach-O 64-bit executable arm64",
+      native_version_output: "workflow-os 0.4.0-preview.1",
+      posture: "final_candidate",
+      working_tree_clean: true,
+      retention_days: 7,
+      expires_at: "2030-11-12T01:08:56Z",
+      publication_authorized: false,
+    },
+    {
+      target: "x86_64-unknown-linux-musl",
+      source_commit: transferCommit,
+      workflow_definition_path: ".github/workflows/final-candidate-linux.yml",
+      workflow_definition_commit: transferCommit,
+      workflow_run_id: 41945946070,
+      workflow_run_attempt: 1,
+      workflow_run_conclusion: "success",
+      workflow_actor: "maintainer",
+      workflow_run_created_at: "2030-11-05T01:01:30Z",
+      artifact_id: 13379065507,
+      artifact_size_bytes: 5765457,
+      artifact_created_at: "2030-11-05T01:08:12Z",
+      storage_artifact_name: `workflow-os-v0.4.0-preview.1-linux-${transferCommit}`,
+      storage_posture: "bounded_actions_artifact",
+      archive_name: "workflow-os-v0.4.0-preview.1-x86_64-unknown-linux-musl.tar.gz",
+      archive_sha256: "5".repeat(64),
+      binary_sha256: "6".repeat(64),
+      artifact_digest_sha256: "7".repeat(64),
+      candidate_evidence_schema_version: "workflowos.dev/final-candidate-evidence/v1",
+      candidate_evidence_sha256: "8".repeat(64),
+      binary_shape: "ELF 64-bit LSB pie executable, x86-64, static-pie linked",
+      native_version_output: "workflow-os 0.4.0-preview.1",
+      posture: "final_candidate",
+      working_tree_clean: true,
+      retention_days: 7,
+      expires_at: "2030-11-12T01:08:12Z",
+      publication_authorized: false,
+    },
+  ];
+
+  for (const candidate of input.state.candidates) {
+    reportFacts.push(
+      candidate.archive_sha256,
+      candidate.binary_sha256,
+      String(candidate.workflow_run_id),
+      String(candidate.workflow_run_attempt),
+      String(candidate.artifact_id),
+      candidate.artifact_digest_sha256,
+      candidate.candidate_evidence_sha256,
+      candidate.storage_artifact_name,
+    );
+  }
+  input.documents.set(transferReportPath, reportFacts.join("\n"));
+  return input;
+}
+
 test("accepts exact merged release-state authority", () => {
   assert.doesNotThrow(() => validateReleaseStateSnapshot(fixture()));
+});
+
+test("accepts symmetric exact-source bounded Actions candidate transfer evidence", () => {
+  assert.doesNotThrow(() => validateReleaseStateSnapshot(hostedTransferFixture()));
+});
+
+test("rejects mixed hosted and local candidate storage", () => {
+  const input = hostedTransferFixture();
+  input.state.candidates[0].storage_posture = "local_ignored_dist";
+  assert.throws(() => validateReleaseStateSnapshot(input), /must not mix bounded Actions artifacts/);
+});
+
+test("rejects hosted transfer without explicit verified status", () => {
+  const input = hostedTransferFixture();
+  delete input.state.candidate_transfer_status;
+  assert.throws(() => validateReleaseStateSnapshot(input), /require verified_bounded_actions_artifacts/);
+});
+
+test("rejects hosted transfer without a distinct superseded source", () => {
+  const input = hostedTransferFixture();
+  input.state.supersedes_candidate_source_commit = input.state.candidate_source_commit;
+  assert.throws(() => validateReleaseStateSnapshot(input), /distinct exact superseded candidate source/);
+});
+
+test("rejects nonterminal hosted workflow evidence", () => {
+  const input = hostedTransferFixture();
+  input.state.candidates[1].workflow_run_conclusion = "failure";
+  assert.throws(() => validateReleaseStateSnapshot(input), /workflow run must be terminal success/);
+});
+
+test("rejects incomplete hosted workflow identity", () => {
+  const input = hostedTransferFixture();
+  input.state.candidates[0].workflow_definition_path = ".github/workflows/final-candidate-linux.yml";
+  delete input.state.candidates[1].workflow_actor;
+  assert.throws(
+    () => validateReleaseStateSnapshot(input),
+    /exact target workflow definition path[\s\S]*bounded workflow actor and run creation time/,
+  );
+});
+
+test("rejects incomplete hosted artifact metadata", () => {
+  const input = hostedTransferFixture();
+  delete input.state.candidates[0].artifact_digest_sha256;
+  input.state.candidates[1].expires_at = "2030-11-06T01:08:12Z";
+  delete input.state.candidates[1].candidate_evidence_schema_version;
+  assert.throws(
+    () => validateReleaseStateSnapshot(input),
+    /artifact and candidate-evidence SHA-256[\s\S]*bounded seven-day artifact retention[\s\S]*supported candidate-evidence schema/,
+  );
+});
+
+test("rejects hosted artifact identity or binary-shape drift", () => {
+  const input = hostedTransferFixture();
+  input.state.candidates[0].storage_artifact_name = "workflow-os-v0.4.0-preview.1-macos-wrong";
+  input.state.candidates[1].binary_shape = "ELF 64-bit ARM";
+  assert.throws(
+    () => validateReleaseStateSnapshot(input),
+    /artifact name must be[\s\S]*expected native binary shape/,
+  );
 });
 
 test("rejects transition-sensitive merge-pending language", () => {
