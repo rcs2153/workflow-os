@@ -136,9 +136,9 @@ Blocked product claims:
 
 ## 3. Gate 1 Implementation: Hosted Retry Reconciliation
 
-Implementation status: **implemented and focused-review accepted locally;
-exact-head PostgreSQL CI and an independent fault-injection rerun remain
-required.** See the
+Implementation status: **closed on exact main `61de8882` after governed
+implementation and review, exact-head pull-request validation, and an
+independent exact-main rerun.** See the
 [Hosted Accepted Means Dispatched Implementation
 Report](../concepts/HOSTED_ACCEPTED_MEANS_DISPATCHED_IMPLEMENTATION_REPORT.md)
 and [focused
@@ -183,6 +183,19 @@ Gate 1 acceptance:
 - hosted-alpha documentation states the repaired and still-limited boundary;
 - exact-head hosted and PostgreSQL CI pass; and
 - an independent fault-injection rerun passes.
+
+Gate 1 acceptance evidence:
+
+- PR [#739](https://github.com/rcs2153/workflow-os/pull/739) passed all nine
+  required checks on exact reviewed head
+  `c2f3640d3035482d8451b4fc5c359dc070e76149`;
+- squash-merged main is
+  `61de8882f8b8dd2a2e2bbb81f5668ece581053b9`;
+- independent exact-main Actions run `42019866185` passed all nine jobs,
+  including the Rust scheduling regression, live PostgreSQL trigger and
+  concurrency coverage, and Hosted Alpha Recovery; and
+- this evidence closes Gate 1 only. Gate 2, **Verified Means Correctly Bound**,
+  is the next authorized implementation lane.
 
 ## 4. Gate 2 Implementation: WorkReport Identity Binding
 

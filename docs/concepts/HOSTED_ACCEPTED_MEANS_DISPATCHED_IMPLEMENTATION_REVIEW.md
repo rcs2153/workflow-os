@@ -2,16 +2,17 @@
 
 ## 1. Verdict
 
-**Accepted for pull-request validation after eight in-scope blockers were fixed
-across the focused and post-merge independent reviews.**
+**Accepted and closed on exact main after eight in-scope source blockers and
+one load-sensitive test-reliability blocker were fixed.**
 
 The implementation now closes the reviewed source-level paths that could
 acknowledge or replay hosted work without the same immutable dispatch context,
 proof-backed approval decision, semantic invocation, and project scope. No
 remaining maintainer-review blocker was found.
 
-Gate 1 is not fully closed by this review. Exact-head PostgreSQL CI and an
-independent fault-injection rerun remain mandatory acceptance evidence.
+PR #739 passed all nine required checks on exact reviewed head `c2f3640d`, and
+independent exact-main Actions run `42019866185` passed all nine jobs. Gate 1
+is closed; this verdict does not broaden the hosted alpha product boundary.
 
 ## 2. Reviewed Boundary
 
@@ -292,8 +293,8 @@ registration margin and waits for the exact remaining interval before wake
 scheduling. Deadline eligibility and every behavioral assertion remain intact.
 The complete Core all-features suite and repeated focused runs pass locally.
 
-This follow-up requires its own exact-head and post-merge CI evidence. Gate 1
-must remain open until those checks pass.
+This follow-up passed its own exact-head and post-merge CI evidence. Gate 1 is
+closed.
 
 The fresh governed review found no blocker. The patch does not alter production
 deadline validation or scheduling behavior, and it preserves the real elapsed
@@ -314,9 +315,19 @@ Governed review phase:
   invocations, `6` started skill invocations, `6` successful skill
   invocations, `1` run resume, and `1` run completion; `0` retries and `0`
   escalations
-- review verdict: accepted for exact-head pull-request validation with no
-  blocking finding; Gate 1 remains open pending exact-head and post-merge CI
+- review verdict: accepted with no blocking finding; subsequent exact-head and
+  exact-main evidence closed Gate 1
 - out-of-kernel execution: commit inspection, source review, evidence review,
   and validation-result comparison were performed by the trusted development
   host; Workflow OS governed scope and approval but did not execute repository
   reads, shell commands, or PR actions
+
+## 11. Final Gate 1 Acceptance Evidence
+
+- PR: [#739](https://github.com/rcs2153/workflow-os/pull/739)
+- exact reviewed head: `c2f3640d3035482d8451b4fc5c359dc070e76149`
+- exact merged main: `61de8882f8b8dd2a2e2bbb81f5668ece581053b9`
+- exact-head PR Actions run: `42018593801`, all nine jobs passed
+- independent exact-main Actions run: `42019866185`, all nine jobs passed
+- next authorized implementation lane: Gate 2, **Verified Means Correctly
+  Bound**

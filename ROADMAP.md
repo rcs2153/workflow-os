@@ -109,11 +109,13 @@ violations:
    race: a real-time wait deadline allowed only `500 ms` for opening and projected
    yield persistence. The production fail-closed boundary was correct; the test now
    preserves that boundary with a multi-second registration margin and waits for the
-   exact remaining interval. Fresh governed review, exact-head PostgreSQL and Rust
-   CI, green post-merge CI, and an independent final-head fault-injection rerun remain
-   required. Reliable unattended
-   hosted completion and truthful hosted-submission acknowledgment remain
-   blocked. See the [implementation
+   exact remaining interval. Gate 1 is closed on exact main `61de8882`: PR
+   [#739](https://github.com/rcs2153/workflow-os/pull/739) passed all nine
+   checks on reviewed head `c2f3640d`, and independent exact-main Actions run
+   `42019866185` passed all nine checks, including the Rust scheduling
+   regression, live PostgreSQL trigger and concurrency coverage, and Hosted
+   Alpha Recovery. This is bounded Gate 1 acceptance evidence, not a broader
+   production-readiness claim. See the [implementation
    report](docs/concepts/HOSTED_ACCEPTED_MEANS_DISPATCHED_IMPLEMENTATION_REPORT.md).
 2. **Verified means correctly bound.** A complete valid WorkReport from run B
    can be placed in run A's filesystem slot, pass body-commitment validation,
@@ -135,6 +137,10 @@ blocked until every gate passes exact-head CI and an independent rerun. See the
 Plan](docs/implementation-plans/continuity-of-authority-p0-release-gates-plan.md).
 The compact-checkpoint benchmark remains bounded product evidence, not a
 substitute for these correctness gates.
+
+Gate 1 is closed. The next authorized implementation lane is Gate 2,
+**Verified Means Correctly Bound**. Gate 3 and the cross-gate review remain
+blocked behind Gate 2 acceptance.
 
 A new P0 **evidence provenance and report integrity** preemption is active
 before publication, public-positioning expansion, or broader evidence-consuming
