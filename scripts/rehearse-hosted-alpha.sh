@@ -19,6 +19,7 @@ api_base_url="${WORKFLOW_OS_HOSTED_API_URL:-http://127.0.0.1:8080}"
 compose_project="${WORKFLOW_OS_HOSTED_COMPOSE_PROJECT:-workflow-os-hosted-recovery}"
 run_suffix="${WORKFLOW_OS_HOSTED_REHEARSAL_RUN_SUFFIX:-$(date -u +%Y%m%d%H%M%S)}"
 run_id="run-hosted-recovery-${run_suffix}"
+one_shot_run_id="run-hosted-worker-once-${run_suffix}"
 bundle_id="bundle-hosted-recovery-${run_suffix}"
 bundle_version="v1"
 correlation_id="correlation-hosted-recovery-${run_suffix}"
@@ -106,6 +107,17 @@ wait_for_run_status() {
   done
 }
 
+run_worker_once() {
+  local expected_outcome="$1"
+  local actual_output=""
+  actual_output="$(compose run --rm --no-deps worker --worker-once)"
+  if [ "${actual_output}" != "worker_outcome: ${expected_outcome}" ]; then
+    printf 'hosted one-shot worker returned an unexpected outcome: %s\n' \
+      "${actual_output}" >&2
+    return 1
+  fi
+}
+
 run_request="$(
   jq \
     --null-input \
@@ -129,11 +141,48 @@ run_request="$(
       redaction_required: true
     }'
 )"
+one_shot_run_request="$(
+  printf '%s' "${run_request}" |
+    jq \
+      --compact-output \
+      --arg run_id "${one_shot_run_id}" \
+      --arg correlation_id "correlation-hosted-worker-once-${run_suffix}" \
+      --arg idempotency_key "hosted-worker-once-create-${run_suffix}" \
+      '.run_id = $run_id
+       | .correlation_id = $correlation_id
+       | .idempotency_key = $idempotency_key'
+)"
 
 compose up --detach --build postgres api
 printf 'hosted_rehearsal_step: wait_for_initial_api\n'
 wait_for_api
 inspect_authenticated_surface
+
+printf 'hosted_rehearsal_step: worker_once_idle\n'
+run_worker_once idle
+
+printf 'hosted_rehearsal_step: create_worker_once_run\n'
+if ! authenticated_post_json "${api_base_url}/api/v0alpha1/runs" "${one_shot_run_request}" >"${response_file}"; then
+  printf 'hosted_api_error_code: %s\n' \
+    "$(jq --raw-output '.code // "hosted.unknown"' "${response_file}")" >&2
+  exit 1
+fi
+if [ "$(jq --raw-output '.snapshot.identity.run_id' "${response_file}")" != "${one_shot_run_id}" ]; then
+  printf 'hosted alpha API returned an unexpected one-shot run identity\n' >&2
+  exit 1
+fi
+printf 'hosted_rehearsal_step: worker_once_complete\n'
+run_worker_once completed
+authenticated_get "${api_base_url}/api/v0alpha1/runs/${one_shot_run_id}/events?limit=50" >"${response_file}"
+if [ "$(jq --raw-output '.events[-1].kind.kind' "${response_file}")" != "RunCompleted" ]; then
+  printf 'hosted one-shot worker terminal event trail is incomplete\n' >&2
+  exit 1
+fi
+authenticated_get "${api_base_url}/api/v0alpha1/runs/${one_shot_run_id}/report" >"${response_file}"
+if [ "$(jq --raw-output '.run_id' "${response_file}")" != "${one_shot_run_id}" ]; then
+  printf 'hosted one-shot worker report has an unexpected run identity\n' >&2
+  exit 1
+fi
 
 printf 'hosted_rehearsal_step: create_run\n'
 if ! authenticated_post_json "${api_base_url}/api/v0alpha1/runs" "${run_request}" >"${response_file}"; then
@@ -160,7 +209,7 @@ if [ "$(jq --raw-output '.snapshot.status' "${response_file}")" != "running" ]; 
   exit 1
 fi
 
-printf 'hosted_rehearsal_step: start_worker\n'
+printf 'hosted_rehearsal_step: start_continuous_worker\n'
 compose up --detach worker
 wait_for_run_status completed
 printf 'hosted_rehearsal_step: inspect_terminal_run\n'
@@ -196,6 +245,8 @@ compose start postgres
 printf 'hosted_rehearsal_step: recover_database\n'
 wait_for_api
 wait_for_run_status completed
+printf 'hosted_rehearsal_step: worker_once_after_restart\n'
+run_worker_once idle
 authenticated_get "${api_base_url}/api/v0alpha1/runs/${run_id}/reports/${report_id}" >"${response_file}"
 if [ "$(jq --raw-output '.run_id' "${response_file}")" != "${run_id}" ]; then
   printf 'hosted alpha terminal report did not survive database interruption\n' >&2
