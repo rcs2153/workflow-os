@@ -2939,6 +2939,29 @@ pub(crate) fn validate_durable_hosted_dispatch(
     Ok(())
 }
 
+pub(crate) fn validate_durable_hosted_dispatch_intent(
+    run: &WorkflowRun,
+    work_item: &HostedWorkItem,
+    expected_invocation_id: &SkillInvocationId,
+    expected_step_id: &StepId,
+    expected_skill_id: &SkillId,
+    expected_skill_version: &SkillVersion,
+) -> Result<(), WorkflowOsError> {
+    validate_dispatch_run_binding(run, work_item)?;
+    let durable = pending_hosted_invocation(run, work_item)?;
+    if &durable.0 != expected_invocation_id
+        || &durable.1 != expected_step_id
+        || &durable.2 != expected_skill_id
+        || &durable.3 != expected_skill_version
+    {
+        return Err(hosted_projection_error(
+            "hosted.dispatch.replay_intent.invalid",
+            "hosted dispatch replay intent is invalid",
+        ));
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn hosted_event(
     run: &WorkflowRun,
@@ -3809,6 +3832,34 @@ mod tests {
             .expect_err("dispatch authority substitution must fail");
         assert_eq!(error.code(), "hosted.dispatch.intent_mismatch");
         assert!(!format!("{error:?}").contains("catalog/substituted"));
+    }
+
+    #[test]
+    fn durable_hosted_dispatch_requires_exact_semantic_invocation() {
+        let (run, item) = dispatched_run_and_item();
+        validate_durable_hosted_dispatch_intent(
+            &run,
+            &item,
+            &SkillInvocationId::new("invocation-hosted-result")
+                .unwrap_or_else(|error| panic!("{error}")),
+            &StepId::new("verify").unwrap_or_else(|error| panic!("{error}")),
+            &SkillId::new("hosted/no-write").unwrap_or_else(|error| panic!("{error}")),
+            &SkillVersion::new("v1").unwrap_or_else(|error| panic!("{error}")),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+
+        let error = validate_durable_hosted_dispatch_intent(
+            &run,
+            &item,
+            &SkillInvocationId::new("invocation-hosted-substituted")
+                .unwrap_or_else(|error| panic!("{error}")),
+            &StepId::new("verify").unwrap_or_else(|error| panic!("{error}")),
+            &SkillId::new("hosted/substituted").unwrap_or_else(|error| panic!("{error}")),
+            &SkillVersion::new("v2").unwrap_or_else(|error| panic!("{error}")),
+        )
+        .expect_err("substituted durable invocation must fail");
+        assert_eq!(error.code(), "hosted.dispatch.replay_intent.invalid");
+        assert!(!format!("{error:?}").contains("substituted"));
     }
 
     #[test]

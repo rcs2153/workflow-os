@@ -3053,7 +3053,7 @@ fn prove_hosted_approval_dispatch_recovery(backend: &PostgresStateBackend, confi
     assert_eq!(denied.snapshot.status, WorkflowRunStatus::Failed);
     let replayed_denial = decide_hosted_dispatch_approval_with_presentation(
         &LocalExecutor::new(backend, &registry),
-        denial,
+        denial.clone(),
         &denied_request.dispatch,
     )
     .expect("exact denial replay returns terminal run");
@@ -3065,6 +3065,30 @@ fn prove_hosted_approval_dispatch_recovery(backend: &PostgresStateBackend, confi
             .filter(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalDenied(_)))
             .count(),
         1
+    );
+
+    let mut changed_denial_dispatch = denied_request.dispatch.clone();
+    changed_denial_dispatch.catalog_entry_id =
+        HostedCatalogEntryId::new("catalog/postgres-hosted-denial-changed")
+            .expect("changed denial catalog");
+    let conflict = decide_hosted_dispatch_approval_with_presentation(
+        &LocalExecutor::new(backend, &registry),
+        denial.clone(),
+        &changed_denial_dispatch,
+    )
+    .expect_err("terminal denial replay must revalidate dispatch context");
+    assert_eq!(conflict.code(), "executor.approval.resume_context_mismatch");
+
+    fs::remove_dir_all(project.path()).expect("remove mutable project after terminal decision");
+    let replayed_without_project = decide_hosted_dispatch_approval_with_presentation(
+        &LocalExecutor::new(backend, &registry),
+        denial,
+        &denied_request.dispatch,
+    )
+    .expect("exact terminal replay must use durable immutable context");
+    assert_eq!(
+        replayed_without_project.snapshot.status,
+        WorkflowRunStatus::Failed
     );
 }
 

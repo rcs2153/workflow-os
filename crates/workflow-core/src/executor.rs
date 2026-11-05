@@ -14733,19 +14733,13 @@ fn recover_hosted_approval_dispatch_replay(
     if durable_decision.decision == ApprovalDecisionKind::Denied
         || run.snapshot.status.is_terminal()
     {
+        validate_terminal_hosted_approval_replay_context(
+            executor,
+            &run,
+            &pending_approval,
+            dispatch,
+        )?;
         return Ok(Some(run));
-    }
-    if run.snapshot.status != WorkflowRunStatus::Running
-        || !run
-            .events
-            .iter()
-            .any(|event| matches!(event.kind, WorkflowRunEventKind::RunResumed))
-    {
-        return Err(executor_error(
-            WorkflowOsErrorKind::InvalidState,
-            "executor.hosted_approval.replay_posture_invalid",
-            "hosted approval replay posture is invalid",
-        ));
     }
     let builder = EventBuilder::from_snapshot(
         &run.snapshot,
@@ -14760,8 +14754,153 @@ fn recover_hosted_approval_dispatch_replay(
     )?;
     validate_hosted_no_write_plan(&plan)?;
     validate_hosted_resume_plan(executor, &mut plan, &run)?;
+    if run.snapshot.status != WorkflowRunStatus::Running
+        || !run
+            .events
+            .iter()
+            .any(|event| matches!(event.kind, WorkflowRunEventKind::RunResumed))
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.hosted_approval.replay_posture_invalid",
+            "hosted approval replay posture is invalid",
+        ));
+    }
     plan.event_builder = builder;
     dispatch_hosted_plan(executor, plan, dispatch).map(Some)
+}
+
+fn validate_terminal_hosted_approval_replay_context(
+    executor: &LocalExecutor<'_, PostgresStateBackend>,
+    run: &WorkflowRun,
+    approval: &ApprovalRequest,
+    dispatch: &HostedNoWriteDispatchInputs,
+) -> Result<(), WorkflowOsError> {
+    let binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(immutable_run_bundle_binding_error)?;
+    let stored = executor
+        .backend
+        .read_immutable_run_bundle(&run.snapshot.identity.run_id)?
+        .ok_or_else(immutable_run_bundle_binding_error)?;
+    if stored.manifest().run_binding() != *binding {
+        return Err(immutable_run_bundle_binding_error());
+    }
+    let base_context = hosted_base_context_from_immutable_bundle(&stored, run)?;
+    let expected_context = hosted_dispatch_context_hash(&base_context, dispatch)?;
+    if stored.manifest().resolved_execution_context_hash() != &expected_context
+        || approval.resolved_execution_context_hash.as_ref() != Some(&expected_context)
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.approval.resume_context_mismatch",
+            "approval resume context does not match the context originally approved",
+        ));
+    }
+    Ok(())
+}
+
+fn hosted_base_context_from_immutable_bundle(
+    bundle: &crate::StoredImmutableRunBundle,
+    run: &WorkflowRun,
+) -> Result<crate::SpecContentHash, WorkflowOsError> {
+    let manifest = bundle.manifest();
+    let execution_posture = manifest.execution_posture();
+    if execution_posture.hook_inputs() != crate::ImmutableRunBundleReferencePosture::NotSupplied
+        || execution_posture.side_effect_inputs()
+            != crate::ImmutableRunBundleReferencePosture::NotSupplied
+    {
+        return Err(immutable_run_bundle_binding_error());
+    }
+    let workflow_records = bundle
+        .definition_records()
+        .iter()
+        .filter(|record| {
+            record.kind() == crate::ImmutableRunBundleDefinitionKind::Workflow
+                && record.definition_id() == manifest.workflow_id().as_str()
+                && record.source_content_hash() == manifest.workflow_content_hash()
+        })
+        .collect::<Vec<_>>();
+    let [workflow_record] = workflow_records.as_slice() else {
+        return Err(immutable_run_bundle_binding_error());
+    };
+    let workflow = LoadedSpec {
+        path: PathBuf::new(),
+        content_hash: workflow_record.source_content_hash().clone(),
+        definition: workflow_record
+            .canonical_definition()
+            .as_workflow()
+            .cloned()
+            .ok_or_else(immutable_run_bundle_binding_error)?,
+    };
+    let skills = bundle
+        .definition_records()
+        .iter()
+        .filter_map(|record| {
+            record
+                .canonical_definition()
+                .as_skill()
+                .cloned()
+                .map(|definition| LoadedSpec {
+                    path: PathBuf::new(),
+                    content_hash: record.source_content_hash().clone(),
+                    definition,
+                })
+        })
+        .collect::<Vec<_>>();
+    let policies = bundle
+        .definition_records()
+        .iter()
+        .filter_map(|record| {
+            record
+                .canonical_definition()
+                .as_policy()
+                .cloned()
+                .map(|definition| LoadedSpec {
+                    path: PathBuf::new(),
+                    content_hash: record.source_content_hash().clone(),
+                    definition,
+                })
+        })
+        .collect::<Vec<_>>();
+    let checkpoint_inputs = LocalExecutionBeforeSkillInvocationCheckpointInputs {
+        required_step_ids: execution_posture.required_checkpoint_step_ids().to_vec(),
+    };
+    let request = LocalExecutionRequest {
+        project_root: PathBuf::new(),
+        workflow_id: manifest.workflow_id().clone(),
+        run_id: Some(manifest.run_id().clone()),
+        correlation_id: run
+            .events
+            .first()
+            .and_then(|event| event.correlation_id.clone())
+            .ok_or_else(immutable_run_bundle_binding_error)?,
+        actor: manifest.created_by().clone(),
+        before_skill_invocation_checkpoints: checkpoint_inputs.clone(),
+        before_skill_invocation_hook: None,
+        side_effect_events: Vec::new(),
+        side_effect_lifecycle_events: Vec::new(),
+    };
+    let artifact_policies =
+        LocalExecutor::<PostgresStateBackend>::derive_execution_plan_report_artifact_policies(
+            &workflow,
+            &ProjectValidationCapability::Default,
+            None,
+        )
+        .map_err(|_| immutable_run_bundle_binding_error())?;
+    resolved_execution_context_hash(
+        &workflow,
+        &skills,
+        &policies,
+        &checkpoint_inputs,
+        &request,
+        artifact_policies,
+        None,
+    )
+    .map_err(|_| immutable_run_bundle_binding_error())
 }
 
 fn validate_hosted_approval_replay_evidence(
@@ -15234,11 +15373,20 @@ fn bind_hosted_dispatch_context(
     plan: &mut ExecutionPlan,
     dispatch: &HostedNoWriteDispatchInputs,
 ) -> Result<(), WorkflowOsError> {
+    plan.resolved_execution_context_hash =
+        hosted_dispatch_context_hash(&plan.resolved_execution_context_hash, dispatch)?;
+    Ok(())
+}
+
+fn hosted_dispatch_context_hash(
+    base_context: &crate::SpecContentHash,
+    dispatch: &HostedNoWriteDispatchInputs,
+) -> Result<crate::SpecContentHash, WorkflowOsError> {
     let mut hasher = Sha256::new();
     update_idempotency_hash(
         &mut hasher,
         "resolved_execution_context",
-        plan.resolved_execution_context_hash.as_str(),
+        base_context.as_str(),
     );
     update_idempotency_hash(
         &mut hasher,
@@ -15275,9 +15423,7 @@ fn bind_hosted_dispatch_context(
     } else {
         update_idempotency_hash(&mut hasher, "project_scope", "none");
     }
-    plan.resolved_execution_context_hash =
-        crate::SpecContentHash::new(hex_digest(hasher.finalize()))?;
-    Ok(())
+    crate::SpecContentHash::new(hex_digest(hasher.finalize()))
 }
 
 fn dispatch_hosted_plan(
@@ -15341,18 +15487,26 @@ fn dispatch_hosted_plan(
         request,
         Timestamp::now_utc(),
     )?;
+    let invocation_id = hosted_invocation_id(&plan)?;
     if let Some(existing) = executor
         .backend
         .read_revisioned_hosted_work_item(work_item.work_item_id())?
     {
         existing.value().validate_dispatch_intent(&work_item)?;
-        crate::hosted::validate_durable_hosted_dispatch(&run, existing.value())?;
+        crate::hosted::validate_durable_hosted_dispatch_intent(
+            &run,
+            existing.value(),
+            &invocation_id,
+            &plan.step.id,
+            &plan.skill_id,
+            &plan.skill_version,
+        )?;
         return Ok(run);
     }
     let projection = HostedSkillDispatch::new(
         &run,
         work_item,
-        hosted_invocation_id(&plan)?,
+        invocation_id,
         plan.skill_id,
         plan.skill_version,
         SkillAttemptId::generate(),

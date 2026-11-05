@@ -37,9 +37,13 @@ fault-injection rerun pass.
 - Allowed only lifecycle fields such as queue timestamps, status timestamps,
   attempt count, and generated attempt identity to differ across exact retries.
 - Required an existing work item to match a rehydrated `Running` run and one
-  exact pending hosted invocation.
+  exact pending hosted invocation, including the deterministic invocation,
+  step, skill, and skill-version tuple expected by the current plan.
 - Made proof-backed approval decisions exactly replayable after a durable grant
   and resume but failed queue insertion, without appending another grant.
+- Required terminal granted or denied approval replay to reconstruct and
+  validate the originally approved dispatch context from durable immutable
+  bundle records before returning the durable terminal run.
 - Changed PostgreSQL dispatch replay to validate semantic intent plus durable
   run evidence instead of comparing regenerated lifecycle event objects.
 - Required the supplied replay projection to preserve invocation, step, skill,
@@ -94,7 +98,18 @@ does.
 The approval-path fault test applies the same queue-insert failure after one
 proof-backed grant and `RunResumed`. Exact approval replay repairs the dispatch,
 preserves one grant event, creates one queue item, remains idempotent on another
-retry, and rejects changed dispatch configuration.
+retry, and rejects changed dispatch configuration. Terminal denial replay also
+rejects changed dispatch configuration instead of treating terminal status as
+authority to bypass the approved context. Exact terminal replay remains
+available after the mutable project checkout is removed because replay derives
+its comparison from the stored canonical workflow, skill, policy, checkpoint,
+and execution-posture records.
+
+Post-merge independent source review found that the executor's existing-item
+shortcut validated only that *some* durable invocation was pending, while the
+PostgreSQL transaction path validated the exact supplied semantic tuple. The
+shortcut now performs the same exact invocation, step, skill, and skill-version
+comparison against the deterministic plan before acknowledging the retry.
 
 ## 5. Hosted API Idempotency
 
@@ -174,6 +189,36 @@ identity validation across every backend and replay consumer.
   ran validation; Workflow OS governed scope and approval but did not execute
   repository writes or shell commands
 
-The focused review and its four corrected blockers are recorded in [Hosted
+The focused and post-merge independent reviews and their seven corrected
+blockers are recorded in [Hosted
 Accepted Means Dispatched Implementation
 Review](HOSTED_ACCEPTED_MEANS_DISPATCHED_IMPLEMENTATION_REVIEW.md).
+
+## 10. Governed Independent-Review Blocker Record
+
+- workflow: `dg/blocker`
+- run: `run-1793873603202986000-2`
+- approval: `approval/run-1793873603202986000-2/fix-approved`
+- presentation: `presentation/b8047fe8bae61f6c`
+- approval outcome: granted by the delegated maintainer with persisted
+  presentation proof
+- phase status: completed
+- event summary: `39` events, including `1` approval request, `1` approval
+  grant, `8` policy decisions, `6` scheduled steps, `6` requested skill
+  invocations, `6` started skill invocations, `6` successful skill
+  invocations, `1` run resume, and `1` run completion; `0` retries and `0`
+  escalations
+- presentation proof: enforced as `presentation/b8047fe8bae61f6c` with the
+  approval event marker present
+- approved boundary: exact durable invocation-plan comparison and terminal
+  approval-replay context validation only
+- non-goals: Gate 2, provider mutation, scheduling expansion, schema changes,
+  release work, and unrelated refactoring
+- validation summary: the complete Core all-features suite, focused hosted and
+  durable-state tests, warnings-denied Core/hosted Clippy and rustdoc,
+  formatting, documentation checks, PostgreSQL test-target compilation, and
+  diff hygiene passed; the live PostgreSQL body remained skipped locally
+  because no test database URL is configured
+- out-of-kernel execution: source inspection, edits, and validation were
+  performed by the trusted development host; Workflow OS governed the phase
+  but did not execute repository writes or shell commands

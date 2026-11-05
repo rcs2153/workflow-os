@@ -101,10 +101,11 @@ violations:
    the fix. The bounded retry-reconciliation implementation is complete
    locally: success now requires the exact approval-wait, terminal, or durable
    dispatch posture, and an exact retry can atomically repair a missing dispatch
-   from the immutable run bundle. Focused review found and fixed dispatch-
-   context, approval-replay, invocation-projection, and project-scope replay
-   blockers. Exact-head PostgreSQL CI and an independent fault-injection rerun
-   remain required. Reliable unattended
+   from the immutable run bundle. Focused and post-merge independent reviews
+   found and fixed dispatch-context, approval-replay, invocation-projection,
+   project-scope replay, executor-shortcut semantic-invocation, terminal-replay
+   context, and mutable-checkout replay blockers. Fresh governed review, exact-head PostgreSQL CI,
+   and an independent final-head fault-injection rerun remain required. Reliable unattended
    hosted completion and truthful hosted-submission acknowledgment remain
    blocked. See the [implementation
    report](docs/concepts/HOSTED_ACCEPTED_MEANS_DISPATCHED_IMPLEMENTATION_REPORT.md).
