@@ -101,8 +101,16 @@ complete WorkReport body commitment, an expected commitment anchored outside
 the mutable report body, enforcement across read/list/inspect/recovery/replay,
 explicit legacy posture, and bounded inspection output. Local durability must
 not be described as independent evidence or storage-owner tamper resistance.
-The first implementation phase is model/projection review over existing
-execution-binding and check-attestation vocabulary; it must not add arbitrary
+The model/projection review over existing execution-binding and
+check-attestation vocabulary is complete. It accepts the existing immutable
+execution binding, explicitly unverified candidate, and crate-private accepted
+attestation as the source foundations, and identifies the missing boundary as a
+payload-free result-level assurance projection rather than a second evidence
+system. See the [focused review](docs/concepts/EVIDENCE_PROVENANCE_MODEL_PROJECTION_REVIEW.md).
+The next implementation phase is the model-only local-check evidence assurance
+projection: separate closed producer, execution, and attestation posture bound
+to existing execution, handler, result, and immutable-run commitments. It must
+not add runtime integration, persistence, events, CLI, schemas, SDKs, arbitrary
 commands, signing, an external witness, hosted identity, provider expansion, or
 publication. Independent security review is required before release admission
 resumes.
