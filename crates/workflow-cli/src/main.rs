@@ -51,7 +51,10 @@ use workflow_core::{
     JiraReadOnlyConfig, LifecycleStatus, LoadedSpec, LocalApprovalDecisionRequest,
     LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
     LocalApprovalPresentationResolvedContextDecisionRequest,
-    LocalApprovalProofMarkerAuditProjectionStore, LocalCheckResultId, LocalCheckResultReference,
+    LocalApprovalProofMarkerAuditProjectionStore, LocalCheckEvidenceAssuranceProjection,
+    LocalCheckEvidenceAttestationPosture, LocalCheckEvidenceExecutionPosture,
+    LocalCheckEvidenceExternalVerifiabilityPosture, LocalCheckEvidenceProducerPosture,
+    LocalCheckResultId, LocalCheckResultReference,
     LocalExecutionAuthoritativeVisibleGovernanceDependencies,
     LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionHookCheckpointInputs,
     LocalExecutionImmutableRunBundleInputs, LocalExecutionReportInputs, LocalExecutionRequest,
@@ -2835,12 +2838,15 @@ fn inspect_from_backend<B: StateBackend + WorkReportArtifactStore>(
     )
     .with_run_identity(&run.snapshot.identity);
     let report_artifacts = backend.list_work_report_artifacts_with_expectation(&expectation)?;
+    let local_check_assurance = authoritative_immutable_bundle_store(invocation)
+        .list_local_check_evidence_assurance_projections(run_id)?;
     if invocation.json {
         let rendered = inspect_json(
             &run,
             &adapter_audit,
             &adapter_observability,
             &report_artifacts,
+            &local_check_assurance,
         );
         if provider_fixture {
             println!(
@@ -2900,6 +2906,7 @@ fn inspect_from_backend<B: StateBackend + WorkReportArtifactStore>(
         if !adapter_observability.is_empty() {
             println!("adapter_observability: {}", adapter_observability.len());
         }
+        print_local_check_evidence_assurance(&local_check_assurance);
         print_work_report_artifacts(&report_artifacts);
         if provider_fixture {
             println!("provider_operation: github.repository.metadata");
@@ -3857,16 +3864,30 @@ fn first_run_artifact_sections(
     ];
     let local_check_citation = local_check_result_reference
         .map(|reference| {
+            let assurance_summary = reference.assurance_projection().map_or_else(
+                || "assurance unavailable".to_owned(),
+                |assurance| {
+                    format!(
+                        "assurance producer={}, execution={}, attestation={}, external_verifiability={}, projection_fingerprint={}",
+                        local_check_assurance_producer_label(assurance.producer_posture()),
+                        local_check_assurance_execution_label(assurance.execution_posture()),
+                        local_check_assurance_attestation_label(assurance.attestation_posture()),
+                        local_check_assurance_external_verifiability_label(
+                            assurance.external_verifiability(),
+                        ),
+                        assurance.projection_fingerprint(),
+                    )
+                },
+            );
             WorkReportCitation::new(WorkReportCitationDefinition {
                 target: WorkReportCitationTarget::LocalCheckResult {
                     reference: WorkReportStableReference::new(
                         reference.result_id().as_str().to_owned(),
                     )?,
                 },
-                summary: Some(
-                    "Authoritative project-validation result considered before execution."
-                        .to_owned(),
-                ),
+                summary: Some(format!(
+                    "Authoritative project-validation result considered before execution; {assurance_summary}."
+                )),
                 missing: false,
                 redaction: RedactionMetadata::empty(),
                 sensitivity: WorkReportSensitivity::Internal,
@@ -13236,6 +13257,7 @@ fn inspect_json(
     adapter_audit: &[workflow_core::AdapterRuntimeAuditRecord],
     adapter_observability: &[workflow_core::AdapterRuntimeObservabilityRecord],
     report_artifacts: &[workflow_core::WorkReportArtifactRecord],
+    local_check_assurance: &[LocalCheckEvidenceAssuranceProjection],
 ) -> String {
     let events = run
         .events
@@ -13287,8 +13309,26 @@ fn inspect_json(
         })
         .collect::<Vec<_>>()
         .join(",");
+    let local_check_assurance = local_check_assurance
+        .iter()
+        .map(|projection| {
+            format!(
+                "{{\"result_id\":\"{}\",\"result_status\":\"{}\",\"producer\":\"{}\",\"execution\":\"{}\",\"attestation\":\"{}\",\"external_verifiability\":\"{}\",\"projection_fingerprint\":\"{}\"}}",
+                json_escape(projection.result_id().as_str()),
+                projection.result_status(),
+                local_check_assurance_producer_label(projection.producer_posture()),
+                local_check_assurance_execution_label(projection.execution_posture()),
+                local_check_assurance_attestation_label(projection.attestation_posture()),
+                local_check_assurance_external_verifiability_label(
+                    projection.external_verifiability(),
+                ),
+                projection.projection_fingerprint(),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"run_id\":\"{}\",\"schema_version\":\"{}\",\"workflow_version\":\"{}\",\"spec_hash\":\"{}\",\"status\":\"{:?}\",\"events\":[{}],\"approvals\":{},\"retries\":{},\"escalations\":{},\"adapter_audit_records\":{},\"adapter_observability_records\":{},\"work_report_artifacts\":[{}]}}",
+        "{{\"run_id\":\"{}\",\"schema_version\":\"{}\",\"workflow_version\":\"{}\",\"spec_hash\":\"{}\",\"status\":\"{:?}\",\"events\":[{}],\"approvals\":{},\"retries\":{},\"escalations\":{},\"adapter_audit_records\":{},\"adapter_observability_records\":{},\"local_check_evidence_assurance\":[{}],\"work_report_artifacts\":[{}]}}",
         json_escape(run.snapshot.identity.run_id.as_str()),
         json_escape(run.snapshot.identity.schema_version.as_str()),
         json_escape(run.snapshot.identity.workflow_version.as_str()),
@@ -13300,8 +13340,65 @@ fn inspect_json(
         run.snapshot.escalations.len(),
         adapter_audit.len(),
         adapter_observability.len(),
+        local_check_assurance,
         report_artifacts
     )
+}
+
+fn print_local_check_evidence_assurance(projections: &[LocalCheckEvidenceAssuranceProjection]) {
+    if projections.is_empty() {
+        return;
+    }
+    println!("local_check_evidence_assurance: {}", projections.len());
+    for projection in projections {
+        println!(
+            "  result_id={} status={} producer={} execution={} attestation={} external_verifiability={} projection_fingerprint={}",
+            projection.result_id(),
+            projection.result_status(),
+            local_check_assurance_producer_label(projection.producer_posture()),
+            local_check_assurance_execution_label(projection.execution_posture()),
+            local_check_assurance_attestation_label(projection.attestation_posture()),
+            local_check_assurance_external_verifiability_label(
+                projection.external_verifiability(),
+            ),
+            projection.projection_fingerprint(),
+        );
+    }
+}
+
+fn local_check_assurance_producer_label(value: LocalCheckEvidenceProducerPosture) -> &'static str {
+    match value {
+        LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound => {
+            "operator_selected_content_bound"
+        }
+    }
+}
+
+fn local_check_assurance_execution_label(
+    value: LocalCheckEvidenceExecutionPosture,
+) -> &'static str {
+    match value {
+        LocalCheckEvidenceExecutionPosture::TrustedHostObserved => "trusted_host_observed",
+    }
+}
+
+fn local_check_assurance_attestation_label(
+    value: LocalCheckEvidenceAttestationPosture,
+) -> &'static str {
+    match value {
+        LocalCheckEvidenceAttestationPosture::Unattested => "unattested",
+        LocalCheckEvidenceAttestationPosture::KernelAcceptedLocalProcess => {
+            "kernel_accepted_local_process"
+        }
+    }
+}
+
+fn local_check_assurance_external_verifiability_label(
+    value: LocalCheckEvidenceExternalVerifiabilityPosture,
+) -> &'static str {
+    match value {
+        LocalCheckEvidenceExternalVerifiabilityPosture::Unavailable => "unavailable",
+    }
 }
 
 fn report_artifact_citation_counts(

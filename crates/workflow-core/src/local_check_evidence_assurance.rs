@@ -364,6 +364,12 @@ impl LocalCheckEvidenceAssuranceProjection {
         &self.resolved_execution_fingerprint
     }
 
+    /// Returns the exact selected-handler commitment.
+    #[must_use]
+    pub const fn handler_selection_fingerprint(&self) -> &SpecContentHash {
+        &self.handler_selection_fingerprint
+    }
+
     /// Returns the exact local-check result identity.
     #[must_use]
     pub const fn result_id(&self) -> &LocalCheckResultId {
@@ -424,6 +430,30 @@ impl LocalCheckEvidenceAssuranceProjection {
         self.producer_posture == minimum.producer
             && self.execution_posture == minimum.execution
             && attestation_satisfies(self.attestation_posture, minimum.attestation)
+    }
+
+    /// Returns whether two projections describe the same durable evidence subject
+    /// and assurance posture.
+    ///
+    /// Observation-specific execution fingerprints are intentionally excluded so
+    /// a later reassessment cannot replace the first persisted projection merely
+    /// because it observed the same subject at a different time.
+    #[must_use]
+    pub(crate) fn same_durable_subject_and_posture(&self, other: &Self) -> bool {
+        self.immutable_run_bundle == other.immutable_run_bundle
+            && self.workflow_id == other.workflow_id
+            && self.run_id == other.run_id
+            && self.step_id == other.step_id
+            && self.command_id == other.command_id
+            && self.command_kind == other.command_kind
+            && self.handler_selection_fingerprint == other.handler_selection_fingerprint
+            && self.result_id == other.result_id
+            && self.result_status == other.result_status
+            && self.producer_posture == other.producer_posture
+            && self.execution_posture == other.execution_posture
+            && self.attestation_posture == other.attestation_posture
+            && self.accepted_attestation == other.accepted_attestation
+            && self.external_verifiability == other.external_verifiability
     }
 }
 

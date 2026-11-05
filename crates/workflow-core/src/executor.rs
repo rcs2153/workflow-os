@@ -16119,6 +16119,11 @@ fn selected_project_validation_route_reference(
             "result_ambiguous",
         ));
     };
+    let [assurance_projection] = route.local_check_evidence_assurance_projections() else {
+        return Err(selected_project_validation_consumer_error(
+            "assurance_projection_ambiguous",
+        ));
+    };
     let bundle_binding = route
         .run()
         .snapshot
@@ -16132,7 +16137,7 @@ fn selected_project_validation_route_reference(
     )?;
     let (_, identities) =
         authoritative_docs_check_preflight_material(&stored, selected_step_id, handler)?;
-    crate::LocalCheckResultReference::from_result(
+    crate::LocalCheckResultReference::from_result_with_assurance(
         identities.result_id,
         local_check_result,
         route.run().snapshot.identity.workflow_id.clone(),
@@ -16140,6 +16145,7 @@ fn selected_project_validation_route_reference(
         inputs.workflow_event_id.clone(),
         inputs.audit_event_id.clone(),
         inputs.output_reference.clone(),
+        assurance_projection.clone(),
         inputs.redaction.clone(),
         inputs.sensitivity,
     )
@@ -16357,7 +16363,7 @@ where
         route,
         &request.report,
         &local_check_reference,
-        stable_reference,
+        &stable_reference,
     ))
 }
 
@@ -16467,7 +16473,7 @@ fn execute_with_authoritative_local_check_governance_report<B>(
 where
     B: StateBackend,
 {
-    let stable_reference = authoritative_report_stable_reference(
+    let caller_stable_reference = authoritative_report_stable_reference(
         &request.report,
         &request.local_check_reference.result_id,
     )?;
@@ -16486,15 +16492,16 @@ where
         route,
         &request.report,
         &request.local_check_reference,
-        stable_reference,
+        &caller_stable_reference,
     ))
 }
 
+#[allow(clippy::too_many_lines)]
 fn compose_authoritative_local_check_governance_report(
     route: LocalExecutionWithAuthoritativeGovernanceRouteResult,
     report: &LocalExecutionReportInputs,
     local_check_reference: &AuthoritativeDocsCheckReportReferenceInputs,
-    stable_reference: WorkReportStableReference,
+    caller_stable_reference: &WorkReportStableReference,
 ) -> LocalExecutionWithAuthoritativeGovernanceReportResult {
     let [local_check_result] = route.local_check_results() else {
         return LocalExecutionWithAuthoritativeGovernanceReportResult::new(
@@ -16508,15 +16515,59 @@ fn compose_authoritative_local_check_governance_report(
             None,
         );
     };
+    let [assurance_projection] = route.local_check_evidence_assurance_projections() else {
+        return LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+            route,
+            AuthoritativeGovernanceReportPosture::GenerationFailed,
+            None,
+            Some(authoritative_governance_report_consumer_error(
+                "assurance_projection_count_invalid",
+                "authoritative governance report consumer requires exactly one assurance projection",
+            )),
+            None,
+        );
+    };
+    let assurance_projection = assurance_projection.clone();
+    let Ok(stable_reference) =
+        WorkReportStableReference::new(assurance_projection.result_id().as_str().to_owned())
+    else {
+        return LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+            route,
+            AuthoritativeGovernanceReportPosture::GenerationFailed,
+            None,
+            Some(authoritative_governance_report_consumer_error(
+                "reference_invalid",
+                "authoritative governance report consumer requires a valid durable check reference",
+            )),
+            None,
+        );
+    };
+    if &stable_reference != caller_stable_reference
+        && report
+            .local_check_result_references
+            .contains(&stable_reference)
+    {
+        return LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+            route,
+            AuthoritativeGovernanceReportPosture::GenerationFailed,
+            None,
+            Some(authoritative_governance_report_consumer_error(
+                "duplicate_reference",
+                "authoritative governance report consumer rejects duplicate check references",
+            )),
+            None,
+        );
+    }
     let identity = &route.run().snapshot.identity;
-    let Ok(reference) = crate::LocalCheckResultReference::from_result(
-        local_check_reference.result_id.clone(),
+    let Ok(reference) = crate::LocalCheckResultReference::from_result_with_assurance(
+        assurance_projection.result_id().clone(),
         local_check_result,
         identity.workflow_id.clone(),
         identity.run_id.clone(),
         local_check_reference.workflow_event_id.clone(),
         local_check_reference.audit_event_id.clone(),
         local_check_reference.output_reference.clone(),
+        assurance_projection,
         local_check_reference.redaction.clone(),
         local_check_reference.sensitivity,
     ) else {
@@ -16983,6 +17034,11 @@ where
     {
         return Err(governance_assessment_fingerprint_mismatch_error());
     }
+    let local_check_evidence_assurance_projections =
+        persist_or_resolve_local_check_evidence_assurance_projections(
+            store,
+            local_check_evidence_assurance_projections,
+        )?;
 
     let bundle_binding = stored.manifest().run_binding();
     Ok(PreparedAuthoritativeDocsCheckGovernance {
@@ -17819,6 +17875,7 @@ where
     )
 }
 
+#[allow(clippy::too_many_lines)]
 fn decide_approval_with_authoritative_local_check_governance_report<B>(
     executor: &LocalExecutor<'_, B>,
     store: &crate::LocalImmutableRunBundleStore,
@@ -17834,16 +17891,17 @@ where
         mut report,
         local_check_reference,
     } = request;
-    let reference_value = local_check_reference.result_id.as_str().to_owned();
-    let stable_reference = WorkReportStableReference::new(reference_value).map_err(|_| {
-        authoritative_governance_report_consumer_error(
-            "reference_invalid",
-            "authoritative governance report consumer requires a valid stable check reference",
-        )
-    })?;
+    let caller_reference_value = local_check_reference.result_id.as_str().to_owned();
+    let caller_stable_reference =
+        WorkReportStableReference::new(caller_reference_value).map_err(|_| {
+            authoritative_governance_report_consumer_error(
+                "reference_invalid",
+                "authoritative governance report consumer requires a valid stable check reference",
+            )
+        })?;
     if report
         .local_check_result_references
-        .contains(&stable_reference)
+        .contains(&caller_stable_reference)
     {
         return Err(authoritative_governance_report_consumer_error(
             "duplicate_reference",
@@ -17868,15 +17926,59 @@ where
             ),
         );
     };
+    let [assurance_projection] = outcome
+        .local_check_evidence_assurance_projections
+        .as_slice()
+    else {
+        return Ok(
+            LocalAuthoritativeGovernanceApprovalReportDecisionResult::new(
+                outcome.run,
+                AuthoritativeGovernanceReportPosture::GenerationFailed,
+                None,
+                Some(authoritative_governance_report_consumer_error(
+                    "assurance_projection_count_invalid",
+                    "authoritative governance report consumer requires exactly one assurance projection",
+                )),
+                None,
+            ),
+        );
+    };
     let identity = &outcome.run.snapshot.identity;
-    let Ok(reference) = crate::LocalCheckResultReference::from_result(
-        local_check_reference.result_id,
+    let stable_reference =
+        WorkReportStableReference::new(assurance_projection.result_id().as_str().to_owned())
+            .map_err(|_| {
+                authoritative_governance_report_consumer_error(
+            "reference_invalid",
+            "authoritative governance report consumer requires a valid durable check reference",
+        )
+            })?;
+    if stable_reference != caller_stable_reference
+        && report
+            .local_check_result_references
+            .contains(&stable_reference)
+    {
+        return Ok(
+            LocalAuthoritativeGovernanceApprovalReportDecisionResult::new(
+                outcome.run,
+                AuthoritativeGovernanceReportPosture::GenerationFailed,
+                None,
+                Some(authoritative_governance_report_consumer_error(
+                    "duplicate_reference",
+                    "authoritative governance report consumer rejects duplicate check references",
+                )),
+                None,
+            ),
+        );
+    }
+    let Ok(reference) = crate::LocalCheckResultReference::from_result_with_assurance(
+        assurance_projection.result_id().clone(),
         local_check_result,
         identity.workflow_id.clone(),
         identity.run_id.clone(),
         local_check_reference.workflow_event_id,
         local_check_reference.audit_event_id,
         local_check_reference.output_reference,
+        assurance_projection.clone(),
         local_check_reference.redaction,
         local_check_reference.sensitivity,
     ) else {
@@ -17932,6 +18034,7 @@ where
 struct AuthoritativeGovernanceApprovalDecisionOutcome {
     run: WorkflowRun,
     local_check_results: Vec<crate::LocalCheckResult>,
+    local_check_evidence_assurance_projections: Vec<crate::LocalCheckEvidenceAssuranceProjection>,
 }
 
 struct AuthoritativeLocalCheckApprovalReassessment {
@@ -18009,6 +18112,8 @@ where
     Ok(AuthoritativeGovernanceApprovalDecisionOutcome {
         run,
         local_check_results: reassessment.local_check_results,
+        local_check_evidence_assurance_projections: reassessment
+            .local_check_evidence_assurance_projections,
     })
 }
 
@@ -18131,6 +18236,11 @@ fn reassess_authoritative_local_check_governance_binding(
         &reassessed,
         options.runtime_fact_source_evaluated_at.is_some(),
     )?;
+    let local_check_evidence_assurance_projections =
+        persist_or_resolve_local_check_evidence_assurance_projections(
+            store,
+            local_check_evidence_assurance_projections,
+        )?;
     Ok(AuthoritativeLocalCheckApprovalReassessment {
         binding: durable_binding,
         evaluated_at: options.runtime_fact_source_evaluated_at,
@@ -18523,6 +18633,40 @@ fn persist_or_validate_governance_assessment_binding(
         }
         Err(error) => Err(error),
     }
+}
+
+fn persist_or_resolve_local_check_evidence_assurance_projections(
+    store: &crate::LocalImmutableRunBundleStore,
+    projections: Vec<crate::LocalCheckEvidenceAssuranceProjection>,
+) -> Result<Vec<crate::LocalCheckEvidenceAssuranceProjection>, WorkflowOsError> {
+    let mut durable = Vec::with_capacity(projections.len());
+    for projection in projections {
+        match store.write_local_check_evidence_assurance_projection_create_only(&projection) {
+            Ok(()) => durable.push(projection),
+            Err(error)
+                if error.code() == "immutable_run_bundle_store.local_check_assurance.exists" =>
+            {
+                let stored = store.read_local_check_evidence_assurance_projection(
+                    projection.run_id(),
+                    projection.result_id(),
+                )?;
+                if !stored.same_durable_subject_and_posture(&projection) {
+                    return Err(local_check_evidence_assurance_binding_mismatch_error());
+                }
+                durable.push(stored);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(durable)
+}
+
+fn local_check_evidence_assurance_binding_mismatch_error() -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        "executor.local_check_evidence_assurance.binding_mismatch",
+        "durable local check evidence assurance does not match the current evidence subject",
+    )
 }
 
 fn governance_assessment_binding_mismatch_error() -> WorkflowOsError {

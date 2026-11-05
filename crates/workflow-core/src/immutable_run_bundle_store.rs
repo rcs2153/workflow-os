@@ -10,12 +10,15 @@ use crate::{
     CanonicalLocalCheckDeclarationSetRecord, CanonicalLocalCheckDeclarationSetReference,
     GovernanceAssessmentBinding, ImmutableRunBundleBuildResult, ImmutableRunBundleDefinitionRecord,
     ImmutableRunBundleDefinitionReference, ImmutableRunBundleId, ImmutableRunBundleManifest,
-    SpecContentHash, WorkflowOsError, WorkflowRunId,
+    LocalCheckEvidenceAssuranceProjection, LocalCheckResultId, SpecContentHash, WorkflowOsError,
+    WorkflowRunId,
 };
 
 const DEFINITION_RECORDS_DIR: &str = "definition-records";
 const LOCAL_CHECK_DECLARATION_SET_RECORDS_DIR: &str = "local-check-declaration-set-records";
 const GOVERNANCE_ASSESSMENT_BINDINGS_DIR: &str = "governance-assessment-bindings";
+const LOCAL_CHECK_EVIDENCE_ASSURANCE_PROJECTIONS_DIR: &str =
+    "local-check-evidence-assurance-projections";
 const MANIFESTS_DIR: &str = "manifests";
 
 #[derive(Serialize, Deserialize)]
@@ -534,6 +537,140 @@ impl LocalImmutableRunBundleStore {
         Ok(binding)
     }
 
+    /// Writes one payload-free local-check evidence-assurance projection
+    /// create-only for its exact run and result identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the immutable bundle is absent or
+    /// mismatched, the address already exists, or local persistence fails.
+    pub(crate) fn write_local_check_evidence_assurance_projection_create_only(
+        &self,
+        projection: &LocalCheckEvidenceAssuranceProjection,
+    ) -> Result<(), WorkflowOsError> {
+        self.with_shared_state_writer_guard(|| {
+            projection.validate()?;
+            let stored = self.read_bundle(
+                projection.run_id(),
+                projection.immutable_run_bundle().bundle_id(),
+            )?;
+            if stored.manifest().run_binding() != *projection.immutable_run_bundle() {
+                return Err(store_error(
+                    "immutable_run_bundle_store.local_check_assurance.bundle_mismatch",
+                    "local check assurance projection does not match the stored immutable bundle",
+                ));
+            }
+            let path = self.local_check_evidence_assurance_projection_path(
+                projection.run_id(),
+                projection.result_id(),
+            );
+            if path.exists() {
+                return Err(store_error(
+                    "immutable_run_bundle_store.local_check_assurance.exists",
+                    "local check assurance projection already exists for the result",
+                ));
+            }
+            write_json_create_new(&path, projection).map_err(|error| {
+                if error.code() == "immutable_run_bundle_store.record_exists" {
+                    store_error(
+                        "immutable_run_bundle_store.local_check_assurance.exists",
+                        "local check assurance projection already exists for the result",
+                    )
+                } else {
+                    error
+                }
+            })
+        })
+    }
+
+    /// Reads and validates one exact local-check assurance projection.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the record is absent, corrupt,
+    /// addressed incorrectly, or no longer matches the immutable run bundle.
+    pub fn read_local_check_evidence_assurance_projection(
+        &self,
+        run_id: &WorkflowRunId,
+        result_id: &LocalCheckResultId,
+    ) -> Result<LocalCheckEvidenceAssuranceProjection, WorkflowOsError> {
+        let projection: LocalCheckEvidenceAssuranceProjection =
+            read_json(&self.local_check_evidence_assurance_projection_path(run_id, result_id))?;
+        if projection.run_id() != run_id || projection.result_id() != result_id {
+            return Err(store_error(
+                "immutable_run_bundle_store.local_check_assurance.identity_mismatch",
+                "local check assurance projection does not match its storage address",
+            ));
+        }
+        let stored = self.read_bundle(run_id, projection.immutable_run_bundle().bundle_id())?;
+        if stored.manifest().run_binding() != *projection.immutable_run_bundle() {
+            return Err(store_error(
+                "immutable_run_bundle_store.local_check_assurance.bundle_mismatch",
+                "local check assurance projection does not match the stored immutable bundle",
+            ));
+        }
+        Ok(projection)
+    }
+
+    /// Lists validated local-check assurance projections for one run.
+    ///
+    /// Missing storage is an empty result. Corrupt, misaddressed, or mismatched
+    /// records fail closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the directory cannot be read or
+    /// any record is corrupt, misaddressed, or bundle-mismatched.
+    pub fn list_local_check_evidence_assurance_projections(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<LocalCheckEvidenceAssuranceProjection>, WorkflowOsError> {
+        let directory = self.local_check_evidence_assurance_projection_run_dir(run_id);
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+        let mut projections = Vec::new();
+        for entry in fs::read_dir(directory).map_err(|_| {
+            store_error(
+                "immutable_run_bundle_store.local_check_assurance.read_dir_failed",
+                "failed to read local check assurance projection directory",
+            )
+        })? {
+            let path = entry
+                .map_err(|_| {
+                    store_error(
+                        "immutable_run_bundle_store.local_check_assurance.read_dir_failed",
+                        "failed to read local check assurance projection directory entry",
+                    )
+                })?
+                .path();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+                continue;
+            }
+            let projection: LocalCheckEvidenceAssuranceProjection = read_json(&path)?;
+            let expected_name = encoded_id_file_name(projection.result_id().as_str());
+            if projection.run_id() != run_id
+                || path.file_name().and_then(|name| name.to_str()) != Some(expected_name.as_str())
+            {
+                return Err(store_error(
+                    "immutable_run_bundle_store.local_check_assurance.identity_mismatch",
+                    "local check assurance projection does not match its storage address",
+                ));
+            }
+            let stored = self.read_bundle(run_id, projection.immutable_run_bundle().bundle_id())?;
+            if stored.manifest().run_binding() != *projection.immutable_run_bundle() {
+                return Err(store_error(
+                    "immutable_run_bundle_store.local_check_assurance.bundle_mismatch",
+                    "local check assurance projection does not match the stored immutable bundle",
+                ));
+            }
+            projections.push(projection);
+        }
+        projections
+            .sort_by(|left, right| left.result_id().as_str().cmp(right.result_id().as_str()));
+        Ok(projections)
+    }
+
     fn read_manifest_envelope(
         &self,
         run_id: &WorkflowRunId,
@@ -693,6 +830,16 @@ impl LocalImmutableRunBundleStore {
         self.root.join(GOVERNANCE_ASSESSMENT_BINDINGS_DIR)
     }
 
+    fn local_check_evidence_assurance_projections_dir(&self) -> PathBuf {
+        self.root
+            .join(LOCAL_CHECK_EVIDENCE_ASSURANCE_PROJECTIONS_DIR)
+    }
+
+    fn local_check_evidence_assurance_projection_run_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
+        self.local_check_evidence_assurance_projections_dir()
+            .join(encoded_id_component(run_id.as_str()))
+    }
+
     fn definition_record_path(&self, hash: &SpecContentHash) -> PathBuf {
         self.definition_records_dir().join(hash_file_name(hash))
     }
@@ -710,6 +857,15 @@ impl LocalImmutableRunBundleStore {
     fn governance_assessment_binding_path(&self, run_id: &WorkflowRunId) -> PathBuf {
         self.governance_assessment_bindings_dir()
             .join(encoded_id_file_name(run_id.as_str()))
+    }
+
+    fn local_check_evidence_assurance_projection_path(
+        &self,
+        run_id: &WorkflowRunId,
+        result_id: &LocalCheckResultId,
+    ) -> PathBuf {
+        self.local_check_evidence_assurance_projection_run_dir(run_id)
+            .join(encoded_id_file_name(result_id.as_str()))
     }
 }
 
@@ -1032,12 +1188,17 @@ fn hash_file_name(hash: &SpecContentHash) -> String {
 }
 
 fn encoded_id_file_name(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len() * 2 + 5);
+    let mut encoded = encoded_id_component(value);
+    encoded.push_str(".json");
+    encoded
+}
+
+fn encoded_id_component(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len() * 2);
     for byte in value.as_bytes() {
         use std::fmt::Write as _;
         let _ = write!(&mut encoded, "{byte:02x}");
     }
-    encoded.push_str(".json");
     encoded
 }
 

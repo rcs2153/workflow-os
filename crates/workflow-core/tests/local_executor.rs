@@ -8149,6 +8149,7 @@ fn proof_enforced_current_runtime_fact_approval_denial_is_source_free() {
 // Caller-authored authority route tests retired with the preview API surface.
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn core_owned_authoritative_route_derives_facts_and_ignores_unused_visible_capability() {
     let project = TestProject::new("core-owned-authoritative-quiet");
     project.write_core_owned_authoritative_project_validation_project();
@@ -8243,6 +8244,18 @@ fn core_owned_authoritative_route_derives_facts_and_ignores_unused_visible_capab
     assert!(projection
         .accepted_attestation_proof_fingerprint()
         .is_none());
+    assert_eq!(
+        store
+            .read_local_check_evidence_assurance_projection(&run_id, projection.result_id())
+            .expect("durable assurance projection"),
+        *projection
+    );
+    assert_eq!(
+        store
+            .list_local_check_evidence_assurance_projections(&run_id)
+            .expect("durable assurance projection list"),
+        vec![projection.clone()]
+    );
     assert_eq!(
         result.governance_assessment_binding().execution(),
         GovernanceExecutionDisposition::Proceed
@@ -8926,11 +8939,11 @@ fn selected_project_validation_report_adapter_reassesses_terminal_run_without_re
         .local_check_evidence_assurance_projections()
         .first()
         .expect("terminal reassessment assurance projection");
-    assert_ne!(
+    assert_eq!(
         retry_projection.execution_binding_fingerprint(),
         first_projection.execution_binding_fingerprint()
     );
-    assert_ne!(
+    assert_eq!(
         retry_projection.projection_fingerprint(),
         first_projection.projection_fingerprint()
     );
@@ -8942,6 +8955,19 @@ fn selected_project_validation_report_adapter_reassesses_terminal_run_without_re
     assert_eq!(
         retry_projection.attestation_posture(),
         LocalCheckEvidenceAttestationPosture::Unattested
+    );
+    assert_eq!(
+        second
+            .local_check_result_reference()
+            .expect("terminal report result reference")
+            .assurance_projection(),
+        Some(first_projection)
+    );
+    assert_eq!(
+        store
+            .list_local_check_evidence_assurance_projections(&run_id)
+            .expect("durable assurance projections"),
+        vec![first_projection.clone()]
     );
     assert!(
         second
