@@ -387,17 +387,25 @@ Execute one reviewed phase per gate:
 5. Product-contract, hosted, integration, and release-admission reconciliation.
 
 Cross-gate status: **private Core correction implemented and focused-review
-accepted after three blocker corrections.** The review confirmed the three individual gate closures but found
-that the private replacement-executor proof did not compose their exact
-lifecycle bindings into its fresh-authority subject. The implementation now
-binds current accepted dispatch, exact WorkReport location, and current
-project-resource authority under one run, immutable context, and revision
-fence, and it rejects binding-free fresh authority. See the [Continuity Of
-Authority Cross-Gate
-Review](../concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_REVIEW.md) and [binding
-report](../concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_BINDING_REPORT.md) and
-[accepted review](../concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_BINDING_REVIEW.md).
-Exact-head pull-request validation and merge remain required before step 5.
+accepted after three blocker corrections; exact-head CI and merge complete.**
+The review confirmed the three individual gate closures but found that the
+private replacement-executor proof did not compose their exact lifecycle
+bindings into its fresh-authority subject. The implementation binds current
+accepted dispatch, exact WorkReport location, current project-resource
+authority, run scope, and lawful-next operation under one immutable context and
+revision fence, and it rejects binding-free fresh authority. PR #746 merged as
+`3216fef1` after all nine exact-head jobs passed. See the [Continuity Of
+Authority Cross-Gate Review](../concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_REVIEW.md),
+[binding report](../concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_BINDING_REPORT.md),
+and [accepted review](../concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_BINDING_REVIEW.md).
+
+Step 5 is active under the [Continuity Of Authority Product And Release
+Reconciliation
+Plan](continuity-of-authority-product-release-reconciliation-plan.md). It must
+correct stale product claims, complete remaining validator-assurance
+projection/enforcement, obtain independent adversarial review, and regenerate
+release candidates from the exact admitted source. It must not promote the
+private cross-gate model into a production replacement-executor claim.
 
 Do not bundle all three implementations into one unreviewable patch. Each gate
 must close its own invariant and tests without claiming that the other two are

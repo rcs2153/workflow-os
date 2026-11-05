@@ -203,10 +203,14 @@ Focused maintainer/security review is accepted after correcting event-only
 dispatch inference, cross-run scope composition, and unbound lawful-next
 operation identity. See the [accepted
 review](docs/concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_BINDING_REVIEW.md).
-Exact-head pull-request validation and merge are now required. After merge,
-product-contract, hosted, integration, and release-admission reconciliation is
-the next lane; provider-mutation and comparative benchmark work remain outside
-this boundary.
+PR #746 merged the unchanged reviewed head as `3216fef1` after all nine exact-
+head checks passed. Product-contract, hosted, integration, and release-
+admission reconciliation is now the active lane. The [reconciliation
+plan](docs/implementation-plans/continuity-of-authority-product-release-reconciliation-plan.md)
+records stale product claims, retires the duplicate replay lane, preserves the
+remaining validator-assurance and independent-review blockers, and requires a
+new exact-source release candidate. Provider-mutation and comparative benchmark
+execution remain outside this boundary.
 
 A new P0 **evidence provenance and report integrity** preemption is active
 before publication, public-positioning expansion, or broader evidence-consuming
@@ -338,18 +342,17 @@ report](docs/concepts/WORK_REPORT_BODY_COMMITMENT_RECOVERY_RECONCILIATION_REPORT
 and [accepted
 review](docs/concepts/WORK_REPORT_BODY_COMMITMENT_RECOVERY_RECONCILIATION_REVIEW.md).
 
-After the three continuity-of-authority release gates pass, the next phase in
-this lane is bounded **WorkReport body-commitment replay enforcement**. Its
-storage-key and internal-identity binding requirements are now part of release
-gate 2 and must not wait for a narrower body-only replay phase. The later replay
-work must trace every terminal or provider replay path that consumes a persisted
-artifact, including transaction-local PostgreSQL reads, require retained
-commitment validation before replay equality or content reuse, preserve the
-original legacy-unverified posture without upgrade, and fail closed without
-payload leakage. Migration, backfill, signing, external witnesses, provider
-mutation broadening, publication, new commands/schemas/SDKs, and claims of
-storage-owner tamper resistance remain out of scope. Independent security
-review remains required before release admission resumes.
+The planned bounded **WorkReport body-commitment replay enforcement** is now
+absorbed by accepted continuity Gate 2 rather than remaining a second
+implementation lane. Gate 2 traced terminal and provider replay consumers,
+including transaction-local PostgreSQL reads, enforced external storage-key and
+internal run/report/workflow identity before retained body commitment, preserved
+legacy-unverified posture without upgrade, and passed focused, exact-head,
+post-merge, and independent replay/misplacement evidence. This closure does not
+add migration, backfill, signing, external witnesses, provider mutation,
+publication, schemas/SDKs, or storage-owner tamper resistance. Independent
+security review and the remaining validator-assurance projection/enforcement
+work still block release admission.
 
 The separate deterministic hosted P0 is now implemented. The advertised
 `workflow-os-hosted --worker-once` entry point previously called the
