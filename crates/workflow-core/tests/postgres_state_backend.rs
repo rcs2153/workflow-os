@@ -2806,7 +2806,10 @@ fn prove_hosted_dispatch_recovery(
     let conflict =
         execute_with_hosted_no_write_dispatch(&LocalExecutor::new(&restarted, &registry), &changed)
             .expect_err("changed dispatch intent must fail");
-    assert_eq!(conflict.code(), "hosted.dispatch.intent_mismatch");
+    assert_eq!(
+        conflict.code(),
+        "executor.immutable_run_bundle.binding_mismatch"
+    );
 
     let concurrent_request = hosted_dispatch_request(project, "concurrent-recovery");
     fault_connection
