@@ -1699,6 +1699,12 @@ fn first_run_explicit_artifact_path_quietly_persists_and_replays_exactly() {
         stdout(&inspect)
     );
     assert!(
+        stdout(&inspect)
+            .contains("body_commitment_read_posture=verified_persisted_envelope_anchor"),
+        "{}",
+        stdout(&inspect)
+    );
+    assert!(
         stdout(&inspect).contains(&format!("local_check_reference={local_check_reference}")),
         "{}",
         stdout(&inspect)
@@ -1715,6 +1721,10 @@ fn first_run_explicit_artifact_path_quietly_persists_and_replays_exactly() {
     assert_eq!(projected_artifact["citation_count"], 1);
     assert_eq!(projected_artifact["missing_citation_count"], 0);
     assert_eq!(projected_artifact["local_check_citation_count"], 1);
+    assert_eq!(
+        projected_artifact["body_commitment_read_posture"],
+        "verified_persisted_envelope_anchor"
+    );
     assert_eq!(
         projected_artifact["local_check_references"][0],
         local_check_reference
@@ -1787,6 +1797,84 @@ fn first_run_explicit_artifact_path_quietly_persists_and_replays_exactly() {
     assert!(!drifted_recovery.status.success());
     assert!(stderr(&drifted_recovery)
         .contains("cli.first_run.artifact.terminal_artifact_recovery_drift"));
+}
+
+#[test]
+fn inspect_rejects_substituted_work_report_before_human_or_json_projection() {
+    let project = TestProject::new("inspect-report-body-substitution");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let run_id = "run-inspect-report-body-substitution";
+    let create = workflow_os(
+        &project,
+        &["first-run", "--write-report-artifact", "--run-id", run_id],
+    );
+    assert!(create.status.success(), "{}", stderr(&create));
+
+    let artifact_path = first_json_file_under(&project.state_root().join("work_reports"))
+        .expect("artifact file exists");
+    let mut artifact: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("artifact file is readable"))
+            .expect("artifact JSON parses");
+    artifact["work_report"]["sections"][0]["summary"] =
+        serde_json::json!("substituted inspect summary sk-inspect-secret");
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec(&artifact).expect("substituted artifact serializes"),
+    )
+    .expect("substituted artifact is written");
+
+    for args in [vec!["inspect", run_id], vec!["--json", "inspect", run_id]] {
+        let inspect = workflow_os(&project, &args);
+        assert!(!inspect.status.success());
+        assert!(stderr(&inspect).contains("work_report_artifact.read.corrupt"));
+        assert!(!stdout(&inspect).contains("substituted inspect summary"));
+        assert!(!stderr(&inspect).contains("substituted inspect summary"));
+        assert!(!stdout(&inspect).contains("sk-inspect-secret"));
+        assert!(!stderr(&inspect).contains("sk-inspect-secret"));
+        assert!(!stdout(&inspect).contains("work_report_artifacts"));
+    }
+}
+
+#[test]
+fn inspect_projects_legacy_work_report_as_explicitly_unverified() {
+    let project = TestProject::new("inspect-report-legacy-unverified");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let run_id = "run-inspect-report-legacy-unverified";
+    let create = workflow_os(
+        &project,
+        &["first-run", "--write-report-artifact", "--run-id", run_id],
+    );
+    assert!(create.status.success(), "{}", stderr(&create));
+
+    let artifact_path = first_json_file_under(&project.state_root().join("work_reports"))
+        .expect("artifact file exists");
+    let mut artifact: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("artifact file is readable"))
+            .expect("artifact JSON parses");
+    artifact["metadata"]
+        .as_object_mut()
+        .expect("metadata object")
+        .remove("body_commitment");
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec(&artifact).expect("legacy artifact serializes"),
+    )
+    .expect("legacy artifact is written");
+
+    let inspect = workflow_os(&project, &["inspect", run_id]);
+    assert!(inspect.status.success(), "{}", stderr(&inspect));
+    assert!(stdout(&inspect).contains("body_commitment_read_posture=legacy_unverified"));
+
+    let inspect_json = workflow_os(&project, &["--json", "inspect", run_id]);
+    assert!(inspect_json.status.success(), "{}", stderr(&inspect_json));
+    let value: serde_json::Value =
+        serde_json::from_str(stdout(&inspect_json).trim()).expect("inspect JSON parses");
+    assert_eq!(
+        value["work_report_artifacts"][0]["body_commitment_read_posture"],
+        "legacy_unverified"
+    );
 }
 
 #[test]

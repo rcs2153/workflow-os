@@ -182,15 +182,33 @@ report](docs/concepts/WORK_REPORT_BODY_COMMITMENT_READ_PATH_ENFORCEMENT_REPORT.m
 and [accepted
 review](docs/concepts/WORK_REPORT_BODY_COMMITMENT_READ_PATH_ENFORCEMENT_REVIEW.md).
 
-The next phase is bounded **WorkReport body-commitment inspect and metadata
-projection enforcement**. It must prevent inspect and report-metadata consumers
-from presenting new-format report content or verified posture unless the
-retained commitment has passed the same read boundary, while preserving
-explicit legacy-unverified disclosure and stable non-leaking errors. Recovery,
-duplicate reconciliation, replay, product/CLI expansion beyond the existing
-surfaces, migration, signing, external witnesses, provider mutation,
-publication, and claims of storage-owner tamper resistance remain out of scope.
-Independent security review remains required before release admission resumes.
+The bounded **WorkReport body-commitment inspect and metadata projection
+enforcement** phase is implemented and its focused maintainer/security review
+is accepted. Existing human and JSON `inspect` output now obtains report
+artifacts through the commitment-enforcing store list boundary and explicitly
+projects `verified_persisted_envelope_anchor` or `legacy_unverified` read
+posture. A report-only substitution therefore fails closed before either output
+can present report metadata. The current-authority WorkReport metadata consumer
+also independently validates the complete artifact before projecting bounded
+metadata and maps substitution to its existing payload-free store-failure
+posture. This strengthens existing projection surfaces; it does not add a new
+command, schema, SDK, or generalized verification claim. Direct serde remains
+structure-only, and storage-owner rewrites of both body and retained commitment
+remain inside the current trust boundary. See the [implementation
+report](docs/concepts/WORK_REPORT_BODY_COMMITMENT_INSPECT_METADATA_PROJECTION_REPORT.md)
+and [accepted
+review](docs/concepts/WORK_REPORT_BODY_COMMITMENT_INSPECT_METADATA_PROJECTION_REVIEW.md).
+
+The next phase is bounded **WorkReport body-commitment recovery and duplicate
+reconciliation enforcement**. It must identify every recovery or duplicate
+reconciliation path that can consume a persisted report artifact, require the
+retained commitment boundary before returning content or accepting equality,
+preserve explicit legacy-unverified disclosure, and fail closed without
+payload leakage on corrupt or conflicting records. Replay remains a later,
+separately reviewed phase. Product/CLI expansion, migration, signing, external
+witnesses, provider mutation, publication, and claims of storage-owner tamper
+resistance remain out of scope. Independent security review remains required
+before release admission resumes.
 
 The separate deterministic hosted P0 is now implemented. The advertised
 `workflow-os-hosted --worker-once` entry point previously called the
