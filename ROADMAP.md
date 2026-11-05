@@ -151,8 +151,8 @@ workflow identity, then body commitment. Review found and fixed built-in
 expectation reads that verified body commitment before full immutable identity,
 and hosted metadata endpoints that still used legacy run-only reads. Focused
 filesystem, injected-store, SQLite, combined substitution, legacy, hosted, and
-PostgreSQL relational-key and identity-order coverage exists. Gate 2 remains
-open. PR #741 merged the unchanged reviewed head after all nine exact-head
+PostgreSQL relational-key and identity-order coverage exists. PR #741 merged
+the unchanged reviewed head after all nine exact-head
 checks passed, including credential-backed PostgreSQL execution. A
 maintainer-operated post-merge rerun on exact `main` confirmed filesystem and
 SQLite misplacement rejection, immutable-identity-before-body ordering, CLI
@@ -168,8 +168,20 @@ pass. See the
 and [focused review](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_REVIEW.md),
 the [post-merge evidence report](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_POST_MERGE_EVIDENCE.md),
 and the [independent rerun report](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_INDEPENDENT_RERUN.md).
-Gate 3 is now the next continuity-of-authority implementation gate. The
-cross-gate review remains blocked until Gate 3 is accepted.
+Gate 3 is now the active continuity-of-authority implementation gate. Its
+candidate binds the current project identity, exact run and approval,
+normalized GitHub repository resource set, provider declaration, relevant
+workflow/skill/policy context, and fixture commitment into the existing
+resolved execution-context commitment. Current declarations are reconstructed
+before approval acceptance and again inside atomic fixture/live provider
+admission. Focused tests reject replacement, broadening, removal, duplicate
+declaration, disablement, policy drift, fixture drift, and post-approval
+resource drift before provider entry, while canonical resource reordering and
+unchanged execution succeed. Focused maintainer/security review found no
+authorization blocker and added explicit endpoint, access-reference, and stable
+project-identity drift coverage. Full local validation passes. Exact-head CI
+and an independent parent-versus-fix drift rerun remain required before Gate 3
+closes. The cross-gate review remains blocked until Gate 3 is accepted.
 
 A new P0 **evidence provenance and report integrity** preemption is active
 before publication, public-positioning expansion, or broader evidence-consuming

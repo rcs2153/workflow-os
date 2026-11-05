@@ -271,8 +271,9 @@ Implementation status:
   with `work_report_artifact.read.location_mismatch` before projection or body
   reuse;
 - body-only substitution remains `work_report_artifact.read.corrupt`; and
-- exact-head CI, focused review, and independent backend misplacement rerun are
-  still required, so this implementation status does not close Gate 2.
+- focused review, exact-head CI, maintainer-operated post-merge evidence, and
+  an independent clean-room backend-misplacement rerun passed. Gate 2 is
+  closed on exact `main`; these results do not close Gate 3.
 
 See the [Gate 2 implementation
 report](../concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_IMPLEMENTATION_REPORT.md).
@@ -327,6 +328,34 @@ Gate 3 acceptance:
 - fixture and opt-in live-read contract tests pass; and
 - an independent drift rerun reproduces the old failure on the parent commit and
   passes on the fix.
+
+Implementation status: **candidate complete; focused review passed.** The
+existing approval `resolved_execution_context_hash` now commits a versioned
+canonical GitHub repository-metadata restriction containing the project ID,
+exact run and deterministic approval ID, provider family, operation and
+resource kind, enabled posture, endpoint, access-reference identity, sorted
+exact resource set, current workflow/skill/policy context, and fixture payload
+commitment. Approval acceptance reconstructs that commitment from the current
+validated project before appending `ApprovalGranted`. The atomic fixture and
+opt-in live-read admission boundary reconstructs it again and requires equality
+with both the immutable run bundle and granted approval before provider entry.
+
+Focused public CLI regressions cover replacement, broadening, removal,
+duplicate declaration, disablement, endpoint and access-reference substitution,
+stable project-identity drift, referenced-policy drift, normalized resource
+ordering, fixture drift, unchanged completion, and post-approval resource drift
+with no provider invocation or telemetry. The private live-read boundary also
+proves that current-project drift rejects before transient access resolution or
+provider entry. Focused maintainer/security review found no authorization
+blocker and corrected the field-level evidence gap before acceptance. Full Core,
+CLI, warnings-denied, documentation, release-state, formatting, and diff
+validation pass. The project manifest currently declares only the GitHub
+repository-metadata provider-read family; Jira and GitHub Actions adapter models
+are not equivalent project-declared governed read families and are not claimed
+as covered by this gate.
+
+This candidate does not close Gate 3 until exact-head CI and the independent
+parent-versus-fix drift rerun pass.
 
 ## 6. Governed Delivery Sequence
 

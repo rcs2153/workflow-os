@@ -1,4 +1,5 @@
 use std::fmt;
+use std::path::Path;
 
 use super::github_repository_transient_access::{
     GitHubRepositoryEnvironmentReader, GitHubRepositoryMetadataAccessReference,
@@ -18,7 +19,7 @@ use crate::{
     GitHubRepositoryMetadataReadConfiguration, GitHubRepositoryMetadataResource,
     OperationalExecutionWindowOpeningOperationId, OperationalExecutionWindowOpeningReceiptId,
     RedactionMetadata, RequiredContextContractBinding, RequiredContextExecutionBinding, SkillInput,
-    SkillOutput, SpecContentHash, SqliteStateBackend, Timestamp,
+    SkillOutput, SpecContentHash, SqliteStateBackend, StateBackend, Timestamp,
     TrustedHostLocalApplicationPreparedSession, WorkflowOsError,
 };
 
@@ -141,6 +142,8 @@ pub(super) struct GitHubRepositoryAtomicLifecycleInput<'a, R, O> {
     pub(super) redaction: RedactionMetadata,
     pub(super) persistence: TrustedHostSupervisorPersistenceInput,
     pub(super) operation_mode: AdapterOperationMode,
+    pub(super) project_root: &'a Path,
+    pub(super) provider_context_commitment: Option<SpecContentHash>,
     pub(super) environment: R,
     pub(super) operation: O,
 }
@@ -163,6 +166,8 @@ where
         input.backend,
         &input.execution_binding,
         &input.correlation_id,
+        input.project_root,
+        input.provider_context_commitment.as_ref(),
     )?;
     let (access, access_presence) = match input.operation_mode {
         AdapterOperationMode::Fixture => (
@@ -261,6 +266,8 @@ fn resolve_immutable_operation(
     backend: &SqliteStateBackend,
     execution_binding: &RequiredContextExecutionBinding,
     correlation_id: &CorrelationId,
+    project_root: &Path,
+    provider_context_commitment: Option<&SpecContentHash>,
 ) -> Result<ResolvedGitHubRepositoryMetadataOperation, WorkflowOsError> {
     execution_binding.validate()?;
     let stored = crate::ImmutableRunBundleStore::read_exact_bundle(
@@ -275,6 +282,56 @@ fn resolve_immutable_operation(
         return Err(atomic_lifecycle_error(
             "immutable_bundle_mismatch",
             "GitHub repository read does not match the immutable run bundle",
+        ));
+    }
+
+    let run = backend.rehydrate_run(execution_binding.run_id())?;
+    let approval = run
+        .snapshot
+        .approval_requests
+        .iter()
+        .rev()
+        .find(|approval| approval.step_id.as_ref() == Some(execution_binding.step_id()))
+        .ok_or_else(|| {
+            atomic_lifecycle_error(
+                "approval_missing",
+                "GitHub repository read requires its exact approval request",
+            )
+        })?;
+    if !approval
+        .decision
+        .as_ref()
+        .is_some_and(|decision| decision.decision == crate::ApprovalDecisionKind::Granted)
+    {
+        return Err(atomic_lifecycle_error(
+            "approval_not_granted",
+            "GitHub repository read requires a granted exact approval",
+        ));
+    }
+    let current_context = super::github_repository_metadata_resolved_context_commitment(
+        &crate::LocalExecutionRequest {
+            project_root: project_root.to_path_buf(),
+            workflow_id: execution_binding.workflow_id().clone(),
+            run_id: Some(execution_binding.run_id().clone()),
+            correlation_id: correlation_id.clone(),
+            actor: execution_binding.actor().clone(),
+            before_skill_invocation_checkpoints:
+                crate::LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+            before_skill_invocation_hook: None,
+            side_effect_events: Vec::new(),
+            side_effect_lifecycle_events: Vec::new(),
+        },
+        execution_binding.run_id(),
+        &approval.approval_id,
+        execution_binding.step_id(),
+        provider_context_commitment,
+    )?;
+    if stored.manifest().resolved_execution_context_hash() != &current_context
+        || approval.resolved_execution_context_hash.as_ref() != Some(&current_context)
+    {
+        return Err(atomic_lifecycle_error(
+            "project_restriction_mismatch",
+            "GitHub repository read project restriction no longer matches the approved context",
         ));
     }
 
@@ -513,6 +570,16 @@ mod tests {
                 activation,
             )
             .expect("execution posture");
+            let selected_step_id = StepId::new("read").expect("step");
+            let resolved_execution_context_hash =
+                super::super::github_repository_metadata_resolved_context_commitment(
+                    &request.execution,
+                    &run_id,
+                    &super::super::approval_id(&run_id, &selected_step_id),
+                    &selected_step_id,
+                    None,
+                )
+                .expect("project restriction commitment");
             let bundle = crate::immutable_run_bundle_builder::build_immutable_run_bundle(
                 crate::ImmutableRunBundleBuildRequest {
                     project: &project,
@@ -520,9 +587,7 @@ mod tests {
                     bundle_id: request.bundle.bundle_id.clone(),
                     bundle_version: request.bundle.bundle_version.clone(),
                     run_id: run_id.clone(),
-                    resolved_execution_context_hash: SpecContentHash::from_text(
-                        "github atomic lifecycle fixture",
-                    ),
+                    resolved_execution_context_hash: resolved_execution_context_hash.clone(),
                     execution_posture: posture,
                     handlers: vec![ImmutableRunBundleHandlerReference {
                         skill_id: SkillId::new("adapter/github-repository-metadata")
@@ -541,11 +606,14 @@ mod tests {
                 .expect("bundle published");
             let registry = LocalSkillRegistry::new();
             let executor = LocalExecutor::new(&backend, &registry);
-            let mut plan = LocalExecutor::<SqliteStateBackend>::prepare_execution(
-                &request.execution,
-                run_id.clone(),
-            )
-            .expect("execution plan");
+            let mut plan = LocalExecutor::<SqliteStateBackend>::
+                prepare_execution_with_capability_and_resolved_context(
+                    &request.execution,
+                    run_id.clone(),
+                    &crate::ProjectValidationCapability::Default,
+                    Some(&resolved_execution_context_hash),
+                )
+                .expect("execution plan");
             plan.immutable_run_bundle = Some(bundle.manifest().run_binding());
             executor
                 .evaluate_pre_run_policy(&plan, &request.execution.actor, &correlation_id)
@@ -651,6 +719,8 @@ mod tests {
                     yield_generation: None,
                 },
                 operation_mode: AdapterOperationMode::LiveReadOnly,
+                project_root: &self.root,
+                provider_context_commitment: None,
                 environment: |key: &str| {
                     (key == "WORKFLOW_OS_GITHUB_TOKEN").then(|| "exact-secret-marker".to_owned())
                 },
@@ -660,6 +730,16 @@ mod tests {
                     result,
                 },
             })
+        }
+
+        fn replace_allowed_repository(&self) {
+            let manifest = self.root.join("workflow-os.yml");
+            let source = fs::read_to_string(&manifest).expect("manifest read");
+            fs::write(
+                manifest,
+                source.replace("repository: widgets", "repository: replacement"),
+            )
+            .expect("manifest resource replaced");
         }
     }
 
@@ -856,6 +936,35 @@ mod tests {
             &fixture.root,
             b"exact-secret-marker"
         ));
+    }
+
+    #[test]
+    fn exact_live_read_revalidates_project_restriction_before_provider_entry() {
+        let fixture = LifecycleFixture::new("lifecycle-project-restriction-drift");
+        fixture.replace_allowed_repository();
+        let calls = Cell::new(0);
+        let observed_length = Cell::new(0);
+
+        let error = fixture
+            .prepare(
+                "lifecycle-project-restriction-drift",
+                &calls,
+                &observed_length,
+                success,
+            )
+            .expect_err("changed restriction must fail before provider entry");
+
+        assert_eq!(
+            error.code(),
+            "executor.github_repository_metadata.atomic.project_restriction_mismatch"
+        );
+        assert_eq!(calls.get(), 0);
+        assert_eq!(observed_length.get(), 0);
+        let rendered = format!("{error:?}");
+        assert!(!rendered.contains("acme"));
+        assert!(!rendered.contains("widgets"));
+        assert!(!rendered.contains("replacement"));
+        assert!(!rendered.contains("exact-secret-marker"));
     }
 
     #[allow(clippy::too_many_lines)]

@@ -21,7 +21,7 @@ use crate::{
     RequiredContextExecutionBindingInput, SqliteStateBackend, StateBackend,
 };
 
-const OPERATION_CODE: &str = "github.repository.metadata";
+pub(super) const OPERATION_CODE: &str = "github.repository.metadata";
 
 /// Exact fixture-only request for the first public GitHub repository read path.
 #[derive(Clone)]
@@ -314,19 +314,14 @@ pub fn decide_github_repository_metadata_fixture_approval(
                     "granting fixture execution requires the exact fixture payload",
                 )
             })?;
-            validate_existing_fixture_run(
+            validate_granted_fixture_approval_context(
                 backend,
                 &run,
-                &approval_request.project_root,
-                fixture_json,
-            )?;
-            let commitment = fixture_context_commitment(fixture_json)?;
-            let _plan = LocalExecutor::<SqliteStateBackend>::prepare_resume_execution(
-                &approval_request.project_root,
-                &builder,
+                &approval_request,
                 &approval,
-                &ProjectValidationCapability::Default,
-                Some(&commitment),
+                &decision,
+                &builder,
+                fixture_json,
             )?;
             executor.append(
                 &mut builder,
@@ -365,6 +360,53 @@ pub fn decide_github_repository_metadata_fixture_approval(
             )
         }
     }
+}
+
+fn validate_granted_fixture_approval_context(
+    backend: &SqliteStateBackend,
+    run: &WorkflowRun,
+    request: &LocalApprovalDecisionRequest,
+    approval: &ApprovalRequest,
+    decision: &ApprovalDecision,
+    builder: &EventBuilder,
+    fixture_json: &str,
+) -> Result<(), WorkflowOsError> {
+    validate_existing_fixture_run(backend, run, &request.project_root, fixture_json)?;
+    let actor = run
+        .events
+        .first()
+        .and_then(|event| event.actor.clone())
+        .ok_or_else(|| fixture_error("actor_missing", "fixture run actor is unavailable"))?;
+    let step_id = approval
+        .step_id
+        .as_ref()
+        .ok_or_else(|| fixture_error("step_missing", "fixture approval step is unavailable"))?;
+    let commitment = github_repository_metadata_resolved_context_commitment(
+        &LocalExecutionRequest {
+            project_root: request.project_root.clone(),
+            workflow_id: run.snapshot.identity.workflow_id.clone(),
+            run_id: Some(run.snapshot.identity.run_id.clone()),
+            correlation_id: decision.correlation_id.clone(),
+            actor,
+            before_skill_invocation_checkpoints:
+                LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+            before_skill_invocation_hook: None,
+            side_effect_events: Vec::new(),
+            side_effect_lifecycle_events: Vec::new(),
+        },
+        &run.snapshot.identity.run_id,
+        &approval.approval_id,
+        step_id,
+        Some(&fixture_context_commitment(fixture_json)?),
+    )?;
+    LocalExecutor::<SqliteStateBackend>::prepare_resume_execution(
+        &request.project_root,
+        builder,
+        approval,
+        &ProjectValidationCapability::Default,
+        Some(&commitment),
+    )?;
+    Ok(())
 }
 
 fn validate_existing_fixture_run(
@@ -408,7 +450,25 @@ fn validate_existing_fixture_run(
         side_effect_events: Vec::new(),
         side_effect_lifecycle_events: Vec::new(),
     };
-    let commitment = fixture_context_commitment(fixture_json)?;
+    let approval = run
+        .snapshot
+        .approval_requests
+        .iter()
+        .rev()
+        .find(|approval| approval.step_id.as_ref() == Some(&step.id))
+        .ok_or_else(|| {
+            fixture_error(
+                "approval_missing",
+                "fixture run lacks its exact approval request",
+            )
+        })?;
+    let commitment = github_repository_metadata_resolved_context_commitment(
+        &request,
+        &run.snapshot.identity.run_id,
+        &approval.approval_id,
+        &step.id,
+        Some(&fixture_context_commitment(fixture_json)?),
+    )?;
     let plan = LocalExecutor::<SqliteStateBackend>::prepare_execution_with_capability_and_resolved_context(
         &request,
         run.snapshot.identity.run_id.clone(),
@@ -431,7 +491,13 @@ fn start_fixture_run(
     run_id: WorkflowRunId,
 ) -> Result<GitHubRepositoryMetadataFixtureExecutionResult, WorkflowOsError> {
     let execution = &request.execution.execution;
-    let commitment = fixture_context_commitment(&request.fixture_json)?;
+    let commitment = github_repository_metadata_resolved_context_commitment(
+        execution,
+        &run_id,
+        &approval_id(&run_id, &request.selected_step_id),
+        &request.selected_step_id,
+        Some(&fixture_context_commitment(&request.fixture_json)?),
+    )?;
     let mut plan = LocalExecutor::<SqliteStateBackend>::prepare_execution_with_capability_and_resolved_context(
         execution,
         run_id.clone(),
@@ -572,6 +638,8 @@ fn execute_fixture_attempt(
                 yield_generation: None,
             },
             operation_mode: AdapterOperationMode::Fixture,
+            project_root: &request.execution.execution.project_root,
+            provider_context_commitment: Some(fixture_context_commitment(&request.fixture_json)?),
             environment: |_key: &str| None,
             operation: FixtureOperation {
                 backend,
