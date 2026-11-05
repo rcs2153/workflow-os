@@ -2972,6 +2972,16 @@ fn work_report_artifact_record_binds_report_and_run_identity() {
         artifact.metadata().terminal_run_status(),
         WorkReportStatus::Completed
     );
+    assert_eq!(
+        artifact.metadata().body_commitment_posture(),
+        WorkReportBodyCommitmentPosture::PersistedEnvelopeAnchor
+    );
+    artifact
+        .metadata()
+        .body_commitment()
+        .expect("new artifact commitment")
+        .verify_report(artifact.work_report())
+        .expect("envelope commitment matches report");
     artifact.validate().expect("artifact validates");
 }
 
@@ -3013,6 +3023,55 @@ fn work_report_artifact_record_serializes_and_deserializes() {
 
     assert_eq!(deserialized, artifact);
     assert_eq!(deserialized.work_report(), artifact.work_report());
+    assert_eq!(
+        deserialized.metadata().body_commitment_posture(),
+        WorkReportBodyCommitmentPosture::PersistedEnvelopeAnchor
+    );
+}
+
+#[test]
+fn legacy_work_report_artifact_without_body_commitment_is_explicitly_unverified() {
+    let mut value = serde_json::to_value(artifact_record()).expect("serialize artifact");
+    value["metadata"]
+        .as_object_mut()
+        .expect("metadata object")
+        .remove("body_commitment");
+
+    let legacy: WorkReportArtifactRecord =
+        serde_json::from_value(value).expect("legacy artifact remains readable");
+
+    assert_eq!(
+        legacy.metadata().body_commitment_posture(),
+        WorkReportBodyCommitmentPosture::LegacyUnverified
+    );
+    assert!(legacy.metadata().body_commitment().is_none());
+    legacy
+        .validate()
+        .expect("legacy structural validation passes");
+}
+
+#[test]
+fn persisted_envelope_commitment_detects_report_only_substitution_at_validation_boundary() {
+    let artifact = artifact_record();
+    let mut value = serde_json::to_value(&artifact).expect("serialize artifact");
+    value["work_report"]["sections"][0]["summary"] = json!("substituted bounded summary");
+
+    let substituted: WorkReportArtifactRecord =
+        serde_json::from_value(value).expect("ordinary read enforcement is intentionally deferred");
+    let error = substituted
+        .validate()
+        .expect_err("explicit validation rejects report-only substitution");
+
+    assert_eq!(error.code(), "work_report.body_commitment.mismatch");
+    assert!(!error.to_string().contains("substituted bounded summary"));
+    assert!(!error.to_string().contains(
+        artifact
+            .metadata()
+            .body_commitment()
+            .expect("body commitment")
+            .commitment()
+            .as_str()
+    ));
 }
 
 #[test]
@@ -3068,6 +3127,10 @@ fn local_backend_writes_reads_and_lists_work_report_artifacts() {
         .expect("artifacts listed");
 
     assert_eq!(read, artifact);
+    assert_eq!(
+        read.metadata().body_commitment_posture(),
+        WorkReportBodyCommitmentPosture::PersistedEnvelopeAnchor
+    );
     assert_eq!(listed, vec![artifact]);
 }
 
