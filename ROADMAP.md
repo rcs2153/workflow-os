@@ -135,12 +135,28 @@ the existing accepted-attestation boundary. See the [runtime composition
 report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_RUNTIME_COMPOSITION_REPORT.md)
 and [accepted review](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_RUNTIME_COMPOSITION_REVIEW.md).
 
-The next phase is the model-only **versioned complete WorkReport body
-commitment**. It must specify canonical coverage, domain separation, versioning,
-legacy posture, and stable non-leaking errors before any persistence anchor or
-read/replay enforcement is implemented. It must not self-assert integrity from
-a commitment stored only inside mutable report content. Independent security
-review remains required before release admission resumes.
+The model-only **versioned complete WorkReport body commitment** is implemented
+and its focused maintainer/security review is accepted. V1 domain-separates and
+commits to the validated report's complete compact canonical body, including
+report and contract identity, generation context, ordered sections and
+citations, disclosure and handoff collections, optional high-assurance approval
+posture, sensitivity, and redaction metadata. A golden vector makes canonical
+coverage changes explicit. The model distinguishes an available-but-unanchored
+commitment from a legacy unverified artifact, redacts commitment values from
+debug output, and returns stable payload-free mismatch errors. A deserialized
+commitment is still only an unanchored claim; storing the value inside mutable
+report content cannot verify that content. See the [implementation
+report](docs/concepts/WORK_REPORT_BODY_COMMITMENT_MODEL_REPORT.md) and [accepted
+review](docs/concepts/WORK_REPORT_BODY_COMMITMENT_MODEL_REVIEW.md).
+
+The next phase is the bounded **WorkReport body-commitment persistence anchor**.
+It must bind the expected commitment outside the mutable report body through
+existing terminal artifact state and supported stores, with explicit atomicity
+or crash-reconciliation semantics and legacy-unverified handling. It must not
+yet broaden into read/list/inspect/recovery/replay enforcement, product or CLI
+projection, migration, signing, external witnesses, provider mutation, or a
+claim of storage-owner tamper resistance. Independent security review remains
+required before release admission resumes.
 
 The separate deterministic hosted P0 is now implemented. The advertised
 `workflow-os-hosted --worker-once` entry point previously called the

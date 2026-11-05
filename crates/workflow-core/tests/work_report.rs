@@ -61,7 +61,8 @@ use workflow_core::{
     WorkReportArtifactRequirement, WorkReportArtifactRequirementDefinition,
     WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactStore,
     WorkReportArtifactUnsupportedApprovalProofMarkerRequirement,
-    WorkReportArtifactUnsupportedHighAssuranceRequirement, WorkReportCitation,
+    WorkReportArtifactUnsupportedHighAssuranceRequirement, WorkReportBodyCommitment,
+    WorkReportBodyCommitmentPosture, WorkReportBodyCommitmentVersion, WorkReportCitation,
     WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationTarget,
     WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
     WorkReportGenerationContext, WorkReportHandoffNote, WorkReportHighAssuranceApprovalDecision,
@@ -230,6 +231,175 @@ fn valid_report() -> WorkReport {
         redaction: redaction(),
     })
     .expect("valid work report")
+}
+
+#[test]
+fn complete_body_commitment_v1_is_deterministic_and_domain_versioned() {
+    let report = valid_report();
+    let first = WorkReportBodyCommitment::from_report(WorkReportBodyCommitmentVersion::V1, &report)
+        .expect("commitment");
+    let second =
+        WorkReportBodyCommitment::from_report(WorkReportBodyCommitmentVersion::V1, &report)
+            .expect("commitment");
+
+    assert_eq!(first, second);
+    assert_eq!(first.version(), WorkReportBodyCommitmentVersion::V1);
+    assert_eq!(
+        first.posture(),
+        WorkReportBodyCommitmentPosture::AvailableUnanchored
+    );
+    assert_eq!(
+        first.commitment().as_str(),
+        "9f5f077b0744b019d96eadefd931d173c98e9d6918d951817383d31c44a925b2"
+    );
+}
+
+#[test]
+fn complete_body_commitment_v1_covers_every_report_body_family_and_order() {
+    let original = valid_report();
+    let expected =
+        WorkReportBodyCommitment::from_report(WorkReportBodyCommitmentVersion::V1, &original)
+            .expect("commitment");
+    let base = serde_json::to_value(&original).expect("serialize report");
+    let mut mutations = Vec::new();
+
+    let mut identity = base.clone();
+    identity["report_id"] = json!("report/changed");
+    mutations.push(identity);
+
+    let mut contract = base.clone();
+    contract["report_contract_version"] = json!("v2");
+    mutations.push(contract);
+
+    let mut generation = base.clone();
+    generation["generation_context"]["generated_by"] = json!("system/other-reporter");
+    mutations.push(generation);
+
+    let mut sections = base.clone();
+    sections["sections"][0]["summary"] = json!("changed work summary");
+    mutations.push(sections);
+
+    let mut section_order = base.clone();
+    section_order["sections"]
+        .as_array_mut()
+        .expect("sections")
+        .swap(0, 1);
+    mutations.push(section_order);
+
+    let mut citation = base.clone();
+    citation["sections"][0]["citations"][0]["summary"] = json!("changed evidence summary");
+    mutations.push(citation);
+
+    let mut incomplete = base.clone();
+    incomplete["incomplete_work"][0]["summary"] = json!("changed deferred work");
+    mutations.push(incomplete);
+
+    let mut limitations = base.clone();
+    limitations["known_limitations"][0]["summary"] = json!("changed limitation");
+    mutations.push(limitations);
+
+    let mut risks = base.clone();
+    risks["risks"][0]["summary"] = json!("changed risk");
+    mutations.push(risks);
+
+    let mut handoff = base.clone();
+    handoff["handoff_notes"][0]["summary"] = json!("changed handoff");
+    mutations.push(handoff);
+
+    let mut high_assurance = base.clone();
+    high_assurance["high_assurance_approval"] = json!({
+        "validation_used": true,
+        "validation_passed": true,
+        "decision": "granted",
+        "requester_approver_posture": "must_differ_validated",
+        "required_reference_count": 1,
+        "supplied_reference_count": 1,
+        "expiration_posture": "unexpired_at_decision",
+        "revocation_posture": "explicit_event_deferred",
+        "denial_fail_closed": true
+    });
+    mutations.push(high_assurance);
+
+    let mut sensitivity = base.clone();
+    sensitivity["sensitivity"] = json!("internal");
+    mutations.push(sensitivity);
+
+    let mut redaction = base;
+    redaction["redaction"] = json!({
+        "redacted_fields": ["summary"],
+        "field_states": [{
+            "field": "summary",
+            "disposition": "redacted",
+            "reason": "bounded report summary"
+        }]
+    });
+    mutations.push(redaction);
+
+    for mutation in mutations {
+        let report: WorkReport = serde_json::from_value(mutation).expect("valid mutated report");
+        let actual =
+            WorkReportBodyCommitment::from_report(WorkReportBodyCommitmentVersion::V1, &report)
+                .expect("commitment");
+        assert_ne!(actual, expected);
+    }
+}
+
+#[test]
+fn complete_body_commitment_verification_fails_closed_without_payloads() {
+    let report = valid_report();
+    let expected =
+        WorkReportBodyCommitment::from_report(WorkReportBodyCommitmentVersion::V1, &report)
+            .expect("commitment");
+    expected.verify_report(&report).expect("matching report");
+
+    let mut changed = serde_json::to_value(&report).expect("serialize report");
+    changed["handoff_notes"][0]["summary"] = json!("changed private handoff text");
+    let changed: WorkReport = serde_json::from_value(changed).expect("valid changed report");
+    let error = expected
+        .verify_report(&changed)
+        .expect_err("changed body must fail");
+
+    assert_eq!(error.code(), "work_report.body_commitment.mismatch");
+    assert!(!error.to_string().contains(expected.commitment().as_str()));
+    assert!(!error.to_string().contains("changed private handoff text"));
+    let debug = format!("{expected:?}");
+    assert!(!debug.contains(expected.commitment().as_str()));
+    assert!(debug.contains("AvailableUnanchored"));
+
+    let mut unverified_claim = serde_json::to_value(&expected).expect("serialize commitment");
+    unverified_claim["commitment"] = json!("0".repeat(64));
+    let unverified_claim: WorkReportBodyCommitment =
+        serde_json::from_value(unverified_claim).expect("syntactically valid commitment claim");
+    assert_eq!(
+        unverified_claim.posture(),
+        WorkReportBodyCommitmentPosture::AvailableUnanchored
+    );
+    assert_eq!(
+        unverified_claim
+            .verify_report(&report)
+            .expect_err("deserialized claim is not trusted")
+            .code(),
+        "work_report.body_commitment.mismatch"
+    );
+}
+
+#[test]
+fn complete_body_commitment_posture_keeps_legacy_artifacts_unverified() {
+    assert_eq!(
+        serde_json::to_string(&WorkReportBodyCommitmentPosture::AvailableUnanchored)
+            .expect("serialize posture"),
+        "\"available_unanchored\""
+    );
+    assert_eq!(
+        serde_json::to_string(&WorkReportBodyCommitmentPosture::LegacyUnverified)
+            .expect("serialize posture"),
+        "\"legacy_unverified\""
+    );
+    assert_eq!(
+        serde_json::from_str::<WorkReportBodyCommitmentPosture>("\"legacy_unverified\"")
+            .expect("deserialize posture"),
+        WorkReportBodyCommitmentPosture::LegacyUnverified
+    );
 }
 
 fn workflow_with_artifact_requirement(requirement: Option<&str>) -> WorkflowDefinition {
