@@ -29,13 +29,11 @@ permitted. A replacement executor should not reconstruct authority from chat
 history.
 
 Current `main` does not yet satisfy that contract across every preview surface.
-The hosted dispatch-truth and WorkReport identity-binding P0 gates are closed.
-One accepted gate remains open: project-level provider resource restrictions
-must remain committed through approval and provider admission. Its bounded
-implementation candidate passed focused maintainer/security review and full
-local validation; exact-head CI and independent drift evidence remain. This
-gate blocks v1 and fully committed live-provider approval claims. See the
-[Continuity Of Authority P0 Release Gates
+The hosted dispatch-truth, WorkReport identity-binding, and GitHub repository-
+metadata project-resource continuity P0 gates are closed for their documented
+boundaries after focused review, exact-head CI, and independent reruns. The
+cross-gate continuity review remains required before broader continuity or v1
+claims. See the [Continuity Of Authority P0 Release Gates
 Plan](../implementation-plans/continuity-of-authority-p0-release-gates-plan.md).
 
 ## Maturity
@@ -49,11 +47,9 @@ Plan](../implementation-plans/continuity-of-authority-p0-release-gates-plan.md).
   general provider-write product.
 - **Primary audience today:** maintainers, infrastructure engineers, security
   engineers, and teams evaluating governed agent work.
-- **Release blockers:** one accepted continuity-of-authority P0 gate remains
-  open for project-resource authorization continuity. The WorkReport identity-
-  binding gate is closed after focused maintainer/security review, exact-head
-  CI, credential-backed PostgreSQL execution, maintainer-operated post-merge
-  evidence, and an independent clean-room misplacement rerun passed.
+- **Release blockers:** all three accepted continuity-of-authority P0 gates are
+  closed for their documented boundaries. The cross-gate review and the
+  repository's other active P0 lanes still block v1 and broader product claims.
 
 ## Implemented Product Surfaces
 
@@ -158,13 +154,14 @@ authority or storage-owner tamper-resistant ledger.
   same-repository branch.
 - Provider outcomes are reconciled through Core-owned gates and records; these
   paths are not enabled automatically by project installation.
-- The GitHub repository-metadata fixture has a bounded Gate 3 implementation
-  candidate: current project/provider restrictions and relevant definition
+- The GitHub repository-metadata fixture and opt-in live-read composition have
+  a bounded accepted Gate 3 implementation: current project/provider
+  restrictions and relevant definition
   context are committed at run creation, revalidated before approval acceptance,
   and revalidated again before atomic fixture/live provider admission. Focused
-  review, drift tests, and full local validation pass, but exact-head CI and
-  independent drift evidence remain required. Do not infer fully committed
-  live-provider authorization until Gate 3 closes.
+  review, drift tests, full local validation, exact-head CI, and an independent
+  parent-versus-fix rerun passed. This does not generalize to undeclared
+  provider families, provider writes, or credential-backed live acceptance.
 
 ## CLI Contract
 

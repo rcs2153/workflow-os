@@ -8,9 +8,10 @@ repository-metadata path commits the exact current project restriction into the
 approval's resolved execution context and reconstructs it before approval
 acceptance and immediately before fixture or live provider admission.
 
-This report does not close Gate 3. Focused maintainer/security review and full
-local validation passed. Exact-head CI and an independent parent-versus-fix
-drift rerun are still required.
+Focused maintainer/security review, full local validation, exact-head CI, and an
+independent parent-versus-fix drift rerun passed. Gate 3 is closed for the
+documented GitHub repository-metadata boundary. See the [independent rerun
+report](PROJECT_RESOURCE_AUTHORIZATION_CONTINUITY_INDEPENDENT_RERUN.md).
 
 ## Problem Closed By The Candidate
 

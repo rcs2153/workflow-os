@@ -129,10 +129,11 @@ violations:
    provider-admission boundaries own the fix. Fully committed repository-
    resource approval and unattended live-provider adoption remain blocked.
 
-All three gates are accepted, not deferred. Implement them in the listed order,
-with adversarial fault, restore/misplacement, drift, concurrency, replay, and
-exact-head regression coverage. Publication and broader product claims remain
-blocked until every gate passes exact-head CI and an independent rerun. See the
+All three gates were accepted, not deferred, and are now closed for their
+documented boundaries after adversarial fault, restore/misplacement, drift,
+concurrency, replay, exact-head CI, and independent rerun evidence. Publication
+and broader product claims remain blocked pending the cross-gate continuity
+review and the repository's other active P0 lanes. See the
 [Continuity Of Authority P0 Release Gates
 Plan](docs/implementation-plans/continuity-of-authority-p0-release-gates-plan.md).
 The compact-checkpoint benchmark remains bounded product evidence, not a
@@ -168,8 +169,9 @@ pass. See the
 and [focused review](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_REVIEW.md),
 the [post-merge evidence report](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_POST_MERGE_EVIDENCE.md),
 and the [independent rerun report](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_INDEPENDENT_RERUN.md).
-Gate 3 is now the active continuity-of-authority implementation gate. Its
-candidate binds the current project identity, exact run and approval,
+Gate 3, **Approved Means Still Authorized**, is closed for the existing GitHub
+repository-metadata fixture and opt-in live-read composition boundary. The
+implementation binds the current project identity, exact run and approval,
 normalized GitHub repository resource set, provider declaration, relevant
 workflow/skill/policy context, and fixture commitment into the existing
 resolved execution-context commitment. Current declarations are reconstructed
@@ -179,9 +181,15 @@ declaration, disablement, policy drift, fixture drift, and post-approval
 resource drift before provider entry, while canonical resource reordering and
 unchanged execution succeed. Focused maintainer/security review found no
 authorization blocker and added explicit endpoint, access-reference, and stable
-project-identity drift coverage. Full local validation passes. Exact-head CI
-and an independent parent-versus-fix drift rerun remain required before Gate 3
-closes. The cross-gate review remains blocked until Gate 3 is accepted.
+project-identity drift coverage. Full local validation passed. PR #744 merged
+the unchanged reviewed head after all nine exact-head checks passed. An
+independent disposable-checkout rerun reproduced the parent defect: approval
+was granted, the old target executed, and audit/telemetry were emitted after
+current project drift. Exact merged `main` rejected the same drift before
+`ApprovalGranted`, provider admission, audit, or telemetry, while canonical
+resource reordering still completed. See the [independent rerun
+report](docs/concepts/PROJECT_RESOURCE_AUTHORIZATION_CONTINUITY_INDEPENDENT_RERUN.md).
+The cross-gate continuity review is now the next required lane.
 
 A new P0 **evidence provenance and report integrity** preemption is active
 before publication, public-positioning expansion, or broader evidence-consuming
