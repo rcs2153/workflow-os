@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use crate::state::{
     is_allowed_side_effect_lifecycle_update, same_approval_presentation_run_identity,
     same_side_effect_run_identity, state_error, validate_append_against_history,
-    LocalStateMigrationExport,
+    validate_work_report_artifact_on_read, LocalStateMigrationExport,
 };
 use crate::{
     validate_approval_presentation_approval_id,
@@ -3101,7 +3101,9 @@ impl WorkReportArtifactStore for SqliteStateBackend {
                 "SQLite state record identity does not match its relational index",
             ));
         }
-        Ok(artifact)
+        artifact
+            .map(validate_work_report_artifact_on_read)
+            .transpose()
     }
 
     fn list_work_report_artifacts(
@@ -3121,7 +3123,10 @@ impl WorkReportArtifactStore for SqliteStateBackend {
                 "SQLite state record identity does not match its relational index",
             ));
         }
-        Ok(artifacts)
+        artifacts
+            .into_iter()
+            .map(validate_work_report_artifact_on_read)
+            .collect()
     }
 }
 

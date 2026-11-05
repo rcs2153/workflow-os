@@ -166,15 +166,31 @@ report](docs/concepts/WORK_REPORT_BODY_COMMITMENT_PERSISTENCE_ANCHOR_REPORT.md)
 and [accepted
 review](docs/concepts/WORK_REPORT_BODY_COMMITMENT_PERSISTENCE_ANCHOR_REVIEW.md).
 
-The next phase is bounded **WorkReport body-commitment read-path enforcement**.
-It must compare the complete body against the retained expected commitment
-before returning new-format report content from read and list operations, while
-preserving explicit legacy-unverified behavior and stable non-leaking errors.
-Inspect, metadata projection, recovery, duplicate reconciliation, replay, and
-product/CLI projection remain later separately reviewed composition steps.
-Migration, signing, external witnesses, provider mutation, publication, and
-claims of storage-owner tamper resistance remain out of scope. Independent
-security review remains required before release admission resumes.
+The bounded **WorkReport body-commitment read-path enforcement** phase is
+implemented and its focused maintainer/security review is accepted. Local
+filesystem, SQLite, and PostgreSQL artifact stores now recompute and compare a
+new-format report's complete body against the retained envelope commitment
+before returning it from ordinary read or list operations. A report-only
+substitution fails closed through one stable, payload-free
+`work_report_artifact.read.corrupt` result. Artifacts without the retained field
+remain readable only with explicit `legacy_unverified` posture; the kernel does
+not derive or backfill a commitment from mutable content. Serde remains a
+structure-only boundary, so enforcement is deliberate at durable store
+boundaries rather than an accidental global deserialization side effect. See
+the [implementation
+report](docs/concepts/WORK_REPORT_BODY_COMMITMENT_READ_PATH_ENFORCEMENT_REPORT.md)
+and [accepted
+review](docs/concepts/WORK_REPORT_BODY_COMMITMENT_READ_PATH_ENFORCEMENT_REVIEW.md).
+
+The next phase is bounded **WorkReport body-commitment inspect and metadata
+projection enforcement**. It must prevent inspect and report-metadata consumers
+from presenting new-format report content or verified posture unless the
+retained commitment has passed the same read boundary, while preserving
+explicit legacy-unverified disclosure and stable non-leaking errors. Recovery,
+duplicate reconciliation, replay, product/CLI expansion beyond the existing
+surfaces, migration, signing, external witnesses, provider mutation,
+publication, and claims of storage-owner tamper resistance remain out of scope.
+Independent security review remains required before release admission resumes.
 
 The separate deterministic hosted P0 is now implemented. The advertised
 `workflow-os-hosted --worker-once` entry point previously called the

@@ -8114,9 +8114,9 @@ impl<'de> Deserialize<'de> for WorkReportArtifactRecord {
             metadata: wire.metadata,
             work_report: wire.work_report,
         };
-        // Complete-body enforcement across ordinary reads is a separately
-        // reviewed phase. This phase preserves legacy records and retains the
-        // expected envelope commitment without silently broadening read paths.
+        // Serde remains structure-only so callers can identify legacy posture.
+        // Durable store read/list boundaries perform complete-body enforcement
+        // before returning artifact content.
         artifact
             .validate_structure()
             .map_err(serde::de::Error::custom)?;

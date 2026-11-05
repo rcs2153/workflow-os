@@ -1804,14 +1804,13 @@ impl WorkReportArtifactStore for LocalStateBackend {
         if !path.exists() {
             return Ok(None);
         }
-        read_json::<WorkReportArtifactRecord>(&path)
-            .map(Some)
-            .map_err(|_| {
-                state_error(
-                    "work_report_artifact.read.corrupt",
-                    "work report artifact could not be read or validated",
-                )
-            })
+        let artifact = read_json::<WorkReportArtifactRecord>(&path).map_err(|_| {
+            state_error(
+                "work_report_artifact.read.corrupt",
+                "work report artifact could not be read or validated",
+            )
+        })?;
+        validate_work_report_artifact_on_read(artifact).map(Some)
     }
 
     fn list_work_report_artifacts(
@@ -1825,15 +1824,28 @@ impl WorkReportArtifactStore for LocalStateBackend {
         json_files_in_dir(&directory)?
             .iter()
             .map(|path| {
-                read_json::<WorkReportArtifactRecord>(path).map_err(|_| {
+                let artifact = read_json::<WorkReportArtifactRecord>(path).map_err(|_| {
                     state_error(
                         "work_report_artifact.read.corrupt",
                         "work report artifact could not be read or validated",
                     )
-                })
+                })?;
+                validate_work_report_artifact_on_read(artifact)
             })
             .collect()
     }
+}
+
+pub(crate) fn validate_work_report_artifact_on_read(
+    artifact: WorkReportArtifactRecord,
+) -> Result<WorkReportArtifactRecord, WorkflowOsError> {
+    artifact.validate().map_err(|_| {
+        state_error(
+            "work_report_artifact.read.corrupt",
+            "work report artifact could not be read or validated",
+        )
+    })?;
+    Ok(artifact)
 }
 
 impl SideEffectRecordStore for LocalStateBackend {
