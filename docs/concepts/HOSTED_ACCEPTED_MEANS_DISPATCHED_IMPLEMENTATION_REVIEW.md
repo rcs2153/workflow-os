@@ -105,7 +105,9 @@ Fix:
 
 - derive hosted work-item identity from run, step, and the deterministic
   invocation idempotency key;
-- retain the generated invocation ID only as the invocation-event identity; and
+- derive the hosted invocation ID from the same exact dispatch intent so
+  concurrent repair workers cannot propose conflicting semantic invocations;
+- regenerate only lifecycle timestamps and execution-attempt identity; and
 - continue validating the complete work-item and dispatch intent when the
   stable identity resolves an existing item.
 

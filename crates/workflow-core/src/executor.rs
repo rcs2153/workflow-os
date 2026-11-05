@@ -15352,7 +15352,7 @@ fn dispatch_hosted_plan(
     let projection = HostedSkillDispatch::new(
         &run,
         work_item,
-        plan.invocation_id,
+        hosted_invocation_id(&plan)?,
         plan.skill_id,
         plan.skill_version,
         SkillAttemptId::generate(),
@@ -15406,6 +15406,28 @@ fn hosted_work_item_id(plan: &ExecutionPlan) -> Result<HostedWorkItemId, Workflo
             WorkflowOsErrorKind::Validation,
             "executor.hosted_no_write.work_item_id.invalid",
             "hosted work item identity is invalid",
+        )
+    })
+}
+
+fn hosted_invocation_id(plan: &ExecutionPlan) -> Result<SkillInvocationId, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    update_idempotency_hash(&mut hasher, "run", plan.event_builder.run_id.as_str());
+    update_idempotency_hash(&mut hasher, "step", plan.step.id.as_str());
+    update_idempotency_hash(
+        &mut hasher,
+        "invocation-idempotency",
+        plan.idempotency_key.as_str(),
+    );
+    SkillInvocationId::new(format!(
+        "hosted-invocation-{}",
+        hex_digest(hasher.finalize())
+    ))
+    .map_err(|_| {
+        executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor.hosted_no_write.invocation_id.invalid",
+            "hosted invocation identity is invalid",
         )
     })
 }
