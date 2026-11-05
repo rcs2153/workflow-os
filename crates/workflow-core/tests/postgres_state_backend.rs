@@ -245,7 +245,7 @@ fn postgresql_backend_proves_shared_state_milestone() {
     prove_competing_idempotency_intent(&backend);
     prove_atomic_side_effect_families(&backend);
     prove_atomic_approval_family(&backend);
-    prove_immutable_bundle_family(&backend, &config);
+    prove_immutable_bundle_family(&backend);
     prove_authoritative_projection_and_shared_consumer(&backend);
     prove_hosted_project_resource_binding(&backend, &config);
     prove_project_approval_route_persistence(&backend, &config);
@@ -254,6 +254,11 @@ fn postgresql_backend_proves_shared_state_milestone() {
     prove_projection_rebuild(&backend);
     prove_corrupt_payload_nonleak(&config, &backend);
     prove_schema_fail_closed(&config, &backend);
+
+    let hosted_recovery_project = TestProject::new();
+    hosted_recovery_project.write_valid_project();
+    prove_hosted_dispatch_recovery(&backend, &config, &hosted_recovery_project);
+    prove_hosted_approval_dispatch_recovery(&backend, &config);
 
     let health = backend.health_check().expect("health");
     assert!(health.healthy);
@@ -2581,7 +2586,7 @@ fn prepare_collaborative_approval_fixture(
     (scope, principal, decided, presentation, granted_event)
 }
 
-fn prove_immutable_bundle_family(backend: &PostgresStateBackend, config: &Config) {
+fn prove_immutable_bundle_family(backend: &PostgresStateBackend) {
     let project = TestProject::new();
     project.write_valid_project();
     let loaded = workflow_core::load_project(project.path());
@@ -2589,8 +2594,6 @@ fn prove_immutable_bundle_family(backend: &PostgresStateBackend, config: &Config
     let bundle = loaded.bundle.expect("project");
     let validation = workflow_core::validate_project_bundle(&bundle);
     assert!(!validation.has_errors(), "{:?}", validation.diagnostics);
-    prove_hosted_dispatch_recovery(backend, config, &project);
-    prove_hosted_approval_dispatch_recovery(backend, config);
     let workflow_id = WorkflowId::new("postgres/build").expect("workflow");
     let build = build_immutable_run_bundle(ImmutableRunBundleBuildRequest {
         project: &bundle,
