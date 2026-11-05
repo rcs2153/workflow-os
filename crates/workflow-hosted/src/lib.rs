@@ -60,6 +60,7 @@ use workflow_core::{
     ProjectApprovalAuthoritySnapshotCommitment, ProjectApprovalAuthorityViewCommitment,
     ProjectApprovalRouteAuthenticatedCompositionRequest, ProjectApprovalRouteCreateResult,
     ProjectApprovalRoutingReason, ProjectId, SpecContentHash, StateBackend, Timestamp,
+    WorkReportArtifactLocationExpectation, WorkReportArtifactLocatorClass,
     WorkReportArtifactMetadata, WorkReportArtifactStore, WorkReportId, WorkReportStatus,
     WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunStatus,
 };
@@ -1289,11 +1290,18 @@ async fn collaborative_read_terminal_report(
     let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
     let backend = state.backend.clone();
     let stored_run_id = run_id.clone();
-    let artifacts =
-        tokio::task::spawn_blocking(move || backend.list_work_report_artifacts(&stored_run_id))
-            .await
-            .map_err(|_| HostedApiError::internal())?
-            .map_err(|error| HostedApiError::from_core(&error))?;
+    let artifacts = tokio::task::spawn_blocking(move || {
+        let run = backend.rehydrate_run(&stored_run_id)?;
+        let expectation = WorkReportArtifactLocationExpectation::for_run(
+            stored_run_id,
+            WorkReportArtifactLocatorClass::Postgres,
+        )
+        .with_run_identity(&run.snapshot.identity);
+        backend.list_work_report_artifacts_with_expectation(&expectation)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
     let mut artifacts = artifacts.into_iter();
     let artifact = artifacts.next().ok_or_else(HostedApiError::not_found)?;
     if artifacts.next().is_some() {
@@ -1331,7 +1339,14 @@ async fn collaborative_read_report(
     let stored_run_id = run_id.clone();
     let stored_report_id = report_id.clone();
     let artifact = tokio::task::spawn_blocking(move || {
-        backend.read_work_report_artifact(&stored_run_id, &stored_report_id)
+        let run = backend.rehydrate_run(&stored_run_id)?;
+        let expectation = WorkReportArtifactLocationExpectation::for_report(
+            stored_run_id,
+            stored_report_id,
+            WorkReportArtifactLocatorClass::Postgres,
+        )
+        .with_run_identity(&run.snapshot.identity);
+        backend.read_work_report_artifact_with_expectation(&expectation)
     })
     .await
     .map_err(|_| HostedApiError::internal())?
@@ -1911,7 +1926,13 @@ async fn read_terminal_report_metadata(
             HostedProjectResourceKind::Run,
             stored_run_id.as_str(),
         )?;
-        backend.list_work_report_artifacts(&stored_run_id)
+        let run = backend.rehydrate_run(&stored_run_id)?;
+        let expectation = WorkReportArtifactLocationExpectation::for_run(
+            stored_run_id,
+            WorkReportArtifactLocatorClass::Postgres,
+        )
+        .with_run_identity(&run.snapshot.identity);
+        backend.list_work_report_artifacts_with_expectation(&expectation)
     })
     .await
     .map_err(|_| HostedApiError::internal())?
@@ -1965,7 +1986,14 @@ async fn read_report_metadata(
             HostedProjectResourceKind::Run,
             stored_run_id.as_str(),
         )?;
-        backend.read_work_report_artifact(&stored_run_id, &stored_report_id)
+        let run = backend.rehydrate_run(&stored_run_id)?;
+        let expectation = WorkReportArtifactLocationExpectation::for_report(
+            stored_run_id,
+            stored_report_id,
+            WorkReportArtifactLocatorClass::Postgres,
+        )
+        .with_run_identity(&run.snapshot.identity);
+        backend.read_work_report_artifact_with_expectation(&expectation)
     })
     .await
     .map_err(|_| HostedApiError::internal())?

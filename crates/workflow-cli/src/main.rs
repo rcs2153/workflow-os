@@ -72,14 +72,15 @@ use workflow_core::{
     RedactionMetadata, SkillDefinition, SkillHandler, SkillInput, SkillOutput, SpecContentHash,
     SqliteStateBackend, StateBackend, StateMigrationDestinationId, StateMigrationId,
     StateMigrationPlan, StateMigrationVerificationReceipt, Timestamp, WorkReport,
-    WorkReportArtifactHighAssuranceRequirement, WorkReportArtifactStore,
-    WorkReportBodyCommitmentPosture, WorkReportCitation, WorkReportCitationDefinition,
-    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
-    WorkReportContractVersion, WorkReportDefinition, WorkReportGenerationContext,
-    WorkReportHandoffNote, WorkReportId, WorkReportIncompleteWorkDisclosure,
-    WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
-    WorkReportSensitivity, WorkReportStableReference, WorkReportStatus, WorkflowArchiveRecord,
-    WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
+    WorkReportArtifactHighAssuranceRequirement, WorkReportArtifactLocationExpectation,
+    WorkReportArtifactLocatorClass, WorkReportArtifactStore, WorkReportBodyCommitmentPosture,
+    WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationKind,
+    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
+    WorkReportDefinition, WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
+    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
+    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
+    WorkReportStatus, WorkflowArchiveRecord, WorkflowArchiveRecordDefinition,
+    WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
     WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflict, WorkflowCatalogConflictSeverity,
     WorkflowCatalogDraftSummary, WorkflowCatalogIndex, WorkflowCatalogIndexInput,
     WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
@@ -1788,9 +1789,13 @@ fn persist_authoritative_cli_report_artifact(
 ) -> Result<AuthoritativeGovernanceArtifactPersistenceResult, WorkflowOsError> {
     if run.snapshot.status.is_terminal() {
         let report_id = WorkReportId::new(format!("report/{}", run.snapshot.identity.run_id))?;
-        if let Some(existing) =
-            backend.read_work_report_artifact(&run.snapshot.identity.run_id, &report_id)?
-        {
+        let expectation = WorkReportArtifactLocationExpectation::for_report(
+            run.snapshot.identity.run_id.clone(),
+            report_id,
+            WorkReportArtifactLocatorClass::InjectedStore,
+        )
+        .with_run_identity(&run.snapshot.identity);
+        if let Some(existing) = backend.read_work_report_artifact_with_expectation(&expectation)? {
             return Ok(authoritative_existing_artifact_result(existing));
         }
     }
@@ -2824,7 +2829,12 @@ fn inspect_from_backend<B: StateBackend + WorkReportArtifactStore>(
     let run = backend.rehydrate_run(run_id)?;
     let adapter_audit = backend.read_adapter_audit_records(run_id)?;
     let adapter_observability = backend.read_adapter_observability_records(run_id)?;
-    let report_artifacts = backend.list_work_report_artifacts(run_id)?;
+    let expectation = WorkReportArtifactLocationExpectation::for_run(
+        run_id.clone(),
+        WorkReportArtifactLocatorClass::InjectedStore,
+    )
+    .with_run_identity(&run.snapshot.identity);
+    let report_artifacts = backend.list_work_report_artifacts_with_expectation(&expectation)?;
     if invocation.json {
         let rendered = inspect_json(
             &run,
@@ -3358,7 +3368,15 @@ fn first_run_report_artifact_command(
     if let Some(existing_run) = existing_run.as_ref() {
         if existing_run.snapshot.status.is_terminal() {
             let report_id = WorkReportId::new(format!("report/{run_id}"))?;
-            if let Some(artifact) = backend.read_work_report_artifact(&run_id, &report_id)? {
+            let expectation = WorkReportArtifactLocationExpectation::for_report(
+                run_id.clone(),
+                report_id,
+                WorkReportArtifactLocatorClass::InjectedStore,
+            )
+            .with_run_identity(&existing_run.snapshot.identity);
+            if let Some(artifact) =
+                backend.read_work_report_artifact_with_expectation(&expectation)?
+            {
                 let commitment = first_run_stored_analysis_commitment(invocation, existing_run)?;
                 return print_first_run_artifact_result(
                     invocation,

@@ -16,6 +16,10 @@ use crate::hosted::{
     HostedExecutionProviderVersion, HostedSkillDispatch, HostedTerminalReportArtifact,
     HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
 };
+use crate::state::{
+    validate_work_report_artifact_on_read, WorkReportArtifactLocationExpectation,
+    WorkReportArtifactLocatorClass,
+};
 use crate::{
     validate_approval_presentation_for_request, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, ApprovalPresentationId, ApprovalPresentationRecord,
@@ -47,7 +51,7 @@ use crate::{
     ProjectStateStore, RunSnapshotStore, SideEffectId, SideEffectRecord, SideEffectRecordStore,
     SpecContentHash, StateBackend, StoredImmutableRunBundle, WorkReportArtifactRecord,
     WorkReportArtifactStore, WorkReportId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot, WorkflowRunStatus,
+    WorkflowRunEvent, WorkflowRunId, WorkflowRunIdentity, WorkflowRunSnapshot, WorkflowRunStatus,
 };
 
 const SCHEMA_VERSION: i32 = 4;
@@ -3077,13 +3081,39 @@ impl WorkReportArtifactStore for PostgresStateBackend {
         report_id: &WorkReportId,
     ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError> {
         let mut client = self.connections.connect()?;
+        let expectation = WorkReportArtifactLocationExpectation::for_report(
+            run_id.clone(),
+            report_id.clone(),
+            WorkReportArtifactLocatorClass::Postgres,
+        );
         read_record::<WorkReportArtifactRecord>(
             &mut client,
             "work_report",
             report_id.as_str(),
             run_id.as_str(),
         )?
-        .map(|record| crate::state::validate_work_report_artifact_on_read(record.value))
+        .map(|record| validate_work_report_artifact_on_read(record.value, &expectation))
+        .transpose()
+    }
+
+    fn read_work_report_artifact_with_expectation(
+        &self,
+        expectation: &WorkReportArtifactLocationExpectation,
+    ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError> {
+        let report_id = expectation.report_id().ok_or_else(|| {
+            state_error(
+                "work_report_artifact.read.expectation_invalid",
+                "work report artifact read expectation must identify one report",
+            )
+        })?;
+        let mut client = self.connections.connect()?;
+        read_record::<WorkReportArtifactRecord>(
+            &mut client,
+            "work_report",
+            report_id.as_str(),
+            expectation.run_id().as_str(),
+        )?
+        .map(|record| validate_work_report_artifact_on_read(record.value, expectation))
         .transpose()
     }
 
@@ -3091,9 +3121,63 @@ impl WorkReportArtifactStore for PostgresStateBackend {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError> {
-        self.list_records_by_key2("work_report", run_id.as_str())?
-            .into_iter()
-            .map(crate::state::validate_work_report_artifact_on_read)
+        let mut client = self.connections.connect()?;
+        let rows = client
+            .query(
+                "SELECT key1, payload FROM workflow_os.records
+                  WHERE family = 'work_report' AND key2 = $1 ORDER BY key1",
+                &[&run_id.as_str()],
+            )
+            .map_err(|error| database_error("work_report_list", &error))?;
+        rows.into_iter()
+            .map(|row| {
+                let report_id = WorkReportId::new(row.get::<_, String>(0)).map_err(|_| {
+                    state_error(
+                        "postgres_state.work_report.identity_mismatch",
+                        "PostgreSQL work report artifact identity is invalid",
+                    )
+                })?;
+                let artifact: WorkReportArtifactRecord = decode(row.get::<_, String>(1).as_str())?;
+                let expectation = WorkReportArtifactLocationExpectation::for_report(
+                    run_id.clone(),
+                    report_id,
+                    WorkReportArtifactLocatorClass::Postgres,
+                );
+                validate_work_report_artifact_on_read(artifact, &expectation)
+            })
+            .collect()
+    }
+
+    fn list_work_report_artifacts_with_expectation(
+        &self,
+        expectation: &WorkReportArtifactLocationExpectation,
+    ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        let rows = client
+            .query(
+                "SELECT key1, payload FROM workflow_os.records
+                  WHERE family = 'work_report' AND key2 = $1 ORDER BY key1",
+                &[&expectation.run_id().as_str()],
+            )
+            .map_err(|error| database_error("work_report_list", &error))?;
+        rows.into_iter()
+            .map(|row| {
+                let stored_report_id =
+                    WorkReportId::new(row.get::<_, String>(0)).map_err(|_| {
+                        state_error(
+                            "work_report_artifact.read.location_mismatch",
+                            "work report artifact does not match its external storage identity",
+                        )
+                    })?;
+                let artifact: WorkReportArtifactRecord = decode(row.get::<_, String>(1).as_str())?;
+                if artifact.report_id() != &stored_report_id {
+                    return Err(state_error(
+                        "work_report_artifact.read.location_mismatch",
+                        "work report artifact does not match its external storage identity",
+                    ));
+                }
+                validate_work_report_artifact_on_read(artifact, expectation)
+            })
             .collect()
     }
 }
@@ -6033,17 +6117,29 @@ fn replay_hosted_receipt_projection_tx(
                 )
             },
         )?;
-    let existing_artifact = read_work_report_artifact_tx(
-        tx,
-        request.report_artifact.record().run_id(),
-        request.report_artifact.record().report_id(),
-    )?
-    .ok_or_else(|| {
-        state_error(
-            "postgres_state.hosted_projection.replay_conflict",
-            "hosted terminal replay conflicts with durable state",
-        )
-    })?;
+    let expected_artifact = request.report_artifact.record();
+    let expected_metadata = expected_artifact.metadata();
+    let expected_identity = WorkflowRunIdentity {
+        run_id: expected_artifact.run_id().clone(),
+        workflow_id: expected_metadata.workflow_id().clone(),
+        schema_version: expected_metadata.schema_version().clone(),
+        workflow_version: expected_metadata.workflow_version().clone(),
+        spec_content_hash: expected_metadata.spec_hash().clone(),
+        immutable_run_bundle: None,
+    };
+    let artifact_expectation = WorkReportArtifactLocationExpectation::for_report(
+        expected_artifact.run_id().clone(),
+        expected_artifact.report_id().clone(),
+        WorkReportArtifactLocatorClass::PostgresTransaction,
+    )
+    .with_run_identity(&expected_identity);
+    let existing_artifact =
+        read_work_report_artifact_tx(tx, &artifact_expectation)?.ok_or_else(|| {
+            state_error(
+                "postgres_state.hosted_projection.replay_conflict",
+                "hosted terminal replay conflicts with durable state",
+            )
+        })?;
     let mut events_match = true;
     for event in request.projection.events() {
         if !event_exists_exact_tx(tx, event)? {
@@ -6393,28 +6489,27 @@ fn read_hosted_execution_receipt_tx(
 
 fn read_work_report_artifact_tx(
     tx: &mut Transaction<'_>,
-    run_id: &WorkflowRunId,
-    report_id: &WorkReportId,
+    expectation: &WorkReportArtifactLocationExpectation,
 ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError> {
+    let report_id = expectation.report_id().ok_or_else(|| {
+        state_error(
+            "work_report_artifact.read.expectation_invalid",
+            "work report artifact read expectation must identify one report",
+        )
+    })?;
     let row = tx
         .query_opt(
             "SELECT payload FROM workflow_os.records
               WHERE family = 'work_report' AND key1 = $1 AND key2 = $2
               FOR UPDATE",
-            &[&report_id.as_str(), &run_id.as_str()],
+            &[&report_id.as_str(), &expectation.run_id().as_str()],
         )
         .map_err(|error| database_error("work_report_read", &error))?;
     let Some(row) = row else {
         return Ok(None);
     };
     let artifact: WorkReportArtifactRecord = decode(row.get::<_, String>(0).as_str())?;
-    if artifact.report_id() != report_id || artifact.run_id() != run_id {
-        return Err(state_error(
-            "postgres_state.work_report.identity_mismatch",
-            "PostgreSQL work report artifact identity is invalid",
-        ));
-    }
-    Ok(Some(artifact))
+    validate_work_report_artifact_on_read(artifact, expectation).map(Some)
 }
 
 fn validate_hosted_work_item_lease(

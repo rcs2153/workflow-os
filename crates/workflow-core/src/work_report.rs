@@ -8058,7 +8058,7 @@ impl WorkReportArtifactRecord {
         Ok(())
     }
 
-    fn validate_structure(&self) -> Result<(), WorkflowOsError> {
+    pub(crate) fn validate_structure(&self) -> Result<(), WorkflowOsError> {
         self.work_report.validate()?;
         self.metadata.validate_against_report(&self.work_report)
     }

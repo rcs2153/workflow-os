@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use rusqlite::{params, Connection};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use workflow_core::{
@@ -49,7 +50,7 @@ use workflow_core::{
     SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectRecord,
     SideEffectRecordDefinition, SideEffectRecordStore, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition, SkillId,
-    SkillVersion, SpecContentHash, StepId, TerminalLocalWorkReportInput,
+    SkillVersion, SpecContentHash, SqliteStateBackend, StepId, TerminalLocalWorkReportInput,
     TerminalLocalWorkReportResult, TerminalLocalWorkReportSideEffectDiscoveryInput,
     TerminalReportApprovalProofMarkerCitationPolicy, Timestamp, TypedHandoffId,
     ValidationReferenceId, WorkReport, WorkReportArtifactApprovalProofMarkerGateInput,
@@ -57,6 +58,7 @@ use workflow_core::{
     WorkReportArtifactApprovalProofMarkerRequirement,
     WorkReportArtifactApprovalProofMarkerStoreGateInput, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactHighAssuranceRequirement,
+    WorkReportArtifactLocationExpectation, WorkReportArtifactLocatorClass,
     WorkReportArtifactProofMarkerGovernedWriteInput, WorkReportArtifactRecord,
     WorkReportArtifactRequirement, WorkReportArtifactRequirementDefinition,
     WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactStore,
@@ -74,7 +76,7 @@ use workflow_core::{
     WorkflowId, WorkflowReportArtifactGateDerivationInput,
     WorkflowReportArtifactProofMarkerDerivationMode,
     WorkflowReportArtifactProofMarkerGateDerivationInput, WorkflowRun, WorkflowRunEvent,
-    WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    WorkflowRunEventKind, WorkflowRunId, WorkflowRunIdentity, WorkflowRunStatus, WorkflowVersion,
     SUPPORTED_SCHEMA_VERSION,
 };
 
@@ -785,6 +787,36 @@ fn artifact_record() -> WorkReportArtifactRecord {
     WorkReportArtifactRecord::new(valid_report()).expect("valid artifact record")
 }
 
+fn artifact_record_for(
+    run_id: WorkflowRunId,
+    report_id: WorkReportId,
+    workflow_id: WorkflowId,
+) -> WorkReportArtifactRecord {
+    let report = WorkReport::new(WorkReportDefinition {
+        report_id,
+        generation_context: WorkReportGenerationContext {
+            run_id,
+            workflow_id,
+            ..generation_context(WorkReportStatus::Completed)
+        },
+        ..valid_report_definition()
+    })
+    .expect("valid alternate work report");
+    WorkReportArtifactRecord::new(report).expect("valid alternate artifact record")
+}
+
+fn run_identity_for(artifact: &WorkReportArtifactRecord) -> WorkflowRunIdentity {
+    let context = artifact.work_report().generation_context();
+    WorkflowRunIdentity {
+        run_id: context.run_id.clone(),
+        workflow_id: context.workflow_id.clone(),
+        schema_version: context.schema_version.clone(),
+        workflow_version: context.workflow_version.clone(),
+        spec_content_hash: context.spec_hash.clone(),
+        immutable_run_bundle: None,
+    }
+}
+
 fn temp_state_backend(name: &str) -> LocalStateBackend {
     let id = NEXT_ARTIFACT_TEST.fetch_add(1, Ordering::Relaxed);
     let root = std::env::temp_dir().join(format!(
@@ -1192,6 +1224,34 @@ impl SideEffectRecordStore for FailingSideEffectRecordStore {
 
 struct FailingWorkReportArtifactStore {
     writes: AtomicU64,
+}
+
+struct SubstitutingWorkReportArtifactStore {
+    artifact: WorkReportArtifactRecord,
+}
+
+impl WorkReportArtifactStore for SubstitutingWorkReportArtifactStore {
+    fn write_work_report_artifact(
+        &self,
+        _artifact: &WorkReportArtifactRecord,
+    ) -> Result<(), workflow_core::WorkflowOsError> {
+        Ok(())
+    }
+
+    fn read_work_report_artifact(
+        &self,
+        _run_id: &WorkflowRunId,
+        _report_id: &WorkReportId,
+    ) -> Result<Option<WorkReportArtifactRecord>, workflow_core::WorkflowOsError> {
+        Ok(Some(self.artifact.clone()))
+    }
+
+    fn list_work_report_artifacts(
+        &self,
+        _run_id: &WorkflowRunId,
+    ) -> Result<Vec<WorkReportArtifactRecord>, workflow_core::WorkflowOsError> {
+        Ok(vec![self.artifact.clone()])
+    }
 }
 
 impl WorkReportArtifactStore for FailingWorkReportArtifactStore {
@@ -3072,6 +3132,288 @@ fn persisted_envelope_commitment_detects_report_only_substitution_at_validation_
             .commitment()
             .as_str()
     ));
+}
+
+#[test]
+fn artifact_location_expectation_rejects_wrong_immutable_identity_without_leaking_identifiers() {
+    let artifact = artifact_record();
+    let mut identity = run_identity_for(&artifact);
+    identity.workflow_id = WorkflowId::new("workflow/other-location").expect("workflow id");
+    let expectation = WorkReportArtifactLocationExpectation::for_report(
+        artifact.run_id().clone(),
+        artifact.report_id().clone(),
+        WorkReportArtifactLocatorClass::InjectedStore,
+    )
+    .with_run_identity(&identity);
+    let store = SubstitutingWorkReportArtifactStore {
+        artifact: artifact.clone(),
+    };
+
+    let error = store
+        .read_work_report_artifact_with_expectation(&expectation)
+        .expect_err("wrong immutable workflow identity rejected");
+    let debug = format!("{expectation:?}");
+
+    assert_eq!(error.code(), "work_report_artifact.read.location_mismatch");
+    assert!(!error.to_string().contains("workflow/other-location"));
+    assert!(!error.to_string().contains(artifact.report_id().as_str()));
+    assert!(!debug.contains("workflow/other-location"));
+    assert!(!debug.contains(artifact.report_id().as_str()));
+}
+
+#[test]
+fn injected_store_cannot_substitute_another_runs_valid_artifact() {
+    let requested = artifact_record();
+    let substituted = artifact_record_for(
+        WorkflowRunId::new("run-other-location").expect("run id"),
+        WorkReportId::new("report/other-location").expect("report id"),
+        workflow_id(),
+    );
+    let store = SubstitutingWorkReportArtifactStore {
+        artifact: substituted,
+    };
+    let exact = WorkReportArtifactLocationExpectation::for_report(
+        requested.run_id().clone(),
+        requested.report_id().clone(),
+        WorkReportArtifactLocatorClass::InjectedStore,
+    );
+    let listing = WorkReportArtifactLocationExpectation::for_run(
+        requested.run_id().clone(),
+        WorkReportArtifactLocatorClass::InjectedStore,
+    );
+
+    let read_error = store
+        .read_work_report_artifact_with_expectation(&exact)
+        .expect_err("wrong-run injected read rejected");
+    let list_error = store
+        .list_work_report_artifacts_with_expectation(&listing)
+        .expect_err("wrong-run injected listing rejected");
+
+    for error in [read_error, list_error] {
+        assert_eq!(error.code(), "work_report_artifact.read.location_mismatch");
+        assert!(!error.to_string().contains("run-other-location"));
+        assert!(!error.to_string().contains("report/other-location"));
+    }
+}
+
+#[test]
+fn local_backend_rejects_valid_artifact_physically_stored_under_wrong_run_and_report() {
+    let backend = temp_state_backend("wrong-physical-location");
+    let requested = artifact_record();
+    let substituted = artifact_record_for(
+        WorkflowRunId::new("run-other-location").expect("run id"),
+        WorkReportId::new("report/other-location").expect("report id"),
+        workflow_id(),
+    );
+    let requested_path = artifact_path(&backend, &requested);
+    fs::create_dir_all(requested_path.parent().expect("artifact parent"))
+        .expect("artifact directory created");
+    fs::write(
+        &requested_path,
+        serde_json::to_vec(&substituted).expect("serialize substituted artifact"),
+    )
+    .expect("substituted artifact written under requested location");
+
+    let read_error = backend
+        .read_work_report_artifact(requested.run_id(), requested.report_id())
+        .expect_err("wrong physical read location rejected");
+    let list_error = backend
+        .list_work_report_artifacts(requested.run_id())
+        .expect_err("wrong physical list location rejected");
+
+    for error in [read_error, list_error] {
+        assert_eq!(error.code(), "work_report_artifact.read.location_mismatch");
+        assert!(!error.to_string().contains("run-other-location"));
+        assert!(!error.to_string().contains("report/other-location"));
+    }
+}
+
+#[test]
+fn local_backend_checks_location_before_body_commitment_for_combined_substitution() {
+    let backend = temp_state_backend("wrong-location-and-body");
+    let requested = artifact_record();
+    let substituted = artifact_record_for(
+        WorkflowRunId::new("run-other-combined").expect("run id"),
+        WorkReportId::new("report/other-combined").expect("report id"),
+        workflow_id(),
+    );
+    let mut value = serde_json::to_value(&substituted).expect("serialize artifact");
+    value["work_report"]["sections"][0]["summary"] = json!("altered combined payload");
+    let requested_path = artifact_path(&backend, &requested);
+    fs::create_dir_all(requested_path.parent().expect("artifact parent"))
+        .expect("artifact directory created");
+    fs::write(
+        &requested_path,
+        serde_json::to_vec(&value).expect("serialize combined substitution"),
+    )
+    .expect("combined substitution written under requested location");
+
+    let error = backend
+        .read_work_report_artifact(requested.run_id(), requested.report_id())
+        .expect_err("location mismatch wins before body mismatch");
+
+    assert_eq!(error.code(), "work_report_artifact.read.location_mismatch");
+    assert!(!error.to_string().contains("run-other-combined"));
+    assert!(!error.to_string().contains("report/other-combined"));
+    assert!(!error.to_string().contains("altered combined payload"));
+}
+
+#[test]
+fn local_expectation_checks_immutable_identity_before_body_commitment() {
+    let backend = temp_state_backend("wrong-immutable-identity-and-body");
+    let artifact = artifact_record();
+    let mut value = serde_json::to_value(&artifact).expect("serialize artifact");
+    value["metadata"]["workflow_id"] = json!("workflow/other-identity");
+    value["work_report"]["generation_context"]["workflow_id"] = json!("workflow/other-identity");
+    value["work_report"]["sections"][0]["summary"] = json!("altered immutable-identity payload");
+    let path = artifact_path(&backend, &artifact);
+    fs::create_dir_all(path.parent().expect("artifact parent"))
+        .expect("artifact directory created");
+    fs::write(
+        &path,
+        serde_json::to_vec(&value).expect("serialize combined substitution"),
+    )
+    .expect("combined substitution written under requested location");
+    let expectation = WorkReportArtifactLocationExpectation::for_report(
+        artifact.run_id().clone(),
+        artifact.report_id().clone(),
+        WorkReportArtifactLocatorClass::LocalFilesystem,
+    )
+    .with_run_identity(&run_identity_for(&artifact));
+
+    let error = backend
+        .read_work_report_artifact_with_expectation(&expectation)
+        .expect_err("immutable identity mismatch wins before body mismatch");
+
+    assert_eq!(error.code(), "work_report_artifact.read.location_mismatch");
+    assert!(!error.to_string().contains("workflow/other-identity"));
+    assert!(!error
+        .to_string()
+        .contains("altered immutable-identity payload"));
+}
+
+#[test]
+fn local_backend_rejects_legacy_artifact_in_wrong_slot_without_using_legacy_as_identity_excuse() {
+    let backend = temp_state_backend("legacy-wrong-physical-location");
+    let requested = artifact_record();
+    let substituted = artifact_record_for(
+        WorkflowRunId::new("run-other-legacy").expect("run id"),
+        WorkReportId::new("report/other-legacy").expect("report id"),
+        workflow_id(),
+    );
+    let mut value = serde_json::to_value(&substituted).expect("serialize artifact");
+    value["metadata"]
+        .as_object_mut()
+        .expect("metadata object")
+        .remove("body_commitment");
+    let requested_path = artifact_path(&backend, &requested);
+    fs::create_dir_all(requested_path.parent().expect("artifact parent"))
+        .expect("artifact directory created");
+    fs::write(
+        &requested_path,
+        serde_json::to_vec(&value).expect("serialize legacy artifact"),
+    )
+    .expect("legacy artifact written under requested location");
+
+    let error = backend
+        .read_work_report_artifact(requested.run_id(), requested.report_id())
+        .expect_err("misplaced legacy artifact rejected");
+
+    assert_eq!(error.code(), "work_report_artifact.read.location_mismatch");
+    assert!(!error.to_string().contains("run-other-legacy"));
+    assert!(!error.to_string().contains("report/other-legacy"));
+}
+
+#[test]
+fn sqlite_backend_rejects_valid_artifact_under_wrong_relational_keys() {
+    let id = NEXT_ARTIFACT_TEST.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "workflow-os-report-artifact-sqlite-location-{}-{id}.sqlite3",
+        std::process::id()
+    ));
+    let requested = artifact_record();
+    let substituted = artifact_record_for(
+        WorkflowRunId::new("run-other-sqlite-location").expect("run id"),
+        WorkReportId::new("report/other-sqlite-location").expect("report id"),
+        workflow_id(),
+    );
+    let backend = SqliteStateBackend::open(&path).expect("SQLite backend");
+    backend
+        .write_work_report_artifact(&substituted)
+        .expect("substituted artifact stored under its valid keys");
+    let connection = Connection::open(&path).expect("SQLite mutation connection");
+    connection
+        .execute(
+            "UPDATE work_report_artifacts SET run_id = ?1, report_id = ?2",
+            params![requested.run_id().as_str(), requested.report_id().as_str()],
+        )
+        .expect("relational keys moved without changing payload");
+    drop(connection);
+
+    let read_error = backend
+        .read_work_report_artifact(requested.run_id(), requested.report_id())
+        .expect_err("wrong relational read keys rejected");
+    let list_error = backend
+        .list_work_report_artifacts(requested.run_id())
+        .expect_err("wrong relational list keys rejected");
+
+    for error in [read_error, list_error] {
+        assert_eq!(error.code(), "work_report_artifact.read.location_mismatch");
+        assert!(!error.to_string().contains("run-other-sqlite-location"));
+        assert!(!error.to_string().contains("report/other-sqlite-location"));
+    }
+    drop(backend);
+    let _ = fs::remove_file(&path);
+    let _ = fs::remove_file(path.with_extension("sqlite3-shm"));
+    let _ = fs::remove_file(path.with_extension("sqlite3-wal"));
+}
+
+#[test]
+fn sqlite_expectation_checks_immutable_identity_before_body_commitment() {
+    let id = NEXT_ARTIFACT_TEST.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "workflow-os-report-artifact-sqlite-identity-order-{}-{id}.sqlite3",
+        std::process::id()
+    ));
+    let artifact = artifact_record();
+    let backend = SqliteStateBackend::open(&path).expect("SQLite backend");
+    backend
+        .write_work_report_artifact(&artifact)
+        .expect("artifact stored");
+    let mut value = serde_json::to_value(&artifact).expect("serialize artifact");
+    value["metadata"]["workflow_id"] = json!("workflow/other-sqlite-identity");
+    value["work_report"]["generation_context"]["workflow_id"] =
+        json!("workflow/other-sqlite-identity");
+    value["work_report"]["sections"][0]["summary"] =
+        json!("altered sqlite immutable-identity payload");
+    let connection = Connection::open(&path).expect("SQLite mutation connection");
+    connection
+        .execute(
+            "UPDATE work_report_artifacts SET payload = ?1",
+            params![serde_json::to_string(&value).expect("serialize substitution")],
+        )
+        .expect("substituted payload stored");
+    drop(connection);
+    let expectation = WorkReportArtifactLocationExpectation::for_report(
+        artifact.run_id().clone(),
+        artifact.report_id().clone(),
+        WorkReportArtifactLocatorClass::Sqlite,
+    )
+    .with_run_identity(&run_identity_for(&artifact));
+
+    let error = backend
+        .read_work_report_artifact_with_expectation(&expectation)
+        .expect_err("immutable identity mismatch wins before body mismatch");
+
+    assert_eq!(error.code(), "work_report_artifact.read.location_mismatch");
+    assert!(!error.to_string().contains("workflow/other-sqlite-identity"));
+    assert!(!error
+        .to_string()
+        .contains("altered sqlite immutable-identity payload"));
+    drop(backend);
+    let _ = fs::remove_file(&path);
+    let _ = fs::remove_file(path.with_extension("sqlite3-shm"));
+    let _ = fs::remove_file(path.with_extension("sqlite3-wal"));
 }
 
 #[test]

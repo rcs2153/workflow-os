@@ -138,9 +138,25 @@ Plan](docs/implementation-plans/continuity-of-authority-p0-release-gates-plan.md
 The compact-checkpoint benchmark remains bounded product evidence, not a
 substitute for these correctness gates.
 
-Gate 1 is closed. The next authorized implementation lane is Gate 2,
-**Verified Means Correctly Bound**. Gate 3 and the cross-gate review remain
-blocked behind Gate 2 acceptance.
+Gate 1 is closed. Gate 2, **Verified Means Correctly Bound**, has a bounded
+implementation candidate accepted by focused maintainer/security review after
+two blockers were corrected. One Core-owned artifact-location
+expectation now composes physical run/report keys, available immutable workflow
+identity, backend locator class, and retained body commitment validation across
+filesystem, SQLite, PostgreSQL, transaction-local replay, injected stores,
+inspect, current-authority projection, recovery, reconciliation, and replay
+consumers, including hosted report-metadata projection. Validation order is
+structural integrity, external and internal identity, available immutable
+workflow identity, then body commitment. Review found and fixed built-in
+expectation reads that verified body commitment before full immutable identity,
+and hosted metadata endpoints that still used legacy run-only reads. Focused
+filesystem, injected-store, SQLite, combined substitution, legacy, hosted, and
+PostgreSQL relational-key and identity-order coverage exists. Gate 2 remains
+open until exact-head CI, credential-backed PostgreSQL execution, an independent
+backend misplacement rerun, and post-merge exact-main evidence pass. See the
+[implementation report](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_IMPLEMENTATION_REPORT.md)
+and [focused review](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_REVIEW.md).
+Gate 3 and the cross-gate review remain blocked behind Gate 2 acceptance.
 
 A new P0 **evidence provenance and report integrity** preemption is active
 before publication, public-positioning expansion, or broader evidence-consuming

@@ -110,8 +110,8 @@ use crate::{
     WorkReportArtifactAuthorityReceiptIntegrityInput,
     WorkReportArtifactAuthorityReceiptIntegrityResult, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactHighAssuranceDisclosureGateResult,
-    WorkReportArtifactHighAssuranceDisclosurePolicy,
-    WorkReportArtifactProofMarkerGovernedWriteInput,
+    WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactLocationExpectation,
+    WorkReportArtifactLocatorClass, WorkReportArtifactProofMarkerGovernedWriteInput,
     WorkReportArtifactProofMarkerGovernedWriteResult, WorkReportArtifactRecord,
     WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore, WorkReportCitationTarget,
     WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDisclosure,
@@ -20264,7 +20264,22 @@ fn reconcile_work_report_artifact_duplicate(
     if candidate.validate().is_err() {
         return WorkReportArtifactDuplicateReconciliation::Unreadable;
     }
-    match artifact_store.read_work_report_artifact(candidate.run_id(), candidate.report_id()) {
+    let metadata = candidate.metadata();
+    let identity = WorkflowRunIdentity {
+        run_id: candidate.run_id().clone(),
+        workflow_id: metadata.workflow_id().clone(),
+        schema_version: metadata.schema_version().clone(),
+        workflow_version: metadata.workflow_version().clone(),
+        spec_content_hash: metadata.spec_hash().clone(),
+        immutable_run_bundle: None,
+    };
+    let expectation = WorkReportArtifactLocationExpectation::for_report(
+        candidate.run_id().clone(),
+        candidate.report_id().clone(),
+        WorkReportArtifactLocatorClass::InjectedStore,
+    )
+    .with_run_identity(&identity);
+    match artifact_store.read_work_report_artifact_with_expectation(&expectation) {
         Ok(Some(existing)) if existing.validate().is_err() => {
             WorkReportArtifactDuplicateReconciliation::Unreadable
         }
@@ -20272,6 +20287,9 @@ fn reconcile_work_report_artifact_duplicate(
             WorkReportArtifactDuplicateReconciliation::Exact(Box::new(existing))
         }
         Ok(Some(_)) => WorkReportArtifactDuplicateReconciliation::Conflict,
+        Err(error) if error.code() == "work_report_artifact.read.location_mismatch" => {
+            WorkReportArtifactDuplicateReconciliation::Conflict
+        }
         Ok(None) | Err(_) => WorkReportArtifactDuplicateReconciliation::Unreadable,
     }
 }

@@ -1512,7 +1512,13 @@ fn capture_work_report_metadata_read(
     else {
         return CapturedWorkReportMetadataRead::InvariantFailure;
     };
-    match store.read_work_report_artifact(input.execution_binding.run_id(), input.report_id) {
+    let expectation = crate::WorkReportArtifactLocationExpectation::for_report(
+        input.execution_binding.run_id().clone(),
+        input.report_id.clone(),
+        crate::WorkReportArtifactLocatorClass::InjectedStore,
+    )
+    .with_workflow_id(input.execution_binding.workflow_id().clone());
+    match store.read_work_report_artifact_with_expectation(&expectation) {
         Ok(Some(artifact)) => {
             capture_valid_work_report_metadata(&artifact, input, requirement_sensitivity_ceiling)
         }
