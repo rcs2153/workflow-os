@@ -876,6 +876,53 @@ mod tests {
             accepted.proof_fingerprint().as_str(),
             "1e30df3ab6665557fccca17eabaee45742adac18b88663f2027787a9b875b1aa"
         );
+
+        let projection = crate::LocalCheckEvidenceAssuranceProjection::new(
+            crate::LocalCheckEvidenceAssuranceProjectionDefinition {
+                execution_binding: &fixture.execution_binding,
+                resolved_execution_fingerprint: SpecContentHash::from_text("resolved execution"),
+                result_id: accepted.result_id().clone(),
+                result: &fixture.result,
+                accepted_attestation: Some(&accepted),
+            },
+        )
+        .expect("accepted projection");
+        assert_eq!(
+            projection.attestation_posture(),
+            crate::LocalCheckEvidenceAttestationPosture::KernelAcceptedLocalProcess
+        );
+        assert_eq!(
+            projection.accepted_attestation_proof_fingerprint(),
+            Some(accepted.proof_fingerprint())
+        );
+        let serialized = serde_json::to_string(&projection).expect("serialized projection");
+        assert!(
+            serde_json::from_str::<crate::LocalCheckEvidenceAssuranceProjection>(&serialized)
+                .is_err(),
+            "a stored proof reference must not recreate verifier-owned assurance"
+        );
+        assert!(
+            projection.satisfies_minimum(crate::LocalCheckEvidenceAssuranceMinimum::new(
+                crate::LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound,
+                crate::LocalCheckEvidenceExecutionPosture::TrustedHostObserved,
+                crate::LocalCheckEvidenceAttestationPosture::KernelAcceptedLocalProcess,
+            ))
+        );
+
+        let error = crate::LocalCheckEvidenceAssuranceProjection::new(
+            crate::LocalCheckEvidenceAssuranceProjectionDefinition {
+                execution_binding: &fixture.execution_binding,
+                resolved_execution_fingerprint: SpecContentHash::from_text("resolved execution"),
+                result_id: LocalCheckResultId::new("result/substituted").expect("result id"),
+                result: &fixture.result,
+                accepted_attestation: Some(&accepted),
+            },
+        )
+        .expect_err("accepted proof must match the result identity");
+        assert_eq!(
+            error.code(),
+            "local_check_evidence_assurance.attestation.commitment_mismatch"
+        );
     }
 
     #[test]
