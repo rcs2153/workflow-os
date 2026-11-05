@@ -199,16 +199,32 @@ report](docs/concepts/WORK_REPORT_BODY_COMMITMENT_INSPECT_METADATA_PROJECTION_RE
 and [accepted
 review](docs/concepts/WORK_REPORT_BODY_COMMITMENT_INSPECT_METADATA_PROJECTION_REVIEW.md).
 
-The next phase is bounded **WorkReport body-commitment recovery and duplicate
-reconciliation enforcement**. It must identify every recovery or duplicate
-reconciliation path that can consume a persisted report artifact, require the
-retained commitment boundary before returning content or accepting equality,
-preserve explicit legacy-unverified disclosure, and fail closed without
-payload leakage on corrupt or conflicting records. Replay remains a later,
-separately reviewed phase. Product/CLI expansion, migration, signing, external
-witnesses, provider mutation, publication, and claims of storage-owner tamper
-resistance remain out of scope. Independent security review remains required
-before release admission resumes.
+The bounded **WorkReport body-commitment recovery and duplicate reconciliation
+enforcement** phase is implemented and its focused maintainer/security review
+is accepted. One shared Core-owned reconciliation boundary now validates both
+the candidate and stored artifact before exact equality can produce an
+already-persisted result. Trusted-host terminal reports, authoritative
+governance reports, selected project-validation authority-receipt reports, and
+governance authority-receipt reports all use that boundary. Invalid or
+unreadable duplicates remain bounded ambiguous/unreadable outcomes; valid
+conflicts remain conflicts; valid legacy artifacts remain explicitly
+`legacy_unverified`. The direct existing-authoritative-artifact recovery helper
+also validates before returning `AlreadyPersisted`. Concrete durable-store
+read enforcement remains defense in depth rather than an assumption imposed on
+every injected trait implementation. See the [implementation
+report](docs/concepts/WORK_REPORT_BODY_COMMITMENT_RECOVERY_RECONCILIATION_REPORT.md)
+and [accepted
+review](docs/concepts/WORK_REPORT_BODY_COMMITMENT_RECOVERY_RECONCILIATION_REVIEW.md).
+
+The next phase is bounded **WorkReport body-commitment replay enforcement**. It
+must trace every terminal or provider replay path that consumes a persisted
+artifact, including transaction-local PostgreSQL reads, require retained
+commitment validation before replay equality or content reuse, preserve the
+original legacy-unverified posture without upgrade, and fail closed without
+payload leakage. Migration, backfill, signing, external witnesses, provider
+mutation broadening, publication, new commands/schemas/SDKs, and claims of
+storage-owner tamper resistance remain out of scope. Independent security
+review remains required before release admission resumes.
 
 The separate deterministic hosted P0 is now implemented. The advertised
 `workflow-os-hosted --worker-once` entry point previously called the

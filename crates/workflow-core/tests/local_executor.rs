@@ -51,6 +51,7 @@ use workflow_core::{
     persist_approval_proof_marker_projections_for_run,
     persist_authoritative_governance_report_artifact,
     persist_governance_authority_receipt_report_artifact, preview_governed_continuation,
+    reconcile_existing_authoritative_governance_report_artifact,
     route_authoritative_explicit_local_check_profile_governance,
     route_core_owned_authoritative_explicit_local_check_profile_governance,
     route_selected_project_validation_governance, transition_side_effect_to_attempted,
@@ -205,15 +206,15 @@ use workflow_core::{
     WorkReportArtifactApprovalProofMarkerGatePolicy,
     WorkReportArtifactAuthorityReceiptIntegrityInput,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
-    WorkReportArtifactStore, WorkReportCitationKind, WorkReportCitationTarget,
-    WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDecision,
-    WorkReportHighAssuranceApprovalDisclosure, WorkReportHighAssuranceApprovalDisclosureDefinition,
-    WorkReportHighAssuranceExpirationPosture, WorkReportHighAssuranceRequesterApproverPosture,
-    WorkReportHighAssuranceRevocationPosture, WorkReportId, WorkReportRedactionPolicy,
-    WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference, WorkflowId,
-    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
-    SUPPORTED_SCHEMA_VERSION,
+    WorkReportArtifactStore, WorkReportBodyCommitmentPosture, WorkReportCitationKind,
+    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
+    WorkReportHighAssuranceApprovalDecision, WorkReportHighAssuranceApprovalDisclosure,
+    WorkReportHighAssuranceApprovalDisclosureDefinition, WorkReportHighAssuranceExpirationPosture,
+    WorkReportHighAssuranceRequesterApproverPosture, WorkReportHighAssuranceRevocationPosture,
+    WorkReportId, WorkReportRedactionPolicy, WorkReportSectionKind, WorkReportSensitivity,
+    WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
+    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -7425,6 +7426,114 @@ fn authority_receipt_artifact_composition_reconciles_exact_duplicates() {
     );
     assert!(result.persistence_error().is_none());
     assert!(!result.retry_blocked());
+}
+
+#[test]
+fn authority_receipt_artifact_composition_rejects_invalid_duplicate_before_equality() {
+    let report_result = authority_receipt_report_result(
+        "authority-receipt-artifact-composition-invalid-duplicate",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    receipt_store
+        .write_governance_decision_authority_receipt(
+            report_result.authority_receipt().expect("receipt"),
+        )
+        .expect("receipt prewrite");
+    let artifact =
+        WorkReportArtifactRecord::new(report_result.work_report().expect("report").clone())
+            .expect("artifact");
+    let mut value = serde_json::to_value(artifact).expect("serialize artifact");
+    value["work_report"]["sections"][0]["summary"] =
+        serde_json::json!("substituted duplicate summary");
+    let substituted: WorkReportArtifactRecord =
+        serde_json::from_value(value).expect("deserialize structurally valid artifact");
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    artifact_store.record.replace(Some(substituted));
+    let project = TestProject::new("authority-receipt-artifact-invalid-duplicate-state");
+    let side_effect_store = LocalStateBackend::new(project.state_root()).expect("state backend");
+
+    let result = persist_governance_authority_receipt_report_artifact(
+        &receipt_store,
+        &artifact_store,
+        &side_effect_store,
+        authority_receipt_artifact_write_input(report_result),
+    );
+
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactOutcomeAmbiguous
+    );
+    assert_eq!(
+        result.persistence_error().expect("bounded error").code(),
+        "executor.governance_authority_receipt_artifact.artifact_reconciliation_failed"
+    );
+    assert!(result.retry_blocked());
+    let debug = format!("{result:?}");
+    assert!(!debug.contains("substituted duplicate summary"));
+}
+
+#[test]
+fn existing_authoritative_artifact_recovery_rejects_invalid_body_commitment() {
+    let report_result = authority_receipt_report_result(
+        "existing-authoritative-artifact-invalid-recovery",
+        ApprovalDecisionKind::Granted,
+    );
+    let artifact =
+        WorkReportArtifactRecord::new(report_result.work_report().expect("report").clone())
+            .expect("artifact");
+    let mut value = serde_json::to_value(artifact).expect("serialize artifact");
+    value["work_report"]["sections"][0]["summary"] =
+        serde_json::json!("substituted recovery summary");
+    let substituted: WorkReportArtifactRecord =
+        serde_json::from_value(value).expect("deserialize structurally valid artifact");
+
+    let result = reconcile_existing_authoritative_governance_report_artifact(substituted);
+
+    assert_eq!(
+        result.posture(),
+        AuthoritativeGovernanceArtifactPosture::PersistenceFailed
+    );
+    assert_eq!(
+        result.error().expect("bounded error").code(),
+        "work_report_artifact.authoritative.duplicate_unreadable"
+    );
+    assert!(result.artifact().is_none());
+    assert!(!format!("{result:?}").contains("substituted recovery summary"));
+}
+
+#[test]
+fn existing_authoritative_artifact_recovery_preserves_legacy_unverified_posture() {
+    let report_result = authority_receipt_report_result(
+        "existing-authoritative-artifact-legacy-recovery",
+        ApprovalDecisionKind::Granted,
+    );
+    let artifact =
+        WorkReportArtifactRecord::new(report_result.work_report().expect("report").clone())
+            .expect("artifact");
+    let mut value = serde_json::to_value(artifact).expect("serialize artifact");
+    value["metadata"]
+        .as_object_mut()
+        .expect("metadata object")
+        .remove("body_commitment");
+    let legacy: WorkReportArtifactRecord =
+        serde_json::from_value(value).expect("deserialize legacy artifact");
+
+    let result = reconcile_existing_authoritative_governance_report_artifact(legacy);
+
+    assert_eq!(
+        result.posture(),
+        AuthoritativeGovernanceArtifactPosture::AlreadyPersisted
+    );
+    assert_eq!(
+        result
+            .artifact()
+            .expect("legacy artifact")
+            .metadata()
+            .body_commitment_posture(),
+        WorkReportBodyCommitmentPosture::LegacyUnverified
+    );
+    assert!(result.error().is_none());
 }
 
 #[test]

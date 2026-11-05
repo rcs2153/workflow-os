@@ -1707,22 +1707,26 @@ fn reconcile_trusted_host_terminal_artifact_duplicate(
     artifact_store: &impl WorkReportArtifactStore,
     artifact: &WorkReportArtifactRecord,
 ) -> TrustedHostTerminalWorkReportArtifactResult {
-    match artifact_store.read_work_report_artifact(artifact.run_id(), artifact.report_id()) {
-        Ok(Some(existing)) if &existing == artifact => {
+    match reconcile_work_report_artifact_duplicate(artifact_store, artifact) {
+        WorkReportArtifactDuplicateReconciliation::Exact(existing) => {
             TrustedHostTerminalWorkReportArtifactResult::new(
                 TrustedHostTerminalWorkReportArtifactPosture::AlreadyPersisted,
-                Some(existing),
+                Some(*existing),
                 None,
             )
         }
-        Ok(Some(_)) => trusted_host_terminal_artifact_failure(
-            TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed,
-            "duplicate_conflict",
-        ),
-        Ok(None) | Err(_) => trusted_host_terminal_artifact_failure(
-            TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed,
-            "duplicate_unreadable",
-        ),
+        WorkReportArtifactDuplicateReconciliation::Conflict => {
+            trusted_host_terminal_artifact_failure(
+                TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed,
+                "duplicate_conflict",
+            )
+        }
+        WorkReportArtifactDuplicateReconciliation::Unreadable => {
+            trusted_host_terminal_artifact_failure(
+                TrustedHostTerminalWorkReportArtifactPosture::PersistenceFailed,
+                "duplicate_unreadable",
+            )
+        }
     }
 }
 
@@ -3231,6 +3235,13 @@ impl fmt::Debug for AuthoritativeGovernanceArtifactPersistenceResult {
 pub fn reconcile_existing_authoritative_governance_report_artifact(
     artifact: WorkReportArtifactRecord,
 ) -> AuthoritativeGovernanceArtifactPersistenceResult {
+    if artifact.validate().is_err() {
+        return authoritative_artifact_failure(
+            "duplicate_unreadable",
+            "authoritative report artifact duplicate could not be reconciled",
+            None,
+        );
+    }
     AuthoritativeGovernanceArtifactPersistenceResult::new(
         AuthoritativeGovernanceArtifactPosture::AlreadyPersisted,
         Some(artifact),
@@ -3659,21 +3670,21 @@ fn reconcile_authoritative_artifact_duplicate(
     artifact: &WorkReportArtifactRecord,
     projection_persistence: Option<ApprovalProofMarkerProjectionPersistenceResult>,
 ) -> AuthoritativeGovernanceArtifactPersistenceResult {
-    match artifact_store.read_work_report_artifact(artifact.run_id(), artifact.report_id()) {
-        Ok(Some(existing)) if &existing == artifact => {
+    match reconcile_work_report_artifact_duplicate(artifact_store, artifact) {
+        WorkReportArtifactDuplicateReconciliation::Exact(existing) => {
             AuthoritativeGovernanceArtifactPersistenceResult::new(
                 AuthoritativeGovernanceArtifactPosture::AlreadyPersisted,
-                Some(existing),
+                Some(*existing),
                 None,
                 projection_persistence,
             )
         }
-        Ok(Some(_)) => authoritative_artifact_failure(
+        WorkReportArtifactDuplicateReconciliation::Conflict => authoritative_artifact_failure(
             "duplicate_conflict",
             "authoritative report artifact persistence found a conflicting duplicate",
             projection_persistence,
         ),
-        Ok(None) | Err(_) => authoritative_artifact_failure(
+        WorkReportArtifactDuplicateReconciliation::Unreadable => authoritative_artifact_failure(
             "duplicate_unreadable",
             "authoritative report artifact duplicate could not be reconciled",
             projection_persistence,
@@ -19233,10 +19244,9 @@ fn close_selected_project_validation_approval_artifact(
             }
         }
         Err(error) if error.code() == "work_report_artifact.write.duplicate" => {
-            match artifact_store.read_work_report_artifact(artifact.run_id(), artifact.report_id())
-            {
-                Ok(Some(existing)) if existing == artifact => {
-                    result.artifact = Some(existing);
+            match reconcile_work_report_artifact_duplicate(artifact_store, &artifact) {
+                WorkReportArtifactDuplicateReconciliation::Exact(existing) => {
+                    result.artifact = Some(*existing);
                     result.artifact_posture =
                         LocalGovernanceAuthorityReceiptArtifactWritePosture::AlreadyPersisted;
                     if high_assurance_required {
@@ -19248,14 +19258,14 @@ fn close_selected_project_validation_approval_artifact(
                             LocalSelectedProjectValidationArtifactGateResult::Satisfied;
                     }
                 }
-                Ok(Some(_)) => {
+                WorkReportArtifactDuplicateReconciliation::Conflict => {
                     result.artifact_posture =
                         LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactDuplicateConflict;
                     result.artifact_error = Some(selected_project_validation_consumer_error(
                         "artifact_duplicate_conflict",
                     ));
                 }
-                Ok(None) | Err(_) => {
+                WorkReportArtifactDuplicateReconciliation::Unreadable => {
                     result.artifact_posture =
                         LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactOutcomeAmbiguous;
                     result.artifact_error = Some(selected_project_validation_consumer_error(
@@ -19701,12 +19711,12 @@ fn reconcile_governance_authority_receipt_artifact_duplicate(
     artifact: &WorkReportArtifactRecord,
     result: &mut LocalGovernanceAuthorityReceiptArtifactWriteResult,
 ) {
-    match artifact_store.read_work_report_artifact(artifact.run_id(), artifact.report_id()) {
-        Ok(Some(existing)) if &existing == artifact => {
-            result.artifact = Some(existing);
+    match reconcile_work_report_artifact_duplicate(artifact_store, artifact) {
+        WorkReportArtifactDuplicateReconciliation::Exact(existing) => {
+            result.artifact = Some(*existing);
             result.posture = LocalGovernanceAuthorityReceiptArtifactWritePosture::AlreadyPersisted;
         }
-        Ok(Some(_)) => {
+        WorkReportArtifactDuplicateReconciliation::Conflict => {
             result.posture =
                 LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactDuplicateConflict;
             result.persistence_error = Some(governance_authority_receipt_artifact_error(
@@ -19714,7 +19724,7 @@ fn reconcile_governance_authority_receipt_artifact_duplicate(
                 "governance authority receipt report artifact duplicate conflicts",
             ));
         }
-        Ok(None) | Err(_) => {
+        WorkReportArtifactDuplicateReconciliation::Unreadable => {
             result.posture =
                 LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactOutcomeAmbiguous;
             result.persistence_error = Some(governance_authority_receipt_artifact_error(
@@ -19723,6 +19733,31 @@ fn reconcile_governance_authority_receipt_artifact_duplicate(
             ));
             result.retry_blocked = true;
         }
+    }
+}
+
+enum WorkReportArtifactDuplicateReconciliation {
+    Exact(Box<WorkReportArtifactRecord>),
+    Conflict,
+    Unreadable,
+}
+
+fn reconcile_work_report_artifact_duplicate(
+    artifact_store: &impl WorkReportArtifactStore,
+    candidate: &WorkReportArtifactRecord,
+) -> WorkReportArtifactDuplicateReconciliation {
+    if candidate.validate().is_err() {
+        return WorkReportArtifactDuplicateReconciliation::Unreadable;
+    }
+    match artifact_store.read_work_report_artifact(candidate.run_id(), candidate.report_id()) {
+        Ok(Some(existing)) if existing.validate().is_err() => {
+            WorkReportArtifactDuplicateReconciliation::Unreadable
+        }
+        Ok(Some(existing)) if existing == *candidate => {
+            WorkReportArtifactDuplicateReconciliation::Exact(Box::new(existing))
+        }
+        Ok(Some(_)) => WorkReportArtifactDuplicateReconciliation::Conflict,
+        Ok(None) | Err(_) => WorkReportArtifactDuplicateReconciliation::Unreadable,
     }
 }
 
