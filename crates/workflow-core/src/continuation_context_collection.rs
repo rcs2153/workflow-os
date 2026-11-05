@@ -28,6 +28,7 @@ use crate::continuation_context::{
 use crate::{ActorId, SpecContentHash, WorkflowOsError};
 
 mod accepted_intent;
+mod cross_gate_lifecycle;
 mod delivery;
 mod local_observers;
 mod replacement_executor;
@@ -1550,6 +1551,61 @@ mod tests {
     struct ExactReplacementAuthorityResolver {
         calls: Cell<u32>,
         expected_operation: SpecContentHash,
+        expected_cross_gate_lifecycle: Option<SpecContentHash>,
+    }
+
+    struct CrossGateLifecycleFixtureSource {
+        observation: cross_gate_lifecycle::CrossGateLifecycleObservation,
+        current_revision: SpecContentHash,
+    }
+
+    impl cross_gate_lifecycle::CrossGateLifecycleSource for CrossGateLifecycleFixtureSource {
+        fn observe_current(
+            &self,
+        ) -> Result<cross_gate_lifecycle::CrossGateLifecycleObservation, WorkflowOsError> {
+            Ok(self.observation.clone())
+        }
+
+        fn current_revision(&self) -> Result<SpecContentHash, WorkflowOsError> {
+            Ok(self.current_revision.clone())
+        }
+    }
+
+    fn cross_gate_binding(
+        run: &str,
+        context: &str,
+        dispatch: &str,
+        report: &str,
+        resource: &str,
+        revision: &str,
+    ) -> cross_gate_lifecycle::CrossGateLifecycleBinding {
+        let run_id = WorkflowRunId::new(run).expect("run");
+        let context = hash(context);
+        let revision = hash(revision);
+        let source = CrossGateLifecycleFixtureSource {
+            observation: cross_gate_lifecycle::CrossGateLifecycleObservation::new(
+                revision.clone(),
+                cross_gate_lifecycle::AcceptedDispatchObservation::new(
+                    run_id.clone(),
+                    context.clone(),
+                    vec![hash(dispatch)],
+                )
+                .expect("dispatch observation"),
+                cross_gate_lifecycle::VerifiedReportObservation::new(
+                    run_id.clone(),
+                    context.clone(),
+                    hash(report),
+                ),
+                cross_gate_lifecycle::CurrentResourceAuthorityObservation::new(
+                    run_id,
+                    context,
+                    hash(resource),
+                ),
+            ),
+            current_revision: revision,
+        };
+        cross_gate_lifecycle::CrossGateLifecycleBinding::compose(&source)
+            .expect("cross-gate binding")
     }
 
     impl replacement_executor::ReplacementExecutorFreshAuthorityResolver
@@ -1563,6 +1619,14 @@ mod tests {
                 return Err(collection_error(
                     "replacement_executor.authority.operation_mismatch",
                     "fresh authority request is bound to another operation identity",
+                ));
+            }
+            if request.cross_gate_lifecycle_commitment()
+                != self.expected_cross_gate_lifecycle.as_ref()
+            {
+                return Err(collection_error(
+                    "replacement_executor.authority.lifecycle_binding_mismatch",
+                    "fresh authority request is bound to another cross-gate lifecycle",
                 ));
             }
             self.calls.set(self.calls.get() + 1);
@@ -2549,9 +2613,7 @@ mod tests {
     }
 
     #[test]
-    fn context_free_replacement_receives_equivalent_understanding_then_resolves_fresh_authority() {
-        use ContinuationUnderstandingClaimKind as Claim;
-
+    fn context_free_replacement_cannot_resolve_authority_without_cross_gate_binding() {
         let request = replacement_request();
         let original_aggregate = replacement_registry(&request, AcceptedIntentKind::Resume, false)
             .compose(request.clone(), &request.anchor)
@@ -2568,27 +2630,71 @@ mod tests {
             actor: ActorId::new("agent/context-free-replacement").expect("replacement recipient"),
             posture: IntegratedReceiptPosture::Exact,
         };
+        let authority = ReplacementAuthorityResolver {
+            calls: Cell::new(0),
+        };
+
+        let error = replacement_executor::prove_replacement_executor_equivalence(
+            &original_aggregate,
+            &replacement_aggregate,
+            &original_recipient,
+            &replacement_recipient,
+            &authority,
+        )
+        .err()
+        .expect("fresh authority without cross-gate binding must fail");
+
+        assert_eq!(
+            error.code(),
+            "continuation_collection.replacement_executor.lifecycle_binding.missing"
+        );
+        assert_eq!(authority.calls.get(), 0);
+    }
+
+    #[test]
+    fn cross_gate_replacement_binds_dispatch_report_and_resource_authority() {
+        let request = replacement_request();
+        let original_aggregate = replacement_registry(&request, AcceptedIntentKind::Resume, false)
+            .compose(request.clone(), &request.anchor)
+            .expect("original aggregate");
+        let replacement_aggregate =
+            replacement_registry(&request, AcceptedIntentKind::Resume, false)
+                .compose(request.clone(), &request.anchor)
+                .expect("replacement aggregate");
+        let original_recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/original-cross-gate").expect("original recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let replacement_recipient = IntegratedRecipient {
+            actor: ActorId::new("agent/replacement-cross-gate").expect("replacement recipient"),
+            posture: IntegratedReceiptPosture::Exact,
+        };
+        let lifecycle = cross_gate_binding(
+            "run/cross-gate",
+            "context/cross-gate",
+            "dispatch/cross-gate",
+            "report/cross-gate",
+            "resource/cross-gate",
+            "revision/cross-gate",
+        );
         let authority = ExactReplacementAuthorityResolver {
             calls: Cell::new(0),
             expected_operation: hash("work/replacement-proof"),
+            expected_cross_gate_lifecycle: Some(lifecycle.commitment().clone()),
         };
 
-        let (original, replacement, proof) =
-            replacement_executor::prove_replacement_executor_equivalence(
+        let (_, replacement, proof) =
+            replacement_executor::prove_cross_gate_replacement_executor_equivalence(
                 &original_aggregate,
                 &replacement_aggregate,
                 &original_recipient,
                 &replacement_recipient,
+                &lifecycle,
+                &lifecycle,
                 &authority,
             )
-            .expect("replacement proof");
+            .expect("cross-gate replacement proof");
 
-        assert_eq!(original.claims(), replacement.claims());
-        assert_eq!(original.gaps(), replacement.gaps());
-        assert_eq!(
-            replacement.posture(),
-            ContinuationContextDecisionPosture::ReadyForAuthorityResolution
-        );
         assert!(replacement.is_non_authorizing());
         assert!(proof.is_non_authorizing());
         assert_eq!(
@@ -2596,49 +2702,307 @@ mod tests {
             replacement_executor::ReplacementFreshAuthorityPosture::ResolvedSeparately
         );
         assert_eq!(authority.calls.get(), 1);
+    }
 
-        let claim_values = |kind| {
-            replacement
-                .claims()
-                .iter()
-                .filter(|claim| claim.kind() == kind)
-                .filter_map(|claim| claim.value().map(ContinuationContextText::as_str))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            claim_values(Claim::Objective),
-            vec!["prove context-free replacement understanding"]
+    #[test]
+    fn cross_gate_replacement_rejects_each_substituted_gate_binding() {
+        let request = replacement_request();
+        let original_aggregate = replacement_registry(&request, AcceptedIntentKind::Resume, false)
+            .compose(request.clone(), &request.anchor)
+            .expect("original aggregate");
+        let replacement_aggregate =
+            replacement_registry(&request, AcceptedIntentKind::Resume, false)
+                .compose(request.clone(), &request.anchor)
+                .expect("replacement aggregate");
+        let original = cross_gate_binding(
+            "run/cross-gate",
+            "context/cross-gate",
+            "dispatch/cross-gate",
+            "report/cross-gate",
+            "resource/cross-gate",
+            "revision/cross-gate",
         );
-        assert!(!replacement.claims().iter().any(|claim| {
-            claim.value().map(ContinuationContextText::as_str) == Some("repeat projection delivery")
-        }));
-        for kind in [
-            Claim::AcceptedAmendment,
-            Claim::Scope,
-            Claim::StrictNonGoal,
-            Claim::Decision,
-            Claim::CompletedObligation,
-            Claim::InProgressObligation,
-            Claim::DeferredObligation,
-            Claim::RemainingObligation,
-            Claim::Blocker,
-            Claim::Uncertainty,
-            Claim::EvidenceRequirement,
-            Claim::CheckRequirement,
-            Claim::SideEffectPosture,
-            Claim::ValidationCommitment,
-            Claim::ReportingCommitment,
-            Claim::PromisedFollowUp,
-            Claim::LawfulNextOption,
-        ] {
-            assert!(
-                replacement
-                    .claims()
-                    .iter()
-                    .any(|claim| claim.kind() == kind),
-                "missing {kind:?}"
+        let substitutions = [
+            cross_gate_binding(
+                "run/cross-gate",
+                "context/cross-gate",
+                "dispatch/substituted",
+                "report/cross-gate",
+                "resource/cross-gate",
+                "revision/cross-gate",
+            ),
+            cross_gate_binding(
+                "run/cross-gate",
+                "context/cross-gate",
+                "dispatch/cross-gate",
+                "report/substituted",
+                "resource/cross-gate",
+                "revision/cross-gate",
+            ),
+            cross_gate_binding(
+                "run/cross-gate",
+                "context/cross-gate",
+                "dispatch/cross-gate",
+                "report/cross-gate",
+                "resource/substituted",
+                "revision/cross-gate",
+            ),
+        ];
+
+        for (index, replacement) in substitutions.iter().enumerate() {
+            let authority = ReplacementAuthorityResolver {
+                calls: Cell::new(0),
+            };
+            let error = replacement_executor::prove_cross_gate_replacement_executor_equivalence(
+                &original_aggregate,
+                &replacement_aggregate,
+                &IntegratedRecipient {
+                    actor: ActorId::new(format!("agent/original-gate-{index}"))
+                        .expect("original recipient"),
+                    posture: IntegratedReceiptPosture::Exact,
+                },
+                &IntegratedRecipient {
+                    actor: ActorId::new(format!("agent/replacement-gate-{index}"))
+                        .expect("replacement recipient"),
+                    posture: IntegratedReceiptPosture::Exact,
+                },
+                &original,
+                replacement,
+                &authority,
+            )
+            .err()
+            .expect("substituted gate binding must fail");
+
+            assert_eq!(
+                error.code(),
+                "continuation_collection.replacement_executor.lifecycle_binding.mismatch"
             );
+            assert_eq!(authority.calls.get(), 0);
         }
+    }
+
+    #[test]
+    fn cross_gate_binding_rejects_run_context_dispatch_and_revision_failures() {
+        let run = WorkflowRunId::new("run/cross-gate").expect("run");
+        let context = hash("context/cross-gate");
+        let revision = hash("revision/cross-gate");
+        let observation = |report_run: WorkflowRunId,
+                           report_context: SpecContentHash,
+                           dispatches: Vec<SpecContentHash>|
+         -> Result<
+            cross_gate_lifecycle::CrossGateLifecycleObservation,
+            WorkflowOsError,
+        > {
+            Ok(cross_gate_lifecycle::CrossGateLifecycleObservation::new(
+                revision.clone(),
+                cross_gate_lifecycle::AcceptedDispatchObservation::new(
+                    run.clone(),
+                    context.clone(),
+                    dispatches,
+                )?,
+                cross_gate_lifecycle::VerifiedReportObservation::new(
+                    report_run,
+                    report_context,
+                    hash("report/cross-gate"),
+                ),
+                cross_gate_lifecycle::CurrentResourceAuthorityObservation::new(
+                    run.clone(),
+                    context.clone(),
+                    hash("resource/cross-gate"),
+                ),
+            ))
+        };
+
+        let missing_dispatch = cross_gate_lifecycle::AcceptedDispatchObservation::new(
+            run.clone(),
+            context.clone(),
+            Vec::new(),
+        )
+        .err()
+        .expect("missing dispatch must fail");
+        assert_eq!(
+            missing_dispatch.code(),
+            "continuation_collection.cross_gate_lifecycle.dispatch.missing"
+        );
+
+        for (source, expected_code) in [
+            (
+                CrossGateLifecycleFixtureSource {
+                    observation: observation(
+                        WorkflowRunId::new("run/substituted").expect("substituted run"),
+                        context.clone(),
+                        vec![hash("dispatch/cross-gate")],
+                    )
+                    .expect("observation"),
+                    current_revision: revision.clone(),
+                },
+                "continuation_collection.cross_gate_lifecycle.run.mismatch",
+            ),
+            (
+                CrossGateLifecycleFixtureSource {
+                    observation: observation(
+                        run.clone(),
+                        hash("context/substituted"),
+                        vec![hash("dispatch/cross-gate")],
+                    )
+                    .expect("observation"),
+                    current_revision: revision.clone(),
+                },
+                "continuation_collection.cross_gate_lifecycle.immutable_context.mismatch",
+            ),
+            (
+                CrossGateLifecycleFixtureSource {
+                    observation: observation(
+                        run.clone(),
+                        context.clone(),
+                        vec![hash("dispatch/cross-gate")],
+                    )
+                    .expect("observation"),
+                    current_revision: hash("revision/drifted"),
+                },
+                "continuation_collection.cross_gate_lifecycle.source.drifted",
+            ),
+        ] {
+            let error = cross_gate_lifecycle::CrossGateLifecycleBinding::compose(&source)
+                .err()
+                .expect("invalid cross-gate observation must fail");
+            assert_eq!(error.code(), expected_code);
+        }
+    }
+
+    #[test]
+    fn cross_gate_binding_is_order_stable_and_rejects_duplicate_dispatch() {
+        let run = WorkflowRunId::new("run/cross-gate").expect("run");
+        let context = hash("context/cross-gate");
+        let revision = hash("revision/cross-gate");
+        let compose = |dispatches| {
+            let source = CrossGateLifecycleFixtureSource {
+                observation: cross_gate_lifecycle::CrossGateLifecycleObservation::new(
+                    revision.clone(),
+                    cross_gate_lifecycle::AcceptedDispatchObservation::new(
+                        run.clone(),
+                        context.clone(),
+                        dispatches,
+                    )
+                    .expect("dispatch observation"),
+                    cross_gate_lifecycle::VerifiedReportObservation::new(
+                        run.clone(),
+                        context.clone(),
+                        hash("report/cross-gate"),
+                    ),
+                    cross_gate_lifecycle::CurrentResourceAuthorityObservation::new(
+                        run.clone(),
+                        context.clone(),
+                        hash("resource/cross-gate"),
+                    ),
+                ),
+                current_revision: revision.clone(),
+            };
+            cross_gate_lifecycle::CrossGateLifecycleBinding::compose(&source)
+                .expect("cross-gate binding")
+        };
+        let left = compose(vec![hash("dispatch/b"), hash("dispatch/a")]);
+        let right = compose(vec![hash("dispatch/a"), hash("dispatch/b")]);
+        assert!(left == right);
+
+        let duplicate = cross_gate_lifecycle::AcceptedDispatchObservation::new(
+            run,
+            context,
+            vec![hash("dispatch/a"), hash("dispatch/a")],
+        )
+        .err()
+        .expect("duplicate dispatch must fail");
+        assert_eq!(
+            duplicate.code(),
+            "continuation_collection.cross_gate_lifecycle.dispatch.duplicate"
+        );
+    }
+
+    #[test]
+    fn cross_gate_pause_stop_and_completed_work_never_resolve_authority() {
+        let lifecycle = cross_gate_binding(
+            "run/cross-gate",
+            "context/cross-gate",
+            "dispatch/cross-gate",
+            "report/cross-gate",
+            "resource/cross-gate",
+            "revision/cross-gate",
+        );
+        for control in [AcceptedIntentKind::Pause, AcceptedIntentKind::Stop] {
+            let request = replacement_request();
+            let original = replacement_registry(&request, control, false)
+                .compose(request.clone(), &request.anchor)
+                .expect("original aggregate");
+            let replacement = replacement_registry(&request, control, false)
+                .compose(request.clone(), &request.anchor)
+                .expect("replacement aggregate");
+            let authority = ReplacementAuthorityResolver {
+                calls: Cell::new(0),
+            };
+            let (_, _, proof) =
+                replacement_executor::prove_cross_gate_replacement_executor_equivalence(
+                    &original,
+                    &replacement,
+                    &IntegratedRecipient {
+                        actor: ActorId::new(
+                            format!("agent/original-cross-{control:?}").to_lowercase(),
+                        )
+                        .expect("original recipient"),
+                        posture: IntegratedReceiptPosture::Exact,
+                    },
+                    &IntegratedRecipient {
+                        actor: ActorId::new(
+                            format!("agent/replacement-cross-{control:?}").to_lowercase(),
+                        )
+                        .expect("replacement recipient"),
+                        posture: IntegratedReceiptPosture::Exact,
+                    },
+                    &lifecycle,
+                    &lifecycle,
+                    &authority,
+                )
+                .expect("cross-gate control proof");
+            assert!(matches!(
+                proof.authority_posture(),
+                replacement_executor::ReplacementFreshAuthorityPosture::NotRequestedPaused
+                    | replacement_executor::ReplacementFreshAuthorityPosture::NotRequestedStopped
+            ));
+            assert_eq!(authority.calls.get(), 0);
+        }
+
+        let request = replacement_request();
+        let original = replacement_registry(&request, AcceptedIntentKind::Resume, true)
+            .compose(request.clone(), &request.anchor)
+            .expect("original aggregate");
+        let replacement = replacement_registry(&request, AcceptedIntentKind::Resume, true)
+            .compose(request.clone(), &request.anchor)
+            .expect("replacement aggregate");
+        let authority = ReplacementAuthorityResolver {
+            calls: Cell::new(0),
+        };
+        let error = replacement_executor::prove_cross_gate_replacement_executor_equivalence(
+            &original,
+            &replacement,
+            &IntegratedRecipient {
+                actor: ActorId::new("agent/original-cross-repeat").expect("original recipient"),
+                posture: IntegratedReceiptPosture::Exact,
+            },
+            &IntegratedRecipient {
+                actor: ActorId::new("agent/replacement-cross-repeat")
+                    .expect("replacement recipient"),
+                posture: IntegratedReceiptPosture::Exact,
+            },
+            &lifecycle,
+            &lifecycle,
+            &authority,
+        )
+        .err()
+        .expect("completed work cannot be resumed");
+        assert_eq!(
+            error.code(),
+            "continuation_collection.replacement_executor.next_action.repeats_completed"
+        );
+        assert_eq!(authority.calls.get(), 0);
     }
 
     #[test]

@@ -8,9 +8,9 @@
 use serde::Serialize;
 
 use super::{
-    collection_commitment, collection_error, delivery, ContinuationAggregateComposition,
-    ContinuationCollectedWorkDisposition, ContinuationCollectedWorkIdentity,
-    ContinuationControlDisposition,
+    collection_commitment, collection_error, cross_gate_lifecycle, delivery,
+    ContinuationAggregateComposition, ContinuationCollectedWorkDisposition,
+    ContinuationCollectedWorkIdentity, ContinuationControlDisposition,
 };
 use crate::continuation_context::{
     ContinuationContextDecisionPosture, ContinuationContextGap, ContinuationUnderstandingClaim,
@@ -85,6 +85,7 @@ pub(super) struct ReplacementFreshAuthorityRequest {
     decision_commitment: SpecContentHash,
     actor: ActorId,
     operation_identity: SpecContentHash,
+    cross_gate_lifecycle_commitment: Option<SpecContentHash>,
     commitment: SpecContentHash,
     non_authorizing: bool,
 }
@@ -94,6 +95,7 @@ impl ReplacementFreshAuthorityRequest {
         aggregate: &ContinuationAggregateComposition,
         actor: ActorId,
         operation_identity: SpecContentHash,
+        cross_gate_lifecycle: Option<&cross_gate_lifecycle::CrossGateLifecycleBinding>,
     ) -> Result<Self, WorkflowOsError> {
         let scope_commitment =
             collection_commitment("replacement-authority-scope", &aggregate.scope)?;
@@ -107,6 +109,8 @@ impl ReplacementFreshAuthorityRequest {
                 &decision_commitment,
                 &actor,
                 &operation_identity,
+                cross_gate_lifecycle
+                    .map(cross_gate_lifecycle::CrossGateLifecycleBinding::commitment),
                 true,
             ),
         )?;
@@ -116,6 +120,8 @@ impl ReplacementFreshAuthorityRequest {
             decision_commitment,
             actor,
             operation_identity,
+            cross_gate_lifecycle_commitment: cross_gate_lifecycle
+                .map(|binding| binding.commitment().clone()),
             commitment,
             non_authorizing: true,
         })
@@ -127,6 +133,10 @@ impl ReplacementFreshAuthorityRequest {
 
     pub(super) const fn operation_identity(&self) -> &SpecContentHash {
         &self.operation_identity
+    }
+
+    pub(super) const fn cross_gate_lifecycle_commitment(&self) -> Option<&SpecContentHash> {
+        self.cross_gate_lifecycle_commitment.as_ref()
     }
 }
 
@@ -225,8 +235,103 @@ where
             "replacement executor did not receive the same bounded understanding",
         ));
     }
+    complete_replacement_proof(
+        original_aggregate,
+        replacement_aggregate,
+        original,
+        replacement,
+        None,
+        authority,
+    )
+}
+
+pub(super) fn prove_cross_gate_replacement_executor_equivalence<O, N, A>(
+    original_aggregate: &ContinuationAggregateComposition,
+    replacement_aggregate: &ContinuationAggregateComposition,
+    original_recipient: &O,
+    replacement_recipient: &N,
+    original_lifecycle: &cross_gate_lifecycle::CrossGateLifecycleBinding,
+    replacement_lifecycle: &cross_gate_lifecycle::CrossGateLifecycleBinding,
+    authority: &A,
+) -> Result<
+    (
+        ReplacementExecutorOrientation,
+        ReplacementExecutorOrientation,
+        ReplacementExecutorProof,
+    ),
+    WorkflowOsError,
+>
+where
+    O: delivery::ContinuationProjectionRecipient,
+    N: delivery::ContinuationProjectionRecipient,
+    A: ReplacementExecutorFreshAuthorityResolver,
+{
+    if original_lifecycle != replacement_lifecycle
+        || !original_lifecycle.is_non_authorizing()
+        || !replacement_lifecycle.is_non_authorizing()
+    {
+        return Err(proof_error(
+            "lifecycle_binding.mismatch",
+            "replacement authority requires one exact non-authorizing cross-gate lifecycle binding",
+        ));
+    }
+    if original_aggregate.scope != replacement_aggregate.scope
+        || original_aggregate.proof.commitment != replacement_aggregate.proof.commitment
+    {
+        return Err(proof_error(
+            "aggregate.mismatch",
+            "original and replacement orientations must derive from the same exact aggregate",
+        ));
+    }
+    let original = ReplacementExecutorOrientation::receive(original_aggregate, original_recipient)?;
+    let replacement =
+        ReplacementExecutorOrientation::receive(replacement_aggregate, replacement_recipient)?;
+    if original.recipient == replacement.recipient {
+        return Err(proof_error(
+            "recipient.not_distinct",
+            "replacement proof requires distinct original and replacement recipients",
+        ));
+    }
+    if original.projection_commitment != replacement.projection_commitment
+        || original.claims != replacement.claims
+        || original.gaps != replacement.gaps
+        || original.posture != replacement.posture
+        || original.control_disposition != replacement.control_disposition
+        || original.work_identities != replacement.work_identities
+    {
+        return Err(proof_error(
+            "understanding.mismatch",
+            "replacement executor did not receive the same bounded understanding",
+        ));
+    }
+    complete_replacement_proof(
+        original_aggregate,
+        replacement_aggregate,
+        original,
+        replacement,
+        Some(replacement_lifecycle),
+        authority,
+    )
+}
+
+fn complete_replacement_proof<A: ReplacementExecutorFreshAuthorityResolver>(
+    original_aggregate: &ContinuationAggregateComposition,
+    replacement_aggregate: &ContinuationAggregateComposition,
+    original: ReplacementExecutorOrientation,
+    replacement: ReplacementExecutorOrientation,
+    cross_gate_lifecycle: Option<&cross_gate_lifecycle::CrossGateLifecycleBinding>,
+    authority: &A,
+) -> Result<
+    (
+        ReplacementExecutorOrientation,
+        ReplacementExecutorOrientation,
+        ReplacementExecutorProof,
+    ),
+    WorkflowOsError,
+> {
+    debug_assert_eq!(original_aggregate.scope, replacement_aggregate.scope);
     let (authority_request, authority_posture) =
-        authority_request_for(replacement_aggregate, &replacement)?;
+        authority_request_for(replacement_aggregate, &replacement, cross_gate_lifecycle)?;
     let commitment = collection_commitment(
         "replacement-executor-proof",
         &(
@@ -270,6 +375,7 @@ where
 fn authority_request_for(
     aggregate: &ContinuationAggregateComposition,
     orientation: &ReplacementExecutorOrientation,
+    cross_gate_lifecycle: Option<&cross_gate_lifecycle::CrossGateLifecycleBinding>,
 ) -> Result<
     (
         Option<ReplacementFreshAuthorityRequest>,
@@ -322,10 +428,17 @@ fn authority_request_for(
                     "lawful next action identity is already recorded as completed",
                 ));
             }
+            let cross_gate_lifecycle = cross_gate_lifecycle.ok_or_else(|| {
+                proof_error(
+                    "lifecycle_binding.missing",
+                    "fresh replacement authority requires the current cross-gate lifecycle binding",
+                )
+            })?;
             let request = ReplacementFreshAuthorityRequest::new(
                 aggregate,
                 orientation.recipient.clone(),
                 operation.identity.clone(),
+                Some(cross_gate_lifecycle),
             )?;
             Ok((
                 Some(request),

@@ -189,17 +189,20 @@ current project drift. Exact merged `main` rejected the same drift before
 `ApprovalGranted`, provider admission, audit, or telemetry, while canonical
 resource reordering still completed. See the [independent rerun
 report](docs/concepts/PROJECT_RESOURCE_AUTHORIZATION_CONTINUITY_INDEPENDENT_RERUN.md).
-The cross-gate continuity review is complete and found a P0 integration
-blocker. All three gates remain closed for their individual documented
-boundaries, but the private replacement-executor proof does not yet bind hosted
-dispatch disposition, exact WorkReport artifact identity/location, and current
-project-resource authority into one fresh-authority lifecycle subject. The next
-authorized phase is the narrow Core-owned cross-gate lifecycle-binding model
-and integrated regression matrix described in the [cross-gate
-review](docs/concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_REVIEW.md). Product-
+The cross-gate continuity review found a P0 integration blocker while
+preserving all three individual gate closures. The narrow private Core
+correction is now implemented: one revision-fenced lifecycle subject binds
+accepted dispatch commitments, exact WorkReport artifact identity/location,
+and current project-resource authority to the same run and immutable execution
+context; replacement resume authority now fails closed when that binding is
+missing. See the [cross-gate
+review](docs/concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_REVIEW.md) and
+[implementation
+report](docs/concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_BINDING_REPORT.md).
+Focused maintainer/security review is the next authorized phase. Product-
 contract, hosted, integration, release-admission, provider-mutation, and
-comparative benchmark work remain blocked until that correction passes focused
-review.
+comparative benchmark work remain blocked until that review accepts the
+boundary.
 
 A new P0 **evidence provenance and report integrity** preemption is active
 before publication, public-positioning expansion, or broader evidence-consuming
