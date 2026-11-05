@@ -275,6 +275,28 @@ events or report citations, evaluate an assurance minimum as a gate, or upgrade
 the existing accepted-attestation boundary. See the [runtime composition
 report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_RUNTIME_COMPOSITION_REPORT.md)
 and [accepted review](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_RUNTIME_COMPOSITION_REVIEW.md).
+The weak projection is now persisted create-only beside the exact immutable
+run and local-check result, reused without upgrade on accepted reassessment and
+replay, exposed through bounded human and JSON inspection, and carried by the
+exact local-check result reference used for WorkReport citation metadata.
+Corrupt, misaddressed, or subject/posture-conflicting projections fail closed;
+semantic reassessment drift remains governed by the existing aggregate binding
+before assurance persistence is reconciled. This slice does not add a policy
+minimum, authenticate the selected producer, strengthen attestation, add
+arbitrary commands, or claim storage-owner tamper resistance. See the [durable
+projection report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_DURABLE_PROJECTION_REPORT.md).
+Focused maintainer/security review is accepted after narrowing the create-only
+sidecar writer to crate-only visibility so downstream callers cannot populate
+the Core-owned persistence namespace through the public store API. Public
+validated read/list inspection remains available, while serialized projection
+vocabulary remains non-authorizing. See the [accepted
+review](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_DURABLE_PROJECTION_REVIEW.md).
+The next authorized validator-assurance phase is a narrow minimum-assurance
+enforcement gate over this Core-owned durable projection. It must reject an
+unattested result when a reviewed declaration requires registered-producer or
+attested-execution posture, preserve existing behavior when no minimum is
+declared, and must not introduce a broad policy DSL, new producer registry,
+provider mutation, or executable-discovery surface.
 
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and

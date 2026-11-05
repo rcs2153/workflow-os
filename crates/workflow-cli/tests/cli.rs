@@ -1690,6 +1690,24 @@ fn first_run_explicit_artifact_path_quietly_persists_and_replays_exactly() {
             _ => None,
         })
         .expect("local check reference is cited");
+    let local_check_citation = artifact
+        .work_report()
+        .sections()
+        .iter()
+        .flat_map(workflow_core::WorkReportSection::citations)
+        .find(|citation| {
+            matches!(
+                citation.target(),
+                WorkReportCitationTarget::LocalCheckResult { .. }
+            )
+        })
+        .expect("local check citation");
+    assert!(local_check_citation.summary().is_some_and(|summary| {
+        summary.contains("producer=operator_selected_content_bound")
+            && summary.contains("execution=trusted_host_observed")
+            && summary.contains("attestation=unattested")
+            && summary.contains("external_verifiability=unavailable")
+    }));
 
     let inspect = workflow_os(&project, &["inspect", run_id]);
     assert!(inspect.status.success(), "{}", stderr(&inspect));
@@ -1709,6 +1727,9 @@ fn first_run_explicit_artifact_path_quietly_persists_and_replays_exactly() {
         "{}",
         stdout(&inspect)
     );
+    assert!(stdout(&inspect).contains("local_check_evidence_assurance: 1"));
+    assert!(stdout(&inspect).contains("producer=operator_selected_content_bound"));
+    assert!(stdout(&inspect).contains("attestation=unattested"));
     let inspect_json_output = workflow_os(&project, &["--json", "inspect", run_id]);
     assert!(
         inspect_json_output.status.success(),
@@ -1729,6 +1750,12 @@ fn first_run_explicit_artifact_path_quietly_persists_and_replays_exactly() {
         projected_artifact["local_check_references"][0],
         local_check_reference
     );
+    let assurance = &inspect_json["local_check_evidence_assurance"][0];
+    assert_eq!(assurance["producer"], "operator_selected_content_bound");
+    assert_eq!(assurance["execution"], "trusted_host_observed");
+    assert_eq!(assurance["attestation"], "unattested");
+    assert_eq!(assurance["external_verifiability"], "unavailable");
+    assert!(assurance["projection_fingerprint"].as_str().is_some());
 
     let retry = workflow_os(
         &project,
@@ -1797,6 +1824,51 @@ fn first_run_explicit_artifact_path_quietly_persists_and_replays_exactly() {
     assert!(!drifted_recovery.status.success());
     assert!(stderr(&drifted_recovery)
         .contains("cli.first_run.artifact.terminal_artifact_recovery_drift"));
+}
+
+#[test]
+fn inspect_rejects_tampered_local_check_assurance_before_projection() {
+    let project = TestProject::new("first-run-assurance-tamper");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let run_id = "run-first-run-assurance-tamper";
+    let first = workflow_os(
+        &project,
+        &["first-run", "--write-report-artifact", "--run-id", run_id],
+    );
+    assert!(first.status.success(), "{}", stderr(&first));
+
+    let assurance_root = project
+        .state_root()
+        .join("immutable-run-bundles")
+        .join("local-check-evidence-assurance-projections");
+    let run_directory = fs::read_dir(&assurance_root)
+        .expect("assurance root")
+        .next()
+        .expect("assurance run directory")
+        .expect("assurance run directory entry")
+        .path();
+    let projection_path = fs::read_dir(run_directory)
+        .expect("assurance run directory")
+        .next()
+        .expect("assurance projection")
+        .expect("assurance projection entry")
+        .path();
+    let original = fs::read_to_string(&projection_path).expect("assurance projection reads");
+    let tampered = original.replace("\"unattested\"", "\"kernel_accepted_local_process\"");
+    assert_ne!(tampered, original);
+    fs::write(&projection_path, tampered).expect("tampered projection writes");
+
+    for args in [vec!["inspect", run_id], vec!["--json", "inspect", run_id]] {
+        let inspect = workflow_os(&project, &args);
+        assert!(!inspect.status.success());
+        assert!(
+            stderr(&inspect).contains("immutable_run_bundle_store.invalid_record"),
+            "{}",
+            stderr(&inspect)
+        );
+        assert!(!stdout(&inspect).contains("local_check_evidence_assurance"));
+    }
 }
 
 #[test]

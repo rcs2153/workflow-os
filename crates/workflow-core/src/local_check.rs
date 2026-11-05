@@ -2946,6 +2946,8 @@ pub struct LocalCheckResultReference {
     workflow_event_id: Option<EventId>,
     audit_event_id: Option<EventId>,
     output_reference: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    assurance_projection: Option<crate::LocalCheckEvidenceAssuranceProjection>,
     redaction: RedactionMetadata,
     sensitivity: WorkReportSensitivity,
 }
@@ -2970,6 +2972,8 @@ pub struct LocalCheckResultReferenceDefinition {
     pub audit_event_id: Option<EventId>,
     /// Optional stable output reference.
     pub output_reference: Option<String>,
+    /// Optional durable payload-free assurance projection for this exact result.
+    pub assurance_projection: Option<crate::LocalCheckEvidenceAssuranceProjection>,
     /// Redaction metadata for reference fields.
     pub redaction: RedactionMetadata,
     /// Sensitivity classification.
@@ -2994,6 +2998,7 @@ impl LocalCheckResultReference {
             workflow_event_id: definition.workflow_event_id,
             audit_event_id: definition.audit_event_id,
             output_reference: definition.output_reference,
+            assurance_projection: definition.assurance_projection,
             redaction: definition.redaction,
             sensitivity: definition.sensitivity,
         };
@@ -3029,6 +3034,43 @@ impl LocalCheckResultReference {
             workflow_event_id,
             audit_event_id,
             output_reference,
+            assurance_projection: None,
+            redaction,
+            sensitivity,
+        })
+    }
+
+    /// Creates a local-check result reference carrying the exact durable
+    /// payload-free assurance projection for the result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the result, workflow, run, or assurance identities
+    /// do not match exactly.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_result_with_assurance(
+        result_id: LocalCheckResultId,
+        result: &LocalCheckResult,
+        workflow_id: WorkflowId,
+        run_id: WorkflowRunId,
+        workflow_event_id: Option<EventId>,
+        audit_event_id: Option<EventId>,
+        output_reference: Option<String>,
+        assurance_projection: crate::LocalCheckEvidenceAssuranceProjection,
+        redaction: RedactionMetadata,
+        sensitivity: WorkReportSensitivity,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::new(LocalCheckResultReferenceDefinition {
+            result_id,
+            command_id: result.command_id().clone(),
+            command_kind: result.command_kind(),
+            status: result.status(),
+            workflow_id,
+            run_id,
+            workflow_event_id,
+            audit_event_id,
+            output_reference,
+            assurance_projection: Some(assurance_projection),
             redaction,
             sensitivity,
         })
@@ -3043,7 +3085,24 @@ impl LocalCheckResultReference {
         validate_local_check_result_reference_metadata(
             self.output_reference.as_deref(),
             &self.redaction,
-        )
+        )?;
+        if let Some(assurance) = &self.assurance_projection {
+            assurance.validate()?;
+            if assurance.result_id() != &self.result_id
+                || assurance.command_id() != &self.command_id
+                || assurance.command_kind() != self.command_kind
+                || assurance.result_status() != self.status
+                || assurance.workflow_id() != &self.workflow_id
+                || assurance.run_id() != &self.run_id
+            {
+                return Err(local_check_error(
+                    WorkflowOsErrorKind::Validation,
+                    "local_check.result_reference.assurance_mismatch",
+                    "local check result reference assurance does not match the result",
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Returns the local check result reference ID.
@@ -3100,6 +3159,14 @@ impl LocalCheckResultReference {
         self.output_reference.as_deref()
     }
 
+    /// Returns the durable payload-free assurance projection when available.
+    #[must_use]
+    pub const fn assurance_projection(
+        &self,
+    ) -> Option<&crate::LocalCheckEvidenceAssuranceProjection> {
+        self.assurance_projection.as_ref()
+    }
+
     /// Returns the sensitivity classification.
     #[must_use]
     pub const fn sensitivity(&self) -> WorkReportSensitivity {
@@ -3129,6 +3196,10 @@ impl fmt::Debug for LocalCheckResultReference {
                 "output_reference",
                 &self.output_reference.as_ref().map(|_| "[REDACTED]"),
             )
+            .field(
+                "assurance_projection",
+                &self.assurance_projection.as_ref().map(|_| "[REDACTED]"),
+            )
             .field("redaction", &"[REDACTED]")
             .field("sensitivity", &self.sensitivity)
             .finish()
@@ -3151,6 +3222,8 @@ impl<'de> Deserialize<'de> for LocalCheckResultReference {
             workflow_event_id: Option<EventId>,
             audit_event_id: Option<EventId>,
             output_reference: Option<String>,
+            #[serde(default)]
+            assurance_projection: Option<crate::LocalCheckEvidenceAssuranceProjection>,
             redaction: RedactionMetadata,
             sensitivity: WorkReportSensitivity,
         }
@@ -3166,6 +3239,7 @@ impl<'de> Deserialize<'de> for LocalCheckResultReference {
             workflow_event_id: wire.workflow_event_id,
             audit_event_id: wire.audit_event_id,
             output_reference: wire.output_reference,
+            assurance_projection: wire.assurance_projection,
             redaction: wire.redaction,
             sensitivity: wire.sensitivity,
         })

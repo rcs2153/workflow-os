@@ -108,6 +108,7 @@ fn valid_result_reference_definition() -> LocalCheckResultReferenceDefinition {
         workflow_event_id: Some(EventId::new("event/local-check").expect("event id")),
         audit_event_id: Some(EventId::new("audit/local-check").expect("audit id")),
         output_reference: Some("local-check-result/docs/passed".to_owned()),
+        assurance_projection: None,
         redaction: redaction_metadata(),
         sensitivity: WorkReportSensitivity::Confidential,
     }
