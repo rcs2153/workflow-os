@@ -2,7 +2,8 @@
 
 ## Verdict
 
-Accepted for exact-head CI and independent parent-versus-fix evaluation.
+Accepted. Exact-head CI and independent parent-versus-fix evaluation later
+passed, closing Gate 3 for the documented GitHub repository-metadata boundary.
 
 The Gate 3 candidate binds the exact current GitHub repository-metadata project
 restriction into the existing approval resolved-context commitment and checks
@@ -10,9 +11,8 @@ that commitment before approval acceptance and immediately before provider
 admission. The review found no authorization bypass, access-before-check path,
 or payload disclosure blocker.
 
-This verdict does not close Gate 3. Exact-head CI and an independent rerun that
-reproduces the old drift behavior on the parent and rejection on the fix remain
-required.
+The post-review evidence is recorded in [Project Resource Authorization
+Continuity Independent Rerun](PROJECT_RESOURCE_AUTHORIZATION_CONTINUITY_INDEPENDENT_RERUN.md).
 
 ## Security Review
 
@@ -96,13 +96,10 @@ review were performed outside the kernel by the delegated maintainer. The
 kernel coordinated approval and phase state; it did not execute or fabricate
 the review evidence.
 
-## Remaining Gate 3 Evidence
+## Post-Review Admission
 
-Before Gate 3 closes:
-
-1. merge only the reviewed exact head after required GitHub checks pass;
-2. run the independent drift scenario against the parent commit and preserve
-   the old incorrect behavior as negative evidence;
-3. run the same scenario against the fix and preserve fail-closed behavior; and
-4. reconcile the roadmap and product contract only after those results are
-   durable and reviewable.
+PR #744 merged the unchanged reviewed head after all nine exact-head checks
+passed. The independent disposable-checkout rerun reproduced the parent defect,
+proved fail-closed behavior on exact merged `main`, and proved that canonical
+resource reordering remains accepted. Gate 3 is closed for this bounded path;
+the review does not claim broader provider-family or live-credential coverage.

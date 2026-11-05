@@ -329,7 +329,8 @@ Gate 3 acceptance:
 - an independent drift rerun reproduces the old failure on the parent commit and
   passes on the fix.
 
-Implementation status: **candidate complete; focused review passed.** The
+Implementation status: **closed for the documented GitHub repository-metadata
+boundary.** The
 existing approval `resolved_execution_context_hash` now commits a versioned
 canonical GitHub repository-metadata restriction containing the project ID,
 exact run and deterministic approval ID, provider family, operation and
@@ -354,8 +355,21 @@ repository-metadata provider-read family; Jira and GitHub Actions adapter models
 are not equivalent project-declared governed read families and are not claimed
 as covered by this gate.
 
-This candidate does not close Gate 3 until exact-head CI and the independent
-parent-versus-fix drift rerun pass.
+PR #744 merged the unchanged reviewed head as exact `main` commit
+`442b4a4435d65d66b974c11d17047e15327af8f5` after all nine exact-head checks in
+Actions run `42045120157` passed. An independent disposable-checkout rerun
+reproduced the parent defect at `a84cbaaba663f09075a810fb71c7963562779663`:
+approval was granted and the original provider operation completed after the
+current repository restriction changed. The same scenario on exact merged
+`main` failed with `executor.approval.resume_context_mismatch` before
+`ApprovalGranted`, provider dispatch, audit, or telemetry. The normalized-order
+control approved and completed. Gate 3 acceptance is complete. See the
+[independent rerun
+report](../concepts/PROJECT_RESOURCE_AUTHORIZATION_CONTINUITY_INDEPENDENT_RERUN.md).
+
+This closure does not claim equivalent project-level enforcement for provider
+families that do not yet expose an authoritative manifest declaration, live
+credential-backed acceptance evidence, or provider-write authorization.
 
 ## 6. Governed Delivery Sequence
 
