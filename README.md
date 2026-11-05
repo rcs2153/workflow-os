@@ -241,6 +241,14 @@ Missing handlers, unsupported authority, and ambiguous actions fail closed. A
 model or schema in the repository is not a runtime capability until a tested
 execution path enforces it.
 
+Evidence assurance is path-specific. Content-bound dispatch proves which
+selected executable bytes and request were used; it does not authenticate an
+operator-selected executable as an official validator. Local WorkReport
+artifacts are currently structurally validated and identity-consistent, but
+local storage does not yet provide cryptographic tamper evidence against its
+owner. See the [Current Product Contract](docs/user-guide/current-product-contract.md)
+for the exact trust boundary.
+
 ## Use It With An Agent
 
 Give the coding agent one operating instruction:

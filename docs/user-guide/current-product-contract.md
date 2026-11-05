@@ -85,6 +85,13 @@ what may happen next from durable state.
 - Persist explicit local report artifacts through gated opt-in paths with
   referential-integrity checks.
 
+Current evidence assurance is path-specific. A closed local-check profile can
+bind the exact selected executable and invocation without proving that an
+operator-selected executable came from a trusted producer. Report artifacts
+are structurally validated and identity-consistent, but current storage does
+not yet anchor a commitment over the complete report body. A privileged local
+storage owner remains inside the trust boundary.
+
 ### State and hosting
 
 - Local filesystem state for ordinary local evaluation.
@@ -159,6 +166,10 @@ Workflow OS does not currently provide:
 - automatic Reasoning Lineage / Claim Graph capture;
 - a guarantee that caller-supplied evidence, checks, or authority claims are
   independently verified;
+- a guarantee that an operator-selected executable is an official or attested
+  validator merely because its bytes and invocation were content-bound;
+- cryptographic tamper evidence for local event or WorkReport storage, or proof
+  against an owner who can rewrite both records and local integrity anchors;
 - a production scheduler that continuously redispatches agents from continuity
   directives.
 
@@ -202,6 +213,10 @@ Trust Workflow OS only for the behavior enforced by the exact path you are
 using. The kernel's value is not that it claims total control over an agent. Its
 value is that material governance facts become typed, durable, fail-closed, and
 inspectable.
+
+`Durable` means the selected backend can preserve and replay validated records;
+it does not by itself mean independently attested or tamper-proof. Inspection
+must be interpreted with the producer and storage assurance of the active path.
 
 For the engineering explanation, continue to
 [Workflow OS Explainer](../concepts/WORKFLOW_OS_EXPLAINER.md).

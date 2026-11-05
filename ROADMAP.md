@@ -86,6 +86,48 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
+A new P0 **evidence provenance and report integrity** preemption is active
+before publication, public-positioning expansion, or broader evidence-consuming
+runtime work. Fresh testing proved two distinct trust boundaries that current
+product language can blur: the trusted host content-binds and dispatches an
+operator-selected validator but does not authenticate its producer, and a
+structurally valid storage-owner edit to a persisted `WorkReport` body is
+accepted because no complete body commitment is anchored outside the report
+payload. The [P0 assessment](docs/concepts/EVIDENCE_PROVENANCE_AND_REPORT_INTEGRITY_P0_ASSESSMENT.md)
+records the code evidence and claim correction. The [P0 plan](docs/implementation-plans/evidence-provenance-and-report-integrity-p0-plan.md)
+requires an explicit assurance taxonomy, honest projection of the current
+operator-selected/content-bound/unattested validator posture, a versioned
+complete WorkReport body commitment, an expected commitment anchored outside
+the mutable report body, enforcement across read/list/inspect/recovery/replay,
+explicit legacy posture, and bounded inspection output. Local durability must
+not be described as independent evidence or storage-owner tamper resistance.
+The model/projection review over existing execution-binding and
+check-attestation vocabulary is complete. It accepts the existing immutable
+execution binding, explicitly unverified candidate, and crate-private accepted
+attestation as the source foundations, and identifies the missing boundary as a
+payload-free result-level assurance projection rather than a second evidence
+system. See the [focused review](docs/concepts/EVIDENCE_PROVENANCE_MODEL_PROJECTION_REVIEW.md).
+The next implementation phase is the model-only local-check evidence assurance
+projection: separate closed producer, execution, and attestation posture bound
+to existing execution, handler, result, and immutable-run commitments. It must
+not add runtime integration, persistence, events, CLI, schemas, SDKs, arbitrary
+commands, signing, an external witness, hosted identity, provider expansion, or
+publication. Independent security review is required before release admission
+resumes.
+
+The separate deterministic hosted P0 is now implemented. The advertised
+`workflow-os-hosted --worker-once` entry point previously called the
+synchronous PostgreSQL client directly from the Tokio runtime thread and
+panicked on both empty and populated queues, while continuous `--worker`
+correctly used `spawn_blocking`. Both modes now share one blocking boundary and
+one stable join-failure mapping. The hosted-alpha recovery rehearsal uses one
+real one-shot process to prove exact idle and completed outcomes, terminal
+events, and report persistence, then uses a distinct run to preserve the
+continuous-worker restart and database-recovery proof. Exact-head hosted-alpha
+CI remains the acceptance boundary because Docker is not installed in the
+desktop development environment. See the [implementation
+report](docs/concepts/HOSTED_WORKER_ONCE_NESTED_RUNTIME_BLOCKER_FIX_REPORT.md).
+
 A P0 governed-phase kernel-freshness blocker is accepted and merged. Every live
 material `phase-start` now rebuilds the Workflow OS CLI
 from the exact current checkout before validation, run creation, approval
@@ -826,6 +868,22 @@ The corrected validator is accepted with no remaining P0/P1 finding in that
 scope, while exact-head CI, candidate rebuild, independent assurance, and
 publication remain open. See the [focused blocker
 review](docs/concepts/0.4.0-preview.1_SCOPED_CANDIDATE_TRANSFER_BLOCKER_REVIEW.md).
+
+The corrected symmetric transfer is now complete from exact merge commit
+`21615863b17a49fa14ea0da8e2ad8e327ffa48b1`. Exact-source CI was terminal
+green before dispatch. The reviewed macOS and Linux candidate workflows were
+each dispatched once, completed successfully on attempt 1, and produced one
+immutable seven-day GitHub Actions artifact. Separate out-of-workflow download
+verification matched both GitHub artifact digests, embedded archive checksums,
+manifests, binary checksums, native binary shapes, version identity, and
+install-lifecycle contracts. The machine-readable release state now represents
+the symmetric hosted posture and keeps publication unauthorized. See the
+[scoped candidate transfer
+report](docs/concepts/0.4.0-preview.1_SCOPED_CANDIDATE_TRANSFER_REPORT.md).
+Independent release/security assurance remains open and must precede any
+separately governed publication decision. No tag, GitHub Release, registry
+publication, release asset upload, announcement, or v1 claim is authorized by
+this transfer.
 
 After Hacker News launch admission is accepted, evaluate one future **Governed
 Obligation Plan reconciliation** lane. The purpose is to test

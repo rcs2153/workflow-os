@@ -94,6 +94,32 @@ Controls:
 
 Limit: v0 local state does not provide cryptographic tamper evidence, encryption at rest, replication, or automated repair.
 
+This limit applies to `WorkReport` artifacts as well as events. Current report
+reads prove structural validity and identity consistency, not that report prose
+is unchanged from its original write. A privileged storage owner remains inside
+the local trust boundary. Report-body commitment and anchored read/replay
+enforcement are tracked as P0 work; external verifiability would require a
+separate signing or witness boundary.
+
+### Untrusted Evidence Producer
+
+Risk: an operator selects an executable that satisfies a closed command shape
+but does not implement the reviewed validator or check.
+
+Controls:
+
+- closed profiles fix arguments, working directory, environment, timeout, and
+  command contract;
+- the selected executable bytes are content-bound and replacement after
+  resolution fails closed;
+- dispatch and bounded process outcome are recorded.
+
+Limit: content binding proves which selected bytes were dispatched. It does not
+authenticate who produced those bytes or prove that an operator-selected
+executable implements the intended validation. Until producer assurance is
+explicitly verified, the result is operator-selected, content-bound, and
+unattested.
+
 ### Approval Bypass
 
 Risk: approval-gated steps execute before approval.
