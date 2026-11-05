@@ -2,9 +2,10 @@
 
 ## 1. Verdict
 
-**Accepted for pull-request validation after five in-scope blockers were fixed.**
+**Accepted for pull-request validation after eight in-scope blockers were fixed
+across the focused and post-merge independent reviews.**
 
-The implementation now closes the known source-level paths that could
+The implementation now closes the reviewed source-level paths that could
 acknowledge or replay hosted work without the same immutable dispatch context,
 proof-backed approval decision, semantic invocation, and project scope. No
 remaining maintainer-review blocker was found.
@@ -115,6 +116,60 @@ Exact retries now reconcile the original durable item, while changed catalog,
 policy, budget, scope, or request intent still fails closed through the semantic
 intent validators.
 
+### 3.6 Executor retry acknowledged a substituted durable invocation
+
+Post-merge independent review found that the executor shortcut for an existing
+work item validated the work-item intent and the existence of a self-consistent
+pending invocation, but did not compare that durable invocation with the exact
+deterministic invocation, step, skill, and skill version expected by the current
+plan. The PostgreSQL transaction replay path already performed the stronger
+comparison, so the executor could bypass that protection by returning before
+the transaction call.
+
+Fix:
+
+- derive the deterministic invocation identity before the existing-item
+  shortcut;
+- compare the complete durable semantic invocation tuple with the current
+  plan; and
+- reject substitution with the existing payload-free hosted replay-intent
+  diagnostic.
+
+### 3.7 Terminal approval replay bypassed dispatch-context validation
+
+Post-merge independent review also found that approval replay validated the
+durable approval decision and presentation proof, then returned a denied or
+terminal run before reconstructing the originally approved dispatch context.
+Changed catalog, policy, budget, or scope could therefore be accepted on an
+otherwise exact terminal replay.
+
+Fix:
+
+- reconstruct and validate the approval resume plan before every terminal or
+  denial replay return;
+- preserve terminal replay idempotency only when the dispatch context still
+  matches the approved commitment; and
+- add a terminal-denial regression that changes catalog identity and requires
+  `executor.approval.resume_context_mismatch`.
+
+### 3.8 First terminal-replay fix depended on the mutable checkout
+
+Independent re-review confirmed the two original bypasses were closed, then
+found that the first terminal-replay correction rebuilt the execution plan from
+the current project checkout. Exact terminal replay could therefore fail after
+the project was moved, deleted, or legitimately changed, even though all
+decision-relevant run inputs were already durable.
+
+Fix:
+
+- reconstruct the pre-dispatch context from the durable immutable bundle's
+  canonical workflow, skill, policy, checkpoint, and execution-posture records;
+- apply the supplied dispatch context to that durable base commitment;
+- compare the result with both the immutable manifest and the approval's
+  original resolved-context commitment; and
+- prove that exact denial replay still succeeds after removing the mutable
+  project checkout, while changed dispatch context remains rejected.
+
 ## 4. Adversarial Coverage
 
 The reviewed PostgreSQL suite now covers:
@@ -129,8 +184,12 @@ The reviewed PostgreSQL suite now covers:
 - changed invocation/skill projection;
 - proof-backed approval dispatch failure after one durable grant and resume;
 - exact approval replay repair without a second grant;
-- repeated approval replay without duplicate queue state; and
-- changed approval dispatch context rejection.
+- repeated approval replay without duplicate queue state;
+- changed approval dispatch context rejection;
+- deterministic-plan rejection of a substituted durable semantic invocation;
+  and
+- terminal approval denial replay rejection after dispatch-context drift; and
+- exact terminal denial replay after mutable project removal.
 
 The full project-scope transaction match is enforced in code. Exact-head
 PostgreSQL CI remains the authoritative execution of database-backed fault and
@@ -152,9 +211,9 @@ concurrency coverage because no local test database URL is configured.
 
 Passed during review:
 
-- focused Core hosted tests (`17 passed`);
+- focused Core hosted tests (`18 passed`);
 - hosted crate tests (`38 passed`);
-- complete Core all-features suite (`783` unit tests plus the full integration
+- complete Core all-features suite (`784` unit tests plus the full integration
   and documentation-test matrix; only explicitly opt-in live tests ignored);
 - warnings-denied Clippy for Core and hosted;
 - warnings-denied Rust documentation for Core and hosted;
@@ -166,10 +225,11 @@ required independent fault-injection rerun.
 
 ## 7. Recommendation
 
-Commit the reviewed Gate 1 patch, run the governed PR phase, and require the
-exact-head PostgreSQL and hosted checks before merge. Do not mark Accepted Means
-Dispatched fully closed until the independent rerun also passes. Do not begin
-Gate 2 on a failing or ambiguous Gate 1 head.
+Commit the independently reviewed Gate 1 blocker patch, run a fresh governed
+review and PR phase, and require exact-head PostgreSQL and hosted checks before
+merge. Do not mark Accepted Means Dispatched fully closed until an independent
+rerun of the final merged head also passes. Do not begin Gate 2 on a failing or
+ambiguous Gate 1 head.
 
 ## 8. Governed Review Record
 
@@ -188,6 +248,33 @@ Gate 2 on a failing or ambiguous Gate 1 head.
 - presentation proof: enforced as
   `presentation/5c63fafc6cc31f3b` with the approval event marker present
 - approved boundary: Gate 1 implementation and documentation review only
+- out-of-kernel execution: source inspection, edits, and validation were
+  performed by the trusted development host; Workflow OS governed the phase
+  but did not execute repository writes or shell commands
+
+## 9. Governed Independent-Review Blocker Record
+
+- workflow: `dg/blocker`
+- run: `run-1793873603202986000-2`
+- approval: `approval/run-1793873603202986000-2/fix-approved`
+- presentation: `presentation/b8047fe8bae61f6c`
+- approval outcome: granted by delegated maintainer with persisted presentation
+  proof
+- approved boundary: exact durable invocation-plan comparison and terminal
+  approval-replay context validation only
+- phase status: completed
+- event summary: `39` events, including `1` approval request, `1` approval
+  grant, `8` policy decisions, `6` scheduled steps, `6` requested skill
+  invocations, `6` started skill invocations, `6` successful skill
+  invocations, `1` run resume, and `1` run completion; `0` retries and `0`
+  escalations
+- presentation proof: enforced as `presentation/b8047fe8bae61f6c` with the
+  approval event marker present
+- validation summary: the complete Core all-features suite, focused hosted and
+  durable-state tests, warnings-denied Core/hosted Clippy and rustdoc,
+  formatting, documentation checks, PostgreSQL test-target compilation, and
+  diff hygiene passed; the live PostgreSQL body remained skipped locally
+  because no test database URL is configured
 - out-of-kernel execution: source inspection, edits, and validation were
   performed by the trusted development host; Workflow OS governed the phase
   but did not execute repository writes or shell commands
