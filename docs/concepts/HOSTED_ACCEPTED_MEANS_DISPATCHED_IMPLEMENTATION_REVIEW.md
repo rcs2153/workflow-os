@@ -2,7 +2,7 @@
 
 ## 1. Verdict
 
-**Accepted for pull-request validation after four in-scope blockers were fixed.**
+**Accepted for pull-request validation after five in-scope blockers were fixed.**
 
 The implementation now closes the known source-level paths that could
 acknowledge or replay hosted work without the same immutable dispatch context,
@@ -92,6 +92,26 @@ Fix:
   unscoped `None`/`None` posture.
 
 Adding, removing, or changing scope now fails closed.
+
+### 3.5 Hosted work-item identity changed across exact retries
+
+Exact-head PostgreSQL CI found that a successful repair could not acknowledge a
+following exact retry. Hosted work-item identity included the plan's freshly
+generated invocation ID, so rebuilding the same deterministic plan searched for
+a different work item and then failed when it encountered the already durable
+invocation.
+
+Fix:
+
+- derive hosted work-item identity from run, step, and the deterministic
+  invocation idempotency key;
+- retain the generated invocation ID only as the invocation-event identity; and
+- continue validating the complete work-item and dispatch intent when the
+  stable identity resolves an existing item.
+
+Exact retries now reconcile the original durable item, while changed catalog,
+policy, budget, scope, or request intent still fails closed through the semantic
+intent validators.
 
 ## 4. Adversarial Coverage
 

@@ -15396,7 +15396,11 @@ fn hosted_work_item_id(plan: &ExecutionPlan) -> Result<HostedWorkItemId, Workflo
     let mut hasher = Sha256::new();
     update_idempotency_hash(&mut hasher, "run", plan.event_builder.run_id.as_str());
     update_idempotency_hash(&mut hasher, "step", plan.step.id.as_str());
-    update_idempotency_hash(&mut hasher, "invocation", plan.invocation_id.as_str());
+    update_idempotency_hash(
+        &mut hasher,
+        "invocation-idempotency",
+        plan.idempotency_key.as_str(),
+    );
     HostedWorkItemId::new(format!("hosted-work-{}", hex_digest(hasher.finalize()))).map_err(|_| {
         executor_error(
             WorkflowOsErrorKind::Validation,
