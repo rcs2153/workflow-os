@@ -21,7 +21,10 @@ use super::{
 use crate::proportional_governance_immutable_bundle::preflight_immutable_bundle_governance;
 use crate::{
     assess_immutable_bundle_governance, assess_immutable_bundle_governance_from_current_facts,
-    compute_local_check_command_contract_fingerprint, local_check::AuthoritativeLocalCheckHandler,
+    compute_local_check_command_contract_fingerprint,
+    local_check::{
+        authoritative_local_check_resolved_execution_fingerprint, AuthoritativeLocalCheckHandler,
+    },
     GovernanceAssessmentBinding, GovernanceRuntimeFactAssessmentRequest,
     GovernanceRuntimeFactObservation, GovernanceRuntimeFactObservationDefinition,
     GovernanceRuntimeFactSnapshot, GovernanceRuntimeFactSnapshotId, GovernanceRuntimeFactSource,
@@ -32,6 +35,7 @@ use crate::{
     ImmutableLocalCheckExecutionBinding, ImmutableLocalCheckExecutionBindingDefinition,
     ImmutableLocalCheckHandlerSelection, ImmutableRunBundleDefinitionKind,
     ImmutableRunBundleDefinitionRecord, ImmutableRunBundleId, ImmutableRunBundleVersion,
+    LocalCheckEvidenceAssuranceProjection, LocalCheckEvidenceAssuranceProjectionDefinition,
     LocalCheckResult, LocalCheckResultId, SkillId, SkillInvocationId, SkillVersion,
     SpecContentHash, StepGovernanceRuntimeFacts, StepId, StoredImmutableRunBundle, Timestamp,
     WorkflowId, WorkflowOsError, WorkflowRunId,
@@ -81,6 +85,7 @@ impl fmt::Debug for DocsCheckAttestationExecutionInput<'_> {
 pub(crate) struct DocsCheckAttestationExecutionOutcome {
     result: LocalCheckResult,
     accepted_attestation: Option<AcceptedLocalCheckAttestation>,
+    assurance_projection: LocalCheckEvidenceAssuranceProjection,
 }
 
 impl DocsCheckAttestationExecutionOutcome {
@@ -90,6 +95,10 @@ impl DocsCheckAttestationExecutionOutcome {
 
     pub(crate) const fn accepted_attestation(&self) -> Option<&AcceptedLocalCheckAttestation> {
         self.accepted_attestation.as_ref()
+    }
+
+    pub(crate) const fn assurance_projection(&self) -> &LocalCheckEvidenceAssuranceProjection {
+        &self.assurance_projection
     }
 }
 
@@ -104,6 +113,7 @@ impl fmt::Debug for DocsCheckAttestationExecutionOutcome {
             )
             .field("result", &"[REDACTED]")
             .field("accepted_attestation", &"[REDACTED]")
+            .field("assurance_projection", &"[REDACTED]")
             .finish()
     }
 }
@@ -125,6 +135,7 @@ pub(crate) struct DocsCheckAttestationGateOutcome {
     result: LocalCheckResult,
     disposition: DocsCheckAttestationGateDisposition,
     proof_fingerprint: Option<SpecContentHash>,
+    assurance_projection: LocalCheckEvidenceAssuranceProjection,
 }
 
 impl DocsCheckAttestationGateOutcome {
@@ -139,6 +150,10 @@ impl DocsCheckAttestationGateOutcome {
     pub(crate) const fn proof_fingerprint(&self) -> Option<&SpecContentHash> {
         self.proof_fingerprint.as_ref()
     }
+
+    pub(crate) const fn assurance_projection(&self) -> &LocalCheckEvidenceAssuranceProjection {
+        &self.assurance_projection
+    }
 }
 
 impl fmt::Debug for DocsCheckAttestationGateOutcome {
@@ -150,6 +165,7 @@ impl fmt::Debug for DocsCheckAttestationGateOutcome {
             .field("proof_present", &self.proof_fingerprint.is_some())
             .field("result", &"[REDACTED]")
             .field("proof_fingerprint", &"[REDACTED]")
+            .field("assurance_projection", &"[REDACTED]")
             .finish()
     }
 }
@@ -191,6 +207,7 @@ impl fmt::Debug for DocsCheckGovernanceEvidenceCheckContribution {
 pub(crate) struct DocsCheckGovernanceContributionOutcome {
     result: LocalCheckResult,
     contribution: DocsCheckGovernanceEvidenceCheckContribution,
+    assurance_projection: LocalCheckEvidenceAssuranceProjection,
 }
 
 pub(crate) struct AuthoritativeDocsCheckCompositionInput<'a> {
@@ -202,6 +219,7 @@ pub(crate) struct AuthoritativeDocsCheckCompositionInput<'a> {
 #[derive(Clone, Eq, PartialEq)]
 pub(crate) struct AuthoritativeDocsCheckCompositionOutcome {
     results: Vec<LocalCheckResult>,
+    assurance_projections: Vec<LocalCheckEvidenceAssuranceProjection>,
     fact: AuthoritativeLocalCheckEvidenceCheckFact,
 }
 
@@ -213,6 +231,10 @@ impl AuthoritativeDocsCheckCompositionOutcome {
     pub(crate) const fn fact(&self) -> &AuthoritativeLocalCheckEvidenceCheckFact {
         &self.fact
     }
+
+    pub(crate) fn assurance_projections(&self) -> &[LocalCheckEvidenceAssuranceProjection] {
+        &self.assurance_projections
+    }
 }
 
 impl fmt::Debug for AuthoritativeDocsCheckCompositionOutcome {
@@ -220,6 +242,10 @@ impl fmt::Debug for AuthoritativeDocsCheckCompositionOutcome {
         formatter
             .debug_struct("AuthoritativeDocsCheckCompositionOutcome")
             .field("result_count", &self.results.len())
+            .field(
+                "assurance_projection_count",
+                &self.assurance_projections.len(),
+            )
             .field("fact", &self.fact)
             .field("results", &"[REDACTED]")
             .finish()
@@ -314,6 +340,7 @@ impl fmt::Debug for AuthoritativeLocalCheckBoundAssessment {
 #[derive(Clone, Eq, PartialEq)]
 pub(crate) struct AuthoritativeLocalCheckReassessmentOutcome {
     results: Vec<LocalCheckResult>,
+    assurance_projections: Vec<LocalCheckEvidenceAssuranceProjection>,
     bound_assessment: AuthoritativeLocalCheckBoundAssessment,
 }
 
@@ -325,6 +352,7 @@ pub(crate) struct AuthoritativeLocalCheckRuntimeFactSourceBridgeInput<'a> {
 #[derive(Clone, Eq, PartialEq)]
 pub(crate) struct AuthoritativeLocalCheckRuntimeFactSourceBridgeOutcome {
     results: Vec<LocalCheckResult>,
+    assurance_projections: Vec<LocalCheckEvidenceAssuranceProjection>,
     governance_binding: GovernanceAssessmentBinding,
     runtime_fact_snapshot: GovernanceRuntimeFactSnapshot,
     registration: GovernanceRuntimeFactSourceRegistration,
@@ -338,6 +366,10 @@ impl AuthoritativeLocalCheckRuntimeFactSourceBridgeOutcome {
 
     pub(crate) const fn governance_binding(&self) -> &GovernanceAssessmentBinding {
         &self.governance_binding
+    }
+
+    pub(crate) fn assurance_projections(&self) -> &[LocalCheckEvidenceAssuranceProjection] {
+        &self.assurance_projections
     }
 
     pub(crate) const fn runtime_fact_snapshot(&self) -> &GovernanceRuntimeFactSnapshot {
@@ -372,6 +404,10 @@ impl fmt::Debug for AuthoritativeLocalCheckRuntimeFactSourceBridgeOutcome {
         formatter
             .debug_struct("AuthoritativeLocalCheckRuntimeFactSourceBridgeOutcome")
             .field("result_count", &self.results.len())
+            .field(
+                "assurance_projection_count",
+                &self.assurance_projections.len(),
+            )
             .field("governance_binding", &self.governance_binding)
             .field("runtime_fact_snapshot", &self.runtime_fact_snapshot)
             .field("registration", &"[REDACTED]")
@@ -490,6 +526,7 @@ pub(crate) fn compose_authoritative_local_check_runtime_fact_source_bridge(
 
     Ok(AuthoritativeLocalCheckRuntimeFactSourceBridgeOutcome {
         results: reassessment.results,
+        assurance_projections: reassessment.assurance_projections,
         governance_binding,
         runtime_fact_snapshot,
         registration,
@@ -522,6 +559,10 @@ impl AuthoritativeLocalCheckReassessmentOutcome {
         &self.bound_assessment
     }
 
+    pub(crate) fn assurance_projections(&self) -> &[LocalCheckEvidenceAssuranceProjection] {
+        &self.assurance_projections
+    }
+
     pub(crate) fn into_parts(
         self,
         bundle: &StoredImmutableRunBundle,
@@ -539,6 +580,10 @@ impl fmt::Debug for AuthoritativeLocalCheckReassessmentOutcome {
         formatter
             .debug_struct("AuthoritativeLocalCheckReassessmentOutcome")
             .field("result_count", &self.results.len())
+            .field(
+                "assurance_projection_count",
+                &self.assurance_projections.len(),
+            )
             .field("bound_assessment", &self.bound_assessment)
             .field("results", &"[REDACTED]")
             .finish()
@@ -591,6 +636,7 @@ pub(crate) fn compose_authoritative_local_check_reassessment(
 
     Ok(AuthoritativeLocalCheckReassessmentOutcome {
         results: local_check.results().to_vec(),
+        assurance_projections: local_check.assurance_projections().to_vec(),
         bound_assessment: AuthoritativeLocalCheckBoundAssessment {
             algorithm: AuthoritativeLocalCheckReassessmentBindingAlgorithm::V1,
             local_check_fact: local_check.fact().clone(),
@@ -711,6 +757,10 @@ impl DocsCheckGovernanceContributionOutcome {
     pub(crate) const fn contribution(&self) -> &DocsCheckGovernanceEvidenceCheckContribution {
         &self.contribution
     }
+
+    pub(crate) const fn assurance_projection(&self) -> &LocalCheckEvidenceAssuranceProjection {
+        &self.assurance_projection
+    }
 }
 
 impl fmt::Debug for DocsCheckGovernanceContributionOutcome {
@@ -720,6 +770,7 @@ impl fmt::Debug for DocsCheckGovernanceContributionOutcome {
             .field("result_status", &self.result.status())
             .field("contribution", &self.contribution)
             .field("result", &"[REDACTED]")
+            .field("assurance_projection", &"[REDACTED]")
             .finish()
     }
 }
@@ -778,12 +829,23 @@ fn execute_docs_check_with_attestation_inner(
         })?;
 
     let request = input.handler.build_process_request()?;
+    let resolved_execution_fingerprint =
+        authoritative_local_check_resolved_execution_fingerprint(input.handler, &request);
     let started_at = input.clock.now()?;
     ensure_clock_order(binding_created_at, started_at)?;
     let output = input.handler.run_process(&request)?;
     let completed_at = input.clock.now()?;
     ensure_clock_order(started_at, completed_at)?;
     let result = LocalCheckResult::from_process_output(contract, &output)?;
+    let assurance_projection = LocalCheckEvidenceAssuranceProjection::new(
+        LocalCheckEvidenceAssuranceProjectionDefinition {
+            execution_binding: &execution_binding,
+            resolved_execution_fingerprint,
+            result_id: input.result_id.clone(),
+            result: &result,
+            accepted_attestation: None,
+        },
+    )?;
     let result_exit_posture = exit_posture(&result);
     let observation = KernelObservedLocalCheck::new(KernelObservedLocalCheckDefinition {
         workflow_id: input.workflow_id.clone(),
@@ -844,6 +906,7 @@ fn execute_docs_check_with_attestation_inner(
         return Ok(DocsCheckAttestationExecutionOutcome {
             result,
             accepted_attestation: None,
+            assurance_projection,
         });
     }
 
@@ -864,6 +927,7 @@ fn execute_docs_check_with_attestation_inner(
     Ok(DocsCheckAttestationExecutionOutcome {
         result,
         accepted_attestation: Some(accepted_attestation),
+        assurance_projection,
     })
 }
 
@@ -874,6 +938,7 @@ pub(crate) fn execute_docs_check_attestation_gate(
     let DocsCheckAttestationExecutionOutcome {
         result,
         accepted_attestation,
+        assurance_projection,
     } = execution;
 
     if !input
@@ -893,6 +958,7 @@ pub(crate) fn execute_docs_check_attestation_gate(
                 DocsCheckAttestationGateReason::ResultStatusNotAccepted,
             ),
             proof_fingerprint: None,
+            assurance_projection,
         });
     }
 
@@ -924,6 +990,7 @@ pub(crate) fn execute_docs_check_attestation_gate(
                     DocsCheckAttestationGateReason::FreshnessExpired,
                 ),
                 proof_fingerprint: None,
+                assurance_projection,
             });
         }
     }
@@ -932,6 +999,7 @@ pub(crate) fn execute_docs_check_attestation_gate(
         result,
         disposition: DocsCheckAttestationGateDisposition::Satisfied,
         proof_fingerprint: Some(accepted.proof_fingerprint().clone()),
+        assurance_projection,
     })
 }
 
@@ -958,6 +1026,7 @@ pub(crate) fn execute_docs_check_governance_contribution(
             obligation_fingerprint,
             posture,
         },
+        assurance_projection: gate.assurance_projection,
     })
 }
 
@@ -971,9 +1040,11 @@ pub(crate) fn compose_authoritative_docs_check_evidence_check_fact(
     let executions = preflight_authoritative_docs_check_composition(input, &candidate)?;
     let mut results = Vec::with_capacity(executions.len());
     let mut contributions = Vec::with_capacity(executions.len());
+    let mut assurance_projections = Vec::with_capacity(executions.len());
     for execution in executions {
         let outcome = execute_docs_check_governance_contribution(execution)?;
         results.push(outcome.result().clone());
+        assurance_projections.push(outcome.assurance_projection().clone());
         contributions.push(adapt_authoritative_docs_check_contribution(
             &candidate,
             outcome.contribution(),
@@ -981,7 +1052,11 @@ pub(crate) fn compose_authoritative_docs_check_evidence_check_fact(
     }
     let coverage = evaluate_local_check_structural_coverage(&candidate, &contributions)?;
     let fact = convert_authoritative_local_check_coverage(&coverage)?;
-    Ok(AuthoritativeDocsCheckCompositionOutcome { results, fact })
+    Ok(AuthoritativeDocsCheckCompositionOutcome {
+        results,
+        assurance_projections,
+        fact,
+    })
 }
 
 fn preflight_authoritative_docs_check_composition<'a>(

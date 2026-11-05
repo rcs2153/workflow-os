@@ -137,9 +137,11 @@ use workflow_core::{
     LocalApprovalPresentationProof, LocalApprovalPresentationResolvedContextDecisionRequest,
     LocalApprovalProofMarkerAuditProjectionStore,
     LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalAuditSink,
-    LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
-    LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
-    LocalCheckResultId, LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest,
+    LocalCancellationRequest, LocalCheckCommandContract, LocalCheckEvidenceAttestationPosture,
+    LocalCheckEvidenceExecutionPosture, LocalCheckEvidenceExternalVerifiabilityPosture,
+    LocalCheckEvidenceProducerPosture, LocalCheckProcessOutput, LocalCheckProcessRequest,
+    LocalCheckProcessRunner, LocalCheckRegistrationProfile, LocalCheckResultId,
+    LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest,
     LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest,
     LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest,
     LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult,
@@ -8096,6 +8098,42 @@ fn core_owned_authoritative_route_derives_facts_and_ignores_unused_visible_capab
     assert_eq!(runner.call_count(), 1);
     assert_eq!(skill_calls.get(), 1);
     assert_eq!(delivery_handler.calls.get(), 0);
+    assert_eq!(result.local_check_evidence_assurance_projections().len(), 1);
+    let projection = result
+        .local_check_evidence_assurance_projections()
+        .first()
+        .expect("closed route assurance projection");
+    assert_eq!(result.local_check_results().len(), 1);
+    let check_result = result
+        .local_check_results()
+        .first()
+        .expect("closed route local-check result");
+    assert_eq!(
+        projection.workflow_id(),
+        &result.run().snapshot.identity.workflow_id
+    );
+    assert_eq!(projection.run_id(), &run_id);
+    assert_eq!(projection.step_id(), &request.selected_step_id);
+    assert_eq!(projection.result_status(), check_result.status());
+    assert_eq!(
+        projection.producer_posture(),
+        LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound
+    );
+    assert_eq!(
+        projection.execution_posture(),
+        LocalCheckEvidenceExecutionPosture::TrustedHostObserved
+    );
+    assert_eq!(
+        projection.attestation_posture(),
+        LocalCheckEvidenceAttestationPosture::Unattested
+    );
+    assert_eq!(
+        projection.external_verifiability(),
+        LocalCheckEvidenceExternalVerifiabilityPosture::Unavailable
+    );
+    assert!(projection
+        .accepted_attestation_proof_fingerprint()
+        .is_none());
     assert_eq!(
         result.governance_assessment_binding().execution(),
         GovernanceExecutionDisposition::Proceed
@@ -8700,6 +8738,7 @@ fn selected_project_validation_report_adapter_defers_nonterminal_report() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn selected_project_validation_report_adapter_reassesses_terminal_run_without_reexecution() {
     let project = TestProject::new("selected-project-validation-report-retry");
     project.write_core_owned_authoritative_project_validation_project();
@@ -8754,6 +8793,47 @@ fn selected_project_validation_report_adapter_reassesses_terminal_run_without_re
     assert_eq!(second.run().snapshot.status, WorkflowRunStatus::Completed);
     assert_eq!(second.run().events, events_after_first);
     assert_eq!(second.run().snapshot.identity.run_id, run_id);
+    assert_eq!(
+        first
+            .route()
+            .local_check_evidence_assurance_projections()
+            .len(),
+        1
+    );
+    let first_projection = first
+        .route()
+        .local_check_evidence_assurance_projections()
+        .first()
+        .expect("initial route assurance projection");
+    assert_eq!(
+        second
+            .route()
+            .local_check_evidence_assurance_projections()
+            .len(),
+        1
+    );
+    let retry_projection = second
+        .route()
+        .local_check_evidence_assurance_projections()
+        .first()
+        .expect("terminal reassessment assurance projection");
+    assert_ne!(
+        retry_projection.execution_binding_fingerprint(),
+        first_projection.execution_binding_fingerprint()
+    );
+    assert_ne!(
+        retry_projection.projection_fingerprint(),
+        first_projection.projection_fingerprint()
+    );
+    assert_eq!(
+        retry_projection.resolved_execution_fingerprint(),
+        first_projection.resolved_execution_fingerprint()
+    );
+    assert_eq!(retry_projection.run_id(), &run_id);
+    assert_eq!(
+        retry_projection.attestation_posture(),
+        LocalCheckEvidenceAttestationPosture::Unattested
+    );
     assert!(
         second
             .route()

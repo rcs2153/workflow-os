@@ -121,12 +121,26 @@ external witness, hosted identity, provider expansion, WorkReport commitment,
 or publication. See the [implementation
 report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_PROJECTION_REPORT.md) and
 [accepted review](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_PROJECTION_REVIEW.md).
-The next phase is one narrow composition into the closed trusted-host
-project-validation result path. That composition must establish a Core-owned
-source binding before minimum-assurance comparison can participate in any gate;
-a caller-created or deserialized weak projection is representational data, not
-execution authority. Independent security review remains required before
-release admission resumes.
+The closed trusted-host project-validation result path now constructs and
+returns the weak evidence-assurance projection from the exact process request,
+immutable execution binding, structured result, and immutable run context held
+by Core in the same call. Fresh and terminal-reassessment routes expose the
+projection without accepting a caller-created or deserialized projection, and
+retry-time observations receive fresh execution-binding identity while
+preserving the same resolved process-boundary commitment. The current route
+remains explicitly operator-selected, content-bound, trusted-host-observed,
+unattested, and externally unverifiable. It does not persist assurance, create
+events or report citations, evaluate an assurance minimum as a gate, or upgrade
+the existing accepted-attestation boundary. See the [runtime composition
+report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_RUNTIME_COMPOSITION_REPORT.md)
+and [accepted review](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_RUNTIME_COMPOSITION_REVIEW.md).
+
+The next phase is the model-only **versioned complete WorkReport body
+commitment**. It must specify canonical coverage, domain separation, versioning,
+legacy posture, and stable non-leaking errors before any persistence anchor or
+read/replay enforcement is implemented. It must not self-assert integrity from
+a commitment stored only inside mutable report content. Independent security
+review remains required before release admission resumes.
 
 The separate deterministic hosted P0 is now implemented. The advertised
 `workflow-os-hosted --worker-once` entry point previously called the
