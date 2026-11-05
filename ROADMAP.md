@@ -86,6 +86,41 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
+A P0 **continuity of authority release-gate** preemption is active before all
+unrelated roadmap work, release admission, v1 consideration, broader hosted
+claims, enterprise audit claims, or live-provider adoption. Continuity of
+authority means that the kernel preserves the exact relationship between what
+was authorized, what executed, which evidence and reports belong to that work,
+and what remains lawful across people, agents, processes, retries, recovery,
+and interruption. Current-main reruns at `40498a5` reproduced three independent
+violations:
+
+1. **Accepted means dispatched.** Hosted exact retries can return HTTP `201`
+   for a durably `Running` run with five events, zero queued work items, and an
+   idle worker after an injected queue-insert failure. Hosted runtime/state owns
+   the fix. Reliable unattended hosted completion and truthful hosted-submission
+   acknowledgment remain blocked.
+2. **Verified means correctly bound.** A complete valid WorkReport from run B
+   can be placed in run A's filesystem slot, pass body-commitment validation,
+   project through human and JSON inspect, and replay as `already_persisted` for
+   run A. Core WorkReport storage/replay owns the cross-backend fix. Sole-record
+   enterprise audit authority and complete report-integrity claims remain
+   blocked.
+3. **Approved means still authorized.** A GitHub repository-metadata approval
+   for `acme/widgets` can complete after the project restriction changes to
+   `acme/replacement`. Project restriction, immutable-run, approval-resume, and
+   provider-admission boundaries own the fix. Fully committed repository-
+   resource approval and unattended live-provider adoption remain blocked.
+
+All three gates are accepted, not deferred. Implement them in the listed order,
+with adversarial fault, restore/misplacement, drift, concurrency, replay, and
+exact-head regression coverage. Publication and broader product claims remain
+blocked until every gate passes exact-head CI and an independent rerun. See the
+[Continuity Of Authority P0 Release Gates
+Plan](docs/implementation-plans/continuity-of-authority-p0-release-gates-plan.md).
+The compact-checkpoint benchmark remains bounded product evidence, not a
+substitute for these correctness gates.
+
 A new P0 **evidence provenance and report integrity** preemption is active
 before publication, public-positioning expansion, or broader evidence-consuming
 runtime work. Fresh testing proved two distinct trust boundaries that current
@@ -216,8 +251,11 @@ report](docs/concepts/WORK_REPORT_BODY_COMMITMENT_RECOVERY_RECONCILIATION_REPORT
 and [accepted
 review](docs/concepts/WORK_REPORT_BODY_COMMITMENT_RECOVERY_RECONCILIATION_REVIEW.md).
 
-The next phase is bounded **WorkReport body-commitment replay enforcement**. It
-must trace every terminal or provider replay path that consumes a persisted
+After the three continuity-of-authority release gates pass, the next phase in
+this lane is bounded **WorkReport body-commitment replay enforcement**. Its
+storage-key and internal-identity binding requirements are now part of release
+gate 2 and must not wait for a narrower body-only replay phase. The later replay
+work must trace every terminal or provider replay path that consumes a persisted
 artifact, including transaction-local PostgreSQL reads, require retained
 commitment validation before replay equality or content reuse, preserve the
 original legacy-unverified posture without upgrade, and fail closed without

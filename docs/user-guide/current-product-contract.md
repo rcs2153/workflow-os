@@ -19,6 +19,25 @@ sandbox. Workflow OS does not replace it. The kernel decides whether a material
 action is valid and authorized, records the decision and outcome, and derives
 what may happen next from durable state.
 
+## Core Product Value: Continuity Of Authority
+
+Workflow OS's strongest differentiated value is continuity of authority across
+people, agents, processes, retries, recovery, and interruptions. The intended
+contract is that the same governed record establishes what was authorized, what
+executed, which evidence and reports belong to that exact work, and what remains
+permitted. A replacement executor should not reconstruct authority from chat
+history.
+
+Current `main` does not yet satisfy that contract across every preview surface.
+Three accepted P0 release gates remain open: hosted success must prove approval-
+waiting, dispatch, terminal, or explicit recovery posture; a verified WorkReport
+must be bound to the exact requested storage and run identity; and project-level
+provider resource restrictions must remain committed through approval and
+provider admission. These gates block v1, reliable unattended hosted-runtime,
+sole enterprise audit-authority, and fully committed live-provider approval
+claims. See the [Continuity Of Authority P0 Release Gates
+Plan](../implementation-plans/continuity-of-authority-p0-release-gates-plan.md).
+
 ## Maturity
 
 - **Release preparation identity:** `0.4.0-preview.1`.
@@ -30,6 +49,9 @@ what may happen next from durable state.
   general provider-write product.
 - **Primary audience today:** maintainers, infrastructure engineers, security
   engineers, and teams evaluating governed agent work.
+- **Release blockers:** three accepted continuity-of-authority P0 gates remain
+  open for hosted dispatch truth, WorkReport identity binding, and project-
+  resource authorization continuity.
 
 ## Implemented Product Surfaces
 
@@ -88,9 +110,12 @@ what may happen next from durable state.
 Current evidence assurance is path-specific. A closed local-check profile can
 bind the exact selected executable and invocation without proving that an
 operator-selected executable came from a trusted producer. Report artifacts
-are structurally validated and identity-consistent, but current storage does
-not yet anchor a commitment over the complete report body. A privileged local
-storage owner remains inside the trust boundary.
+retain and enforce a complete body commitment on selected read, inspect,
+metadata, recovery, and reconciliation paths, but a valid artifact can still be
+misplaced under another run's storage slot because external key and internal
+run/report identity are not yet enforced consistently across every backend and
+replay path. A privileged local storage owner remains inside the trust boundary,
+and the product is not a sole enterprise audit authority.
 
 ### State and hosting
 
@@ -101,6 +126,11 @@ storage owner remains inside the trust boundary.
   outcome reconciliation, and recovery coverage.
 - A single-tenant hosted alpha API/worker that authenticates one trust domain,
   dispatches no-write work, and persists terminal reporting.
+- Hosted submission/retry currently has an accepted P0 recovery gap: after a
+  partial pre-dispatch failure, exact retry can acknowledge an existing Running
+  run without proving a queued work item, approval wait, terminal state, or
+  explicit recovery posture. Do not treat the hosted alpha as reliable
+  unattended execution until the release gate passes.
 - Optional OpenShell no-write provider contracts and pinned CLI inspection
   compatibility. The current CLI compatibility boundary does not satisfy the
   full execution-provider evidence contract.
@@ -114,6 +144,11 @@ storage owner remains inside the trust boundary.
   same-repository branch.
 - Provider outcomes are reconciled through Core-owned gates and records; these
   paths are not enabled automatically by project installation.
+- The GitHub repository-metadata fixture currently has an accepted P0 drift gap:
+  changing the current project repository restriction after presentation does
+  not yet block approval and provider admission for the previously declared
+  target. Do not infer fully committed live-provider authorization from this
+  preview path.
 
 ## CLI Contract
 
@@ -171,7 +206,13 @@ Workflow OS does not currently provide:
 - cryptographic tamper evidence for local event or WorkReport storage, or proof
   against an owner who can rewrite both records and local integrity anchors;
 - a production scheduler that continuously redispatches agents from continuity
-  directives.
+  directives;
+- proof that every hosted success response corresponds to approval-waiting,
+  dispatchable, terminal, or explicit recovery posture;
+- proof that every persisted WorkReport is bound to the exact requested storage
+  key and run identity across all backends and replay paths; or
+- proof that every project-level provider resource restriction remains current
+  through approval and provider admission.
 
 Unknown or unsupported behavior should fail closed. A roadmap model is not a
 product capability until it is wired into an explicit, tested execution path.

@@ -171,6 +171,35 @@ mechanisms. One condition must use actual in-session compaction or host-level
 context replacement in a long-running coding task rather than only fresh-session
 simulation.
 
+### 7.1 Comparative Recovery Benchmark
+
+After Workflow OS passes the three continuity-of-authority P0 release gates,
+run the same recovery corpus against Workflow OS, LangGraph, and Sentence
+Governors. The purpose is not to compare how easily each framework can carry an
+arbitrary state blob. It is to compare whether each configured system preserves
+the exact approved, denied, completed, blocked, and still-lawful work across
+compaction and replacement, and what the whole task costs.
+
+For every framework:
+
+- publish the exact application-level state schema and integration code;
+- distinguish native framework guarantees from benchmark-harness logic;
+- provide equivalent authoritative facts and task instructions;
+- use the same cut points, model, settings, fixture, and expected decisions;
+- measure approval reuse rejection, denial stopping, duplicate SideEffects,
+  false authority, stale intent, missing completion, and lawful next action;
+- report recovery turns, lookups, cached and uncached tokens, gross tokens,
+  authoritative billed cost when available, latency, and end-to-end completion;
+  and
+- repeat with and without automatic checkpoint injection where the framework
+  permits both postures.
+
+Do not call Workflow OS superior merely because the comparison harness is
+better integrated with Workflow OS. Conversely, do not treat a framework's
+ability to transport state as proof that it validates authority continuity.
+Preserve all adapter code and raw runs so reviewers can separate framework
+behavior from evaluator-authored logic.
+
 ## 8. Measures
 
 Primary correctness and safety measures:
