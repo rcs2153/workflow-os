@@ -3006,10 +3006,7 @@ fn prove_hosted_approval_dispatch_recovery(backend: &PostgresStateBackend, confi
         &changed_dispatch,
     )
     .expect_err("changed approval dispatch context must fail");
-    assert_eq!(
-        conflict.code(),
-        "executor.immutable_run_bundle.binding_mismatch"
-    );
+    assert_eq!(conflict.code(), "executor.approval.resume_context_mismatch");
 
     let denied_request = hosted_approval_dispatch_request(&project, "denial");
     let waiting = execute_with_hosted_no_write_dispatch(
