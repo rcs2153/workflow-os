@@ -4,7 +4,9 @@
 
 This report records exact-head CI and maintainer-operated post-merge evidence
 for continuity-of-authority Gate 2, **Verified Means Correctly Bound**. It does
-not claim independent assurance and does not close Gate 2.
+not itself claim independent assurance. The later [independent rerun
+report](WORK_REPORT_ARTIFACT_IDENTITY_BINDING_INDEPENDENT_RERUN.md) supplies the
+remaining acceptance evidence and closes Gate 2.
 
 ## Bound Revision
 
@@ -76,8 +78,7 @@ perform those external actions.
 Exact-head CI, credential-backed PostgreSQL execution, unchanged-head merge,
 and maintainer-operated post-merge exact-main evidence pass.
 
-Gate 2 remains open because its plan also requires an independent
-filesystem/backend-misplacement rerun. This report must not be used to relabel
-maintainer testing as independent review. Gate 3 and the cross-gate review
-remain blocked until the independent rerun passes and Gate 2 is explicitly
-closed.
+This report alone did not close Gate 2 because its plan also required an
+independent filesystem/backend-misplacement rerun. It must not be used to
+relabel maintainer testing as independent review. That independent rerun later
+passed at exact merged `main`; Gate 2 is now closed and Gate 3 is unblocked.

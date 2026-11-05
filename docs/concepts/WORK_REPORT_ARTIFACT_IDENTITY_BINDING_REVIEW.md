@@ -2,13 +2,13 @@
 
 ## Verdict
 
-Accepted as the bounded implementation candidate for continuity-of-authority
-Gate 2, **Verified Means Correctly Bound**, after two review blockers were
-corrected.
+Accepted and closed as continuity-of-authority Gate 2, **Verified Means
+Correctly Bound**, after two review blockers were corrected and every bounded
+acceptance item passed.
 
-This review did not close Gate 2. Exact-head CI with credential-backed
-PostgreSQL execution and maintainer-operated post-merge exact-main regression
-evidence now pass. An independent backend-misplacement rerun remains required.
+Exact-head CI, credential-backed PostgreSQL execution, maintainer-operated
+post-merge exact-main regression evidence, and an independent clean-room
+backend-misplacement rerun all pass.
 
 ## Blockers Found And Corrected
 
@@ -104,7 +104,13 @@ rejection before projection or `already_persisted`, PostgreSQL test compilation,
 and the complete hosted suite. See the [post-merge evidence
 report](WORK_REPORT_ARTIFACT_IDENTITY_BINDING_POST_MERGE_EVIDENCE.md).
 
-The remaining acceptance work is an independent filesystem/backend
-misplacement rerun. Maintainer-operated evidence is not relabeled as
-independent assurance. Gate 3 remains blocked until that final requirement
-passes and Gate 2 is explicitly closed.
+The independent rerun executed the complete 243-test WorkReport target and the
+focused CLI substitution test from a clean detached checkout at exact merged
+`main`, compiled the PostgreSQL adversarial target, confirmed payload-free
+failures, and left the primary workspace untouched. It did not claim local
+live PostgreSQL execution; exact-head CI supplies that evidence. See the
+[independent rerun
+report](WORK_REPORT_ARTIFACT_IDENTITY_BINDING_INDEPENDENT_RERUN.md).
+
+Gate 2 is closed. Gate 3 is unblocked as the next reviewed phase; no Gate 3
+behavior is authorized by this review.

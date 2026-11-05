@@ -138,9 +138,9 @@ Plan](docs/implementation-plans/continuity-of-authority-p0-release-gates-plan.md
 The compact-checkpoint benchmark remains bounded product evidence, not a
 substitute for these correctness gates.
 
-Gate 1 is closed. Gate 2, **Verified Means Correctly Bound**, has a bounded
-implementation candidate accepted by focused maintainer/security review after
-two blockers were corrected. One Core-owned artifact-location
+Gate 1 is closed. Gate 2, **Verified Means Correctly Bound**, is closed. Its
+bounded implementation was accepted by focused maintainer/security review
+after two blockers were corrected. One Core-owned artifact-location
 expectation now composes physical run/report keys, available immutable workflow
 identity, backend locator class, and retained body commitment validation across
 filesystem, SQLite, PostgreSQL, transaction-local replay, injected stores,
@@ -157,13 +157,19 @@ checks passed, including credential-backed PostgreSQL execution. A
 maintainer-operated post-merge rerun on exact `main` confirmed filesystem and
 SQLite misplacement rejection, immutable-identity-before-body ordering, CLI
 inspect/replay rejection before projection, and hosted regressions. This is
-post-merge machine and maintainer evidence, not independent assurance. The
-independent backend-misplacement rerun remains the only unresolved Gate 2
-acceptance item. See the
+post-merge machine and maintainer evidence. An independent agent then reran the
+complete 243-test WorkReport target and focused CLI substitution test from a
+clean detached checkout at exact `main`, compiled the PostgreSQL adversarial
+target, confirmed payload-free failures, and left the primary workspace
+untouched. It correctly did not claim local live PostgreSQL execution; that
+evidence remains supplied by exact-head CI. All Gate 2 acceptance items now
+pass. See the
 [implementation report](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_IMPLEMENTATION_REPORT.md)
 and [focused review](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_REVIEW.md),
-plus the [post-merge evidence report](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_POST_MERGE_EVIDENCE.md).
-Gate 3 and the cross-gate review remain blocked behind Gate 2 acceptance.
+the [post-merge evidence report](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_POST_MERGE_EVIDENCE.md),
+and the [independent rerun report](docs/concepts/WORK_REPORT_ARTIFACT_IDENTITY_BINDING_INDEPENDENT_RERUN.md).
+Gate 3 is now the next continuity-of-authority implementation gate. The
+cross-gate review remains blocked until Gate 3 is accepted.
 
 A new P0 **evidence provenance and report integrity** preemption is active
 before publication, public-positioning expansion, or broader evidence-consuming
