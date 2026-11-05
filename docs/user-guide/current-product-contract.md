@@ -126,11 +126,14 @@ and the product is not a sole enterprise audit authority.
   outcome reconciliation, and recovery coverage.
 - A single-tenant hosted alpha API/worker that authenticates one trust domain,
   dispatches no-write work, and persists terminal reporting.
-- Hosted submission/retry currently has an accepted P0 recovery gap: after a
-  partial pre-dispatch failure, exact retry can acknowledge an existing Running
-  run without proving a queued work item, approval wait, terminal state, or
-  explicit recovery posture. Do not treat the hosted alpha as reliable
-  unattended execution until the release gate passes.
+- Hosted submission/retry now reconciles the exact immutable run before
+  acknowledgement. Approval-waiting and terminal exact runs can be returned
+  directly; a `Running` run requires one matching queued work item plus pending
+  invocation evidence, or an exact retry must atomically repair that dispatch.
+  Changed intent and unsupported durable postures fail closed. Exact-head
+  PostgreSQL CI and an independent fault-injection rerun remain required before
+  the Accepted Means Dispatched release gate passes, so do not yet treat the
+  hosted alpha as reliable unattended execution.
 - Optional OpenShell no-write provider contracts and pinned CLI inspection
   compatibility. The current CLI compatibility boundary does not satisfy the
   full execution-provider evidence contract.

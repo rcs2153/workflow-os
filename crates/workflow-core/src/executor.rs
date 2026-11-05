@@ -9400,7 +9400,7 @@ where
             side_effect_events: Vec::new(),
             side_effect_lifecycle_events: Vec::new(),
         };
-        let mut plan = Self::prepare_execution_with_capability_and_resolved_context(
+        let plan = Self::prepare_execution_with_capability_and_resolved_context(
             &request,
             builder.run_id.clone(),
             validation_capability,
@@ -9413,6 +9413,14 @@ where
                 "approval resume context could not be reconstructed safely",
             )
         })?;
+        Self::validate_resume_execution_plan(plan, builder, approval)
+    }
+
+    fn validate_resume_execution_plan(
+        mut plan: ExecutionPlan,
+        builder: &EventBuilder,
+        approval: &ApprovalRequest,
+    ) -> Result<ExecutionPlan, WorkflowOsError> {
         if plan.event_builder.workflow_id != builder.workflow_id
             || plan.event_builder.schema_version != builder.schema_version
             || plan.event_builder.workflow_version != builder.workflow_version
@@ -14487,24 +14495,15 @@ pub fn execute_with_hosted_no_write_dispatch(
         .run_id
         .clone()
         .unwrap_or_else(WorkflowRunId::generate);
-    if !executor.backend.read_events(&run_id)?.is_empty() {
-        let run = executor.backend.rehydrate_run(&run_id)?;
-        let binding = run
-            .snapshot
-            .identity
-            .immutable_run_bundle
-            .clone()
-            .ok_or_else(immutable_run_bundle_binding_error)?;
-        return Ok(LocalExecutionWithImmutableRunBundleResult {
-            run,
-            bundle_binding: binding,
-        });
-    }
-
     let execution = &request.execution.execution;
     let mut plan =
         LocalExecutor::<PostgresStateBackend>::prepare_execution(execution, run_id.clone())?;
     validate_hosted_no_write_plan(&plan)?;
+    bind_hosted_dispatch_context(&mut plan, &request.dispatch)?;
+    if !executor.backend.read_events(&run_id)?.is_empty() {
+        return reconcile_existing_hosted_no_write_run(executor, request, plan, &run_id);
+    }
+
     executor.evaluate_pre_run_policy(&plan, &execution.actor, &execution.correlation_id)?;
     let project = load_validated_project_bundle(
         &execution.project_root,
@@ -14556,6 +14555,62 @@ pub fn execute_with_hosted_no_write_dispatch(
     })
 }
 
+fn reconcile_existing_hosted_no_write_run(
+    executor: &LocalExecutor<'_, PostgresStateBackend>,
+    request: &LocalExecutionWithHostedDispatchRequest,
+    mut plan: ExecutionPlan,
+    run_id: &WorkflowRunId,
+) -> Result<LocalExecutionWithImmutableRunBundleResult, WorkflowOsError> {
+    let execution = &request.execution.execution;
+    let run = executor.backend.rehydrate_run(run_id)?;
+    let binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .clone()
+        .ok_or_else(immutable_run_bundle_binding_error)?;
+    let stored = executor
+        .backend
+        .read_immutable_run_bundle(run_id)?
+        .ok_or_else(immutable_run_bundle_binding_error)?;
+    if stored.manifest().run_binding() != binding
+        || !existing_immutable_run_bundle_request_matches(
+            stored.manifest(),
+            execution,
+            &request.execution.bundle,
+            None,
+        )?
+        || validate_immutable_run_bundle_matches_plan(stored.manifest(), &plan).is_err()
+    {
+        return Err(immutable_run_bundle_binding_error());
+    }
+    let run = match run.snapshot.status {
+        WorkflowRunStatus::WaitingForApproval => run,
+        status if status.is_terminal() => run,
+        WorkflowRunStatus::Running => {
+            plan.immutable_run_bundle = Some(binding.clone());
+            plan.step_scheduled = true;
+            plan.event_builder = EventBuilder::from_snapshot(
+                &run.snapshot,
+                execution.correlation_id.clone(),
+                execution.actor.clone(),
+            );
+            dispatch_hosted_plan(executor, plan, &request.dispatch)?
+        }
+        _ => {
+            return Err(executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.hosted_no_write.retry_posture.invalid",
+                "hosted run cannot be acknowledged from its durable posture",
+            ));
+        }
+    };
+    Ok(LocalExecutionWithImmutableRunBundleResult {
+        run,
+        bundle_binding: binding,
+    })
+}
+
 /// Applies proof-enforced approval and dispatches the approved single-step
 /// invocation through the no-write hosted boundary.
 ///
@@ -14568,6 +14623,10 @@ pub fn decide_hosted_dispatch_approval_with_presentation(
     request: LocalApprovalPresentationDecisionRequest,
     dispatch: &HostedNoWriteDispatchInputs,
 ) -> Result<WorkflowRun, WorkflowOsError> {
+    if let Some(recovered) = recover_hosted_approval_dispatch_replay(executor, &request, dispatch)?
+    {
+        return Ok(recovered);
+    }
     let LocalApprovalPresentationDecisionRequest {
         approval: approval_request,
         proof,
@@ -14594,14 +14653,14 @@ pub fn decide_hosted_dispatch_approval_with_presentation(
     );
     match decision.decision {
         ApprovalDecisionKind::Granted => {
-            let mut plan = LocalExecutor::<PostgresStateBackend>::prepare_resume_execution(
+            let mut plan = prepare_hosted_resume_execution(
                 &approval_request.project_root,
                 &builder,
                 &approval,
-                &ProjectValidationCapability::Default,
-                None,
+                dispatch,
             )?;
             validate_hosted_no_write_plan(&plan)?;
+            validate_hosted_resume_plan(executor, &mut plan, &run)?;
             executor.append(
                 &mut builder,
                 WorkflowRunEventKind::ApprovalGranted(decision),
@@ -14640,6 +14699,199 @@ pub fn decide_hosted_dispatch_approval_with_presentation(
             )
         }
     }
+}
+
+fn recover_hosted_approval_dispatch_replay(
+    executor: &LocalExecutor<'_, PostgresStateBackend>,
+    request: &LocalApprovalPresentationDecisionRequest,
+    dispatch: &HostedNoWriteDispatchInputs,
+) -> Result<Option<WorkflowRun>, WorkflowOsError> {
+    let approval_request = &request.approval;
+    let run = executor.backend.rehydrate_run(&approval_request.run_id)?;
+    if run.snapshot.status == WorkflowRunStatus::WaitingForApproval {
+        return Ok(None);
+    }
+    let Some(durable_approval) = run
+        .snapshot
+        .approval_requests
+        .iter()
+        .find(|candidate| candidate.approval_id == approval_request.approval_id)
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    let Some(durable_decision) = durable_approval.decision.clone() else {
+        return Ok(None);
+    };
+    let pending_approval = validate_hosted_approval_replay_evidence(
+        executor,
+        request,
+        &run,
+        &durable_approval,
+        &durable_decision,
+    )?;
+    if durable_decision.decision == ApprovalDecisionKind::Denied
+        || run.snapshot.status.is_terminal()
+    {
+        return Ok(Some(run));
+    }
+    if run.snapshot.status != WorkflowRunStatus::Running
+        || !run
+            .events
+            .iter()
+            .any(|event| matches!(event.kind, WorkflowRunEventKind::RunResumed))
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.hosted_approval.replay_posture_invalid",
+            "hosted approval replay posture is invalid",
+        ));
+    }
+    let builder = EventBuilder::from_snapshot(
+        &run.snapshot,
+        durable_decision.correlation_id.clone(),
+        durable_decision.actor.clone(),
+    );
+    let mut plan = prepare_hosted_resume_execution(
+        &approval_request.project_root,
+        &builder,
+        &pending_approval,
+        dispatch,
+    )?;
+    validate_hosted_no_write_plan(&plan)?;
+    validate_hosted_resume_plan(executor, &mut plan, &run)?;
+    plan.event_builder = builder;
+    dispatch_hosted_plan(executor, plan, dispatch).map(Some)
+}
+
+fn validate_hosted_approval_replay_evidence(
+    executor: &LocalExecutor<'_, PostgresStateBackend>,
+    request: &LocalApprovalPresentationDecisionRequest,
+    run: &WorkflowRun,
+    durable_approval: &ApprovalRequest,
+    durable_decision: &ApprovalDecision,
+) -> Result<ApprovalRequest, WorkflowOsError> {
+    let approval_request = &request.approval;
+    if durable_decision.actor != approval_request.actor
+        || durable_decision.decision != approval_request.decision
+        || durable_decision.reason != approval_request.reason
+        || durable_decision.correlation_id != approval_request.correlation_id
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.hosted_approval.replay_conflict",
+            "hosted approval replay conflicts with durable state",
+        ));
+    }
+    let presentation =
+        executor.resolve_approval_presentation_proof(durable_approval, &request.proof)?;
+    let mut pending_approval = durable_approval.clone();
+    pending_approval.decision = None;
+    validate_approval_presentation_enforcement(
+        &presentation,
+        &pending_approval,
+        durable_decision,
+        request.max_presentation_age,
+    )?;
+    let expected_marker = approval_decision_proof_marker(
+        &presentation,
+        durable_decision,
+        request.max_presentation_age,
+    )?;
+    let durable_marker = durable_decision.proof_marker.as_ref().ok_or_else(|| {
+        executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.hosted_approval.proof_marker_missing",
+            "hosted approval replay proof marker is unavailable",
+        )
+    })?;
+    if durable_marker != &expected_marker {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.hosted_approval.proof_marker_mismatch",
+            "hosted approval replay proof does not match durable state",
+        ));
+    }
+    let mut decision_events = run.events.iter().filter(|event| {
+        match (&event.kind, durable_decision.decision) {
+            (WorkflowRunEventKind::ApprovalGranted(candidate), ApprovalDecisionKind::Granted)
+            | (WorkflowRunEventKind::ApprovalDenied(candidate), ApprovalDecisionKind::Denied) => {
+                candidate == durable_decision
+            }
+            _ => false,
+        }
+    });
+    decision_events.next().ok_or_else(|| {
+        executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.hosted_approval.decision_event_missing",
+            "hosted approval replay decision event is unavailable",
+        )
+    })?;
+    if decision_events.next().is_some() {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.hosted_approval.decision_event_ambiguous",
+            "hosted approval replay decision event is ambiguous",
+        ));
+    }
+    Ok(pending_approval)
+}
+
+fn validate_hosted_resume_plan(
+    executor: &LocalExecutor<'_, PostgresStateBackend>,
+    plan: &mut ExecutionPlan,
+    run: &WorkflowRun,
+) -> Result<(), WorkflowOsError> {
+    let binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .clone()
+        .ok_or_else(immutable_run_bundle_binding_error)?;
+    let stored = executor
+        .backend
+        .read_immutable_run_bundle(&run.snapshot.identity.run_id)?
+        .ok_or_else(immutable_run_bundle_binding_error)?;
+    if stored.manifest().run_binding() != binding
+        || validate_immutable_run_bundle_matches_plan(stored.manifest(), plan).is_err()
+    {
+        return Err(immutable_run_bundle_binding_error());
+    }
+    plan.immutable_run_bundle = Some(binding);
+    plan.step_scheduled = true;
+    Ok(())
+}
+
+fn prepare_hosted_resume_execution(
+    project_root: &std::path::Path,
+    builder: &EventBuilder,
+    approval: &ApprovalRequest,
+    dispatch: &HostedNoWriteDispatchInputs,
+) -> Result<ExecutionPlan, WorkflowOsError> {
+    let request = LocalExecutionRequest {
+        project_root: project_root.to_path_buf(),
+        workflow_id: builder.workflow_id.clone(),
+        run_id: Some(builder.run_id.clone()),
+        correlation_id: builder.correlation_id.clone(),
+        actor: builder.actor.clone(),
+        before_skill_invocation_checkpoints:
+            LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+        before_skill_invocation_hook: None,
+        side_effect_events: Vec::new(),
+        side_effect_lifecycle_events: Vec::new(),
+    };
+    let mut plan =
+        LocalExecutor::<PostgresStateBackend>::prepare_execution(&request, builder.run_id.clone())
+            .map_err(|_| {
+                executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "executor.approval.resume_context_unavailable",
+                    "approval resume context could not be reconstructed safely",
+                )
+            })?;
+    bind_hosted_dispatch_context(&mut plan, dispatch)?;
+    LocalExecutor::<PostgresStateBackend>::validate_resume_execution_plan(plan, builder, approval)
 }
 
 /// Applies one proof-enforced collaborative project approval decision only
@@ -14978,6 +15230,56 @@ fn validate_hosted_no_write_plan(plan: &ExecutionPlan) -> Result<(), WorkflowOsE
     Ok(())
 }
 
+fn bind_hosted_dispatch_context(
+    plan: &mut ExecutionPlan,
+    dispatch: &HostedNoWriteDispatchInputs,
+) -> Result<(), WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    update_idempotency_hash(
+        &mut hasher,
+        "resolved_execution_context",
+        plan.resolved_execution_context_hash.as_str(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "catalog_entry",
+        dispatch.catalog_entry_id.as_str(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "policy_id",
+        dispatch.policy.policy_id().as_str(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "policy_hash",
+        dispatch.policy.policy_hash().as_str(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "timeout_seconds",
+        &dispatch.budget.timeout_seconds().to_string(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "max_output_bytes",
+        &dispatch.budget.max_output_bytes().to_string(),
+    );
+    if let Some(scope) = &dispatch.project_scope {
+        update_idempotency_hash(
+            &mut hasher,
+            "organization_id",
+            scope.organization_id().as_str(),
+        );
+        update_idempotency_hash(&mut hasher, "project_id", scope.project_id().as_str());
+    } else {
+        update_idempotency_hash(&mut hasher, "project_scope", "none");
+    }
+    plan.resolved_execution_context_hash =
+        crate::SpecContentHash::new(hex_digest(hasher.finalize()))?;
+    Ok(())
+}
+
 fn dispatch_hosted_plan(
     executor: &LocalExecutor<'_, PostgresStateBackend>,
     mut plan: ExecutionPlan,
@@ -14998,7 +15300,7 @@ fn dispatch_hosted_plan(
         adapter_id: None,
         correlation_id: Some(plan.event_builder.correlation_id.clone()),
     };
-    executor.evaluate_and_record_policy(&mut plan.event_builder, &invoke_context)?;
+    ensure_hosted_invoke_policy(executor, &mut plan.event_builder, &invoke_context)?;
     let run = executor.backend.rehydrate_run(&plan.event_builder.run_id)?;
     let bundle = run
         .snapshot
@@ -15039,10 +15341,18 @@ fn dispatch_hosted_plan(
         request,
         Timestamp::now_utc(),
     )?;
+    if let Some(existing) = executor
+        .backend
+        .read_revisioned_hosted_work_item(work_item.work_item_id())?
+    {
+        existing.value().validate_dispatch_intent(&work_item)?;
+        crate::hosted::validate_durable_hosted_dispatch(&run, existing.value())?;
+        return Ok(run);
+    }
     let projection = HostedSkillDispatch::new(
         &run,
         work_item,
-        plan.invocation_id,
+        hosted_invocation_id(&plan)?,
         plan.skill_id,
         plan.skill_version,
         SkillAttemptId::generate(),
@@ -15057,16 +15367,67 @@ fn dispatch_hosted_plan(
     executor.backend.rehydrate_run(&plan.event_builder.run_id)
 }
 
+fn ensure_hosted_invoke_policy(
+    executor: &LocalExecutor<'_, PostgresStateBackend>,
+    builder: &mut EventBuilder,
+    context: &PolicyEvaluationContext,
+) -> Result<(), WorkflowOsError> {
+    let run = executor.backend.rehydrate_run(&builder.run_id)?;
+    let existing = run.events.iter().rev().find_map(|event| match &event.kind {
+        WorkflowRunEventKind::PolicyDecisionRecorded(decision)
+            if decision.action == context.action
+                && decision.capabilities == context.capabilities
+                && decision.actor == context.actor
+                && decision.workflow_id == context.workflow_id
+                && decision.run_id == context.run_id
+                && decision.correlation_id == context.correlation_id =>
+        {
+            Some(decision.as_ref())
+        }
+        _ => None,
+    });
+    if let Some(decision) = existing {
+        return policy_result(decision);
+    }
+    executor.evaluate_and_record_policy(builder, context)
+}
+
 fn hosted_work_item_id(plan: &ExecutionPlan) -> Result<HostedWorkItemId, WorkflowOsError> {
     let mut hasher = Sha256::new();
     update_idempotency_hash(&mut hasher, "run", plan.event_builder.run_id.as_str());
     update_idempotency_hash(&mut hasher, "step", plan.step.id.as_str());
-    update_idempotency_hash(&mut hasher, "invocation", plan.invocation_id.as_str());
+    update_idempotency_hash(
+        &mut hasher,
+        "invocation-idempotency",
+        plan.idempotency_key.as_str(),
+    );
     HostedWorkItemId::new(format!("hosted-work-{}", hex_digest(hasher.finalize()))).map_err(|_| {
         executor_error(
             WorkflowOsErrorKind::Validation,
             "executor.hosted_no_write.work_item_id.invalid",
             "hosted work item identity is invalid",
+        )
+    })
+}
+
+fn hosted_invocation_id(plan: &ExecutionPlan) -> Result<SkillInvocationId, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    update_idempotency_hash(&mut hasher, "run", plan.event_builder.run_id.as_str());
+    update_idempotency_hash(&mut hasher, "step", plan.step.id.as_str());
+    update_idempotency_hash(
+        &mut hasher,
+        "invocation-idempotency",
+        plan.idempotency_key.as_str(),
+    );
+    SkillInvocationId::new(format!(
+        "hosted-invocation-{}",
+        hex_digest(hasher.finalize())
+    ))
+    .map_err(|_| {
+        executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor.hosted_no_write.invocation_id.invalid",
+            "hosted invocation identity is invalid",
         )
     })
 }

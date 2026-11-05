@@ -898,13 +898,15 @@ async fn collaborative_create_run(
     let run_id = request.run_id.clone();
     let run = tokio::task::spawn_blocking(move || {
         backend.reserve_hosted_project_resource(&reservation)?;
+        let request_intent = hosted_mutation_intent("project-run-create", &request)?;
         let expected_result = IdempotencyResult {
             result_ref: format!(
-                "hosted-project-run:{}:{}:{}:{}",
+                "hosted-project-run:{}:{}:{}:{}:{}",
                 scope.organization_id(),
                 scope.project_id(),
                 actor,
-                run_id
+                run_id,
+                request_intent.as_str()
             ),
         };
         match backend
@@ -1098,7 +1100,7 @@ async fn collaborative_decide_approval(
     }
     let backend = state.backend.clone();
     let result = tokio::task::spawn_blocking(move || {
-        reserve_scoped_hosted_mutation(
+        reserve_scoped_replayable_hosted_mutation(
             &backend,
             &scope,
             &actor,
@@ -1199,6 +1201,46 @@ fn reserve_scoped_hosted_mutation<T: Serialize>(
     operation: &str,
     request: &T,
 ) -> Result<(), WorkflowOsError> {
+    reserve_scoped_hosted_mutation_with_replay(
+        backend,
+        scope,
+        actor,
+        idempotency_key,
+        operation,
+        request,
+        false,
+    )
+}
+
+fn reserve_scoped_replayable_hosted_mutation<T: Serialize>(
+    backend: &PostgresStateBackend,
+    scope: &HostedProjectScope,
+    actor: &ActorId,
+    idempotency_key: &IdempotencyKey,
+    operation: &str,
+    request: &T,
+) -> Result<(), WorkflowOsError> {
+    reserve_scoped_hosted_mutation_with_replay(
+        backend,
+        scope,
+        actor,
+        idempotency_key,
+        operation,
+        request,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reserve_scoped_hosted_mutation_with_replay<T: Serialize>(
+    backend: &PostgresStateBackend,
+    scope: &HostedProjectScope,
+    actor: &ActorId,
+    idempotency_key: &IdempotencyKey,
+    operation: &str,
+    request: &T,
+    allow_exact_replay: bool,
+) -> Result<(), WorkflowOsError> {
     let intent = hosted_mutation_intent(
         &format!(
             "{}:{}:{}:{}",
@@ -1214,6 +1256,7 @@ fn reserve_scoped_hosted_mutation<T: Serialize>(
     };
     match backend.record_idempotency_result(idempotency_key, expected.clone())? {
         IdempotencyWrite::FirstWrite(result) if result == expected => Ok(()),
+        IdempotencyWrite::Duplicate(result) if result == expected && allow_exact_replay => Ok(()),
         IdempotencyWrite::Duplicate(result) if result == expected => {
             Err(WorkflowOsError::invalid_state(
                 "hosted.project_mutation.idempotency.replay_deferred",
@@ -1522,7 +1565,7 @@ async fn collaborative_publish_catalog_version(
 }
 
 /// Exact explicit inputs for one remote governed-run creation.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct HostedRunCreateRequest {
     run_id: WorkflowRunId,
     workflow_id: WorkflowId,
@@ -1566,21 +1609,7 @@ async fn create_run(
             HostedProjectResourceKind::Run,
             request.run_id.as_str(),
         )?;
-        let expected_result = IdempotencyResult {
-            result_ref: format!("hosted-run:{}", request.run_id.as_str()),
-        };
-        match backend
-            .record_idempotency_result(&request.idempotency_key, expected_result.clone())?
-        {
-            IdempotencyWrite::FirstWrite(result) | IdempotencyWrite::Duplicate(result)
-                if result == expected_result => {}
-            IdempotencyWrite::FirstWrite(_) | IdempotencyWrite::Duplicate(_) => {
-                return Err(WorkflowOsError::invalid_state(
-                    "hosted.run.idempotency.conflict",
-                    "hosted run idempotency identity conflicts with durable state",
-                ));
-            }
-        }
+        reserve_hosted_mutation(&backend, &request.idempotency_key, "run-create", &request)?;
         let registry = LocalSkillRegistry::new();
         let executor = LocalExecutor::new(&backend, &registry);
         let execution = LocalExecutionRequest {
@@ -3191,6 +3220,40 @@ mod tests {
         assert_eq!(first, replay);
         assert_ne!(first, other_operation);
         assert!(!first.as_str().contains("private-reason-value"));
+    }
+
+    #[test]
+    fn hosted_run_create_intent_binds_the_complete_request() {
+        let request = HostedRunCreateRequest {
+            run_id: WorkflowRunId::new("run-hosted-create-intent")
+                .unwrap_or_else(|error| panic!("{error}")),
+            workflow_id: WorkflowId::new("hosted/create-intent")
+                .unwrap_or_else(|error| panic!("{error}")),
+            bundle_id: ImmutableRunBundleId::new("bundle-hosted-create-intent")
+                .unwrap_or_else(|error| panic!("{error}")),
+            bundle_version: ImmutableRunBundleVersion::new("v1")
+                .unwrap_or_else(|error| panic!("{error}")),
+            created_at: Timestamp::parse_rfc3339("2026-11-05T00:00:00Z")
+                .unwrap_or_else(|error| panic!("{error}")),
+            correlation_id: CorrelationId::new("correlation-hosted-create-intent")
+                .unwrap_or_else(|error| panic!("{error}")),
+            idempotency_key: IdempotencyKey::new("hosted-create-intent")
+                .unwrap_or_else(|error| panic!("{error}")),
+            sensitivity: ImmutableRunBundleSensitivity::Internal,
+            redaction_required: true,
+        };
+        let exact = hosted_mutation_intent("run-create", &request)
+            .unwrap_or_else(|error| panic!("{error}"));
+        let replay = hosted_mutation_intent("run-create", &request)
+            .unwrap_or_else(|error| panic!("{error}"));
+        let mut changed = request.clone();
+        changed.bundle_version =
+            ImmutableRunBundleVersion::new("v2").unwrap_or_else(|error| panic!("{error}"));
+        let changed = hosted_mutation_intent("run-create", &changed)
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(exact, replay);
+        assert_ne!(exact, changed);
+        assert!(!format!("{request:?}").contains("run-hosted-create-intent"));
     }
 
     fn request_with_side_effects(

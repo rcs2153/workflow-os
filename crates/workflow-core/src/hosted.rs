@@ -1944,6 +1944,35 @@ impl HostedSkillDispatch {
     pub const fn invocation_started(&self) -> &WorkflowRunEvent {
         &self.invocation_started
     }
+
+    pub(crate) fn validate_replay_intent(&self, run: &WorkflowRun) -> Result<(), WorkflowOsError> {
+        let durable = pending_hosted_invocation(run, &self.work_item)?;
+        let supplied = match &self.invocation_requested.kind {
+            WorkflowRunEventKind::SkillInvocationRequested(invocation) => (
+                &invocation.invocation_id,
+                &invocation.step_id,
+                &invocation.skill_id,
+                &invocation.skill_version,
+            ),
+            _ => {
+                return Err(hosted_projection_error(
+                    "hosted.dispatch.replay_intent.invalid",
+                    "hosted dispatch replay intent is invalid",
+                ));
+            }
+        };
+        if supplied.0 != &durable.0
+            || supplied.1 != &durable.1
+            || supplied.2 != &durable.2
+            || supplied.3 != &durable.3
+        {
+            return Err(hosted_projection_error(
+                "hosted.dispatch.replay_intent.invalid",
+                "hosted dispatch replay intent is invalid",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl fmt::Debug for HostedSkillDispatch {
@@ -2676,6 +2705,34 @@ impl HostedWorkItem {
     pub const fn attempt_count(&self) -> u32 {
         self.attempt_count
     }
+
+    /// Validates that another work item represents the same immutable dispatch
+    /// intent while allowing durable lifecycle fields to have advanced.
+    ///
+    /// # Errors
+    ///
+    /// Rejects any identity, authority, immutable-bundle, or provider-request
+    /// substitution without exposing the conflicting values.
+    pub(crate) fn validate_dispatch_intent(&self, expected: &Self) -> Result<(), WorkflowOsError> {
+        if self.work_item_id != expected.work_item_id
+            || self.catalog_entry_id != expected.catalog_entry_id
+            || self.run_id != expected.run_id
+            || self.workflow_id != expected.workflow_id
+            || self.bundle_id != expected.bundle_id
+            || self.bundle_version != expected.bundle_version
+            || self.bundle_root_hash != expected.bundle_root_hash
+            || self.requested_by != expected.requested_by
+            || self.correlation_id != expected.correlation_id
+            || self.idempotency_key != expected.idempotency_key
+            || self.execution_request != expected.execution_request
+        {
+            return Err(WorkflowOsError::invalid_state(
+                "hosted.dispatch.intent_mismatch",
+                "hosted dispatch intent conflicts with durable state",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl TryFrom<HostedWorkItemWire> for HostedWorkItem {
@@ -2871,6 +2928,15 @@ fn pending_hosted_invocation(
         requested.skill_id.clone(),
         requested.skill_version.clone(),
     ))
+}
+
+pub(crate) fn validate_durable_hosted_dispatch(
+    run: &WorkflowRun,
+    work_item: &HostedWorkItem,
+) -> Result<(), WorkflowOsError> {
+    validate_dispatch_run_binding(run, work_item)?;
+    pending_hosted_invocation(run, work_item)?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3720,6 +3786,29 @@ mod tests {
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(reclaimed.status(), HostedWorkItemStatus::Running);
         assert_eq!(reclaimed.attempt_count(), 2);
+    }
+
+    #[test]
+    fn hosted_dispatch_intent_ignores_only_lifecycle_fields() {
+        let expected = work_item();
+        let running = expected
+            .transition(
+                HostedWorkItemStatus::Running,
+                timestamp("2026-07-29T00:00:01Z"),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        running
+            .validate_dispatch_intent(&expected)
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        let mut substituted = running;
+        substituted.catalog_entry_id = HostedCatalogEntryId::new("catalog/substituted")
+            .unwrap_or_else(|error| panic!("{error}"));
+        let error = substituted
+            .validate_dispatch_intent(&expected)
+            .expect_err("dispatch authority substitution must fail");
+        assert_eq!(error.code(), "hosted.dispatch.intent_mismatch");
+        assert!(!format!("{error:?}").contains("catalog/substituted"));
     }
 
     #[test]
