@@ -13371,6 +13371,7 @@ fn local_check_assurance_producer_label(value: LocalCheckEvidenceProducerPosture
         LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound => {
             "operator_selected_content_bound"
         }
+        LocalCheckEvidenceProducerPosture::RegisteredContentBound => "registered_content_bound",
     }
 }
 
@@ -13719,6 +13720,22 @@ fn usage(message: impl Into<String>) -> WorkflowOsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_check_assurance_producer_labels_cover_public_postures() {
+        assert_eq!(
+            local_check_assurance_producer_label(
+                LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound,
+            ),
+            "operator_selected_content_bound"
+        );
+        assert_eq!(
+            local_check_assurance_producer_label(
+                LocalCheckEvidenceProducerPosture::RegisteredContentBound,
+            ),
+            "registered_content_bound"
+        );
+    }
 
     #[test]
     fn inspect_reference_escaping_keeps_terminal_and_json_output_single_record_safe() {

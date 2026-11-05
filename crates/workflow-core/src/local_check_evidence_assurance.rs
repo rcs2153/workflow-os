@@ -10,7 +10,7 @@ use crate::{
 };
 
 /// Versioned algorithm for payload-free local-check evidence assurance projections.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalCheckEvidenceAssuranceProjectionAlgorithm {
     /// Initial fixed-width framed SHA-256 projection.
@@ -46,6 +46,11 @@ impl<'de> Deserialize<'de> for LocalCheckEvidenceAssuranceProjectionAlgorithm {
 pub enum LocalCheckEvidenceProducerPosture {
     /// An operator selected exact executable bytes that the trusted host content-bound.
     OperatorSelectedContentBound,
+    /// Core selected a reviewed, registered producer identity and content binding.
+    ///
+    /// This is requirement vocabulary only until a separately reviewed producer
+    /// registry and verifier can establish the posture.
+    RegisteredContentBound,
 }
 
 impl<'de> Deserialize<'de> for LocalCheckEvidenceProducerPosture {
@@ -55,6 +60,7 @@ impl<'de> Deserialize<'de> for LocalCheckEvidenceProducerPosture {
     {
         match String::deserialize(deserializer)?.as_str() {
             "operator_selected_content_bound" => Ok(Self::OperatorSelectedContentBound),
+            "registered_content_bound" => Ok(Self::RegisteredContentBound),
             _ => Err(serde::de::Error::custom(
                 "local check evidence producer posture is invalid",
             )),
@@ -427,7 +433,7 @@ impl LocalCheckEvidenceAssuranceProjection {
     /// establish a Core-owned source and immutable context before relying on it.
     #[must_use]
     pub fn satisfies_minimum(&self, minimum: LocalCheckEvidenceAssuranceMinimum) -> bool {
-        self.producer_posture == minimum.producer
+        producer_satisfies(self.producer_posture, minimum.producer)
             && self.execution_posture == minimum.execution
             && attestation_satisfies(self.attestation_posture, minimum.attestation)
     }
@@ -676,6 +682,7 @@ const fn producer_label(value: LocalCheckEvidenceProducerPosture) -> &'static st
         LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound => {
             "operator_selected_content_bound"
         }
+        LocalCheckEvidenceProducerPosture::RegisteredContentBound => "registered_content_bound",
     }
 }
 
@@ -683,6 +690,23 @@ const fn execution_label(value: LocalCheckEvidenceExecutionPosture) -> &'static 
     match value {
         LocalCheckEvidenceExecutionPosture::TrustedHostObserved => "trusted_host_observed",
     }
+}
+
+const fn producer_satisfies(
+    actual: LocalCheckEvidenceProducerPosture,
+    minimum: LocalCheckEvidenceProducerPosture,
+) -> bool {
+    matches!(
+        (actual, minimum),
+        (
+            LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound,
+            LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound
+        ) | (
+            LocalCheckEvidenceProducerPosture::RegisteredContentBound,
+            LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound
+                | LocalCheckEvidenceProducerPosture::RegisteredContentBound
+        )
+    )
 }
 
 const fn attestation_label(value: LocalCheckEvidenceAttestationPosture) -> &'static str {
@@ -1005,8 +1029,26 @@ mod tests {
             LocalCheckEvidenceExecutionPosture::TrustedHostObserved,
             LocalCheckEvidenceAttestationPosture::KernelAcceptedLocalProcess,
         );
+        let registered = LocalCheckEvidenceAssuranceMinimum::new(
+            LocalCheckEvidenceProducerPosture::RegisteredContentBound,
+            LocalCheckEvidenceExecutionPosture::TrustedHostObserved,
+            LocalCheckEvidenceAttestationPosture::Unattested,
+        );
         assert!(projection.satisfies_minimum(weak));
         assert!(!projection.satisfies_minimum(attested));
+        assert!(!projection.satisfies_minimum(registered));
+        assert!(producer_satisfies(
+            LocalCheckEvidenceProducerPosture::RegisteredContentBound,
+            LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound,
+        ));
+        assert!(producer_satisfies(
+            LocalCheckEvidenceProducerPosture::RegisteredContentBound,
+            LocalCheckEvidenceProducerPosture::RegisteredContentBound,
+        ));
+        assert!(!producer_satisfies(
+            LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound,
+            LocalCheckEvidenceProducerPosture::RegisteredContentBound,
+        ));
     }
 
     #[test]

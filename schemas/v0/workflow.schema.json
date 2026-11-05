@@ -184,6 +184,20 @@
         "command_id": { "$ref": "#/$defs/identifier" },
         "requirement_level": { "enum": ["required", "optional"] },
         "minimum_assurance": { "const": "kernel_observed_local_process" },
+        "evidence_assurance_minimum": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["producer", "execution", "attestation"],
+          "properties": {
+            "producer": {
+              "enum": ["operator_selected_content_bound", "registered_content_bound"]
+            },
+            "execution": { "const": "trusted_host_observed" },
+            "attestation": {
+              "enum": ["unattested", "kernel_accepted_local_process"]
+            }
+          }
+        },
         "accepted_statuses": {
           "type": "array",
           "prefixItems": [{ "const": "passed" }],

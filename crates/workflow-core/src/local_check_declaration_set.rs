@@ -89,6 +89,7 @@ pub struct CanonicalLocalCheckDeclaration {
     attestation_requirement_fingerprint: SpecContentHash,
     requirement_level: LocalCheckRequirementLevel,
     minimum_assurance: crate::LocalCheckAttestationAssurance,
+    evidence_assurance_minimum: Option<crate::LocalCheckEvidenceAssuranceMinimum>,
     accepted_statuses: Vec<LocalCheckResultStatus>,
     freshness: LocalCheckAttestationFreshnessPolicy,
     exact_immutable_run_binding_required: bool,
@@ -108,6 +109,8 @@ struct CanonicalLocalCheckDeclarationWire {
     attestation_requirement_fingerprint: SpecContentHash,
     requirement_level: LocalCheckRequirementLevel,
     minimum_assurance: crate::LocalCheckAttestationAssurance,
+    #[serde(default)]
+    evidence_assurance_minimum: Option<crate::LocalCheckEvidenceAssuranceMinimum>,
     accepted_statuses: Vec<LocalCheckResultStatus>,
     freshness: LocalCheckAttestationFreshnessPolicy,
     exact_immutable_run_binding_required: bool,
@@ -155,6 +158,7 @@ impl CanonicalLocalCheckDeclaration {
             attestation_requirement_fingerprint,
             requirement_level: declaration.requirement_level(),
             minimum_assurance: declaration.minimum_assurance(),
+            evidence_assurance_minimum: declaration.evidence_assurance_minimum(),
             accepted_statuses: declaration.accepted_statuses().to_vec(),
             freshness: declaration.freshness(),
             exact_immutable_run_binding_required: declaration
@@ -268,6 +272,14 @@ impl CanonicalLocalCheckDeclaration {
         self.minimum_assurance
     }
 
+    /// Returns the optional durable evidence-assurance minimum.
+    #[must_use]
+    pub const fn evidence_assurance_minimum(
+        &self,
+    ) -> Option<crate::LocalCheckEvidenceAssuranceMinimum> {
+        self.evidence_assurance_minimum
+    }
+
     /// Returns the accepted result statuses.
     #[must_use]
     pub fn accepted_statuses(&self) -> &[LocalCheckResultStatus] {
@@ -361,6 +373,7 @@ impl CanonicalLocalCheckDeclarationWire {
             attestation_requirement_fingerprint: self.attestation_requirement_fingerprint,
             requirement_level: self.requirement_level,
             minimum_assurance: self.minimum_assurance,
+            evidence_assurance_minimum: self.evidence_assurance_minimum,
             accepted_statuses: self.accepted_statuses,
             freshness: self.freshness,
             exact_immutable_run_binding_required: self.exact_immutable_run_binding_required,
@@ -810,6 +823,23 @@ fn hash_declaration(hasher: &mut Sha256, declaration: &CanonicalLocalCheckDeclar
         "minimum_assurance",
         assurance_label(declaration.minimum_assurance),
     );
+    if let Some(minimum) = declaration.evidence_assurance_minimum {
+        hash_field(
+            hasher,
+            "evidence_producer_minimum",
+            evidence_producer_label(minimum.producer()),
+        );
+        hash_field(
+            hasher,
+            "evidence_execution_minimum",
+            evidence_execution_label(minimum.execution()),
+        );
+        hash_field(
+            hasher,
+            "evidence_attestation_minimum",
+            evidence_attestation_label(minimum.attestation()),
+        );
+    }
     for status in &declaration.accepted_statuses {
         hash_field(hasher, "accepted_status", &status.to_string());
     }
@@ -874,6 +904,36 @@ const fn assurance_label(value: crate::LocalCheckAttestationAssurance) -> &'stat
             "kernel_observed_local_process"
         }
         crate::LocalCheckAttestationAssurance::ExternalVerifier => "external_verifier",
+    }
+}
+
+const fn evidence_producer_label(value: crate::LocalCheckEvidenceProducerPosture) -> &'static str {
+    match value {
+        crate::LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound => {
+            "operator_selected_content_bound"
+        }
+        crate::LocalCheckEvidenceProducerPosture::RegisteredContentBound => {
+            "registered_content_bound"
+        }
+    }
+}
+
+const fn evidence_execution_label(
+    value: crate::LocalCheckEvidenceExecutionPosture,
+) -> &'static str {
+    match value {
+        crate::LocalCheckEvidenceExecutionPosture::TrustedHostObserved => "trusted_host_observed",
+    }
+}
+
+const fn evidence_attestation_label(
+    value: crate::LocalCheckEvidenceAttestationPosture,
+) -> &'static str {
+    match value {
+        crate::LocalCheckEvidenceAttestationPosture::Unattested => "unattested",
+        crate::LocalCheckEvidenceAttestationPosture::KernelAcceptedLocalProcess => {
+            "kernel_accepted_local_process"
+        }
     }
 }
 

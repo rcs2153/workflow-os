@@ -3,9 +3,11 @@
 
 use workflow_core::{
     LocalCheckAttestationAssurance, LocalCheckAttestationFreshnessPolicy, LocalCheckCommandId,
-    LocalCheckNetworkPolicy, LocalCheckRequirementDeclaration,
-    LocalCheckRequirementDeclarationDefinition, LocalCheckRequirementId,
-    LocalCheckRequirementLevel, LocalCheckResultStatus, LocalCheckSideEffectClass,
+    LocalCheckEvidenceAssuranceMinimum, LocalCheckEvidenceAttestationPosture,
+    LocalCheckEvidenceExecutionPosture, LocalCheckEvidenceProducerPosture, LocalCheckNetworkPolicy,
+    LocalCheckRequirementDeclaration, LocalCheckRequirementDeclarationDefinition,
+    LocalCheckRequirementId, LocalCheckRequirementLevel, LocalCheckResultStatus,
+    LocalCheckSideEffectClass,
 };
 
 fn valid_definition() -> LocalCheckRequirementDeclarationDefinition {
@@ -14,6 +16,7 @@ fn valid_definition() -> LocalCheckRequirementDeclarationDefinition {
         command_id: LocalCheckCommandId::new("workflow-os/docs-check").expect("valid command id"),
         requirement_level: LocalCheckRequirementLevel::Required,
         minimum_assurance: LocalCheckAttestationAssurance::KernelObservedLocalProcess,
+        evidence_assurance_minimum: None,
         accepted_statuses: vec![LocalCheckResultStatus::Passed],
         freshness: LocalCheckAttestationFreshnessPolicy::NoReuse,
         exact_immutable_run_binding_required: true,
@@ -21,6 +24,23 @@ fn valid_definition() -> LocalCheckRequirementDeclarationDefinition {
         network_maximum: LocalCheckNetworkPolicy::Disabled,
         side_effect_maximum: LocalCheckSideEffectClass::NoSourceWrites,
     }
+}
+
+#[test]
+fn evidence_assurance_minimum_round_trips_as_optional_bound_declaration_vocabulary() {
+    let mut definition = valid_definition();
+    let minimum = LocalCheckEvidenceAssuranceMinimum::new(
+        LocalCheckEvidenceProducerPosture::RegisteredContentBound,
+        LocalCheckEvidenceExecutionPosture::TrustedHostObserved,
+        LocalCheckEvidenceAttestationPosture::KernelAcceptedLocalProcess,
+    );
+    definition.evidence_assurance_minimum = Some(minimum);
+    let declaration = LocalCheckRequirementDeclaration::new(definition).expect("valid declaration");
+    let encoded = serde_json::to_string(&declaration).expect("serialize declaration");
+    let decoded: LocalCheckRequirementDeclaration =
+        serde_json::from_str(&encoded).expect("deserialize declaration");
+
+    assert_eq!(decoded.evidence_assurance_minimum(), Some(minimum));
 }
 
 #[test]

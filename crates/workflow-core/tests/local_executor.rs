@@ -746,6 +746,19 @@ observability_requirements:
         fs::write(workflow_path, workflow).expect("one-step authoritative fixture writes");
     }
 
+    fn require_local_check_evidence_assurance(&self, producer: &str, attestation: &str) {
+        let workflow_path = self.path().join("workflows/main.workflow.yml");
+        let workflow = fs::read_to_string(&workflow_path)
+            .expect("authoritative workflow fixture reads")
+            .replace(
+                "        minimum_assurance: kernel_observed_local_process\n",
+                &format!(
+                    "        minimum_assurance: kernel_observed_local_process\n        evidence_assurance_minimum:\n          producer: {producer}\n          execution: trusted_host_observed\n          attestation: {attestation}\n"
+                ),
+            );
+        fs::write(workflow_path, workflow).expect("evidence-assurance fixture writes");
+    }
+
     fn write_core_owned_authoritative_approval_project(&self) {
         self.write_core_owned_authoritative_project_validation_project();
         let workflow_path = self.path().join("workflows/main.workflow.yml");
@@ -8264,6 +8277,103 @@ fn core_owned_authoritative_route_derives_facts_and_ignores_unused_visible_capab
         result.governance_assessment_binding().disclosure(),
         GovernanceDisclosureRequirement::Quiet
     );
+}
+
+#[test]
+fn selected_project_validation_accepts_explicit_current_evidence_minimum() {
+    let project = TestProject::new("selected-project-validation-current-assurance");
+    project.write_core_owned_authoritative_project_validation_project();
+    project.require_local_check_evidence_assurance("operator_selected_content_bound", "unattested");
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-selected-project-validation-current-assurance").expect("run id");
+    let request = project.selected_project_validation_request(run_id);
+
+    let result =
+        route_selected_project_validation_governance(&executor, &store, &profile, None, &request)
+            .expect("current weak assurance satisfies its exact declared minimum");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 1);
+}
+
+#[test]
+fn selected_project_validation_rejects_unattested_durable_evidence_before_workflow_execution() {
+    for (case, producer, attestation) in [
+        (
+            "registered-producer",
+            "registered_content_bound",
+            "unattested",
+        ),
+        (
+            "attested-execution",
+            "operator_selected_content_bound",
+            "kernel_accepted_local_process",
+        ),
+    ] {
+        let project = TestProject::new(&format!("selected-project-validation-{case}"));
+        project.write_core_owned_authoritative_project_validation_project();
+        project.require_local_check_evidence_assurance(producer, attestation);
+        let skill_calls = Rc::new(Cell::new(0));
+        let registry = registry(Box::new(EchoHandler {
+            calls: Rc::clone(&skill_calls),
+        }));
+        let runner = Arc::new(FakeLocalCheckRunner::new(
+            LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+        ));
+        let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+            .resolve_with_process_runner(
+                workflow_os_binary(),
+                project.path().to_path_buf(),
+                Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+            )
+            .expect("explicit profile resolves");
+        let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+        let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+        let executor = LocalExecutor::new(&backend, &registry);
+        let run_id =
+            WorkflowRunId::new(format!("run-selected-project-validation-{case}")).expect("run id");
+        let request = project.selected_project_validation_request(run_id.clone());
+
+        let error = route_selected_project_validation_governance(
+            &executor, &store, &profile, None, &request,
+        )
+        .expect_err("weak durable evidence must not satisfy a stronger minimum");
+
+        assert_eq!(
+            error.code(),
+            "executor.local_check_evidence_assurance.minimum_not_satisfied"
+        );
+        assert_eq!(runner.call_count(), 1);
+        assert_eq!(skill_calls.get(), 0);
+        assert!(backend.read_events(&run_id).expect("event read").is_empty());
+        let [projection] = store
+            .list_local_check_evidence_assurance_projections(&run_id)
+            .expect("durable assurance projection")
+            .try_into()
+            .expect("one durable projection");
+        assert_eq!(
+            projection.attestation_posture(),
+            LocalCheckEvidenceAttestationPosture::Unattested
+        );
+    }
 }
 
 #[test]

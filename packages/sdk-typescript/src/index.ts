@@ -275,12 +275,19 @@ export interface LocalCheckRequirementDeclaration {
   command_id: string;
   requirement_level: LocalCheckRequirementLevel;
   minimum_assurance: "kernel_observed_local_process";
+  evidence_assurance_minimum?: LocalCheckEvidenceAssuranceMinimum;
   accepted_statuses: ["passed"];
   freshness: LocalCheckAttestationFreshnessPolicy;
   exact_immutable_run_binding_required: true;
   truncation_allowed: boolean;
   network_maximum: "disabled";
   side_effect_maximum: "no_source_writes" | "build_or_cache_writes";
+}
+
+export interface LocalCheckEvidenceAssuranceMinimum {
+  producer: "operator_selected_content_bound" | "registered_content_bound";
+  execution: "trusted_host_observed";
+  attestation: "unattested" | "kernel_accepted_local_process";
 }
 
 export interface ValueMapping {

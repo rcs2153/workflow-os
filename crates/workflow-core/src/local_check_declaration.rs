@@ -28,6 +28,7 @@ pub struct LocalCheckRequirementDeclaration {
     command_id: LocalCheckCommandId,
     requirement_level: LocalCheckRequirementLevel,
     minimum_assurance: LocalCheckAttestationAssurance,
+    evidence_assurance_minimum: Option<crate::LocalCheckEvidenceAssuranceMinimum>,
     accepted_statuses: Vec<LocalCheckResultStatus>,
     freshness: LocalCheckAttestationFreshnessPolicy,
     exact_immutable_run_binding_required: bool,
@@ -46,6 +47,8 @@ pub struct LocalCheckRequirementDeclarationDefinition {
     pub requirement_level: LocalCheckRequirementLevel,
     /// Minimum assurance required from a future verifier.
     pub minimum_assurance: LocalCheckAttestationAssurance,
+    /// Optional minimum evidence posture enforced over the Core-owned durable projection.
+    pub evidence_assurance_minimum: Option<crate::LocalCheckEvidenceAssuranceMinimum>,
     /// Accepted result statuses.
     pub accepted_statuses: Vec<LocalCheckResultStatus>,
     /// Observation freshness requirement.
@@ -109,6 +112,7 @@ impl LocalCheckRequirementDeclaration {
             command_id: definition.command_id,
             requirement_level: definition.requirement_level,
             minimum_assurance: definition.minimum_assurance,
+            evidence_assurance_minimum: definition.evidence_assurance_minimum,
             accepted_statuses: definition.accepted_statuses,
             freshness: definition.freshness,
             exact_immutable_run_binding_required: true,
@@ -140,6 +144,14 @@ impl LocalCheckRequirementDeclaration {
     #[must_use]
     pub const fn minimum_assurance(&self) -> LocalCheckAttestationAssurance {
         self.minimum_assurance
+    }
+
+    /// Returns the optional durable evidence-assurance minimum.
+    #[must_use]
+    pub const fn evidence_assurance_minimum(
+        &self,
+    ) -> Option<crate::LocalCheckEvidenceAssuranceMinimum> {
+        self.evidence_assurance_minimum
     }
 
     /// Returns accepted statuses.
@@ -191,6 +203,10 @@ impl fmt::Debug for LocalCheckRequirementDeclaration {
             .field("command_id", &"[REDACTED]")
             .field("requirement_level", &self.requirement_level)
             .field("minimum_assurance", &self.minimum_assurance)
+            .field(
+                "evidence_assurance_minimum",
+                &self.evidence_assurance_minimum,
+            )
             .field("accepted_statuses", &self.accepted_statuses)
             .field("freshness", &self.freshness)
             .field(
@@ -211,6 +227,8 @@ struct LocalCheckRequirementDeclarationWire {
     command_id: LocalCheckCommandId,
     requirement_level: LocalCheckRequirementLevel,
     minimum_assurance: LocalCheckAttestationAssurance,
+    #[serde(default)]
+    evidence_assurance_minimum: Option<crate::LocalCheckEvidenceAssuranceMinimum>,
     accepted_statuses: Vec<LocalCheckResultStatus>,
     freshness: LocalCheckAttestationFreshnessPolicy,
     exact_immutable_run_binding_required: bool,
@@ -230,6 +248,7 @@ impl<'de> Deserialize<'de> for LocalCheckRequirementDeclaration {
             command_id: wire.command_id,
             requirement_level: wire.requirement_level,
             minimum_assurance: wire.minimum_assurance,
+            evidence_assurance_minimum: wire.evidence_assurance_minimum,
             accepted_statuses: wire.accepted_statuses,
             freshness: wire.freshness,
             exact_immutable_run_binding_required: wire.exact_immutable_run_binding_required,
