@@ -8377,6 +8377,70 @@ fn selected_project_validation_rejects_unattested_durable_evidence_before_workfl
 }
 
 #[test]
+fn selected_project_validation_rejects_same_run_minimum_downgrade_after_denial() {
+    let project = TestProject::new("selected-project-validation-minimum-downgrade");
+    project.write_core_owned_authoritative_project_validation_project();
+    project.require_local_check_evidence_assurance("registered_content_bound", "unattested");
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-selected-project-validation-minimum-downgrade").expect("run id");
+
+    let first_error = route_selected_project_validation_governance(
+        &executor,
+        &store,
+        &profile,
+        None,
+        &project.selected_project_validation_request(run_id.clone()),
+    )
+    .expect_err("strong minimum must reject current weak evidence");
+    assert_eq!(
+        first_error.code(),
+        "executor.local_check_evidence_assurance.minimum_not_satisfied"
+    );
+
+    let workflow_path = project.path().join("workflows/main.workflow.yml");
+    let downgraded = fs::read_to_string(&workflow_path)
+        .expect("workflow reads")
+        .replace(
+            "producer: registered_content_bound",
+            "producer: operator_selected_content_bound",
+        );
+    fs::write(&workflow_path, downgraded).expect("downgraded workflow writes");
+
+    let retry_error = route_selected_project_validation_governance(
+        &executor,
+        &store,
+        &profile,
+        None,
+        &project.selected_project_validation_request(run_id.clone()),
+    )
+    .expect_err("same-run declaration downgrade must not authorize execution");
+    assert_eq!(
+        retry_error.code(),
+        "executor.authoritative_local_check.existing_run_unsupported"
+    );
+    assert_eq!(skill_calls.get(), 0);
+    assert!(backend.read_events(&run_id).expect("event read").is_empty());
+    assert_eq!(runner.call_count(), 1);
+}
+
+#[test]
 fn explicit_docs_check_profile_routes_real_check_fact_through_existing_runtime() {
     let project = TestProject::new("explicit-docs-profile-authoritative-route");
     project.write_authoritative_docs_check_project();

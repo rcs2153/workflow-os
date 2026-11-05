@@ -326,6 +326,51 @@ fn fingerprints_change_for_decision_relevant_contract_and_bundle_changes() {
 }
 
 #[test]
+fn evidence_assurance_minimum_changes_identity_and_rejects_substitution() {
+    let source = declaration(
+        "docs-required",
+        "local-check/docs",
+        "required",
+        "no_source_writes",
+    );
+    let weak_source = source.replace(
+        "        minimum_assurance: kernel_observed_local_process\n",
+        "        minimum_assurance: kernel_observed_local_process\n        evidence_assurance_minimum:\n          producer: operator_selected_content_bound\n          execution: trusted_host_observed\n          attestation: unattested\n",
+    );
+    let strong_source = weak_source.replace(
+        "producer: operator_selected_content_bound",
+        "producer: registered_content_bound",
+    );
+    let inventory = inventory(vec![
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract")
+    ]);
+    let absent = resolve(&workflow(&source), &inventory);
+    let weak = resolve(&workflow(&weak_source), &inventory);
+    let strong = resolve(&workflow(&strong_source), &inventory);
+
+    assert_ne!(
+        absent.declaration_set_fingerprint(),
+        weak.declaration_set_fingerprint()
+    );
+    assert_ne!(
+        weak.declaration_set_fingerprint(),
+        strong.declaration_set_fingerprint()
+    );
+
+    let mut substituted = serde_json::to_value(&weak).expect("serialized declaration set");
+    substituted["declarations"][0]["evidence_assurance_minimum"]["producer"] =
+        serde_json::Value::String("registered_content_bound".to_owned());
+    let error = serde_json::from_value::<workflow_core::CanonicalLocalCheckDeclarationSetRecord>(
+        substituted,
+    )
+    .expect_err("minimum substitution must invalidate the declaration-set identity");
+    assert_eq!(
+        error.to_string(),
+        "invalid canonical local check declaration set"
+    );
+}
+
+#[test]
 fn serde_recomputes_fingerprints_and_debug_redacts_identifiers() {
     let record = resolve(
         &workflow(&declaration(
