@@ -291,12 +291,23 @@ the Core-owned persistence namespace through the public store API. Public
 validated read/list inspection remains available, while serialized projection
 vocabulary remains non-authorizing. See the [accepted
 review](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_DURABLE_PROJECTION_REVIEW.md).
-The next authorized validator-assurance phase is a narrow minimum-assurance
-enforcement gate over this Core-owned durable projection. It must reject an
-unattested result when a reviewed declaration requires registered-producer or
-attested-execution posture, preserve existing behavior when no minimum is
-declared, and must not introduce a broad policy DSL, new producer registry,
-provider mutation, or executable-discovery surface.
+The narrow minimum-assurance enforcement gate is implemented and its focused
+maintainer/security review is accepted. An optional, dimension-specific
+`evidence_assurance_minimum` now participates in schema and SDK vocabulary, the
+content-addressed canonical declaration set, and immutable run identity. The
+closed authoritative project-validation path recovers that exact declaration
+from the stored bundle and evaluates it against the Core-owned durable
+projection before workflow events or skill execution. The current weak posture
+can satisfy an exact weak minimum, while registered-producer and
+kernel-accepted-attestation requirements fail closed. Declarations without the
+field preserve existing behavior. This slice adds no broad policy DSL,
+producer registry, provider mutation, executable discovery, assurance upgrade,
+or release claim. The accepted review replaced declaration-order comparison
+with an explicit closed producer-assurance table and completed the CLI's public
+label projection. See the [implementation
+report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_MINIMUM_GATE_REPORT.md) and
+[accepted review](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_MINIMUM_GATE_REVIEW.md).
+Independent adversarial assurance review is the next validator-assurance phase.
 
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and

@@ -17039,6 +17039,15 @@ where
             store,
             local_check_evidence_assurance_projections,
         )?;
+    let evidence_assurance_minimum = authoritative_docs_check_evidence_assurance_minimum(
+        &stored,
+        &request.selected_step_id,
+        requirement.requirement_fingerprint(),
+    )?;
+    enforce_local_check_evidence_assurance_minimum(
+        &local_check_evidence_assurance_projections,
+        evidence_assurance_minimum,
+    )?;
 
     let bundle_binding = stored.manifest().run_binding();
     Ok(PreparedAuthoritativeDocsCheckGovernance {
@@ -17189,6 +17198,38 @@ fn authoritative_docs_check_preflight_material(
         declaration,
     )?;
     Ok((requirement, identities))
+}
+
+fn authoritative_docs_check_evidence_assurance_minimum(
+    bundle: &crate::StoredImmutableRunBundle,
+    selected_step_id: &StepId,
+    requirement_fingerprint: &crate::SpecContentHash,
+) -> Result<Option<crate::LocalCheckEvidenceAssuranceMinimum>, WorkflowOsError> {
+    let records = bundle
+        .local_check_declaration_set_records()
+        .iter()
+        .filter(|record| record.step_id() == selected_step_id)
+        .collect::<Vec<_>>();
+    let [record] = records.as_slice() else {
+        return Err(authoritative_docs_check_executor_error(
+            "selected_declaration_set_unresolved",
+            "selected authoritative local-check declaration set is unavailable",
+        ));
+    };
+    let declarations = record
+        .declarations()
+        .iter()
+        .filter(|declaration| {
+            declaration.attestation_requirement_fingerprint() == requirement_fingerprint
+        })
+        .collect::<Vec<_>>();
+    let [declaration] = declarations.as_slice() else {
+        return Err(authoritative_docs_check_executor_error(
+            "selected_declaration_unresolved",
+            "selected authoritative local-check declaration is unavailable",
+        ));
+    };
+    Ok(declaration.evidence_assurance_minimum())
 }
 
 fn derive_authoritative_docs_check_identities(
@@ -18659,6 +18700,30 @@ fn persist_or_resolve_local_check_evidence_assurance_projections(
         }
     }
     Ok(durable)
+}
+
+fn enforce_local_check_evidence_assurance_minimum(
+    projections: &[crate::LocalCheckEvidenceAssuranceProjection],
+    minimum: Option<crate::LocalCheckEvidenceAssuranceMinimum>,
+) -> Result<(), WorkflowOsError> {
+    let Some(minimum) = minimum else {
+        return Ok(());
+    };
+    let [projection] = projections else {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.local_check_evidence_assurance.projection_ambiguous",
+            "local check evidence assurance minimum requires one durable projection",
+        ));
+    };
+    if !projection.satisfies_minimum(minimum) {
+        return Err(executor_error(
+            WorkflowOsErrorKind::PolicyDenied,
+            "executor.local_check_evidence_assurance.minimum_not_satisfied",
+            "durable local check evidence assurance does not satisfy the required minimum",
+        ));
+    }
+    Ok(())
 }
 
 fn local_check_evidence_assurance_binding_mismatch_error() -> WorkflowOsError {
