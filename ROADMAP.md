@@ -2304,6 +2304,42 @@ history. It is reference material, not a second delivery queue.
    host directive ingestion, CLI preview, runtime integration, compaction
    adapters, delivery receipts, Salsa, and replacement-executor proof remain
    unimplemented.
+
+   **Compact recovery checkpoint product requirement and evaluation boundary.**
+   Two controlled evaluations report that supplying the same summary plus a
+   compact current kernel checkpoint preserved the recovery decision while
+   reducing evidence reconstruction. The first, at revision `000a31a` (the
+   direct parent of current accepted WorkReport integrity work), reduced gross
+   model input/output tokens from 108,770 to 72,407 across four matched cases
+   and eliminated two evidence lookups: 36,363 tokens, or 33.43%. A follow-up
+   under actual Codex compaction reported 167,470 versus 83,857 gross tokens
+   across three paired scenarios while both arms made all nine decisions
+   correctly: 83,613 tokens, or 49.93%. This is promising small-scale evidence
+   for a narrower product claim: a compact authoritative current-state
+   checkpoint can eliminate a much larger evidence-reconstruction turn when
+   conversational memory is stale. It is not yet evidence that Workflow OS
+   reduces production token cost by a fixed percentage. The evidence remains
+   limited in model, task, and host coverage and concerns gross rather than
+   billed tokens. The repository does not yet contain either complete raw
+   evaluation package or independently auditable selection and exclusion
+   records.
+
+   Compact checkpoint generation is therefore a named P0 product requirement,
+   but public efficiency claims remain blocked pending a versioned evaluation
+   artifact and broader experiment. The required evaluation must preserve
+   prompts, fixtures, exact model and settings, every raw outcome, token
+   accounting, pair-selection and exclusion rules, and rerun instructions. It
+   must compare summary-only, summary plus on-demand evidence lookup, and
+   automatically injected checkpoint conditions across real long-running coding
+   tasks and actual compaction events. Pre-registered cut points include before
+   approval, after approval, after a SideEffect, and after terminal commit.
+   Measures include recovery correctness, duplicate SideEffects, false
+   authority, stale-intent use, recovery turns, gross and billed tokens,
+   latency, and end-to-end completion. See the [Compact Recovery Checkpoint
+   Evaluation Plan](docs/implementation-plans/compact-recovery-checkpoint-evaluation-plan.md).
+   This evidence requirement does not reorder the Active Delivery Queue above,
+   authorize runtime integration, or select Salsa; WorkReport body-commitment
+   replay enforcement remains the next runtime phase.
    The review added a durable cursor-bound single-consumption requirement and
    narrowed the first allowed operation to one local
    `invoke_current_step_skill` `BeforeSkillInvocation` consumer. That opt-in
