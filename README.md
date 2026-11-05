@@ -1,34 +1,100 @@
 # Workflow OS
 
-Workflow OS is a governance kernel for work performed by AI agents.
+[![CI](https://github.com/rcs2153/workflow-os/actions/workflows/ci.yml/badge.svg)](https://github.com/rcs2153/workflow-os/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/rcs2153/workflow-os?include_prereleases)](https://github.com/rcs2153/workflow-os/releases)
+[![License](https://img.shields.io/github/license/rcs2153/workflow-os)](LICENSE)
+
+Workflow OS is a local-first governance kernel for AI agent work. It binds
+declared authority, policy, evidence references, approvals, side-effect records,
+and completion claims into one inspectable work history without replacing the
+agent runtime.
 
 ```text
 Agent executes. Workflow OS governs.
 ```
 
-Agents are increasingly capable of writing code, calling tools, and changing
-external systems. The missing layer is not another agent framework. It is a
-durable answer to:
+Agents can already write code, call tools, and change external systems. What is
+usually missing is a durable, bounded, and fail-closed answer to:
 
-- What was this agent authorized to do?
+- What was the agent authorized to do?
 - Which workflow, policy, and inputs governed the action?
 - What evidence and checks supported the decision?
 - Who or what approved it?
-- What side effects actually occurred?
+- What side effects occurred?
 - What may happen next?
 
-Workflow OS puts those facts in a deterministic kernel instead of leaving them
-inside prompts, chat history, or agent memory.
+Workflow OS puts those facts in a deterministic, fail-closed kernel instead of
+leaving them inside prompts, chat history, model traces, or agent memory.
 
-The current preparation identity is **Workflow OS `0.4.0-preview.1` — Governed
-Authority and Repository Adoption Preview**. It is an Apache-2.0 preview useful today for local
+The current source tree is preparing **Workflow OS `0.4.0-preview.1` - Governed
+Authority and Repository Adoption Preview**. It is useful today for local
 governed workflows and engineering evaluation. It is not yet a production
 enterprise control plane.
+
+## See The Kernel Work
+
+A workflow declares ordered work, the skill or adapter used at each step, its
+policy requirements, and any approval boundary. This abridged example requires
+approval before a repository metadata read:
+
+```yaml
+schema_version: workflowos.dev/v0
+id: example/github-repository-metadata-fixture
+version: v1
+autonomy_level: level_2
+steps:
+  - id: read
+    skill_ref:
+      id: adapter/github-repository-metadata
+      version: v1
+    policy_requirements: [{ id: external/read }]
+    approval_policy:
+      policy: { id: approval/github-read }
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: repository-read
+    reason: Approval is required before the metadata read.
+```
+
+The [complete example](examples/github-repository-metadata-fixture/workflows/read.workflow.yml)
+includes ownership, trigger, timeout, audit, and observability declarations.
+
+Starting an approval-gated run produces an explicit checkpoint rather than
+silently invoking the skill:
+
+```text
+run_id: run-...
+status: WaitingForApproval
+approval_id: approval/run-.../read
+```
+
+After approval, `workflow-os inspect <run-id>` exposes the ordered history:
+
+```text
+RunCreated -> PolicyDecisionRecorded -> ApprovalRequested -> ApprovalGranted
+-> RunResumed -> SkillInvocationStarted -> SkillInvocationSucceeded
+-> RunCompleted
+```
+
+For a qualifying low-risk local path, proportional governance can proceed
+without an approval interruption while still persisting the governed check
+result and report:
+
+```text
+status: Completed
+governance: quiet_success
+report: persisted report/run-...
+inspect: workflow-os inspect run-...
+```
+
+That is the core product loop: execution stays flexible inside a governed work
+envelope; authorization, evidence posture, side-effect records, and completion
+claims remain inspectable.
 
 ## How It Works
 
 ```text
-workflow + policy + authority + evidence obligations
+workflow + policy + authority + evidence requirements
                          |
                          v
                   Workflow OS kernel
@@ -39,114 +105,145 @@ workflow + policy + authority + evidence obligations
              agent / handler / adapter / sandbox
                          |
                          v
-              events + evidence + work report
+        events + evidence references + WorkReport
 ```
 
 For each material action, Workflow OS:
 
-1. validates the declared workflow and policy;
+1. validates the workflow and policy;
 2. binds the run to immutable definitions and inputs;
-3. evaluates current authority, checks, evidence, and approval requirements;
-4. allows, discloses, blocks for approval, or denies the action;
-5. records ordered durable events and side-effect outcomes;
-6. produces an inspectable report and derives the lawful next action.
+3. evaluates authority, checks, evidence, and approval requirements;
+4. proceeds quietly, discloses, blocks for approval, or denies;
+5. records durable events and supported side-effect outcomes; and
+6. on supported paths, produces an inspectable WorkReport and derives the next
+   permitted action.
 
-Workflow OS does not model every internal reasoning step. The agent remains
-free to explore and execute inside the authorized envelope. The kernel governs
-the boundaries where work consumes authority, changes durable state, invokes a
-tool, creates a side effect, or claims completion.
+Workflow OS does not model every reasoning step or tool-selection edge. The
+agent remains free to explore inside the authorized envelope. The kernel
+governs the boundaries where work consumes authority, changes durable state,
+invokes a capability, creates a side effect, or claims completion.
 
-## Try It In A Repository
+## Why Workflow OS
 
-Build the CLI:
+Most agent infrastructure governs one layer of the problem:
+
+| Category | What it does well | What Workflow OS adds |
+| --- | --- | --- |
+| Agent frameworks and graph orchestrators | Run model loops, tools, handoffs, and durable execution | A separate authority boundary that does not require every reasoning or execution edge to be encoded in a graph |
+| Sandboxes and security runtimes | Contain processes, files, networks, credentials, and tool access | The work-level contract that explains why execution was authorized, which evidence was required, and what the result may claim |
+| Action-governance runtimes and gateways | Enforce identity, capability, policy, and approval around individual agent actions | A repository-adoptable contract spanning declared work, immutable inputs, required evidence and checks, side-effect accounting, terminal WorkReports, and lawful continuation |
+| Policy and authorization engines | Decide whether a principal may perform an action | Durable workflow identity, approval context, evidence and check obligations, side-effect records, and terminal reporting |
+| Observability and evaluation platforms | Trace, inspect, score, and debug what ran | Fail-closed decisions before material actions plus an assurance-labeled record of what was approved and completed |
+| Workflow OS | Governs the complete unit of work across those layers | One inspectable chain from declared intent and authority to evidence references, side-effect records, outcome, WorkReport, and next permitted action |
+
+This makes Workflow OS complementary to agent SDKs, deterministic workflow
+engines, policy systems, observability platforms, and sandboxes. Those systems
+can execute, contain, authorize, or observe individual parts of a run. Workflow
+OS keeps the governed work contract durable across them.
+
+The distinction is deliberate:
+
+- **Govern the work, not the model loop.** Agents may plan and adapt without
+  forcing every internal decision into a brittle graph.
+- **Authority is not a prompt.** Scope, policy, approval, and capability state
+  live outside model context and are reassessed at material boundaries.
+- **A trace is not proof of permission.** Events are connected to the exact
+  workflow, immutable inputs, checks, approvals, side-effect records, and
+  evidence references whose assurance remains explicit.
+- **Completion is a governed claim.** A WorkReport records what happened, what
+  did not happen, what remains incomplete, and what may happen next.
+- **Low risk does not mean no record.** Proportional governance can proceed
+  quietly while preserving an inspectable governance and evidence-reference
+  trail.
+
+## Build And Try It
+
+### Prerequisites
+
+- Rust stable
+- Node.js 20 for repository checks and SDK development
+
+Build the current CLI from source:
 
 ```sh
-cargo build -p workflow-cli --bin workflow-os
+git clone https://github.com/rcs2153/workflow-os.git
+cd workflow-os
+cargo build --release -p workflow-cli --bin workflow-os
+export WORKFLOW_OS="$PWD/target/release/workflow-os"
 ```
+
+Published preview archives and checksums are available from
+[GitHub Releases](https://github.com/rcs2153/workflow-os/releases). The current
+source tree may be newer than the latest published preview.
 
 From a repository you want to govern:
 
 ```sh
-/path/to/workflow-os init-repo-governance --agent codex --dry-run
-/path/to/workflow-os init-repo-governance --agent codex
-/path/to/workflow-os validate
-/path/to/workflow-os first-run
+cd /path/to/your-repository
+"$WORKFLOW_OS" init-repo-governance --agent codex --dry-run
+"$WORKFLOW_OS" init-repo-governance --agent codex
+"$WORKFLOW_OS" validate
+"$WORKFLOW_OS" first-run
 ```
 
-This creates a local governance envelope and reports what Workflow OS can
-establish safely from repository metadata. It does not read arbitrary source
-contents, execute project commands, call providers, or invent evidence.
+`init-repo-governance` adds a local governance envelope while preserving
+existing unmanaged `AGENTS.md` content. `first-run` safely inspects allowlisted
+repository metadata and reports:
 
-`first-run` identifies missing ownership, checks, evidence, approval, reporting,
-and side-effect decisions. It also recommends candidate workflows. A candidate
-does not become active until it is authored, reviewed, and promoted.
+- what governance is already configured;
+- missing ownership, checks, evidence, and side-effect decisions;
+- concrete workflow candidates for the detected repository; and
+- what Workflow OS did not inspect, execute, or change.
 
-To opt into one real governed local `WorkReport` artifact for the bounded
-first-run analysis:
+It does not read arbitrary source files, execute project commands, contact
+providers, or invent evidence.
+
+To persist one governed local WorkReport for the bounded first-run analysis:
 
 ```sh
-/path/to/workflow-os first-run --write-report-artifact
+"$WORKFLOW_OS" first-run --write-report-artifact
 ```
 
-This explicit path validates the exact generated contract, binds the bounded
-analysis to immutable run identity, executes the declared authoritative
-project-validation check, lets Core derive the proportional-governance route,
-and writes one create-only local report artifact after completion. Exact
-complete low-risk facts proceed without approval records; escalated routes
-remain proof-backed and blocking.
-It does not execute repository build/test commands, read arbitrary source,
-call providers, access the network, or create external side effects. Ordinary
-`first-run` remains non-mutating.
+This path validates the generated contract, binds the analysis to immutable
+run identity, executes the declared Workflow OS project-validation check,
+selects the required governance level, and writes one create-only report after
+completion. It still does not execute repository build or test commands, read
+arbitrary source, access the network, or create external side effects.
 
-To exercise the approval and event-log path with a deterministic mock handler:
+For a fully local approval and event-history demonstration, see the
+[vertical-slice approval example](examples/vertical-slice-approval/README.md).
 
-```sh
-/path/to/workflow-os --mock-all-local-skills run local/first-run-governance
-/path/to/workflow-os --mock-all-local-skills approve <run-id> <approval-id> \
-  --actor user/evaluator --reason reviewed-first-run
-/path/to/workflow-os inspect <run-id>
-```
+## What Is Implemented
 
-The mock proves kernel sequencing, approval, persistence, and audit behavior.
-It does not prove that repository work was executed.
+- Deterministic YAML loading and validation.
+- Sequential multi-step local workflows.
+- Immutable run inputs and approval-resume integrity.
+- Policy decisions and proof-bound approvals.
+- Durable event history, retries, escalation, cancellation, and rehydration.
+- Evidence references, side-effect records, and terminal WorkReports, with
+  path-specific assurance and explicit local storage-owner limits.
+- Proportional governance: quiet capture, visible disclosure, approval, or
+  denial.
+- Scoped capability, current-authority, required-context, and check models.
+- Local filesystem, SQLite continuity, and PostgreSQL state implementations.
+- Fixture-first read-only GitHub, Jira, and GitHub Actions adapters.
+- Narrow GitHub comment and managed draft-pull-request execution paths.
+- A single-tenant hosted no-write alpha and optional OpenShell boundary.
 
-## What Is Real Today
+Not every Core capability is exposed through the CLI. The
+[Current Product Contract](docs/user-guide/current-product-contract.md)
+distinguishes public execution paths from reviewed internal foundations.
 
-The current kernel includes:
+## Current Boundaries
 
-- deterministic YAML loading and validation;
-- sequential multi-step local workflows;
-- immutable run inputs and approval-resume integrity;
-- policy decisions and proof-bound approvals;
-- durable event history, retries, escalation, cancellation, and rehydration;
-- evidence references, side-effect records, and terminal work reports;
-- proportional governance: quiet capture, visible disclosure, approval, or
-  denial;
-- scoped capability, current-authority, required-context, and check models;
-- local filesystem, SQLite continuity, and PostgreSQL state implementations;
-- fixture-first read-only GitHub, Jira, and GitHub Actions adapters;
-- narrow, explicit GitHub write proofs for comments and managed draft pull
-  requests;
-- a single-tenant hosted no-write alpha and optional OpenShell boundary.
+Workflow OS is not an agent runtime, prompt router, agent swarm, CI system, or
+general automation engine. The current preview does not provide production
+multi-tenant hosting, enterprise identity administration, broad provider
+writes, arbitrary shell execution, or proof that caller-asserted work happened.
 
-Not every Core capability is exposed through the CLI. Some are deliberately
-kept as explicit, reviewed integration paths while their security contracts
-harden.
-
-## What It Does Not Claim
-
-Workflow OS is not:
-
-- an agent runtime, prompt router, or agent swarm;
-- a replacement for a coding agent, CI system, Temporal, or Airflow;
-- a general shell-execution or provider-write framework;
-- a production multi-tenant service;
-- enterprise RBAC, identity, or policy administration;
-- proof that mocked or caller-asserted work actually happened.
-
-Missing handlers and unsupported authority fail closed. A model or schema in
-the repository is not a runtime capability unless an explicit execution path
-enforces it.
+Missing handlers, unsupported authority, and ambiguous actions fail closed. A
+model or schema in the repository is not a runtime capability until a tested
+execution path enforces it.
 
 Evidence assurance is path-specific. Content-bound dispatch proves which
 selected executable bytes and request were used; it does not authenticate an
@@ -158,7 +255,7 @@ for the exact trust boundary.
 
 ## Use It With An Agent
 
-Point the agent at the repository and give it one operating instruction:
+Give the coding agent one operating instruction:
 
 ```text
 Use Workflow OS as the governing layer for this task.
@@ -169,18 +266,18 @@ At closure, report checks, evidence, side effects, incomplete work, and the
 kernel-authorized next action.
 ```
 
-The agent still performs edits and ordinary tool calls unless a reviewed
-Workflow OS handler owns that execution. Workflow OS governs the work; it does
-not gain control merely because an instruction file says so.
+The agent still edits files and uses ordinary tools unless a reviewed Workflow
+OS handler owns that execution. Workflow OS governs the work; an instruction
+file alone does not give the kernel control of the agent.
 
 ## Read Next
 
-- [Current Product Contract](docs/user-guide/current-product-contract.md): what
-  is implemented, experimental, and unavailable.
-- [Workflow OS Explainer](docs/concepts/WORKFLOW_OS_EXPLAINER.md): the engineering
-  architecture and execution model.
+- [Current Product Contract](docs/user-guide/current-product-contract.md): the
+  implemented, experimental, and unavailable product surfaces.
 - [Agent Harness Quickstart](docs/user-guide/agent-harness-quickstart.md): using
   Workflow OS with a coding agent.
+- [Workflow OS Explainer](docs/concepts/WORKFLOW_OS_EXPLAINER.md): architecture
+  and execution model.
 - [Engineering Standard](docs/ENGINEERING_STANDARD.md): invariants for changing
   the kernel.
 - [Roadmap](ROADMAP.md): accepted sequence and unfinished work.
@@ -197,12 +294,10 @@ dogfood/                 this repository's governed workflows
 docs/                    contracts, architecture, plans, and reports
 ```
 
-The `dogfood/` workflows are specific to building Workflow OS. They are
+The `dogfood/` workflows govern development of Workflow OS itself. They are
 reference implementations, not defaults installed into downstream projects.
 
 ## Develop
-
-Use Node.js 20 and a Rust toolchain with `rustfmt` and `clippy`:
 
 ```sh
 cargo fmt --all --check
@@ -212,6 +307,9 @@ npm ci
 npm run check
 npm run check:integrations
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and
+[SECURITY.md](SECURITY.md) before opening a change or reporting a vulnerability.
 
 ## License
 

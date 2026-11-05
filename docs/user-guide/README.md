@@ -1,49 +1,66 @@
 # Workflow OS User Guide
 
-These guides are for RC1 internal evaluation of the current Workflow OS repository.
+These guides cover the current Workflow OS `0.4.0-preview.1` preparation
+identity on `main`. Workflow OS is an advanced local governance preview, not a
+production enterprise control plane.
 
-RC1 internal evaluation means the local kernel preview can be evaluated seriously, and Phase 2 read-only adapters can be evaluated against fixtures. The `0.2.0-preview.1` public read-only integration preview adds narrow opt-in live-provider evidence, but RC1 evaluation still does not mean production readiness, hosted service readiness, broad live provider compatibility, or write-capable adapter readiness.
+Start with the [Current Product Contract](current-product-contract.md) when a
+guide, implementation report, or older release document appears to disagree
+with current behavior.
 
 ## Current Posture
 
-| Area | Status |
+| Area | Current status |
 | --- | --- |
-| Local kernel preview | Implemented and ready for public local-kernel preview evaluation. |
-| Vertical slice approval example | Implemented with explicit deterministic local mock handler. |
-| GitHub/Jira/CI read-only adapters | Public read-only integration preview in `0.2.0-preview.1`; fixture-first and opt-in for live providers. |
-| Adapter telemetry mapping | Local/runtime-preview telemetry mapping for controlled fixture-backed examples. |
-| Live provider proof | Recorded for one narrow read path per provider family; broader provider operation coverage remains fixture-tested, not live-proven. |
-| Governed Work Pattern | Accepted architecture direction. Selected evidence-reference and work-report foundations are implemented; broader pattern behavior remains scoped future work. |
-| Evidence references | Core model plus selected adapter telemetry, diagnostic, and schema-version diagnostic attachment paths are implemented. Persistence, CLI rendering, examples, approval attachment, and broad automatic attachment remain unsupported. |
-| Work reports | Core contract/report models, explicit in-memory local report generation/result helper APIs, executor-integrated report-bearing execution, and explicit local artifact store are implemented. Automatic runtime report generation, CLI rendering, examples, schemas, and automatic artifact writing remain unsupported. |
-| Self-governance dogfooding | First dogfood project is implemented as kernel-governed, Codex-executed Workflow OS build governance. The `dg/*` workflows are reference dogfood workflows for this repository, not community defaults or required user templates. The repo-local `npm run dogfood:benchmark` helper wraps existing CLI commands for the benchmark. Real build skills, automatic execution, recursive agents, and production self-hosting remain unsupported. |
-| Agent harness onboarding | Documented as the recommended local adoption path: a coding agent executes repository work while Workflow OS governs validation, approval checkpoints, durable state, and report posture. `workflow-os init-agent-harness` is implemented as a documentation scaffold for agent instructions and a session prompt. `workflow-os init-repo-governance` is implemented as a minimal in-repo project scaffold for existing repositories. `workflow-os first-run` is implemented as a bounded report-ready context command for first-run Governed Work Pattern posture. Runtime harness auto-generation remains unsupported. |
-| Reasoning Lineage / Claim Graph | Proposed architecture direction only. |
-| GitHub/Jira writes and CI reruns/dispatch | Unsupported. |
-| Production backend, distributed workers, hosted service, UI, marketplace | Unsupported. |
-| Level 3/4 autonomy | Declaration-only and denied by default. |
+| Repository onboarding | Implemented. Existing unmanaged `AGENTS.md` content is preserved by default. |
+| First-run analysis | Implemented for allowlisted repository metadata, concise or verbose posture, and review-only workflow recommendations. |
+| Local execution | Deterministic sequential multi-step workflows with policy evaluation, approvals, retries, escalation, cancellation, and durable rehydration. |
+| Authority and continuity | Immutable run inputs, approval-presentation proof, bounded continuation projection, execution-window and wait foundations. |
+| Evidence and reporting | Evidence references, side-effect records, WorkReport generation, and explicit governed local report-artifact paths. Assurance is path-specific; local report storage is not independently tamper-proof. |
+| Proportional governance | Bounded routing among quiet capture, visible disclosure, blocking approval, and denial. |
+| State | Local filesystem, SQLite continuity, and PostgreSQL implementations; production HA is not claimed. |
+| Read-only integrations | Fixture-first and opt-in live GitHub, Jira, and GitHub Actions paths. |
+| External writes | Narrow GitHub comment and managed draft-PR execution paths only; no general write-adapter product. |
+| Hosting | Single-tenant no-write alpha; not production multi-tenant hosting. |
+| OpenShell | Optional no-write boundary and compatibility work; not a complete execution-provider integration. |
+| Self-governance | `dg/*` workflows govern this repository and serve as team-specific examples, not downstream defaults. |
+| Higher autonomy | Level 3/4 declarations remain denied by default and are not a production autonomy offering. |
 
-## Guides
+## Start Here
 
-- [Current Product Contract](current-product-contract.md): concise current-state
-  boundary for what Workflow OS does today, what is mock/demo-only, and what is
-  not implemented.
-- [Field Guide](field-guide.md): narrative guide for the operating model, current implementation boundary, and why Workflow OS matters.
-- [Agent Harness Quickstart](agent-harness-quickstart.md): copy/paste setup path for using Codex, Claude Code, or another coding agent with Workflow OS as the governing layer.
-- [Existing Repo Governance Onboarding Plan](../implementation-plans/existing-repo-governance-onboarding-plan.md): P0 plan for turning a user's existing repository into a valid Workflow OS project and first-run Governed Work Pattern report path without copying internal dogfood workflows.
-- [Self-Governed Build Benchmark](self-governed-build-benchmark.md): maintainer runbook and repo-local helper path for using the local kernel to govern Workflow OS development work without overclaiming automation.
-- [Workbook](workbook.md): fillable markdown workbook for qualifying, designing, governing, and evaluating workflows before writing specs.
-- [RC1 Evaluation Guide](rc1-evaluation-guide.md): exact safe evaluation paths for the local kernel, vertical slice, read-only fixture adapters, and telemetry inspection.
+1. [Root quickstart](../../README.md): build the CLI and govern an existing
+   repository.
+2. [Current Product Contract](current-product-contract.md): exact implemented
+   and unavailable behavior.
+3. [Agent Harness Quickstart](agent-harness-quickstart.md): use a coding agent
+   as executor while Workflow OS governs the work.
+4. [First-run CLI guide](../cli/first-run.md): repository posture,
+   recommendations, and governed report artifacts.
+5. [Vertical-slice example](../../examples/vertical-slice-approval/README.md):
+   approval, resume, persistence, and event inspection.
 
-## Related Documentation
+## Design And Evaluation Guides
 
-- [Root quickstart](../../README.md)
+- [Workbook](workbook.md): qualify and design a governed workflow before
+  writing specifications.
+- [Self-Governed Build Benchmark](self-governed-build-benchmark.md): maintained
+  dogfood loop for Workflow OS development.
+- [RC1 Evaluation Guide](rc1-evaluation-guide.md): historical bounded
+  evaluation path for the earlier local-kernel/read-only-adapter milestone.
+- [Field Guide](field-guide.md): earlier operating-model narrative. Use the
+  Current Product Contract for present capability claims.
+
+## Reference
+
 - [CLI overview](../cli/overview.md)
-- [Project charter](../PROJECT_CHARTER.md)
-- [Known limitations](../release/V0_KNOWN_LIMITATIONS.md)
+- [Workflow specifications](../specs/workflows.md)
+- [Runtime overview](../runtime/README.md)
+- [Architecture overview](../architecture/overview.md)
+- [Operations](../operations/README.md)
+- [Security](../security/README.md)
 - [Troubleshooting](../operations/TROUBLESHOOTING.md)
-- [Security overview](../security/README.md)
-- [Policy engine](../runtime/policy-engine.md)
-- [Phase 2 public read-only preview readiness rerun](../integrations/PHASE_2_PUBLIC_READ_ONLY_PREVIEW_READINESS_RERUN.md)
+- [Known limitations](../release/V0_KNOWN_LIMITATIONS.md)
 
-Use these guides as evaluation and operating artifacts, not as proof that unsupported production behavior exists.
+Older release, readiness, review, and implementation-plan documents are
+historical evidence for the version or phase named in the file. They should not
+override the Current Product Contract or current CLI documentation.
