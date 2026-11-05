@@ -3310,7 +3310,10 @@ mod tests {
     fn repeated_schedule_composes_two_time_windows_and_stops_terminal() {
         let fixture = Fixture::new();
         let deadline = Timestamp::from_offset_date_time(
-            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+            // Leave enough time for the opening and projected-yield transactions to
+            // complete under a loaded full-suite runner. The production boundary
+            // still rejects a wait whose deadline has elapsed before persistence.
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::seconds(5),
         );
         let locator = register_supervisor_time_window_wait_with_attempts(
             &fixture,
@@ -3318,7 +3321,13 @@ mod tests {
             deadline,
             3,
         );
-        std::thread::sleep(std::time::Duration::from_millis(600));
+        let remaining = deadline.as_offset_date_time() - Timestamp::now_utc().as_offset_date_time();
+        if remaining.is_positive() {
+            std::thread::sleep(
+                std::time::Duration::try_from(remaining).expect("positive deadline duration"),
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
         let waiter_calls = AtomicUsize::new(0);
         let executor_calls = AtomicUsize::new(0);
         let mut waiter = SequenceDeadlineWaiter {

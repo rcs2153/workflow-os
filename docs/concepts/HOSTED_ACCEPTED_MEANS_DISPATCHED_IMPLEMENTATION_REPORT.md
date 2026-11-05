@@ -222,3 +222,60 @@ Review](HOSTED_ACCEPTED_MEANS_DISPATCHED_IMPLEMENTATION_REVIEW.md).
 - out-of-kernel execution: source inspection, edits, and validation were
   performed by the trusted development host; Workflow OS governed the phase
   but did not execute repository writes or shell commands
+
+## 11. Post-Merge Rust Reliability Blocker
+
+The first merged Gate 1 repair passed all pull-request checks, including live
+PostgreSQL coverage. Its exact-main push run then failed one unrelated Core
+test:
+
+`repeated_schedule_composes_two_time_windows_and_stops_terminal`
+
+The test created a real-time wait deadline only `500 ms` in the future before
+opening the execution window and persisting the projected yield. Under the
+loaded all-features CI process, setup could consume that interval. The kernel
+then correctly rejected the elapsed wait rather than persisting stale
+authority, and the supervisor surfaced the bounded ambiguous-persistence
+failure.
+
+The correction changes test setup only. It gives opening and projected-yield
+persistence a five-second registration margin, then sleeps for the exact
+remaining interval plus a small boundary cushion before exercising both wake
+cycles. It does not relax deadline validation, retry security, authority
+binding, wake count, or terminal-state assertions.
+
+Local evidence after the correction:
+
+- `30` focused repetitions of the parent test passed;
+- `5` focused repetitions of the hardened test passed; and
+- the complete Core all-features suite passed, including `784` unit tests and
+  the full integration and documentation-test matrix.
+
+Gate 1 remains open until this bounded repair passes fresh governed review,
+exact-head pull-request CI, and exact-main post-merge CI.
+
+Governed blocker phase:
+
+- workflow: `dg/blocker`
+- run: `run-1793876555157702000-2`
+- approval: `approval/run-1793876555157702000-2/fix-approved`
+- presentation: `presentation/dcdbdfa271231588`
+- approval outcome: granted by the delegated maintainer with persisted
+  presentation proof
+- phase status: completed
+- event summary: `39` events, including `1` approval request, `1` approval
+  grant, `8` policy decisions, `6` scheduled steps, `6` requested skill
+  invocations, `6` started skill invocations, `6` successful skill
+  invocations, `1` run resume, and `1` run completion; `0` retries and `0`
+  escalations
+- approved boundary: reproduce and correct the exact post-merge Rust scheduling
+  failure without weakening assertions or production checks
+- non-goals: Gate 2, provider mutation, unrelated refactoring, skipped or ignored
+  tests, release work, and benchmark-claim changes
+- validation summary: `30` parent-test repetitions, `5` hardened-test
+  repetitions, the complete Core all-features suite, warnings-denied Core
+  Clippy and rustdoc, formatting, documentation checks, and diff hygiene passed
+- out-of-kernel execution: source inspection, edits, repeated test execution,
+  full-suite validation, and documentation validation were performed by the
+  trusted development host; Workflow OS governed scope and approval but did
+  not execute repository writes or shell commands

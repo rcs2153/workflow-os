@@ -104,8 +104,14 @@ violations:
    from the immutable run bundle. Focused and post-merge independent reviews
    found and fixed dispatch-context, approval-replay, invocation-projection,
    project-scope replay, executor-shortcut semantic-invocation, terminal-replay
-   context, and mutable-checkout replay blockers. Fresh governed review, exact-head PostgreSQL CI,
-   and an independent final-head fault-injection rerun remain required. Reliable unattended
+   context, and mutable-checkout replay blockers. The first merged repair passed
+   pull-request CI, but its exact-main Rust job exposed a load-sensitive test setup
+   race: a real-time wait deadline allowed only `500 ms` for opening and projected
+   yield persistence. The production fail-closed boundary was correct; the test now
+   preserves that boundary with a multi-second registration margin and waits for the
+   exact remaining interval. Fresh governed review, exact-head PostgreSQL and Rust
+   CI, green post-merge CI, and an independent final-head fault-injection rerun remain
+   required. Reliable unattended
    hosted completion and truthful hosted-submission acknowledgment remain
    blocked. See the [implementation
    report](docs/concepts/HOSTED_ACCEPTED_MEANS_DISPATCHED_IMPLEMENTATION_REPORT.md).
