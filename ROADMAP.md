@@ -203,10 +203,29 @@ Focused maintainer/security review is accepted after correcting event-only
 dispatch inference, cross-run scope composition, and unbound lawful-next
 operation identity. See the [accepted
 review](docs/concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_BINDING_REVIEW.md).
-Exact-head pull-request validation and merge are now required. After merge,
-product-contract, hosted, integration, and release-admission reconciliation is
-the next lane; provider-mutation and comparative benchmark work remain outside
-this boundary.
+PR #746 merged the unchanged reviewed head as `3216fef1` after all nine exact-
+head checks passed. Product-contract, hosted, integration, and release-
+admission reconciliation is now the active lane. The [reconciliation
+plan](docs/implementation-plans/continuity-of-authority-product-release-reconciliation-plan.md)
+records stale product claims, retires the duplicate replay lane, preserves the
+remaining validator-assurance and independent-review blockers, and requires a
+new exact-source release candidate. Provider-mutation and comparative benchmark
+execution remain outside this boundary.
+
+The first reconciliation slice, **product-contract truth correction**, is
+implemented. The current product contract now records all three gate closures
+and the private cross-gate boundary without presenting a production replacement
+executor. Stale non-capability claims were replaced with the actual unsupported
+generalizations, public WorkReport language now distinguishes retained body-
+commitment enforcement from storage-owner tamper resistance, and the release
+checklist marks the existing symmetric candidates as historical exact-source
+evidence rather than current-source publication assets. See the [implementation
+report](docs/concepts/CONTINUITY_PRODUCT_CONTRACT_TRUTH_CORRECTION_REPORT.md).
+Focused review is accepted after correcting one remaining roadmap statement
+that incorrectly left replay enforcement as future work. See the [accepted
+review](docs/concepts/CONTINUITY_PRODUCT_CONTRACT_TRUTH_CORRECTION_REVIEW.md).
+Exact-head PR validation and merge are required before durable validator-
+assurance projection begins.
 
 A new P0 **evidence provenance and report integrity** preemption is active
 before publication, public-positioning expansion, or broader evidence-consuming
@@ -338,18 +357,17 @@ report](docs/concepts/WORK_REPORT_BODY_COMMITMENT_RECOVERY_RECONCILIATION_REPORT
 and [accepted
 review](docs/concepts/WORK_REPORT_BODY_COMMITMENT_RECOVERY_RECONCILIATION_REVIEW.md).
 
-After the three continuity-of-authority release gates pass, the next phase in
-this lane is bounded **WorkReport body-commitment replay enforcement**. Its
-storage-key and internal-identity binding requirements are now part of release
-gate 2 and must not wait for a narrower body-only replay phase. The later replay
-work must trace every terminal or provider replay path that consumes a persisted
-artifact, including transaction-local PostgreSQL reads, require retained
-commitment validation before replay equality or content reuse, preserve the
-original legacy-unverified posture without upgrade, and fail closed without
-payload leakage. Migration, backfill, signing, external witnesses, provider
-mutation broadening, publication, new commands/schemas/SDKs, and claims of
-storage-owner tamper resistance remain out of scope. Independent security
-review remains required before release admission resumes.
+The planned bounded **WorkReport body-commitment replay enforcement** is now
+absorbed by accepted continuity Gate 2 rather than remaining a second
+implementation lane. Gate 2 traced terminal and provider replay consumers,
+including transaction-local PostgreSQL reads, enforced external storage-key and
+internal run/report/workflow identity before retained body commitment, preserved
+legacy-unverified posture without upgrade, and passed focused, exact-head,
+post-merge, and independent replay/misplacement evidence. This closure does not
+add migration, backfill, signing, external witnesses, provider mutation,
+publication, schemas/SDKs, or storage-owner tamper resistance. Independent
+security review and the remaining validator-assurance projection/enforcement
+work still block release admission.
 
 The separate deterministic hosted P0 is now implemented. The advertised
 `workflow-os-hosted --worker-once` entry point previously called the
@@ -2463,8 +2481,10 @@ history. It is reference material, not a second delivery queue.
    latency, and end-to-end completion. See the [Compact Recovery Checkpoint
    Evaluation Plan](docs/implementation-plans/compact-recovery-checkpoint-evaluation-plan.md).
    This evidence requirement does not reorder the Active Delivery Queue above,
-   authorize runtime integration, or select Salsa; WorkReport body-commitment
-   replay enforcement remains the next runtime phase.
+   authorize runtime integration, or select Salsa. WorkReport body-commitment
+   replay enforcement was absorbed by accepted continuity Gate 2; durable
+   validator-assurance projection and narrow minimum-assurance enforcement are
+   the next runtime slices under the active reconciliation plan.
    The review added a durable cursor-bound single-consumption requirement and
    narrowed the first allowed operation to one local
    `invoke_current_step_skill` `BeforeSkillInvocation` consumer. That opt-in

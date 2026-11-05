@@ -31,10 +31,14 @@ history.
 Current `main` does not yet satisfy that contract across every preview surface.
 The hosted dispatch-truth, WorkReport identity-binding, and GitHub repository-
 metadata project-resource continuity P0 gates are closed for their documented
-boundaries after focused review, exact-head CI, and independent reruns. The
-cross-gate continuity review remains required before broader continuity or v1
-claims. See the [Continuity Of Authority P0 Release Gates
-Plan](../implementation-plans/continuity-of-authority-p0-release-gates-plan.md).
+boundaries after focused review, exact-head CI, and independent reruns. A
+private Core cross-gate model now binds those exact lifecycle facts before
+replacement fresh-authority resolution and rejects mixed or missing bindings.
+It is not a production replacement-executor caller or a generalized continuity
+claim. See the [Continuity Of Authority P0 Release Gates
+Plan](../implementation-plans/continuity-of-authority-p0-release-gates-plan.md)
+and [Product And Release Reconciliation
+Plan](../implementation-plans/continuity-of-authority-product-release-reconciliation-plan.md).
 
 ## Maturity
 
@@ -47,9 +51,11 @@ Plan](../implementation-plans/continuity-of-authority-p0-release-gates-plan.md).
   general provider-write product.
 - **Primary audience today:** maintainers, infrastructure engineers, security
   engineers, and teams evaluating governed agent work.
-- **Release blockers:** all three accepted continuity-of-authority P0 gates are
-  closed for their documented boundaries. The cross-gate review and the
-  repository's other active P0 lanes still block v1 and broader product claims.
+- **Release blockers:** all three continuity gates and the private cross-gate
+  review are closed for their documented boundaries. Validator-assurance
+  persistence/enforcement, independent adversarial review, exact-source
+  re-candidating, and the repository's other active P0 lanes still block
+  publication, v1, and broader product claims.
 
 ## Implemented Product Surfaces
 
@@ -133,14 +139,14 @@ authority or storage-owner tamper-resistant ledger.
   independent fault-injection rerun. That closes dispatch-truth Gate 1 only; it
   does not make the hosted alpha a production or reliable unattended execution
   product.
-- Persisted WorkReport reads now have a bounded identity-binding implementation
-  candidate: physical run/report keys and available immutable workflow identity
-  are checked before retained body commitment and before projection, recovery,
-  reconciliation, or replay. Legacy body-commitment posture does not excuse a
-  wrong storage identity. This remains local/backend integrity, not
+- Persisted WorkReport reads have an accepted bounded identity-binding
+  implementation: physical run/report keys and available immutable workflow
+  identity are checked before retained body commitment and before projection,
+  recovery, reconciliation, or replay. Legacy body-commitment posture does not
+  excuse a wrong storage identity. This remains local/backend integrity, not
   storage-owner tamper resistance. Exact-head CI, maintainer-operated
   post-merge evidence, and the independent backend-misplacement rerun pass;
-  Gate 2 is accepted and closed.
+  Gate 2 is closed.
 - Optional OpenShell no-write provider contracts and pinned CLI inspection
   compatibility. The current CLI compatibility boundary does not satisfy the
   full execution-provider evidence contract.
@@ -220,12 +226,12 @@ Workflow OS does not currently provide:
   against an owner who can rewrite both records and local integrity anchors;
 - a production scheduler that continuously redispatches agents from continuity
   directives;
-- proof that every hosted success response corresponds to approval-waiting,
-  dispatchable, terminal, or explicit recovery posture;
-- proof that every persisted WorkReport is bound to the exact requested storage
-  key and run identity across all backends and replay paths; or
-- proof that every project-level provider resource restriction remains current
-  through approval and provider admission.
+- a production replacement executor wired to the private cross-gate lifecycle
+  binding and concrete current-state sources;
+- continuity guarantees for hosted, storage, provider, or replay paths outside
+  the explicitly reviewed Gate 1-3 boundaries; or
+- project-resource continuity generalized to undeclared provider families,
+  provider writes, or credential-backed live acceptance.
 
 Unknown or unsupported behavior should fail closed. A roadmap model is not a
 product capability until it is wired into an explicit, tested execution path.

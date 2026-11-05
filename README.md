@@ -247,11 +247,14 @@ execution path enforces it.
 
 Evidence assurance is path-specific. Content-bound dispatch proves which
 selected executable bytes and request were used; it does not authenticate an
-operator-selected executable as an official validator. Local WorkReport
-artifacts are currently structurally validated and identity-consistent, but
-local storage does not yet provide cryptographic tamper evidence against its
-owner. See the [Current Product Contract](docs/user-guide/current-product-contract.md)
-for the exact trust boundary.
+operator-selected executable as an official validator. Supported WorkReport
+stores enforce exact artifact identity and a retained complete-body commitment
+across accepted read, inspect, recovery, reconciliation, and replay paths. That
+detects report-only substitution while the local anchor remains intact; local
+storage still does not provide cryptographic tamper evidence against an owner
+who can rewrite both record and anchor. See the [Current Product
+Contract](docs/user-guide/current-product-contract.md) for the exact trust
+boundary.
 
 ## Use It With An Agent
 
