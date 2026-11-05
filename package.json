@@ -2,7 +2,7 @@
   "name": "workflow-os",
   "version": "0.4.0-preview.1",
   "private": true,
-  "description": "Govern AI agent work with durable authority, evidence, approvals, side effects, and WorkReports.",
+  "description": "Local-first governance for AI agent work with explicit authority, evidence posture, approvals, side-effect records, and WorkReports.",
   "license": "Apache-2.0",
   "workspaces": [
     "packages/*"

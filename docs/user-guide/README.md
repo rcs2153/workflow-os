@@ -16,11 +16,11 @@ with current behavior.
 | First-run analysis | Implemented for allowlisted repository metadata, concise or verbose posture, and review-only workflow recommendations. |
 | Local execution | Deterministic sequential multi-step workflows with policy evaluation, approvals, retries, escalation, cancellation, and durable rehydration. |
 | Authority and continuity | Immutable run inputs, approval-presentation proof, bounded continuation projection, execution-window and wait foundations. |
-| Evidence and reporting | Evidence references, side-effect records, WorkReport generation, and explicit governed local report-artifact paths. |
+| Evidence and reporting | Evidence references, side-effect records, WorkReport generation, and explicit governed local report-artifact paths. Assurance is path-specific; local report storage is not independently tamper-proof. |
 | Proportional governance | Bounded routing among quiet capture, visible disclosure, blocking approval, and denial. |
 | State | Local filesystem, SQLite continuity, and PostgreSQL implementations; production HA is not claimed. |
 | Read-only integrations | Fixture-first and opt-in live GitHub, Jira, and GitHub Actions paths. |
-| External writes | Narrow GitHub comment and managed draft-PR proof paths only; no general write-adapter product. |
+| External writes | Narrow GitHub comment and managed draft-PR execution paths only; no general write-adapter product. |
 | Hosting | Single-tenant no-write alpha; not production multi-tenant hosting. |
 | OpenShell | Optional no-write boundary and compatibility work; not a complete execution-provider integration. |
 | Self-governance | `dg/*` workflows govern this repository and serve as team-specific examples, not downstream defaults. |

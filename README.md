@@ -5,15 +5,16 @@
 [![License](https://img.shields.io/github/license/rcs2153/workflow-os)](LICENSE)
 
 Workflow OS is a local-first governance kernel for AI agent work. It binds
-authority, policy, evidence, approvals, side effects, and completion claims to
-one durable work record without replacing the agent runtime.
+declared authority, policy, evidence references, approvals, side-effect records,
+and completion claims into one inspectable work history without replacing the
+agent runtime.
 
 ```text
 Agent executes. Workflow OS governs.
 ```
 
 Agents can already write code, call tools, and change external systems. What is
-usually missing is a durable, enforceable answer to:
+usually missing is a durable, bounded, and fail-closed answer to:
 
 - What was the agent authorized to do?
 - Which workflow, policy, and inputs governed the action?
@@ -76,8 +77,8 @@ RunCreated -> PolicyDecisionRecorded -> ApprovalRequested -> ApprovalGranted
 ```
 
 For a qualifying low-risk local path, proportional governance can proceed
-without an approval interruption while still persisting the evidence and
-report:
+without an approval interruption while still persisting the governed check
+result and report:
 
 ```text
 status: Completed
@@ -87,8 +88,8 @@ inspect: workflow-os inspect run-...
 ```
 
 That is the core product loop: execution stays flexible inside a governed work
-envelope; authorization, evidence, side effects, and completion claims remain
-inspectable.
+envelope; authorization, evidence posture, side-effect records, and completion
+claims remain inspectable.
 
 ## How It Works
 
@@ -104,7 +105,7 @@ workflow + policy + authority + evidence requirements
              agent / handler / adapter / sandbox
                          |
                          v
-              events + evidence + WorkReport
+        events + evidence references + WorkReport
 ```
 
 For each material action, Workflow OS:
@@ -113,8 +114,9 @@ For each material action, Workflow OS:
 2. binds the run to immutable definitions and inputs;
 3. evaluates authority, checks, evidence, and approval requirements;
 4. proceeds quietly, discloses, blocks for approval, or denies;
-5. records durable events and side-effect outcomes; and
-6. produces an inspectable WorkReport and derives the next permitted action.
+5. records durable events and supported side-effect outcomes; and
+6. on supported paths, produces an inspectable WorkReport and derives the next
+   permitted action.
 
 Workflow OS does not model every reasoning step or tool-selection edge. The
 agent remains free to explore inside the authorized envelope. The kernel
@@ -131,8 +133,8 @@ Most agent infrastructure governs one layer of the problem:
 | Sandboxes and security runtimes | Contain processes, files, networks, credentials, and tool access | The work-level contract that explains why execution was authorized, which evidence was required, and what the result may claim |
 | Action-governance runtimes and gateways | Enforce identity, capability, policy, and approval around individual agent actions | A repository-adoptable contract spanning declared work, immutable inputs, required evidence and checks, side-effect accounting, terminal WorkReports, and lawful continuation |
 | Policy and authorization engines | Decide whether a principal may perform an action | Durable workflow identity, approval context, evidence and check obligations, side-effect records, and terminal reporting |
-| Observability and evaluation platforms | Trace, inspect, score, and debug what ran | Fail-closed decisions before material actions plus an evidence-backed record of what was approved and completed |
-| Workflow OS | Governs the complete unit of work across those layers | One inspectable chain from declared intent and authority to evidence, side effects, outcome, WorkReport, and next permitted action |
+| Observability and evaluation platforms | Trace, inspect, score, and debug what ran | Fail-closed decisions before material actions plus an assurance-labeled record of what was approved and completed |
+| Workflow OS | Governs the complete unit of work across those layers | One inspectable chain from declared intent and authority to evidence references, side-effect records, outcome, WorkReport, and next permitted action |
 
 This makes Workflow OS complementary to agent SDKs, deterministic workflow
 engines, policy systems, observability platforms, and sandboxes. Those systems
@@ -146,12 +148,13 @@ The distinction is deliberate:
 - **Authority is not a prompt.** Scope, policy, approval, and capability state
   live outside model context and are reassessed at material boundaries.
 - **A trace is not proof of permission.** Events are connected to the exact
-  workflow, immutable inputs, evidence, checks, approvals, and side effects
-  that justified the outcome.
+  workflow, immutable inputs, checks, approvals, side-effect records, and
+  evidence references whose assurance remains explicit.
 - **Completion is a governed claim.** A WorkReport records what happened, what
   did not happen, what remains incomplete, and what may happen next.
 - **Low risk does not mean no record.** Proportional governance can proceed
-  quietly while preserving the same inspectable evidence trail.
+  quietly while preserving an inspectable governance and evidence-reference
+  trail.
 
 ## Build And Try It
 
@@ -217,13 +220,14 @@ For a fully local approval and event-history demonstration, see the
 - Immutable run inputs and approval-resume integrity.
 - Policy decisions and proof-bound approvals.
 - Durable event history, retries, escalation, cancellation, and rehydration.
-- Evidence references, side-effect records, and terminal WorkReports.
+- Evidence references, side-effect records, and terminal WorkReports, with
+  path-specific assurance and explicit local storage-owner limits.
 - Proportional governance: quiet capture, visible disclosure, approval, or
   denial.
 - Scoped capability, current-authority, required-context, and check models.
 - Local filesystem, SQLite continuity, and PostgreSQL state implementations.
 - Fixture-first read-only GitHub, Jira, and GitHub Actions adapters.
-- Narrow GitHub write proofs for comments and managed draft pull requests.
+- Narrow GitHub comment and managed draft-pull-request execution paths.
 - A single-tenant hosted no-write alpha and optional OpenShell boundary.
 
 Not every Core capability is exposed through the CLI. The
