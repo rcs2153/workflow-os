@@ -294,3 +294,29 @@ The complete Core all-features suite and repeated focused runs pass locally.
 
 This follow-up requires its own exact-head and post-merge CI evidence. Gate 1
 must remain open until those checks pass.
+
+The fresh governed review found no blocker. The patch does not alter production
+deadline validation or scheduling behavior, and it preserves the real elapsed
+deadline, two scheduled wakes, exact executor-entry counts, bounded wake budget,
+and terminal disposition assertions.
+
+Governed review phase:
+
+- workflow: `dg/review`
+- run: `run-1793877689851739000-2`
+- approval: `approval/run-1793877689851739000-2/review-scope-approved`
+- presentation: `presentation/3994e760112b2cd6`
+- approval outcome: granted by the delegated maintainer with persisted
+  presentation proof
+- phase status: completed
+- event summary: `39` events, including `1` approval request, `1` approval
+  grant, `8` policy decisions, `6` scheduled steps, `6` requested skill
+  invocations, `6` started skill invocations, `6` successful skill
+  invocations, `1` run resume, and `1` run completion; `0` retries and `0`
+  escalations
+- review verdict: accepted for exact-head pull-request validation with no
+  blocking finding; Gate 1 remains open pending exact-head and post-merge CI
+- out-of-kernel execution: commit inspection, source review, evidence review,
+  and validation-result comparison were performed by the trusted development
+  host; Workflow OS governed scope and approval but did not execute repository
+  reads, shell commands, or PR actions
