@@ -34,6 +34,7 @@ const REPORT_REFERENCE_MAX_BYTES: usize = 256;
 const REPORT_REDACTION_FIELD_MAX_BYTES: usize = 128;
 const REPORT_REDACTION_REASON_MAX_BYTES: usize = 512;
 const REPORT_REDACTION_MAX_ENTRIES: usize = 64;
+const WORK_REPORT_BODY_COMMITMENT_V1_DOMAIN: &str = "workflow-os/work-report-body-commitment/v1";
 
 static NEXT_WORK_REPORT_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_APPROVAL_PROJECTION_TEMP_ID: AtomicU64 = AtomicU64::new(1);
@@ -2291,6 +2292,145 @@ pub struct WorkReport {
     high_assurance_approval: Option<WorkReportHighAssuranceApprovalDisclosure>,
     sensitivity: WorkReportSensitivity,
     redaction: RedactionMetadata,
+}
+
+/// Version of the canonical complete-body commitment for a `WorkReport`.
+///
+/// A new version is required before changing canonical field coverage,
+/// ordering, framing, or serialization semantics.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkReportBodyCommitmentVersion {
+    /// V1 commits to the validated report's complete compact JSON body inside
+    /// the V1 domain-separated commitment envelope.
+    V1,
+}
+
+/// Bounded posture for complete-body commitment availability.
+///
+/// `AvailableUnanchored` does not mean that an artifact has been verified or
+/// that Core computed the value in the current call. A later phase must retain
+/// the expected commitment outside mutable report content before verification
+/// can be claimed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkReportBodyCommitmentPosture {
+    /// A complete-body commitment value is available but is not independently anchored.
+    AvailableUnanchored,
+    /// A legacy artifact has no complete-body commitment and is unverified.
+    LegacyUnverified,
+}
+
+/// Versioned, domain-separated commitment to one complete validated report body.
+///
+/// The value is a model primitive only. Storing it inside the same mutable
+/// report body would be self-assertion and must not be treated as integrity
+/// verification.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkReportBodyCommitment {
+    version: WorkReportBodyCommitmentVersion,
+    commitment: SpecContentHash,
+}
+
+#[derive(Serialize)]
+struct WorkReportBodyCommitmentV1Canonical<'a> {
+    domain: &'static str,
+    version: WorkReportBodyCommitmentVersion,
+    report: &'a WorkReport,
+}
+
+impl WorkReportBodyCommitment {
+    /// Computes a versioned commitment over the complete validated report body.
+    ///
+    /// V1 covers report and contract identity, complete generation context,
+    /// ordered sections and citations, all disclosure/note collections, the
+    /// optional high-assurance disclosure, sensitivity, and redaction metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable, payload-free validation error when the report is
+    /// invalid or canonical bytes cannot be created.
+    pub fn from_report(
+        version: WorkReportBodyCommitmentVersion,
+        report: &WorkReport,
+    ) -> Result<Self, WorkflowOsError> {
+        report.validate().map_err(|_| {
+            work_report_body_commitment_error(
+                "report_invalid",
+                "work report body commitment input is invalid",
+            )
+        })?;
+
+        let bytes = match version {
+            WorkReportBodyCommitmentVersion::V1 => {
+                serde_json::to_vec(&WorkReportBodyCommitmentV1Canonical {
+                    domain: WORK_REPORT_BODY_COMMITMENT_V1_DOMAIN,
+                    version,
+                    report,
+                })
+            }
+        }
+        .map_err(|_| {
+            work_report_body_commitment_error(
+                "canonicalization_failed",
+                "work report body commitment could not be created",
+            )
+        })?;
+
+        Ok(Self {
+            version,
+            commitment: SpecContentHash::from_bytes(bytes),
+        })
+    }
+
+    /// Verifies a report against this expected commitment in memory.
+    ///
+    /// This comparison does not establish that the expected value was retained
+    /// outside the report owner's trust domain.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable, payload-free integrity error when the complete body
+    /// does not match.
+    pub fn verify_report(&self, report: &WorkReport) -> Result<(), WorkflowOsError> {
+        let actual = Self::from_report(self.version, report)?;
+        if actual != *self {
+            return Err(work_report_body_commitment_error(
+                "mismatch",
+                "work report body commitment does not match",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Returns the commitment version.
+    #[must_use]
+    pub const fn version(&self) -> WorkReportBodyCommitmentVersion {
+        self.version
+    }
+
+    /// Returns the complete-body commitment digest.
+    #[must_use]
+    pub const fn commitment(&self) -> &SpecContentHash {
+        &self.commitment
+    }
+
+    /// Returns the truthful model-only posture.
+    #[must_use]
+    pub const fn posture(&self) -> WorkReportBodyCommitmentPosture {
+        WorkReportBodyCommitmentPosture::AvailableUnanchored
+    }
+}
+
+impl fmt::Debug for WorkReportBodyCommitment {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportBodyCommitment")
+            .field("version", &self.version)
+            .field("commitment", &"[REDACTED]")
+            .field("posture", &self.posture())
+            .finish()
+    }
 }
 
 /// Input fields for constructing a validated `WorkReport`.
@@ -8465,6 +8605,13 @@ fn validate_not_secret_like(type_name: &'static str, value: &str) -> Result<(), 
 
 fn validation_error(code: &'static str, message: impl Into<String>) -> WorkflowOsError {
     WorkflowOsError::validation(code, message)
+}
+
+fn work_report_body_commitment_error(
+    suffix: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    WorkflowOsError::validation(format!("work_report.body_commitment.{suffix}"), message)
 }
 
 fn approval_proof_marker_citation_error(
