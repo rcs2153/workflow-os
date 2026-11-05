@@ -86,6 +86,37 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
+A new P0 **evidence provenance and report integrity** preemption is active
+before publication, public-positioning expansion, or broader evidence-consuming
+runtime work. Fresh testing proved two distinct trust boundaries that current
+product language can blur: the trusted host content-binds and dispatches an
+operator-selected validator but does not authenticate its producer, and a
+structurally valid storage-owner edit to a persisted `WorkReport` body is
+accepted because no complete body commitment is anchored outside the report
+payload. The [P0 assessment](docs/concepts/EVIDENCE_PROVENANCE_AND_REPORT_INTEGRITY_P0_ASSESSMENT.md)
+records the code evidence and claim correction. The [P0 plan](docs/implementation-plans/evidence-provenance-and-report-integrity-p0-plan.md)
+requires an explicit assurance taxonomy, honest projection of the current
+operator-selected/content-bound/unattested validator posture, a versioned
+complete WorkReport body commitment, an expected commitment anchored outside
+the mutable report body, enforcement across read/list/inspect/recovery/replay,
+explicit legacy posture, and bounded inspection output. Local durability must
+not be described as independent evidence or storage-owner tamper resistance.
+The first implementation phase is model/projection review over existing
+execution-binding and check-attestation vocabulary; it must not add arbitrary
+commands, signing, an external witness, hosted identity, provider expansion, or
+publication. Independent security review is required before release admission
+resumes.
+
+A separate deterministic hosted P0 is queued immediately after this truth-
+boundary planning phase: the advertised `workflow-os-hosted --worker-once`
+entry point calls the synchronous PostgreSQL client directly from the Tokio
+runtime thread and panics on both empty and populated queues, while continuous
+`--worker` correctly uses `spawn_blocking`. The bounded fix must route one-shot
+execution through the same blocking boundary, map join failure to a stable
+error, and add a real-binary PostgreSQL regression for idle, completed, restart,
+and no-panic behavior. This is release-blocking and must not be diluted into the
+evidence-provenance implementation.
+
 A P0 governed-phase kernel-freshness blocker is accepted and merged. Every live
 material `phase-start` now rebuilds the Workflow OS CLI
 from the exact current checkout before validation, run creation, approval
