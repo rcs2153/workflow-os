@@ -386,6 +386,19 @@ Execute one reviewed phase per gate:
    lifecycle binding.
 5. Product-contract, hosted, integration, and release-admission reconciliation.
 
+Cross-gate status: **private Core correction implemented and focused-review
+accepted after three blocker corrections.** The review confirmed the three individual gate closures but found
+that the private replacement-executor proof did not compose their exact
+lifecycle bindings into its fresh-authority subject. The implementation now
+binds current accepted dispatch, exact WorkReport location, and current
+project-resource authority under one run, immutable context, and revision
+fence, and it rejects binding-free fresh authority. See the [Continuity Of
+Authority Cross-Gate
+Review](../concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_REVIEW.md) and [binding
+report](../concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_BINDING_REPORT.md) and
+[accepted review](../concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_BINDING_REVIEW.md).
+Exact-head pull-request validation and merge remain required before step 5.
+
 Do not bundle all three implementations into one unreviewable patch. Each gate
 must close its own invariant and tests without claiming that the other two are
 fixed. The Active Delivery Queue remains blocked until all three merge.
