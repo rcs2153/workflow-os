@@ -51,7 +51,7 @@ async fn run() -> Result<(), WorkflowOsError> {
             Duration::from_secs(30),
         ));
         if mode == ProcessMode::WorkerOnce {
-            print_worker_outcome(worker.run_once()?.is_some());
+            print_worker_outcome(run_worker_once(worker).await?);
         } else {
             run_worker_loop(worker).await?;
         }
@@ -119,21 +119,21 @@ fn process_mode() -> ProcessMode {
 async fn run_worker_loop(worker: Arc<HostedWorker>) -> Result<(), WorkflowOsError> {
     let mut shutdown = Box::pin(shutdown_signal());
     loop {
-        let current = Arc::clone(&worker);
-        let outcome = tokio::task::spawn_blocking(move || current.run_once())
-            .await
-            .map_err(|_| {
-                WorkflowOsError::invalid_state(
-                    "hosted.worker.task.failed",
-                    "hosted worker task failed",
-                )
-            })??;
-        print_worker_outcome(outcome.is_some());
+        print_worker_outcome(run_worker_once(Arc::clone(&worker)).await?);
         tokio::select! {
             () = &mut shutdown => return Ok(()),
             () = tokio::time::sleep(Duration::from_millis(500)) => {}
         }
     }
+}
+
+async fn run_worker_once(worker: Arc<HostedWorker>) -> Result<bool, WorkflowOsError> {
+    let outcome = tokio::task::spawn_blocking(move || worker.run_once())
+        .await
+        .map_err(|_| {
+            WorkflowOsError::invalid_state("hosted.worker.task.failed", "hosted worker task failed")
+        })??;
+    Ok(outcome.is_some())
 }
 
 fn print_worker_outcome(completed: bool) {

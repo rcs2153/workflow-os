@@ -107,15 +107,18 @@ commands, signing, an external witness, hosted identity, provider expansion, or
 publication. Independent security review is required before release admission
 resumes.
 
-A separate deterministic hosted P0 is queued immediately after this truth-
-boundary planning phase: the advertised `workflow-os-hosted --worker-once`
-entry point calls the synchronous PostgreSQL client directly from the Tokio
-runtime thread and panics on both empty and populated queues, while continuous
-`--worker` correctly uses `spawn_blocking`. The bounded fix must route one-shot
-execution through the same blocking boundary, map join failure to a stable
-error, and add a real-binary PostgreSQL regression for idle, completed, restart,
-and no-panic behavior. This is release-blocking and must not be diluted into the
-evidence-provenance implementation.
+The separate deterministic hosted P0 is now implemented. The advertised
+`workflow-os-hosted --worker-once` entry point previously called the
+synchronous PostgreSQL client directly from the Tokio runtime thread and
+panicked on both empty and populated queues, while continuous `--worker`
+correctly used `spawn_blocking`. Both modes now share one blocking boundary and
+one stable join-failure mapping. The hosted-alpha recovery rehearsal uses one
+real one-shot process to prove exact idle and completed outcomes, terminal
+events, and report persistence, then uses a distinct run to preserve the
+continuous-worker restart and database-recovery proof. Exact-head hosted-alpha
+CI remains the acceptance boundary because Docker is not installed in the
+desktop development environment. See the [implementation
+report](docs/concepts/HOSTED_WORKER_ONCE_NESTED_RUNTIME_BLOCKER_FIX_REPORT.md).
 
 A P0 governed-phase kernel-freshness blocker is accepted and merged. Every live
 material `phase-start` now rebuilds the Workflow OS CLI
