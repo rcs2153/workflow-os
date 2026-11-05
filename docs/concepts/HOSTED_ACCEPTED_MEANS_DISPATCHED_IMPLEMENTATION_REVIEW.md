@@ -278,3 +278,19 @@ ambiguous Gate 1 head.
 - out-of-kernel execution: source inspection, edits, and validation were
   performed by the trusted development host; Workflow OS governed the phase
   but did not execute repository writes or shell commands
+
+## 10. Post-Merge CI Follow-Up
+
+The merged review head passed pull-request CI, but exact-main CI exposed a
+load-sensitive timing assumption in one operational scheduling test. The test
+allowed only `500 ms` between deadline creation and persistence of the first
+time-window yield. A loaded runner could lawfully cross that deadline, causing
+the production security boundary to reject the stale wait.
+
+The bounded follow-up changes test timing only: it provides a five-second
+registration margin and waits for the exact remaining interval before wake
+scheduling. Deadline eligibility and every behavioral assertion remain intact.
+The complete Core all-features suite and repeated focused runs pass locally.
+
+This follow-up requires its own exact-head and post-merge CI evidence. Gate 1
+must remain open until those checks pass.
