@@ -1185,22 +1185,48 @@ impl PostgresStateBackend {
             if let Some(existing) =
                 read_hosted_work_item_tx(tx, dispatch.work_item().work_item_id(), true)?
             {
-                if existing.value() != dispatch.work_item()
-                    || !event_exists_exact_tx(tx, dispatch.invocation_requested())?
-                    || !event_exists_exact_tx(tx, dispatch.invocation_started())?
-                {
-                    return Err(state_error(
+                existing
+                    .value()
+                    .validate_dispatch_intent(dispatch.work_item())
+                    .map_err(|_| {
+                        state_error(
+                            "postgres_state.hosted_dispatch.replay_conflict",
+                            "hosted dispatch replay conflicts with durable state",
+                        )
+                    })?;
+                let events = read_events_tx(tx, dispatch.work_item().run_id())?;
+                let projected = WorkflowRun::rehydrate(&events)?;
+                crate::hosted::validate_durable_hosted_dispatch(&projected, existing.value())
+                    .map_err(|_| {
+                        state_error(
+                            "postgres_state.hosted_dispatch.replay_conflict",
+                            "hosted dispatch replay conflicts with durable state",
+                        )
+                    })?;
+                dispatch.validate_replay_intent(&projected).map_err(|_| {
+                    state_error(
                         "postgres_state.hosted_dispatch.replay_conflict",
                         "hosted dispatch replay conflicts with durable state",
-                    ));
-                }
-                if let Some(scope) = request.project_scope {
-                    require_locked_project_resource_binding_tx(
-                        tx,
-                        scope,
-                        HostedProjectResourceKind::WorkItem,
-                        dispatch.work_item().work_item_id().as_str(),
-                    )?;
+                    )
+                })?;
+                let durable_scope = read_project_resource_binding_tx(
+                    tx,
+                    HostedProjectResourceKind::WorkItem,
+                    dispatch.work_item().work_item_id().as_str(),
+                    true,
+                )?;
+                match (request.project_scope, durable_scope) {
+                    (Some(scope), Some(binding))
+                        if binding.value().scope() == scope
+                            && binding.value().status()
+                                == HostedProjectResourceBindingStatus::Active => {}
+                    (None, None) => {}
+                    (Some(_) | None, Some(_)) | (Some(_), None) => {
+                        return Err(state_error(
+                            "postgres_state.hosted_dispatch.replay_conflict",
+                            "hosted dispatch replay conflicts with durable state",
+                        ));
+                    }
                 }
                 return Ok(PostgresHostedWorkItemCreateResult::Replayed(existing));
             }

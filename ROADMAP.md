@@ -98,8 +98,16 @@ violations:
 1. **Accepted means dispatched.** Hosted exact retries can return HTTP `201`
    for a durably `Running` run with five events, zero queued work items, and an
    idle worker after an injected queue-insert failure. Hosted runtime/state owns
-   the fix. Reliable unattended hosted completion and truthful hosted-submission
-   acknowledgment remain blocked.
+   the fix. The bounded retry-reconciliation implementation is complete
+   locally: success now requires the exact approval-wait, terminal, or durable
+   dispatch posture, and an exact retry can atomically repair a missing dispatch
+   from the immutable run bundle. Focused review found and fixed dispatch-
+   context, approval-replay, invocation-projection, and project-scope replay
+   blockers. Exact-head PostgreSQL CI and an independent fault-injection rerun
+   remain required. Reliable unattended
+   hosted completion and truthful hosted-submission acknowledgment remain
+   blocked. See the [implementation
+   report](docs/concepts/HOSTED_ACCEPTED_MEANS_DISPATCHED_IMPLEMENTATION_REPORT.md).
 2. **Verified means correctly bound.** A complete valid WorkReport from run B
    can be placed in run A's filesystem slot, pass body-commitment validation,
    project through human and JSON inspect, and replay as `already_persisted` for

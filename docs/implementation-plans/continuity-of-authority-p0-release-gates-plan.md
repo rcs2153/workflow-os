@@ -136,6 +136,14 @@ Blocked product claims:
 
 ## 3. Gate 1 Implementation: Hosted Retry Reconciliation
 
+Implementation status: **implemented and focused-review accepted locally;
+exact-head PostgreSQL CI and an independent fault-injection rerun remain
+required.** See the
+[Hosted Accepted Means Dispatched Implementation
+Report](../concepts/HOSTED_ACCEPTED_MEANS_DISPATCHED_IMPLEMENTATION_REPORT.md)
+and [focused
+review](../concepts/HOSTED_ACCEPTED_MEANS_DISPATCHED_IMPLEMENTATION_REVIEW.md).
+
 Trace hosted submission from request identity through run-prefix persistence,
 approval-wait posture, queue insertion, dispatch event projection, worker claim,
 terminal state, and exact retry.

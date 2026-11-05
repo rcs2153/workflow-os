@@ -16,16 +16,18 @@ use std::time::Duration;
 use postgres::{Client, Config, NoTls};
 use workflow_core::{
     build_immutable_run_bundle, compute_approval_presentation_content_hash,
-    decide_collaborative_project_approval_with_presentation, resolve_project_approval_route,
-    transition_side_effect_to_attempted, transition_side_effect_to_completed, ActorId, AdapterId,
-    AdapterKind, ApprovalDecision, ApprovalDecisionKind, ApprovalDecisionProofEnforcementMode,
-    ApprovalDecisionProofMarker, ApprovalDecisionProofMarkerDefinition,
-    ApprovalDecisionProofValidationPolicy, ApprovalPresentationChannel, ApprovalPresentationId,
-    ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
-    ApprovalPresentationRecordStore, ApprovalPresentationSensitivity, ApprovalReferenceId,
-    ApprovalRequest, ApprovalStore, CollaborativeExternalSubjectCommitment,
-    CollaborativeIdentityAudienceCommitment, CollaborativeIdentityAuthorityMatchPosture,
-    CollaborativeIdentityAuthorityQuery, CollaborativeIdentityAuthorityRevisionActivation,
+    decide_collaborative_project_approval_with_presentation,
+    decide_hosted_dispatch_approval_with_presentation, execute_with_hosted_no_write_dispatch,
+    resolve_project_approval_route, transition_side_effect_to_attempted,
+    transition_side_effect_to_completed, ActorId, AdapterId, AdapterKind, ApprovalDecision,
+    ApprovalDecisionKind, ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
+    ApprovalDecisionProofMarkerDefinition, ApprovalDecisionProofValidationPolicy,
+    ApprovalPresentationChannel, ApprovalPresentationId, ApprovalPresentationRecord,
+    ApprovalPresentationRecordDefinition, ApprovalPresentationRecordStore,
+    ApprovalPresentationSensitivity, ApprovalReferenceId, ApprovalRequest, ApprovalStore,
+    CollaborativeExternalSubjectCommitment, CollaborativeIdentityAudienceCommitment,
+    CollaborativeIdentityAuthorityMatchPosture, CollaborativeIdentityAuthorityQuery,
+    CollaborativeIdentityAuthorityRevisionActivation,
     CollaborativeIdentityAuthorityRevisionCandidate, CollaborativeIdentityIssuerCommitment,
     CollaborativeIdentityProviderId, CollaborativeIdentityProviderLifecycle,
     CollaborativeIdentityProviderRegistration, CollaborativeIdentityProviderRegistrationVersion,
@@ -43,22 +45,25 @@ use workflow_core::{
     HostedExecutionId, HostedExecutionPolicyBinding, HostedExecutionPolicyId,
     HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
     HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
-    HostedExecutionStatus, HostedPrincipalBinding, HostedPrincipalKind, HostedPrincipalRegistry,
-    HostedProjectCapability, HostedProjectCatalogVersion, HostedProjectGrant,
-    HostedProjectResourceBinding, HostedProjectResourceBindingStatus, HostedProjectResourceKind,
-    HostedProjectScope, HostedSkillDispatch, HostedTerminalReportArtifact,
-    HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
-    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
-    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildRequest,
-    ImmutableRunBundleDefinitionKind, ImmutableRunBundleDefinitionReference,
-    ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
-    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundlePublishOutcome,
-    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleStore,
-    ImmutableRunBundleVersion, IntegrationId, LifecycleStatus, LocalApprovalDecisionRequest,
+    HostedExecutionStatus, HostedNoWriteDispatchInputs, HostedPrincipalBinding,
+    HostedPrincipalKind, HostedPrincipalRegistry, HostedProjectCapability,
+    HostedProjectCatalogVersion, HostedProjectGrant, HostedProjectResourceBinding,
+    HostedProjectResourceBindingStatus, HostedProjectResourceKind, HostedProjectScope,
+    HostedSkillDispatch, HostedTerminalReportArtifact, HostedTerminalResultProjection,
+    HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId,
+    HostedWorkItemStatus, IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite,
+    ImmutableRunBundleBuildRequest, ImmutableRunBundleDefinitionKind,
+    ImmutableRunBundleDefinitionReference, ImmutableRunBundleExecutionPosture,
+    ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
+    ImmutableRunBundlePublishOutcome, ImmutableRunBundleReferencePosture,
+    ImmutableRunBundleSensitivity, ImmutableRunBundleStore, ImmutableRunBundleVersion,
+    IntegrationId, LifecycleStatus, LocalApprovalDecisionRequest,
     LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
-    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionRequest, LocalExecutor,
-    LocalObservabilitySink, LocalSkillRegistry, LocalStructuredLogger, LockStore, OrganizationId,
-    OwnershipMetadata, PostgresAuthoritativeProjectionRequest, PostgresClaimHostedWorkItemRequest,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
+    LocalExecutionRequest, LocalExecutionWithHostedDispatchRequest,
+    LocalExecutionWithImmutableRunBundleRequest, LocalExecutor, LocalObservabilitySink,
+    LocalSkillRegistry, LocalStructuredLogger, LockStore, OrganizationId, OwnershipMetadata,
+    PostgresAuthoritativeProjectionRequest, PostgresClaimHostedWorkItemRequest,
     PostgresCommitHostedReceiptProjectionRequest, PostgresCommitHostedReceiptRequest,
     PostgresCommitHostedUnreceiptedProjectionRequest, PostgresConnectionFactory,
     PostgresCreateHostedWorkItemRequest, PostgresDispatchHostedSkillRequest,
@@ -240,7 +245,7 @@ fn postgresql_backend_proves_shared_state_milestone() {
     prove_competing_idempotency_intent(&backend);
     prove_atomic_side_effect_families(&backend);
     prove_atomic_approval_family(&backend);
-    prove_immutable_bundle_family(&backend);
+    prove_immutable_bundle_family(&backend, &config);
     prove_authoritative_projection_and_shared_consumer(&backend);
     prove_hosted_project_resource_binding(&backend, &config);
     prove_project_approval_route_persistence(&backend, &config);
@@ -2576,7 +2581,7 @@ fn prepare_collaborative_approval_fixture(
     (scope, principal, decided, presentation, granted_event)
 }
 
-fn prove_immutable_bundle_family(backend: &PostgresStateBackend) {
+fn prove_immutable_bundle_family(backend: &PostgresStateBackend, config: &Config) {
     let project = TestProject::new();
     project.write_valid_project();
     let loaded = workflow_core::load_project(project.path());
@@ -2584,6 +2589,8 @@ fn prove_immutable_bundle_family(backend: &PostgresStateBackend) {
     let bundle = loaded.bundle.expect("project");
     let validation = workflow_core::validate_project_bundle(&bundle);
     assert!(!validation.has_errors(), "{:?}", validation.diagnostics);
+    prove_hosted_dispatch_recovery(backend, config, &project);
+    prove_hosted_approval_dispatch_recovery(backend, config);
     let workflow_id = WorkflowId::new("postgres/build").expect("workflow");
     let build = build_immutable_run_bundle(ImmutableRunBundleBuildRequest {
         project: &bundle,
@@ -2701,6 +2708,455 @@ fn prove_immutable_bundle_family(backend: &PostgresStateBackend) {
             .expect("publish hosted outcome bundle");
         persist_running_bundle_backed_run_with_suffix(backend, outcome_build.manifest(), suffix);
         prove_hosted_unreceipted_projection(backend, outcome_build.manifest(), suffix, outcome);
+    }
+}
+
+fn prove_hosted_dispatch_recovery(
+    backend: &PostgresStateBackend,
+    config: &Config,
+    project: &TestProject,
+) {
+    let request = hosted_dispatch_request(project, "recovery");
+    let mut fault_connection = config
+        .connect(NoTls)
+        .expect("connect hosted dispatch fault");
+    fault_connection
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION workflow_os.test_block_hosted_work_item()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+               RAISE EXCEPTION 'blocked hosted work item insert';
+             END;
+             $$;
+             CREATE TRIGGER test_block_hosted_work_item
+             BEFORE INSERT ON workflow_os.records
+             FOR EACH ROW
+             WHEN (NEW.family = 'hosted_work_item')
+             EXECUTE FUNCTION workflow_os.test_block_hosted_work_item();",
+        )
+        .expect("install hosted work-item fault");
+    let registry = LocalSkillRegistry::new();
+    let first_error =
+        execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+            .expect_err("queue insert fault must fail create");
+    assert_eq!(first_error.code(), "postgres_state.backend.unavailable");
+    let stranded = backend
+        .rehydrate_run(request.execution.execution.run_id.as_ref().expect("run id"))
+        .expect("rehydrate stranded run");
+    assert_eq!(stranded.snapshot.status, WorkflowRunStatus::Running);
+    let before_recovery = backend
+        .hosted_queue_metrics_snapshot()
+        .expect("queue metrics before recovery")
+        .queued_work_items();
+    fault_connection
+        .batch_execute(
+            "DROP TRIGGER test_block_hosted_work_item ON workflow_os.records;
+             DROP FUNCTION workflow_os.test_block_hosted_work_item();",
+        )
+        .expect("remove hosted work-item fault");
+
+    let mut changed_before_recovery = request.clone();
+    changed_before_recovery.dispatch.catalog_entry_id =
+        HostedCatalogEntryId::new("catalog/postgres-pre-recovery-changed")
+            .expect("changed pre-recovery catalog");
+    let conflict = execute_with_hosted_no_write_dispatch(
+        &LocalExecutor::new(backend, &registry),
+        &changed_before_recovery,
+    )
+    .expect_err("changed pre-recovery dispatch context must fail");
+    assert_eq!(
+        conflict.code(),
+        "executor.immutable_run_bundle.binding_mismatch"
+    );
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after changed pre-recovery retry")
+            .queued_work_items(),
+        before_recovery
+    );
+
+    let recovered =
+        execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+            .expect("exact retry repairs missing dispatch");
+    assert_eq!(recovered.run().snapshot.status, WorkflowRunStatus::Running);
+    let after_recovery = backend
+        .hosted_queue_metrics_snapshot()
+        .expect("queue metrics after recovery")
+        .queued_work_items();
+    assert_eq!(after_recovery, before_recovery + 1);
+    execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+        .expect("exact retry is acknowledged");
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after replay")
+            .queued_work_items(),
+        after_recovery
+    );
+
+    let restarted = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
+        config.clone(),
+    )));
+    execute_with_hosted_no_write_dispatch(&LocalExecutor::new(&restarted, &registry), &request)
+        .expect("restart retry preserves dispatch acknowledgement");
+    let mut changed = request.clone();
+    changed.dispatch.catalog_entry_id =
+        HostedCatalogEntryId::new("catalog/postgres-changed").expect("changed catalog");
+    let conflict =
+        execute_with_hosted_no_write_dispatch(&LocalExecutor::new(&restarted, &registry), &changed)
+            .expect_err("changed dispatch intent must fail");
+    assert_eq!(conflict.code(), "hosted.dispatch.intent_mismatch");
+
+    let concurrent_request = hosted_dispatch_request(project, "concurrent-recovery");
+    fault_connection
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION workflow_os.test_block_hosted_work_item()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+               RAISE EXCEPTION 'blocked hosted work item insert';
+             END;
+             $$;
+             CREATE TRIGGER test_block_hosted_work_item
+             BEFORE INSERT ON workflow_os.records
+             FOR EACH ROW
+             WHEN (NEW.family = 'hosted_work_item')
+             EXECUTE FUNCTION workflow_os.test_block_hosted_work_item();",
+        )
+        .expect("install concurrent hosted work-item fault");
+    execute_with_hosted_no_write_dispatch(
+        &LocalExecutor::new(backend, &registry),
+        &concurrent_request,
+    )
+    .expect_err("concurrent recovery fixture must strand before dispatch");
+    fault_connection
+        .batch_execute(
+            "DROP TRIGGER test_block_hosted_work_item ON workflow_os.records;
+             DROP FUNCTION workflow_os.test_block_hosted_work_item();",
+        )
+        .expect("remove concurrent hosted work-item fault");
+    let queued_before_concurrent = backend
+        .hosted_queue_metrics_snapshot()
+        .expect("queue metrics before concurrent recovery")
+        .queued_work_items();
+    let barrier = Arc::new(Barrier::new(3));
+    let request = Arc::new(concurrent_request);
+    let mut workers = Vec::new();
+    for _ in 0..2 {
+        let backend = backend.clone();
+        let barrier = Arc::clone(&barrier);
+        let request = Arc::clone(&request);
+        workers.push(thread::spawn(move || {
+            let registry = LocalSkillRegistry::new();
+            barrier.wait();
+            execute_with_hosted_no_write_dispatch(
+                &LocalExecutor::new(&backend, &registry),
+                &request,
+            )
+        }));
+    }
+    barrier.wait();
+    let results = workers
+        .into_iter()
+        .map(|worker| worker.join().expect("hosted recovery worker"))
+        .collect::<Vec<_>>();
+    assert!(results.iter().all(Result::is_ok), "{results:?}");
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after concurrent recovery")
+            .queued_work_items(),
+        queued_before_concurrent + 1
+    );
+}
+
+fn prove_hosted_approval_dispatch_recovery(backend: &PostgresStateBackend, config: &Config) {
+    let project = TestProject::new();
+    project.write_hosted_approval_project();
+    let request = hosted_approval_dispatch_request(&project, "recovery");
+    let registry = LocalSkillRegistry::new();
+    let waiting =
+        execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+            .expect("start hosted approval dispatch");
+    assert_eq!(
+        waiting.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    let approval = waiting
+        .run()
+        .snapshot
+        .approval_requests
+        .first()
+        .cloned()
+        .expect("hosted approval request");
+    let presentation = approval_presentation(&approval);
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("persist hosted approval presentation");
+    let decision = LocalApprovalPresentationDecisionRequest {
+        approval: LocalApprovalDecisionRequest {
+            project_root: project.path().to_path_buf(),
+            run_id: approval.run_id.clone(),
+            approval_id: approval.approval_id.clone(),
+            decision: ApprovalDecisionKind::Granted,
+            actor: ActorId::new("system/postgres-test").expect("approval actor"),
+            reason: "approve hosted dispatch recovery".to_owned(),
+            correlation_id: CorrelationId::new("correlation/postgres-hosted-approval")
+                .expect("approval correlation"),
+        },
+        proof: LocalApprovalPresentationProof::PresentationId(
+            presentation.presentation_id().clone(),
+        ),
+        max_presentation_age: None,
+    };
+    let mut fault_connection = config
+        .connect(NoTls)
+        .expect("connect hosted approval dispatch fault");
+    fault_connection
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION workflow_os.test_block_hosted_approval_work_item()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+               RAISE EXCEPTION 'blocked hosted approval work item insert';
+             END;
+             $$;
+             CREATE TRIGGER test_block_hosted_approval_work_item
+             BEFORE INSERT ON workflow_os.records
+             FOR EACH ROW
+             WHEN (NEW.family = 'hosted_work_item')
+             EXECUTE FUNCTION workflow_os.test_block_hosted_approval_work_item();",
+        )
+        .expect("install hosted approval work-item fault");
+    let first_error = decide_hosted_dispatch_approval_with_presentation(
+        &LocalExecutor::new(backend, &registry),
+        decision.clone(),
+        &request.dispatch,
+    )
+    .expect_err("approval dispatch fault must fail");
+    assert_eq!(first_error.code(), "postgres_state.backend.unavailable");
+    let stranded = backend
+        .rehydrate_run(&approval.run_id)
+        .expect("rehydrate approval-stranded run");
+    assert_eq!(stranded.snapshot.status, WorkflowRunStatus::Running);
+    assert_eq!(
+        stranded
+            .events
+            .iter()
+            .filter(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalGranted(_)))
+            .count(),
+        1
+    );
+    let queued_before = backend
+        .hosted_queue_metrics_snapshot()
+        .expect("queue metrics before approval recovery")
+        .queued_work_items();
+    fault_connection
+        .batch_execute(
+            "DROP TRIGGER test_block_hosted_approval_work_item ON workflow_os.records;
+             DROP FUNCTION workflow_os.test_block_hosted_approval_work_item();",
+        )
+        .expect("remove hosted approval work-item fault");
+
+    let recovered = decide_hosted_dispatch_approval_with_presentation(
+        &LocalExecutor::new(backend, &registry),
+        decision.clone(),
+        &request.dispatch,
+    )
+    .expect("exact approval replay repairs dispatch");
+    assert_eq!(recovered.snapshot.status, WorkflowRunStatus::Running);
+    assert_eq!(
+        recovered
+            .events
+            .iter()
+            .filter(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalGranted(_)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after approval recovery")
+            .queued_work_items(),
+        queued_before + 1
+    );
+    decide_hosted_dispatch_approval_with_presentation(
+        &LocalExecutor::new(backend, &registry),
+        decision.clone(),
+        &request.dispatch,
+    )
+    .expect("exact approval replay remains idempotent");
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after approval replay")
+            .queued_work_items(),
+        queued_before + 1
+    );
+
+    let mut changed_dispatch = request.dispatch.clone();
+    changed_dispatch.catalog_entry_id =
+        HostedCatalogEntryId::new("catalog/postgres-hosted-approval-changed")
+            .expect("changed approval catalog");
+    let conflict = decide_hosted_dispatch_approval_with_presentation(
+        &LocalExecutor::new(backend, &registry),
+        decision,
+        &changed_dispatch,
+    )
+    .expect_err("changed approval dispatch context must fail");
+    assert_eq!(
+        conflict.code(),
+        "executor.immutable_run_bundle.binding_mismatch"
+    );
+
+    let denied_request = hosted_approval_dispatch_request(&project, "denial");
+    let waiting = execute_with_hosted_no_write_dispatch(
+        &LocalExecutor::new(backend, &registry),
+        &denied_request,
+    )
+    .expect("start hosted approval denial");
+    let approval = waiting
+        .run()
+        .snapshot
+        .approval_requests
+        .first()
+        .cloned()
+        .expect("hosted denial approval request");
+    let presentation = approval_presentation(&approval);
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("persist hosted denial presentation");
+    let denial = LocalApprovalPresentationDecisionRequest {
+        approval: LocalApprovalDecisionRequest {
+            project_root: project.path().to_path_buf(),
+            run_id: approval.run_id.clone(),
+            approval_id: approval.approval_id.clone(),
+            decision: ApprovalDecisionKind::Denied,
+            actor: ActorId::new("system/postgres-test").expect("denial actor"),
+            reason: "deny hosted dispatch".to_owned(),
+            correlation_id: CorrelationId::new("correlation/postgres-hosted-approval-denial")
+                .expect("denial correlation"),
+        },
+        proof: LocalApprovalPresentationProof::PresentationId(
+            presentation.presentation_id().clone(),
+        ),
+        max_presentation_age: None,
+    };
+    let denied = decide_hosted_dispatch_approval_with_presentation(
+        &LocalExecutor::new(backend, &registry),
+        denial.clone(),
+        &denied_request.dispatch,
+    )
+    .expect("deny hosted dispatch");
+    assert_eq!(denied.snapshot.status, WorkflowRunStatus::Failed);
+    let replayed_denial = decide_hosted_dispatch_approval_with_presentation(
+        &LocalExecutor::new(backend, &registry),
+        denial,
+        &denied_request.dispatch,
+    )
+    .expect("exact denial replay returns terminal run");
+    assert_eq!(replayed_denial.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        replayed_denial
+            .events
+            .iter()
+            .filter(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalDenied(_)))
+            .count(),
+        1
+    );
+}
+
+fn hosted_dispatch_request(
+    project: &TestProject,
+    suffix: &str,
+) -> LocalExecutionWithHostedDispatchRequest {
+    LocalExecutionWithHostedDispatchRequest {
+        execution: LocalExecutionWithImmutableRunBundleRequest {
+            execution: LocalExecutionRequest {
+                project_root: project.path().to_path_buf(),
+                workflow_id: WorkflowId::new("postgres/build").expect("workflow"),
+                run_id: Some(
+                    WorkflowRunId::new(format!("run-postgres-hosted-{suffix}")).expect("run id"),
+                ),
+                correlation_id: CorrelationId::new(format!("correlation-postgres-hosted-{suffix}"))
+                    .expect("correlation"),
+                actor: ActorId::new("system/postgres-hosted-recovery").expect("actor"),
+                before_skill_invocation_checkpoints:
+                    LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+                before_skill_invocation_hook: None,
+                side_effect_events: Vec::new(),
+                side_effect_lifecycle_events: Vec::new(),
+            },
+            bundle: LocalExecutionImmutableRunBundleInputs {
+                bundle_id: ImmutableRunBundleId::new(format!("bundle/postgres-hosted-{suffix}"))
+                    .expect("bundle id"),
+                bundle_version: ImmutableRunBundleVersion::new("v1").expect("bundle version"),
+                created_at: timestamp(),
+                sensitivity: ImmutableRunBundleSensitivity::Internal,
+                redaction_required: true,
+            },
+        },
+        dispatch: HostedNoWriteDispatchInputs {
+            catalog_entry_id: HostedCatalogEntryId::new(format!(
+                "catalog/postgres-hosted-{suffix}"
+            ))
+            .expect("catalog"),
+            policy: HostedExecutionPolicyBinding::new(
+                HostedExecutionPolicyId::new("policy/no-write").expect("policy"),
+                SpecContentHash::from_text("no-write-policy"),
+            ),
+            budget: HostedExecutionBudget::new(60, 1024).expect("budget"),
+            project_scope: None,
+        },
+    }
+}
+
+fn hosted_approval_dispatch_request(
+    project: &TestProject,
+    suffix: &str,
+) -> LocalExecutionWithHostedDispatchRequest {
+    LocalExecutionWithHostedDispatchRequest {
+        execution: LocalExecutionWithImmutableRunBundleRequest {
+            execution: LocalExecutionRequest {
+                project_root: project.path().to_path_buf(),
+                workflow_id: WorkflowId::new("hosted/approval").expect("workflow"),
+                run_id: Some(
+                    WorkflowRunId::new(format!("run-postgres-hosted-approval-{suffix}"))
+                        .expect("run id"),
+                ),
+                correlation_id: CorrelationId::new(format!(
+                    "correlation-postgres-hosted-approval-{suffix}"
+                ))
+                .expect("correlation"),
+                actor: ActorId::new("system/postgres-test").expect("actor"),
+                before_skill_invocation_checkpoints:
+                    LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+                before_skill_invocation_hook: None,
+                side_effect_events: Vec::new(),
+                side_effect_lifecycle_events: Vec::new(),
+            },
+            bundle: LocalExecutionImmutableRunBundleInputs {
+                bundle_id: ImmutableRunBundleId::new(format!(
+                    "bundle/postgres-hosted-approval-{suffix}"
+                ))
+                .expect("bundle id"),
+                bundle_version: ImmutableRunBundleVersion::new("v1").expect("bundle version"),
+                created_at: timestamp(),
+                sensitivity: ImmutableRunBundleSensitivity::Internal,
+                redaction_required: true,
+            },
+        },
+        dispatch: HostedNoWriteDispatchInputs {
+            catalog_entry_id: HostedCatalogEntryId::new(format!(
+                "catalog/postgres-hosted-approval-{suffix}"
+            ))
+            .expect("catalog"),
+            policy: HostedExecutionPolicyBinding::new(
+                HostedExecutionPolicyId::new("policy/no-write").expect("policy"),
+                SpecContentHash::from_text("no-write-policy"),
+            ),
+            budget: HostedExecutionBudget::new(60, 1024).expect("budget"),
+            project_scope: None,
+        },
     }
 }
 
@@ -2845,6 +3301,98 @@ fn prove_hosted_work_item_queue(
         replay,
         PostgresHostedWorkItemCreateResult::Replayed(_)
     ));
+    let retry_time = Timestamp::parse_rfc3339("2026-07-29T12:00:01Z").expect("retry time");
+    let retry_item = HostedWorkItem::queued(
+        item.work_item_id().clone(),
+        item.catalog_entry_id().clone(),
+        item.run_id().clone(),
+        item.workflow_id().clone(),
+        item.bundle_id().clone(),
+        item.bundle_version().clone(),
+        item.bundle_root_hash().clone(),
+        item.requested_by().clone(),
+        item.correlation_id().clone(),
+        item.idempotency_key().clone(),
+        item.execution_request().clone(),
+        retry_time,
+    )
+    .expect("retry hosted work item");
+    let retry_dispatch = HostedSkillDispatch::new(
+        &running_run,
+        retry_item.clone(),
+        SkillInvocationId::new("invocation-postgres-hosted").expect("invocation"),
+        SkillId::new("hosted/no-write").expect("skill"),
+        SkillVersion::new("v1").expect("skill version"),
+        SkillAttemptId::new("attempt-postgres-hosted-retry").expect("retry attempt"),
+        retry_time,
+    )
+    .expect("retry hosted dispatch");
+    let replay_with_regenerated_lifecycle_fields = backend
+        .dispatch_hosted_skill(PostgresDispatchHostedSkillRequest {
+            dispatch: &retry_dispatch,
+            project_scope: None,
+        })
+        .expect("replay regenerated hosted dispatch");
+    assert!(matches!(
+        replay_with_regenerated_lifecycle_fields,
+        PostgresHostedWorkItemCreateResult::Replayed(_)
+    ));
+    let substituted_projection = HostedSkillDispatch::new(
+        &running_run,
+        retry_item,
+        SkillInvocationId::new("invocation-postgres-hosted-substituted")
+            .expect("substituted invocation"),
+        SkillId::new("hosted/substituted").expect("substituted skill"),
+        SkillVersion::new("v2").expect("substituted skill version"),
+        SkillAttemptId::new("attempt-postgres-hosted-substituted").expect("substituted attempt"),
+        retry_time,
+    )
+    .expect("substituted hosted dispatch projection");
+    let conflict = backend
+        .dispatch_hosted_skill(PostgresDispatchHostedSkillRequest {
+            dispatch: &substituted_projection,
+            project_scope: None,
+        })
+        .expect_err("changed hosted projection intent must fail");
+    assert_eq!(
+        conflict.code(),
+        "postgres_state.hosted_dispatch.replay_conflict"
+    );
+    let conflicting_item = HostedWorkItem::queued(
+        item.work_item_id().clone(),
+        HostedCatalogEntryId::new("catalog/postgres-other").expect("other catalog"),
+        item.run_id().clone(),
+        item.workflow_id().clone(),
+        item.bundle_id().clone(),
+        item.bundle_version().clone(),
+        item.bundle_root_hash().clone(),
+        item.requested_by().clone(),
+        item.correlation_id().clone(),
+        item.idempotency_key().clone(),
+        item.execution_request().clone(),
+        retry_time,
+    )
+    .expect("conflicting hosted work item");
+    let conflicting_dispatch = HostedSkillDispatch::new(
+        &running_run,
+        conflicting_item,
+        SkillInvocationId::new("invocation-postgres-hosted").expect("invocation"),
+        SkillId::new("hosted/no-write").expect("skill"),
+        SkillVersion::new("v1").expect("skill version"),
+        SkillAttemptId::new("attempt-postgres-hosted-conflict").expect("conflict attempt"),
+        retry_time,
+    )
+    .expect("conflicting hosted dispatch");
+    let conflict = backend
+        .dispatch_hosted_skill(PostgresDispatchHostedSkillRequest {
+            dispatch: &conflicting_dispatch,
+            project_scope: None,
+        })
+        .expect_err("changed hosted dispatch intent must fail");
+    assert_eq!(
+        conflict.code(),
+        "postgres_state.hosted_dispatch.replay_conflict"
+    );
     let queued_metrics = backend
         .hosted_queue_metrics_snapshot()
         .expect("queued metrics");
@@ -3870,6 +4418,39 @@ observability_requirements:
             "policies/read-only.policy.yml",
             &format!(
                 "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: local/read-only\nname: Read Only\nrules:\n  - id: allow-local\n    effect: allow_local\n"
+            ),
+        );
+    }
+
+    fn write_hosted_approval_project(&self) {
+        self.write(
+            "workflow-os.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nproject:\n  id: postgres/hosted-approval\n  name: PostgreSQL Hosted Approval\n"
+            ),
+        );
+        self.write(
+            "workflows/approval.workflow.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: hosted/approval\nversion: v1\ndisplay_name: Hosted Approval\ntriggers:\n  - id: manual\n    kind: manual\nsteps:\n  - id: inspect\n    skill_ref:\n      id: hosted/check\n      version: v1\n    policy_requirements:\n      - id: local/read-only\n    approval_policy:\n      policy:\n        id: approval/required\n    terminal_behavior: fail_workflow\napproval_requirements:\n  - id: hosted-approval\n    reason: Approve hosted no-write dispatch.\ncancellation_behavior: stop\naudit_requirements:\n  required: true\n  events: [RunCreated, RunCompleted]\nobservability_requirements:\n  metrics: [workflow_latency]\n  tracing: true\n  latency_tracking: true\n"
+            ),
+        );
+        self.write(
+            "skills/check.skill.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: hosted/check\nversion: v1\ndisplay_name: Hosted Check\ninput_contract:\n  fields:\n    - name: request\n      field_type: string\noutput_contract:\n  fields:\n    - name: summary\n      field_type: string\nfailure_modes:\n  - code: failed\n    description: Check failed.\n    retryable: false\naudit_requirements:\n  required: true\n  events: [SkillInvocationRequested]\nobservability_requirements:\n  metrics: [skill_latency]\n  tracing: true\n  latency_tracking: true\n"
+            ),
+        );
+        self.write(
+            "policies/read-only.policy.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: local/read-only\nname: Read Only\nrules:\n  - id: allow-local\n    effect: allow_local\n"
+            ),
+        );
+        self.write(
+            "policies/approval.policy.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: approval/required\nname: Approval Required\nrules:\n  - id: require-approval\n    effect: require_approval\n"
             ),
         );
     }
