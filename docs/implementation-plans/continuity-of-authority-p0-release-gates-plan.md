@@ -386,6 +386,15 @@ Execute one reviewed phase per gate:
    lifecycle binding.
 5. Product-contract, hosted, integration, and release-admission reconciliation.
 
+Cross-gate review status: **blocked pending one narrow implementation
+increment.** The review confirmed the three individual gate closures but found
+that the private replacement-executor proof does not yet compose their exact
+lifecycle bindings into its fresh-authority subject. See the [Continuity Of
+Authority Cross-Gate
+Review](../concepts/CONTINUITY_OF_AUTHORITY_CROSS_GATE_REVIEW.md). Step 5 remains
+blocked until the required Core-owned lifecycle binding and integrated
+substitution matrix pass focused review.
+
 Do not bundle all three implementations into one unreviewable patch. Each gate
 must close its own invariant and tests without claiming that the other two are
 fixed. The Active Delivery Queue remains blocked until all three merge.
