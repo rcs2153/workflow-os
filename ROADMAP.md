@@ -1595,6 +1595,27 @@ exact private implementation and tests. Executor composition, persistence,
 public schema/SDK/CLI, providers, dependencies, Salsa, release behavior, and
 publication remain unauthorized.
 
+Focused maintainer/security review of the merged Phase 4 source extractor
+requests changes. The extractor binds each supplied required-context execution
+binding to the stored bundle, workflow, run, step, and contract, but it does
+not independently prove that the caller-selected actor, sensitivity ceiling,
+or binding time matches a consumer-owned execution expectation. A
+self-consistent alternative binding can therefore form a different valid
+non-authorizing projection. The accepted plan also requires a broader
+adversarial and exact-boundary matrix than the merged tests currently provide.
+The immutable-record, policy, local-check, report-posture, shared-bound,
+projection, and redaction properties are accepted; executor composition is
+not. See the [focused source-extraction
+review](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_4_SOURCE_EXTRACTION_REVIEW.md).
+The next authorized increment is one separately governed correction plan that
+names a genuinely consumer-owned actor/sensitivity/freshness comparison or
+explicitly narrows the extractor to commitment-only posture while preserving
+the runtime block. It must also enumerate wrong-actor, wrong-sensitivity,
+stale/future-time, wrong-step/run/bundle, duplicate, multi-step ordering, and
+exact-max/max-plus-one tests. Implementation edits, executor composition,
+persistence, public schema/SDK/CLI, providers, dependencies, Salsa, release
+behavior, and publication remain unauthorized.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
