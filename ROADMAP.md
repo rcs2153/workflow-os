@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-11-03.
+Status date: 2026-11-06.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -86,14 +86,74 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
-A P0 **continuity of authority release-gate** preemption is active before all
-unrelated roadmap work, release admission, v1 consideration, broader hosted
-claims, enterprise audit claims, or live-provider adoption. Continuity of
-authority means that the kernel preserves the exact relationship between what
-was authorized, what executed, which evidence and reports belong to that work,
-and what remains lawful across people, agents, processes, retries, recovery,
-and interruption. Current-main reruns at `40498a5` reproduced three independent
-violations:
+A new P0 **hosted partial-run recovery** preemption is active before further
+private Governed Obligation Plan composition, provider-mutation broadening,
+nested-harness work, or broader hosted claims. Independent fault injection
+against the public hosted path found a narrower failure than the already-closed
+**Accepted Means Dispatched** gate: after failures at early creation event
+boundaries, including before `RunValidated`, `RunStarted`, or `StepScheduled`,
+removing the fault and repeating the exact request can still return conflict
+without creating queued work or a terminal report. The API exposes the partial
+state, but the caller has no bounded recovery path. An accepted create or exact
+retry must never strand an immutable run prefix that ordinary exact retry cannot
+repair, reconcile, or classify into an explicit resumable wait. See the
+[Hosted Partial-Run Creation Recovery
+Plan](docs/implementation-plans/hosted-partial-run-creation-recovery-plan.md).
+
+The ordered queue is:
+
+1. independently reproduce and classify every early hosted creation boundary;
+2. implement one Core-owned, transactionally fenced recovery path that repairs
+   or explicitly rejects each valid immutable prefix without duplicate events,
+   work items, invocation, SideEffects, or reports;
+3. complete focused maintainer/security review, fault-by-fault PostgreSQL and
+   hosted API tests, exact-head CI, and an independent rerun; then
+4. execute one **cross-harness authoritative continuation milestone** in which
+   one supported harness starts a consequential governed workflow, a separately
+   implemented harness resumes it after interruption using only the same
+   kernel-owned record and public integration boundary, and an independent
+   reviewer proves the approval remained correctly bound and the selected
+   bounded effect produced one accepted, reconciled outcome at its declared
+   idempotency and provider-observation boundary. Measure the custom integration
+   code, recovery turns, latency, evidence lookups, and tokens. See the
+   [Cross-Harness Authoritative Continuation Milestone
+   Plan](docs/implementation-plans/cross-harness-authoritative-continuation-milestone-plan.md).
+
+This sequencing tests the enterprise adoption thesis more directly than
+another private projection increment. It does not authorize agent teams,
+recursive agents, nested-harness runtime, a new provider mutation family, or a
+production hosted claim. The approximately `49.9%` and `50.1%` controlled gross
+recovery-token reductions remain bounded benchmark evidence: both compared
+arms received Workflow OS evidence, both made all tested decisions correctly,
+cache behavior narrowed uncached-token differences, and authoritative dollar
+savings were not measured. The stronger product claim under test is that the
+same inspectable record used for governance can orient a replacement harness
+without recreating authority from conversational memory. See the [queue
+reconciliation
+report](docs/concepts/HOSTED_RECOVERY_AND_CROSS_HARNESS_QUEUE_RECONCILIATION_REPORT.md).
+
+The Phase 4 Governed Obligation Plan source-extraction correction remains
+accepted and closed. Executor composition is deliberately deferred until these
+two externally testable milestones are complete and the Active Delivery Queue
+is reconciled again.
+
+Focused maintainer/security review accepts this queue reconciliation after
+three boundary corrections: repaired event transitions must be deterministically
+rederived with stable identities rather than synthesized from current
+projections; a replacement harness must prove its actor and delegation posture;
+and exactly-once evidence is scoped to the selected existing idempotency and
+provider-reconciliation boundary rather than generalized globally. See the
+[focused review](docs/concepts/HOSTED_RECOVERY_AND_CROSS_HARNESS_QUEUE_RECONCILIATION_REVIEW.md).
+The next authorized phase is independent reproduction and an exact durable-
+prefix transition matrix for hosted partial-run recovery. Production code
+remains unauthorized until that matrix receives focused review.
+
+The earlier P0 **continuity of authority release-gate** preemption established
+the three closed gates summarized below. Continuity of authority means that the
+kernel preserves the exact relationship between what was authorized, what
+executed, which evidence and reports belong to that work, and what remains
+lawful across people, agents, processes, retries, recovery, and interruption.
+Current-main reruns at `40498a5` reproduced three independent violations:
 
 1. **Accepted means dispatched.** Hosted exact retries can return HTTP `201`
    for a durably `Running` run with five events, zero queued work items, and an
