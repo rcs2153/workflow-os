@@ -335,6 +335,26 @@ review](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_WIRE_HARDENING_REVIEW.md).
 The current minimum-gate hardening lane is closed. This does not close separate
 independent release/security-assurance requirements.
 
+The exact-current-source `0.4.0-preview.1` candidate rebuild is complete. Exact
+source `b93fff36c416ea86aa23a2d11ea4655d89c06397` passed all nine required CI
+jobs, then the reviewed macOS and Linux candidate workflows each ran exactly
+once and completed successfully. Their seven-day Actions artifacts were
+downloaded by exact artifact ID and independently checked against GitHub
+digests, embedded archive checksums, package manifests, candidate-evidence
+records, binary hashes and native shapes, and install-lifecycle expectations.
+The pair supersedes but does not rewrite the historical exact-source pair from
+`21615863b17a49fa14ea0da8e2ad8e327ffa48b1`. Publication remains unauthorized.
+See the [current-source candidate rebuild
+report](docs/concepts/0.4.0-preview.1_CURRENT_SOURCE_CANDIDATE_REBUILD_REPORT.md).
+The next release-admission phase is independent release/security assurance
+against this exact source and artifact pair. Comparative benchmark execution,
+provider-mutation broadening, and publication remain outside that phase.
+Focused owner-conducted review accepts the candidate evidence and active
+release-state projection after preserving one machine authority path through
+the scoped-transfer report and confirming that the dispatch irregularities did
+not create duplicate runs. It is not independent assurance. See the [accepted
+review](docs/concepts/0.4.0-preview.1_CURRENT_SOURCE_CANDIDATE_REBUILD_REVIEW.md).
+
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and
 commits to the validated report's complete compact canonical body, including
