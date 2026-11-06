@@ -1396,6 +1396,24 @@ The next authorized increment is focused maintainer/security review of this
 private model. Phase 3 deterministic explanation and independent differential
 validation remain unauthorized until that review accepts the implementation.
 
+Focused maintainer/security review now accepts the Phase 2 model after one
+determinism correction. V1 commitment framing previously encoded segment
+length with platform-width `usize`; it now uses fixed-width unsigned 64-bit
+big-endian lengths and fixed known vectors for obligation identities, source
+closure, ordering, and aggregate inventory. The review accepts independent
+source and inventory commitments, source-derived identity, closed static
+vocabulary, fail-closed construction, crate-private visibility, and
+redaction-safe Debug output. It also records that runtime use still requires
+reviewed cardinality bounds and a canonical source extractor, and that V1's
+now-locked double-hash representation cannot change without a new algorithm
+version. See the [Phase 2 model
+review](docs/concepts/GOVERNED_OBLIGATION_PLAN_MODEL_REVIEW.md).
+The next authorized increment is a separately governed private Phase 3
+deterministic explanation and independent differential-validation slice.
+Runtime composition, persistence, public schema/SDK/CLI, providers,
+incremental dependencies, Salsa, release behavior, and publication remain
+unauthorized.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after

@@ -305,7 +305,7 @@ pub(crate) fn build_governed_obligation_plan(
             ));
         }
 
-        let obligation_id = compute_obligation_id(&obligation.source, obligation.kind);
+        let obligation_id = compute_obligation_id(&obligation.source, obligation.kind)?;
         if !obligation_ids.insert(obligation_id.clone()) {
             return Err(model_error(
                 "duplicate_obligation",
@@ -322,9 +322,9 @@ pub(crate) fn build_governed_obligation_plan(
     }
 
     entries.sort_by(|left, right| left.obligation_id.cmp(&right.obligation_id));
-    let source_closure_commitment = compute_source_closure_commitment(&source_commitments);
+    let source_closure_commitment = compute_source_closure_commitment(&source_commitments)?;
     let inventory_commitment =
-        compute_inventory_commitment(algorithm, &source_closure_commitment, &entries);
+        compute_inventory_commitment(algorithm, &source_closure_commitment, &entries)?;
 
     Ok(GovernedObligationPlan {
         algorithm,
@@ -337,7 +337,7 @@ pub(crate) fn build_governed_obligation_plan(
 fn compute_obligation_id(
     source: &GovernedObligationSource,
     kind: GovernedObligationKind,
-) -> SpecContentHash {
+) -> Result<SpecContentHash, WorkflowOsError> {
     hash_segments([
         OBLIGATION_ID_DOMAIN,
         source.kind.as_str(),
@@ -349,51 +349,60 @@ fn compute_obligation_id(
 
 fn compute_source_closure_commitment(
     sources: &BTreeMap<(GovernedObligationSourceKind, String), SpecContentHash>,
-) -> SpecContentHash {
+) -> Result<SpecContentHash, WorkflowOsError> {
     let mut hasher = Sha256::new();
-    update_segment(&mut hasher, SOURCE_CLOSURE_DOMAIN);
+    update_segment(&mut hasher, SOURCE_CLOSURE_DOMAIN)?;
     for ((kind, identity), commitment) in sources {
-        update_segment(&mut hasher, kind.as_str());
-        update_segment(&mut hasher, identity);
-        update_segment(&mut hasher, commitment.as_str());
+        update_segment(&mut hasher, kind.as_str())?;
+        update_segment(&mut hasher, identity)?;
+        update_segment(&mut hasher, commitment.as_str())?;
     }
-    SpecContentHash::from_bytes(hasher.finalize())
+    Ok(SpecContentHash::from_bytes(hasher.finalize()))
 }
 
 fn compute_inventory_commitment(
     algorithm: GovernedObligationPlanAlgorithm,
     source_closure_commitment: &SpecContentHash,
     entries: &[GovernedObligationPlanEntry],
-) -> SpecContentHash {
+) -> Result<SpecContentHash, WorkflowOsError> {
     let mut hasher = Sha256::new();
-    update_segment(&mut hasher, INVENTORY_DOMAIN);
-    update_segment(&mut hasher, algorithm.as_str());
-    update_segment(&mut hasher, source_closure_commitment.as_str());
+    update_segment(&mut hasher, INVENTORY_DOMAIN)?;
+    update_segment(&mut hasher, algorithm.as_str())?;
+    update_segment(&mut hasher, source_closure_commitment.as_str())?;
     for entry in entries {
-        update_segment(&mut hasher, entry.obligation_id.as_str());
-        update_segment(&mut hasher, entry.kind.as_str());
-        update_segment(&mut hasher, entry.posture.as_str());
+        update_segment(&mut hasher, entry.obligation_id.as_str())?;
+        update_segment(&mut hasher, entry.kind.as_str())?;
+        update_segment(&mut hasher, entry.posture.as_str())?;
         update_segment(
             &mut hasher,
             entry
                 .evidence_class
                 .map_or("none", GovernedObligationEvidenceClass::as_str),
-        );
+        )?;
     }
-    SpecContentHash::from_bytes(hasher.finalize())
+    Ok(SpecContentHash::from_bytes(hasher.finalize()))
 }
 
-fn hash_segments<'a>(segments: impl IntoIterator<Item = &'a str>) -> SpecContentHash {
+fn hash_segments<'a>(
+    segments: impl IntoIterator<Item = &'a str>,
+) -> Result<SpecContentHash, WorkflowOsError> {
     let mut hasher = Sha256::new();
     for segment in segments {
-        update_segment(&mut hasher, segment);
+        update_segment(&mut hasher, segment)?;
     }
-    SpecContentHash::from_bytes(hasher.finalize())
+    Ok(SpecContentHash::from_bytes(hasher.finalize()))
 }
 
-fn update_segment(hasher: &mut Sha256, value: &str) {
-    hasher.update(value.len().to_be_bytes());
+fn update_segment(hasher: &mut Sha256, value: &str) -> Result<(), WorkflowOsError> {
+    let length = u64::try_from(value.len()).map_err(|_| {
+        model_error(
+            "commitment_input_too_large",
+            "governed obligation commitment input is too large",
+        )
+    })?;
+    hasher.update(length.to_be_bytes());
     hasher.update(value.as_bytes());
+    Ok(())
 }
 
 fn validate_source_identity(value: &str) -> Result<(), WorkflowOsError> {
@@ -513,6 +522,29 @@ mod tests {
         assert_eq!(
             forward.inventory_commitment(),
             reversed.inventory_commitment()
+        );
+    }
+
+    #[test]
+    fn v1_fixed_width_commitment_vectors_are_stable() {
+        let (sources, obligations) = fixture();
+        let plan = success(build_governed_obligation_plan(sources, obligations));
+
+        assert_eq!(
+            plan.source_closure_commitment().as_str(),
+            "422d11ca31afbbebf82884f4f0998f175bc0fa54f70c5816e1dcf1621ab697e2"
+        );
+        assert_eq!(
+            plan.entries()[0].obligation_id().as_str(),
+            "60071ad3666e43408c02ec79742f50a89218043a7a4fa438d133966a0ba1e9ba"
+        );
+        assert_eq!(
+            plan.entries()[1].obligation_id().as_str(),
+            "6bd9aeb9bb3c9cbf70fcf7d9b5f1fe65163d1865f90f25cdbdc4ad940836d4b4"
+        );
+        assert_eq!(
+            plan.inventory_commitment().as_str(),
+            "39374d695aa0229dcaffb357d8f688a7c1993ba77c57c2b6fac7467866558a4e"
         );
     }
 
