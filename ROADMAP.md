@@ -349,6 +349,11 @@ report](docs/concepts/0.4.0-preview.1_CURRENT_SOURCE_CANDIDATE_REBUILD_REPORT.md
 The next release-admission phase is independent release/security assurance
 against this exact source and artifact pair. Comparative benchmark execution,
 provider-mutation broadening, and publication remain outside that phase.
+Focused owner-conducted review accepts the candidate evidence and active
+release-state projection after preserving one machine authority path through
+the scoped-transfer report and confirming that the dispatch irregularities did
+not create duplicate runs. It is not independent assurance. See the [accepted
+review](docs/concepts/0.4.0-preview.1_CURRENT_SOURCE_CANDIDATE_REBUILD_REVIEW.md).
 
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and
