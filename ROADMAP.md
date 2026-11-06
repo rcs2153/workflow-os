@@ -1347,6 +1347,22 @@ Phase 1 architecture reconciliation is the next authorized increment. Model,
 runtime, schema, SDK, CLI, dependency, Salsa, provider, and public-surface work
 remain unauthorized.
 
+Phase 1 architecture reconciliation is now complete. The matrix confirms a
+real but bounded inspectability gap: Core owns the canonical contracts,
+runtime decisions, evidence, event history, reports, and completion state, but
+does not expose one deterministic pre-execution inventory that traces all
+supported static requirements to canonical sources and later reconciles them
+with authoritative terminal evidence. The gap may justify a private,
+non-authorizing requirement index only. It does not justify a new authored
+language, policy engine, approval system, evidence store, SideEffect inference,
+completion model, public schema/SDK/CLI, dependency, incremental engine, or
+Salsa. Existing proportional-governance derivation is canonical prior art and
+must be reused rather than duplicated. See the [Phase 1 architecture
+reconciliation](docs/concepts/GOVERNED_OBLIGATION_PLAN_ARCHITECTURE_RECONCILIATION.md).
+The next authorized increment is focused maintainer/security review of this
+matrix. Phase 2 model work remains unauthorized until that review accepts the
+source-of-truth, immutable-closure, and differential-validation boundaries.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
