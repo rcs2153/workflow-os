@@ -68,6 +68,8 @@ mod governance_disclosure;
 mod governance_profile;
 mod governed_context_access;
 mod governed_continuation;
+#[allow(dead_code)]
+mod governed_obligation_plan;
 mod harness;
 mod high_assurance_approval;
 mod hosted;
