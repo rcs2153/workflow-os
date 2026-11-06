@@ -1638,6 +1638,23 @@ implementation and focused tests, followed by focused maintainer/security
 review. Executor composition, persistence, public schema/SDK/CLI, providers,
 dependencies, Salsa, release behavior, and publication remain unauthorized.
 
+The private Phase 4 source-extraction correction is now implemented for
+focused review. The private type now identifies a canonical commitment closure
+rather than implying consumer-owned authority. Bundle, workflow, run, step,
+contract, duplicate, missing-posture, unknown-sensitivity, pre-bundle-time,
+and resource-bound failures remain fail closed. Different actors, known
+sensitivity ceilings, and non-pre-bundle times are instead proven to form
+different valid commitments and projection hashes; only a future exact runtime
+consumer may compare those commitments to its own authoritative expectation.
+Shared pair/source/obligation bounds and checked arithmetic now have explicit
+exact-maximum, maximum-plus-one, overflow, redaction, and multi-step ordering
+tests. See the [Phase 4 source-extraction correction
+report](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_4_SOURCE_EXTRACTION_CORRECTION_REPORT.md).
+The next authorized increment is focused maintainer/security review of the
+exact correction and tests. Executor composition, persistence, public
+schema/SDK/CLI, providers, dependencies, Salsa, release behavior, and
+publication remain unauthorized.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
