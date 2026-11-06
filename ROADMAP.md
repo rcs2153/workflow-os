@@ -1659,9 +1659,13 @@ The focused maintainer/security review accepted the commitment-only production
 boundary but requested two test corrections before acceptance. Alternate actor,
 known-sensitivity, and later-time tests currently prove only the final
 projection hash changes, not the required-context closure commitment directly.
-Exact source and obligation maxima are currently asserted against private bound
-helpers rather than real extraction fixtures, so pre-construction counter and
-extraction-loop agreement is not yet proven at the boundary. See the [Phase 4
+Reachable exact source and obligation maxima are currently asserted against
+private bound helpers rather than real extraction fixtures, so
+pre-construction counter and extraction-loop agreement is not yet proven at
+the boundary. Because extraction derives at most one obligation per source,
+obligation-only maximum-plus-one with an in-bounds source count is structurally
+unreachable; its independent fail-closed branch remains correctly proven at
+helper level and must not be simulated with an invalid product shape. See the [Phase 4
 source-extraction correction
 review](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_4_SOURCE_EXTRACTION_CORRECTION_REVIEW.md).
 The next authorized increment is one test-only blocker-fix phase for those two

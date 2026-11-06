@@ -38,28 +38,38 @@ Required correction:
 - retain the existing final projection-commitment assertions and redaction
   checks.
 
-### P1: Exact source and obligation limits are proven only at helper level
+### P1: Reachable exact-bound extraction is not proven end to end
 
 `shared_cardinality_bounds_accept_exact_maxima_and_reject_max_plus_one`
 invokes the private count-bound helper directly. It proves the comparison
 operator, but it does not prove that a real canonical source closure is counted
-correctly at the exact source or obligation maximum, or that maximum-plus-one
-is rejected before complete plan construction.
+correctly at the exact source maximum, that source maximum-plus-one is rejected
+before complete plan construction, or that a reachable exact-obligation
+extraction succeeds.
 
 This distinction matters because the pre-allocation counter and the extraction
 loops are separate code. A future change could make them diverge: the terminal
 length check would still fail closed, but only after an unexpectedly larger
 allocation and without proving the planned pre-construction resource bound.
 
+The extractor derives at most one obligation from each canonical source.
+Therefore every reachable extraction preserves `obligation_count <=
+source_count`. An obligation-maximum-plus-one fixture whose source count remains
+in bounds is structurally impossible. The helper-level independent obligation
+overflow test is the correct defense-in-depth proof for that otherwise
+unreachable branch; requiring a real fixture for it would manufacture an
+invalid product shape.
+
 Required correction:
 
 - build bounded generated fixtures whose real extraction reaches exactly the
-  canonical-source maximum and exactly the obligation maximum;
+  canonical-source maximum and a reachable exact obligation maximum;
 - prove those extractions succeed;
-- add independent fixtures at source maximum plus one and obligation maximum
-  plus one;
-- prove rejection occurs through extraction before a complete plan is
-  returned; and
+- add a real fixture at source maximum plus one and prove rejection occurs
+  before a complete plan is returned;
+- retain the helper-level independent obligation maximum-plus-one rejection and
+  document why it is unreachable through the one-source-per-obligation
+  extraction invariant; and
 - continue deriving every size from
   `immutable_run_bundle_reference_max_count()` rather than copying its literal.
 
@@ -109,11 +119,30 @@ Repository inspection, tests, documentation, Git, and review judgment occurred
 outside the kernel. This is an owner-conducted maintainer/security review, not
 independent external assurance.
 
+## Review-Artifact Correction
+
+Read-only follow-up found that the first draft of this review requested an
+obligation-only over-bound extraction fixture that cannot exist under the
+one-source-per-obligation invariant. Draft PR #777 was closed without merge.
+The corrected review preserves reachable end-to-end boundary requirements and
+retains helper-level proof for the structurally unreachable independent
+obligation overflow branch.
+
+- workflow: `dg/blocker`
+- run: `run-1793982071027613000-2`
+- approval: `approval/run-1793982071027613000-2/fix-approved`
+- presentation: `presentation/e9d7e24dccfa87c8`
+- approval outcome: granted with persisted presentation proof
+- presentation enforcement: `proof_enforced`
+- phase status: `Completed`
+- event summary: 39 events, 1 approval, 0 retries, 0 escalations
+
 ## Next Required Gate
 
 Run one separately governed blocker-fix phase limited to the two missing test
-families. The fix must not change production semantics unless the real
-boundary fixtures reveal an implementation defect. Repeat focused tests,
-warnings-denied Clippy, the full `workflow-core` suite if production code
-changes, docs checks, and diff checks, then perform one focused review of the
-exact fix before reconsidering acceptance.
+families. The fix must not change production semantics unless the reachable
+real boundary fixtures reveal an implementation defect. Do not construct an
+impossible obligation-only overflow shape merely to satisfy a test. Repeat
+focused tests, warnings-denied Clippy, the full `workflow-core` suite if
+production code changes, docs checks, and diff checks, then perform one focused
+review of the exact fix before reconsidering acceptance.
