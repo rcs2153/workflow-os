@@ -327,9 +327,13 @@ preserve both boundaries. The gate continues to use its explicit closed
 producer-assurance table, and the changes do not make a stronger producer
 posture reachable. See the [implementation
 report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_WIRE_HARDENING_REPORT.md).
-Focused maintainer/security review of this hardening increment is the next
-required phase before the current gate is considered closed. This does not
-close separate independent release/security-assurance requirements.
+Focused maintainer/security review is accepted after confirming that both
+publicly reachable wire records fail closed on unknown fields, the active gate
+still uses its explicit exhaustive producer-assurance table, and removing
+ordering traits changes no reachable runtime behavior. See the [accepted
+review](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_WIRE_HARDENING_REVIEW.md).
+The current minimum-gate hardening lane is closed. This does not close separate
+independent release/security-assurance requirements.
 
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and

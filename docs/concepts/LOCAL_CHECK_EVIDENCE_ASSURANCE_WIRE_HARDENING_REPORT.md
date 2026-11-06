@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented; focused maintainer/security review is required before acceptance.
+Implemented and accepted after focused maintainer/security review.
 
 ## Summary
 
@@ -92,6 +92,8 @@ not execute commands or manufacture validation evidence.
 
 ## Next Phase
 
-Run focused maintainer/security review of the exact hardening diff and its
-validation evidence. Do not make a stronger producer posture reachable during
-that review.
+The focused review accepted this bounded hardening increment without a blocker.
+See [Local Check Evidence Assurance Wire Hardening
+Review](LOCAL_CHECK_EVIDENCE_ASSURANCE_WIRE_HARDENING_REVIEW.md). Any future
+stronger producer posture still requires its own separately authorized model,
+runtime, and assurance work.
