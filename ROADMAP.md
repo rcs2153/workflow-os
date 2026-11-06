@@ -1485,6 +1485,30 @@ for the smallest opt-in runtime composition. Public schema/SDK/CLI,
 persistence, providers, incremental dependencies, Salsa, release behavior,
 and publication remain unauthorized.
 
+The private Phase 4 runtime-composition plan is now complete. It selects the
+existing `ImmutableRunBundleBuildResult` as the sole canonical extraction
+boundary because that result already contains the typed validated workflow,
+skill, policy, and per-step local-check records committed by the run bundle.
+The proposed plan is derived before persistence, bound to the exact run and
+immutable bundle root, and deterministically rederived from stored immutable
+records before continuation. It may organize and explain requirements but
+cannot select policy, grant approval, attest evidence or checks, authorize a
+`SideEffect`, append an event, persist a report, or complete a run. Source and
+obligation inventories are privately bounded to 256 entries and any missing,
+extra, conflicting, unsupported, stale, transplanted, or over-limit input
+fails closed before the first runtime event. Implementation is split into a
+reviewed source-extractor/binding slice and a later reviewed opt-in executor
+composition so that no second resolver enters runtime by implication. See the
+[Phase 4 runtime-composition
+plan](docs/implementation-plans/governed-obligation-plan-phase4-runtime-composition-plan.md)
+and [planning
+report](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_4_PLAN_REPORT.md). The
+next authorized increment is focused maintainer/security review of this plan.
+Runtime implementation, persistence, public schema/SDK/CLI, providers,
+incremental dependencies, Salsa, release behavior, and publication remain
+unauthorized until that review accepts the canonical extraction, immutable
+binding, cardinality, provenance, and fail-closed boundaries.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
