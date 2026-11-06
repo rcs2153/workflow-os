@@ -367,6 +367,19 @@ report](docs/concepts/0.4.0-preview.1_CURRENT_SOURCE_INDEPENDENT_ASSURANCE.md).
 The next release-admission lane is the separate governed publication decision.
 Comparative benchmark execution and provider-mutation broadening remain outside
 that decision.
+The separate publication decision is complete and denies publication of the
+current candidate pair. The independently reproduced dangling-destination-
+symlink behavior violates the documented installer boundary: an install may
+create the binary outside the selected installation directory without
+`--force`. That is a release-integrity blocker even though it was classified P2
+during assurance. The Linux candidate-evidence asymmetry is not an independent
+runtime defect, but it must be corrected before the next candidate pair is
+admitted so both targets carry the same binary hash and shape evidence. The
+next bounded lane is installer destination hardening plus symmetric candidate
+evidence, followed by focused review, terminal-green exact-head CI, and a new
+exact-source native candidate pair. No tag, GitHub Release, asset upload,
+registry publication, or announcement is authorized. See the [publication
+decision](docs/concepts/0.4.0-preview.1_CURRENT_SOURCE_PUBLICATION_DECISION.md).
 
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and
