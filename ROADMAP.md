@@ -1616,6 +1616,28 @@ exact-max/max-plus-one tests. Implementation edits, executor composition,
 persistence, public schema/SDK/CLI, providers, dependencies, Salsa, release
 behavior, and publication remain unauthorized.
 
+The Phase 4 source-extraction correction plan is now complete. Inspection did
+not find an existing generic consumer that owns the complete multi-step source
+closure plus independent expected actor, sensitivity ceiling, trusted time,
+freshness policy, and the durable governance-assessment lifecycle. Narrow
+trusted-host and GitHub read paths construct bindings inside their own
+admission flows, but selecting either as the generic Phase 4 consumer would
+overstate its authority and supported workflow shape. The correction therefore
+defines the extractor as an immutable commitment closure only. Alternate
+actors, known sensitivity ceilings, and non-pre-bundle binding times are valid
+different commitments and must change the closure and projection hashes; they
+are not rejected as semantically wrong without a future consumer-owned
+expectation. Exact bundle/workflow/run/step/contract mismatches, missing or
+duplicate posture, pre-bundle time, unknown sensitivity, and bounded-resource
+violations continue to fail closed. The plan also requires the complete
+identity, alternate-commitment, insertion-order, exact-maximum, and
+maximum-plus-one test matrix. See the [Phase 4 source-extraction correction
+plan](docs/implementation-plans/governed-obligation-plan-phase4-source-extraction-correction-plan.md).
+The next authorized increment is one separately governed private correction
+implementation and focused tests, followed by focused maintainer/security
+review. Executor composition, persistence, public schema/SDK/CLI, providers,
+dependencies, Salsa, release behavior, and publication remain unauthorized.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
