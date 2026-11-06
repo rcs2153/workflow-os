@@ -2,9 +2,9 @@
 
 ## Status
 
-Proposed future lane after the active delegated-authority external-connector
-work. This plan does not preempt the Active Delivery Queue and does not authorize
-implementation.
+Accepted after focused maintainer/security review. Phase 1 architecture
+reconciliation is authorized; later phases remain contingent on its evidence
+and separate focused review.
 
 ## Context
 
@@ -68,6 +68,19 @@ authority.
    reviewed contract change explicitly says otherwise.
 10. Human-readable explanation must not overstate modeled, fixture-backed, or
     non-enforcing behavior.
+11. Static obligation derivation and runtime satisfaction are separate. A
+    derived plan may state what must be established, but only existing Core
+    policy, authority, approval, evidence, SideEffect, event, and completion
+    paths may establish whether it is satisfied.
+12. Any run-bound plan commitment must cover the exact validated canonical
+    input closure and derivation algorithm version. Runtime code must not
+    rederive an accepted plan from a mutable checkout.
+13. Differential validation must use independently specified expected
+    obligations and canonical runtime outcomes. Reusing the same derivation
+    helper on both sides is not evidence of semantic agreement.
+14. Existing proportional-governance workflow derivation is a canonical source
+    candidate that must be reconciled, not wrapped or copied into a competing
+    obligation evaluator.
 
 ## Phased Evaluation
 
@@ -76,6 +89,14 @@ authority.
 Produce a concept-to-existing-Core matrix covering proposed contract, typed
 resource, effect, obligation, evidence, check, approval, program, evaluation,
 and completion concepts.
+
+The matrix must explicitly include the existing validated project bundle,
+workflow and step definitions, resolved skill and policy closure, typed policy
+effects, required-context contracts and consumption, canonical local-check
+declaration sets and result references, proportional-governance workflow
+derivation and immutable-bundle assessment, approval presentation and decision
+proof, SideEffect records and discovery, immutable run bundles, durable events,
+WorkReport contracts and artifacts, and terminal run projection.
 
 For every concept, identify:
 
@@ -86,6 +107,27 @@ For every concept, identify:
 - the authoritative source of truth;
 - compatibility and migration implications; and
 - whether the concept should be rejected as duplication.
+
+The matrix must also classify each fact as one of:
+
+- authored requirement;
+- derived static requirement;
+- runtime fact;
+- runtime satisfaction or denial;
+- durable evidence/reference;
+- disclosure-only posture; or
+- unsupported/deferred.
+
+It must not infer an authored SideEffect obligation merely because a runtime
+SideEffect record or write-capable skill exists. Where no canonical authored
+source exists, the matrix must record a gap or reject the proposed mapping.
+
+Phase 1 must answer one concrete user/runtime failure: whether governance
+requirements distributed across canonical contracts cannot currently be
+inspected as one deterministic pre-execution obligation inventory and compared
+with terminal evidence without weakening or duplicating runtime authority. If
+the existing projection and report surfaces already solve that failure, the
+lane closes without a new model.
 
 This phase changes no runtime, public schema, dependency, MSRV, or CLI behavior.
 
@@ -106,6 +148,11 @@ Acceptance requires:
 - tests proving that malformed or incomplete source contracts cannot produce an
   executable or authorizing claim.
 
+The model may contain requirement identity and canonical source references. It
+must not contain approval-granted, evidence-passed, SideEffect-completed,
+policy-allowed, or run-completed state. Those are runtime outcomes projected by
+existing authoritative paths.
+
 No separate `WorkContract` YAML language is introduced.
 
 ### Phase 3: Explanation And Differential Validation
@@ -124,12 +171,22 @@ The phase must prove:
   permissive; and
 - clean rederivation produces identical semantic output for identical inputs.
 
+Expected obligations and expected runtime outcomes must be specified
+independently from the implementation under test. At least one negative fixture
+must prove that removing a canonical gate from the derived plan is detected even
+when runtime execution still correctly denies or waits.
+
 This phase does not create a public evaluator with competing runtime semantics.
 
 ### Phase 4: One Opt-In Runtime Composition
 
 Only after focused review of differential evidence, bind one derived plan to an
 existing immutable run bundle and consume it in one narrow opt-in runtime path.
+
+The immutable binding must commit to the derivation algorithm version and the
+complete canonical source closure used by the plan. A changed workflow, skill,
+policy, required-context contract, local-check declaration, report contract, or
+other included canonical source invalidates the binding before consumption.
 
 The composition must preserve current policy evaluation, current-authority
 resolution, approval proof, evidence verification, SideEffect reconciliation,
