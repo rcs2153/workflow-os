@@ -13,6 +13,10 @@ use crate::{
 
 const ID_MAX_BYTES: usize = 128;
 const REFERENCE_MAX_COUNT: usize = 256;
+
+pub(crate) const fn immutable_run_bundle_reference_max_count() -> usize {
+    REFERENCE_MAX_COUNT
+}
 const BUNDLE_DOMAIN: &str = "workflow-os/immutable-run-bundle/v1";
 
 macro_rules! bundle_id {

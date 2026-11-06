@@ -1574,6 +1574,27 @@ persistence changes, public schema/SDK/CLI, providers, dependencies, Salsa,
 release behavior, and publication remain unauthorized pending focused review
 of that implementation.
 
+The first private Phase 4 implementation slice is now complete. One
+module-owned canonical input closure requires the store-validated immutable
+bundle plus one exact required-context contract and execution binding for every
+workflow step. The extractor deterministically inventories supported workflow,
+typed policy, required-context, canonical local-check, and authored report
+sources under the shared immutable-bundle cardinality bound. The corrected
+private vocabulary names `ReportArtifactRequirements` rather than a runtime
+`WorkReportContract`. One non-persistent projection commits the exact bundle,
+run, required-context closure, algorithm, source closure, inventory, and count
+without carrying authority, evidence, satisfaction, or execution posture.
+Missing or substituted bindings fail closed, explicit-none remains canonical
+source posture, and Debug output redacts identities and commitments. Current
+project validation still rejects non-default authored report artifact
+requirements because runtime enforcement is unavailable; this slice does not
+bypass that boundary. See the [Phase 4 source extraction
+report](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_4_SOURCE_EXTRACTION_REPORT.md).
+The next authorized increment is focused maintainer/security review of the
+exact private implementation and tests. Executor composition, persistence,
+public schema/SDK/CLI, providers, dependencies, Salsa, release behavior, and
+publication remain unauthorized.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
