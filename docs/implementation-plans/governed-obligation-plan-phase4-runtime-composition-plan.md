@@ -2,10 +2,10 @@
 
 ## Status
 
-Proposed for focused maintainer/security review. This plan authorizes no
-runtime implementation until that review accepts the source-extraction,
-immutable-binding, cardinality, provenance, consumption, and fail-closed
-boundaries below.
+Corrected after focused maintainer/security review requested changes. Runtime
+implementation remains unauthorized pending a second focused review of the
+complete source closure, projection binding, persistence boundary, shared
+invariants, and consumer gate below.
 
 ## Purpose
 
@@ -42,13 +42,12 @@ Phase 4 addresses only that inspectability and binding failure. It does not
 change what Core requires or how Core decides whether a requirement is
 satisfied.
 
-## Chosen Runtime Seam
+## Corrected Canonical Input Closure
 
-The implementation must use the existing immutable-run-bundle construction
-and opt-in local execution path.
+The immutable run bundle is the mandatory execution base, but it is not the
+complete obligation source closure.
 
-The canonical source boundary is
-`ImmutableRunBundleBuildResult`, specifically:
+The bundle-owned portion consists of:
 
 - `ImmutableRunBundleManifest` for run identity, resolved execution-context
   commitment, ordered definition references, canonical local-check references,
@@ -58,46 +57,71 @@ The canonical source boundary is
 - `CanonicalLocalCheckDeclarationSetRecord` for authoritative per-step
   local-check declarations.
 
-The extractor must operate on the already-built in-memory bundle result before
-persistence. It must not reload YAML, inspect the mutable project checkout,
-accept an independently assembled `ProjectBundle`, or accept caller-supplied
-obligations. This ensures that bundle construction and obligation extraction
-share one resolved canonical closure rather than two resolution algorithms.
+Required context is not embedded in those definition records. The complete
+private extraction input must therefore be one module-owned
+`GovernedObligationCanonicalInputClosure` assembled only from:
 
-After the bundle is persisted and read back through
-`ImmutableRunBundleStore`, the consumer must revalidate the exact
-`ImmutableRunBundleBinding` before any run event is appended. Continuation or
-replay must use only the stored immutable records and binding already attached
-to the run.
+- one `StoredImmutableRunBundle` already validated by
+  `ImmutableRunBundleStore`;
+- for every workflow step, exactly one existing
+  `RequiredContextContractBinding` and matching
+  `RequiredContextExecutionBinding` validated against that same stored bundle,
+  step, actor, and sensitivity posture; and
+- no other caller-defined source family.
 
-## Private Binding Model
+An explicit-none required-context contract is a real canonical input, not the
+absence of input. Missing per-step posture is unknown or unsupported and fails
+closed. The extractor must not infer zero required context from a missing
+argument.
 
-Add one crate-private, non-serializing binding value containing only:
+The closure constructor must be module-owned. It must reuse existing immutable
+store resolution and record-bijection validation, then validate each required-
+context execution binding through its existing Core contract. It must not
+reload YAML, inspect the mutable project checkout, accept an independently
+assembled `ProjectBundle`, or accept caller-supplied obligations, decisions,
+evidence, or satisfaction state.
+
+Workflow-authored `ReportArtifactRequirements` are available in the canonical
+workflow record and may contribute static obligations. A runtime
+`WorkReportContract`, report-generation request, or stored artifact is not part
+of this first static source closure and cannot be inferred or substituted.
+
+## Private Projection Binding Model
+
+Add one crate-private, non-serializing
+`GovernedObligationPlanProjectionBinding` containing only:
 
 - `GovernedObligationPlanAlgorithm`;
 - the immutable run bundle ID, version, and root hash or the existing
   `ImmutableRunBundleBinding` value;
 - the bound `WorkflowRunId`;
+- sorted commitments for every accepted required-context contract and
+  execution binding;
 - the plan source-closure commitment;
 - the plan inventory commitment; and
 - the obligation count.
 
-The binding is projection data. It is not a capability, approval, policy
+The projection binding is static inventory identity only. It is not a
+`GovernanceAssessmentBinding`, capability, approval, policy
 decision, evidence receipt, event, WorkReport, or terminal-state record. It is
 not separately persisted in Phase 4. The exact bundle remains durable truth;
-the plan and binding are deterministically rederived from the stored bundle
-when needed and must reproduce the same commitments.
+required-context contracts and execution bindings remain their own canonical
+inputs; and the existing durable `GovernanceAssessmentBinding` remains the
+only accepted proportional-governance assessment binding. The projection must
+not contain execution disposition, disclosure, completeness, current facts,
+authority, approval, evidence, or satisfaction.
 
-The binding constructor is module-owned. Callers cannot provide a bundle root,
-source commitment, inventory commitment, run identity, or obligation count
-independently. Construction succeeds only from one validated bundle result and
-one plan derived from that same result.
+The projection-binding constructor is module-owned. Callers cannot provide a
+bundle root, required-context commitment, source commitment, inventory
+commitment, run identity, or obligation count independently. Construction
+succeeds only from one validated canonical input closure and one plan derived
+from that exact closure.
 
 ## Canonical Extraction Rules
 
 Create one crate-private extractor that accepts
-`&ImmutableRunBundleBuildResult` and returns one plan plus its private binding.
-The extractor must:
+`&GovernedObligationCanonicalInputClosure` and returns one plan plus its
+private projection binding. The extractor must:
 
 1. Validate the bundle manifest and every referenced canonical record through
    existing immutable-bundle invariants.
@@ -109,15 +133,17 @@ The extractor must:
 4. Reuse existing proportional-governance derivation and existing typed policy
    effects where they are the canonical source. It must not copy their
    selection logic into the obligation module.
-5. Derive required-context obligations only from existing canonical
-   required-context contracts attached to the immutable workflow/skill
-   closure.
+5. Derive required-context obligations only from the exact validated per-step
+   contract and execution-binding pairs in the closure. Omitted, substituted,
+   stale, wrong-step, wrong-actor, wrong-bundle, and duplicate bindings fail
+   closed. Explicit none remains an explicit canonical source.
 6. Derive local-check obligations only from canonical local-check declaration
    sets. An absent declaration remains absence; runtime check observations do
    not manufacture a static obligation.
-7. Derive report obligations only where the immutable canonical workflow
-   contract already requires the existing report-artifact path. Advisory or
-   unsupported posture must remain explicit.
+7. Derive report obligations only from workflow-authored
+   `ReportArtifactRequirements` in the canonical workflow record. It must not
+   treat a runtime `WorkReportContract`, generation request, or artifact as an
+   authored static source.
 8. Reject unknown fields, unsupported mandatory contracts, duplicate sources,
    unresolved references, conflicting commitments, missing records, extra
    records that would alter the supported closure, or any source that cannot
@@ -131,13 +157,14 @@ they already have a canonical supported source in the accepted private model.
 
 ## Cardinality And Resource Bounds
 
-The first runtime composition must be bounded before allocation and before run
-creation.
+The first extraction and any later runtime composition must be bounded before
+allocation and before run creation.
 
-- Reuse the immutable-bundle maximum of 256 definition or reference records as
-  the outer canonical-source bound.
-- Permit at most 256 canonical obligation sources.
-- Permit at most 256 derived obligations total.
+- Expose or reuse one crate-private immutable-bundle reference bound; do not
+  copy the literal into the obligation module.
+- Derive the canonical-source and obligation bounds from that shared bound.
+- Bound required-context pairs by the validated workflow step count and the
+  same shared outer bound.
 - Permit at most one obligation for one source/kind pair.
 - Retain the existing 256-byte source-identity bound.
 - Reject arithmetic overflow and any input that exceeds a bound before
@@ -146,40 +173,45 @@ creation.
 These are conservative Phase 4 limits, not a new public contract. Increasing
 them requires measured evidence and focused review. Truncation is forbidden.
 
-## One Opt-In Consumer
+## Runtime Consumer Gate
 
-Add one crate-private opt-in wrapper around the existing immutable-bundle local
-execution entry point. Existing public and crate-visible execution APIs remain
-unchanged.
+The first corrected implementation stops at the private canonical-input
+closure, extractor, and projection binding. It does not add an executor
+wrapper.
 
-For a new run, the wrapper must:
+A later separately governed plan amendment must name one exact existing
+runtime path that already owns:
 
-1. Prepare the existing execution plan and evaluate the existing pre-run
-   policy exactly as today.
-2. Load and validate the project using the existing capability.
-3. Build the immutable run bundle with the existing builder.
-4. Derive the governed obligation plan from that exact build result.
-5. Construct and validate the private bundle/plan binding.
-6. Persist and read back the immutable bundle through the existing store.
-7. Prove the stored manifest reproduces the exact binding and deterministically
-   rederive the same plan commitments from the stored records.
-8. Fail closed before `RunCreated`, `RunValidated`, `RunStarted`, or any other
-   runtime event if extraction, bounds, binding, or rederivation fails.
-9. Delegate unchanged to the existing executor path.
+- the exact stored immutable run bundle;
+- complete per-step required-context contracts and execution bindings;
+- the existing durable `GovernanceAssessmentBinding` and its current-fact
+  reassessment lifecycle; and
+- all existing approval, evidence/check, `SideEffect`, event, report, retry,
+  wait, replay, and completion behavior required by the selected workflow.
 
-For an existing run, continuation must:
+If an existing path does not own that complete closure, executor composition
+remains blocked. A generic wrapper may not add parallel caller-injected inputs
+or bypass established reassessment. Any future composition must use
+`execute_with_governance_assessment_binding`,
+`execute_with_current_runtime_facts_governance_assessment_binding`, or a
+focused-review-accepted common internal stage factored from those paths. The
+private plan projection must be evaluated alongside the durable governance
+assessment; it cannot replace, satisfy, or weaken it.
 
-1. rehydrate the run through the existing backend;
-2. require its existing immutable-run-bundle binding;
-3. read the exact stored bundle;
-4. validate run, request, and bundle identity through existing checks;
-5. rederive and revalidate the private plan binding from stored immutable
-   records only; and
-6. delegate unchanged to the existing continuation path.
+For a future new run, all deterministic source extraction, bounds, and
+projection-binding checks must complete in memory before bundle persistence.
+After persistence, read-back and rederivation must complete before any runtime
+event. A post-persistence failure may leave the create-only immutable bundle as
+an unactivated record, but it creates no run event, approval, invocation,
+WorkReport, `SideEffect`, or external action.
 
-The wrapper may return a private redaction-safe explanation alongside the
-ordinary execution result for test inspection. The explanation cannot be used
-to select or override the execution result.
+For a future existing run, continuation must use only the stored immutable
+bundle and exact existing required-context execution bindings. It must
+independently reproduce both the durable governance assessment and private
+plan projection before delegating unchanged to the selected continuation path.
+An exact retry may validate and reuse an identical unactivated bundle; it must
+not overwrite, delete, or silently replace it. Automatic orphan cleanup is
+outside Phase 4.
 
 ## Authoritative Runtime Boundaries
 
@@ -218,8 +250,10 @@ Add a small private stable error family under
 - bundle binding mismatch;
 - plan binding mismatch;
 - stored rederivation mismatch;
-- run identity mismatch; and
-- obligation inventory disagreement.
+- run identity mismatch;
+- obligation inventory disagreement;
+- required-context binding missing, substituted, stale, or mismatched; and
+- plan projection and governance-assessment lifecycle disagreement.
 
 Messages must be payload-free and redaction-safe. The errors must not include
 definition IDs, source identities, hashes, policy contents, check commands,
@@ -229,10 +263,14 @@ approval reasons, evidence contents, or local paths.
 
 ### Source extraction
 
-- identical bundle inputs produce identical source and inventory commitments;
+- identical canonical input closures produce identical source and inventory
+  commitments;
 - filesystem, map, and insertion-order changes do not affect output;
 - every supported workflow step, policy, required-context contract,
   declaration set, and report contract is represented exactly once;
+- explicit-none required context is represented as a canonical source;
+- missing, substituted, duplicated, stale, wrong-step, wrong-actor, and
+  wrong-bundle required-context bindings fail closed;
 - absent authored requirements do not become obligations;
 - runtime `SideEffect` facts do not become obligations;
 - missing, extra, duplicate, conflicting, unsupported, and unresolved records
@@ -243,17 +281,19 @@ approval reasons, evidence contents, or local paths.
 
 ### Immutable binding
 
-- the plan binds to the exact bundle root, version, run ID, algorithm, source
-  closure, inventory, and count;
+- the plan projection binds to the exact bundle root, version, run ID,
+  required-context closure, algorithm, source closure, inventory, and count;
 - changing workflow, skill, policy, required context, local checks, report
   posture, resolved context, handler posture, execution posture, or any
   included canonical record invalidates the binding;
 - a plan from run or bundle A cannot be consumed for run or bundle B;
 - an arbitrary caller-supplied `PolicyDecision`, assessment, obligation ID, or
-  commitment cannot establish provenance; and
-- stored-bundle rederivation matches clean in-memory derivation.
+  commitment cannot establish provenance;
+- stored-bundle rederivation matches clean in-memory derivation; and
+- the plan projection cannot substitute for, weaken, or satisfy a missing,
+  stale, incomplete, denied, or changed `GovernanceAssessmentBinding`.
 
-### Runtime composition
+### Future runtime composition
 
 - one approved representative workflow follows the same wait/resume/terminal
   result and event sequence with the private wrapper as with the existing
@@ -269,8 +309,13 @@ approval reasons, evidence contents, or local paths.
   events or work;
 - mutable-checkout changes after run creation do not affect continuation;
 - corrupted stored bundle material fails before continuation; and
-- extraction or binding failure on a new run creates no run events, approval,
-  handler invocation, artifact, or external effect.
+- pre-persistence extraction or binding failure creates no immutable bundle,
+  run event, approval, handler invocation, artifact, or external effect;
+- post-persistence read-back or rederivation failure may retain only the exact
+  unactivated immutable bundle and creates no run event, approval, invocation,
+  WorkReport, `SideEffect`, or external action; and
+- exact retry validates and reuses an identical unactivated bundle or fails
+  closed without overwrite or deletion.
 
 ### Differential non-regression
 
@@ -298,24 +343,31 @@ Broader workspace validation may be required by changed surfaces or CI.
 ## Sequencing And Review Gates
 
 1. Focused maintainer/security review of this plan.
-2. One separately governed private source-extractor and binding implementation.
+2. One separately governed private canonical-input-closure, source-extractor,
+   and projection-binding implementation only.
 3. Focused review of extraction completeness, cardinality, binding, and
    redaction before executor composition.
-4. One separately governed opt-in executor composition using the accepted
-   extractor and binding.
-5. Focused review and exact-head CI before Phase 4 acceptance.
-6. Phase 5 measurement planning only after Phase 4 is accepted.
+4. One separately governed plan amendment naming an exact consumer that owns
+   required context and durable governance reassessment; if no such path
+   exists, stop Phase 4 runtime composition.
+5. One separately governed opt-in executor composition using the accepted
+   extractor, projection, exact consumer, and unchanged authoritative gates.
+6. Focused review and exact-head CI before Phase 4 acceptance.
+7. Phase 5 measurement planning only after Phase 4 is accepted.
 
 If review cannot establish one canonical extraction path from the immutable
-bundle, the correct outcome is to stop Phase 4 rather than introduce a second
-resolver.
+bundle plus existing exact required-context bindings, or cannot name a
+consumer that already owns the complete closure, the correct outcome is to
+stop Phase 4 rather than introduce a second resolver or assessment lifecycle.
 
 ## Explicit Non-Goals
 
 This plan does not authorize:
 
 - public schema, SDK, CLI, or serialization changes;
-- persistence of the plan or its explanation;
+- persistence of the plan, projection binding, or explanation;
+- modification or replacement of `GovernanceAssessmentBinding`;
+- automatic cleanup of unactivated immutable bundles;
 - a new event, state transition, approval, evidence, report, or completion
   model;
 - accepting caller-authored decisions or evidence as authoritative;
@@ -336,11 +388,13 @@ This plan does not authorize:
 Phase 4 is complete only when one opt-in local execution proves all of the
 following:
 
-- its private plan was derived from the exact immutable canonical bundle
-  closure;
+- its private plan was derived from the exact immutable bundle plus complete
+  validated per-step required-context closure;
 - its algorithm and complete source/inventory commitments are bound to the
   exact run and bundle root;
 - new-run and continuation paths fail closed before action on any mismatch;
+- the private projection remains subordinate to the existing durable
+  governance-assessment lifecycle;
 - authoritative runtime decisions and evidence paths are unchanged;
 - event, wait, retry, denial, report, SideEffect, and completion behavior are
   unchanged;

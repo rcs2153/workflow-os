@@ -1531,6 +1531,29 @@ persistence changes, public schema/SDK/CLI, providers, dependencies, Salsa,
 release behavior, and publication remain unauthorized pending a second focused
 review.
 
+The Phase 4 plan blocker correction is now complete. The immutable bundle is
+the mandatory base but no longer misrepresented as the complete obligation
+source: one private canonical input closure also requires exact existing
+`RequiredContextContractBinding` and `RequiredContextExecutionBinding` pairs
+for every step, including canonical explicit-none posture. The proposed value
+is now a non-persistent static projection binding that is strictly subordinate
+to the existing durable `GovernanceAssessmentBinding`; it cannot contain or
+replace execution, disclosure, completeness, authority, approval, evidence, or
+satisfaction. The correction also distinguishes deterministic pre-persistence
+failure from post-persistence read-back failure: a create-only immutable bundle
+may remain unactivated, but no run event, approval, invocation, report,
+`SideEffect`, or external action may follow. Bounds and record bijection must
+reuse existing immutable-bundle invariants. The first implementation is
+narrowed to canonical-input closure, extraction, and projection binding only;
+executor composition remains blocked until a later reviewed amendment names an
+exact consumer that already owns required context and durable governance
+reassessment. See the [Phase 4 blocker correction
+report](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_4_PLAN_BLOCKER_CORRECTION_REPORT.md).
+The next authorized increment is a second focused maintainer/security review
+of the corrected plan. Runtime implementation, persistence changes, public
+schema/SDK/CLI, providers, dependencies, Salsa, release behavior, and
+publication remain unauthorized until that review accepts the correction.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
