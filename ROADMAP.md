@@ -310,12 +310,20 @@ report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_MINIMUM_GATE_REPORT.md) and
 A maintainer-operated adversarial pass found no blocker in the tested downgrade,
 declaration-substitution, serialized-posture-tamper, denial-ordering, or
 no-minimum compatibility boundaries and added permanent regressions for the
-previously uncovered attacks. This is useful adversarial evidence, but it is
-not independent assurance because the delegated maintainer also owns the
-implementation and review loop. See the [adversarial review
+previously uncovered attacks. See the [adversarial review
 report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_MINIMUM_GATE_ADVERSARIAL_REVIEW.md).
-Independent external adversarial assurance remains the next validator-assurance
-phase.
+An independent agent then reproduced the attacks from a clean detached exact-
+main checkout and ran the complete Core suite. It found no P0, P1, or P2
+blocker. It found one low-severity closed-wire gap because assurance projection
+and minimum records accept unknown fields, and one informational future-policy
+risk because the producer enum still derives ordering traits even though the
+gate uses an explicit comparison table. See the [independent assurance
+report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_MINIMUM_GATE_INDEPENDENT_ASSURANCE.md).
+The narrow independent-assurance requirement for the current minimum gate is
+satisfied. Unknown-field rejection and ordering-trait removal are the next
+bounded validator-assurance hardening increment and must land before any
+stronger producer posture becomes reachable. This does not close separate
+independent release/security-assurance requirements.
 
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and
