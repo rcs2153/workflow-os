@@ -307,7 +307,15 @@ with an explicit closed producer-assurance table and completed the CLI's public
 label projection. See the [implementation
 report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_MINIMUM_GATE_REPORT.md) and
 [accepted review](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_MINIMUM_GATE_REVIEW.md).
-Independent adversarial assurance review is the next validator-assurance phase.
+A maintainer-operated adversarial pass found no blocker in the tested downgrade,
+declaration-substitution, serialized-posture-tamper, denial-ordering, or
+no-minimum compatibility boundaries and added permanent regressions for the
+previously uncovered attacks. This is useful adversarial evidence, but it is
+not independent assurance because the delegated maintainer also owns the
+implementation and review loop. See the [adversarial review
+report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_MINIMUM_GATE_ADVERSARIAL_REVIEW.md).
+Independent external adversarial assurance remains the next validator-assurance
+phase.
 
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and

@@ -1066,6 +1066,10 @@ mod tests {
         let mut value = serde_json::to_value(&projection).expect("value");
         value["producer_posture"] = json!("reviewed_because_path_looked_official");
         assert!(serde_json::from_value::<LocalCheckEvidenceAssuranceProjection>(value).is_err());
+
+        let mut value = serde_json::to_value(&projection).expect("value");
+        value["producer_posture"] = json!("registered_content_bound");
+        assert!(serde_json::from_value::<LocalCheckEvidenceAssuranceProjection>(value).is_err());
     }
 
     #[test]
