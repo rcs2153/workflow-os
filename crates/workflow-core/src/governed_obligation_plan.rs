@@ -271,15 +271,19 @@ struct GovernedRequiredContextBindingPair {
     execution: RequiredContextExecutionBinding,
 }
 
-/// Complete private static input closure for one run-bound obligation plan.
+/// Complete private static commitment closure for one run-bound obligation plan.
+///
+/// This proves the exact immutable sources supplied to extraction. It does not
+/// prove that a future runtime consumer selected or authorized the actor,
+/// sensitivity ceiling, or binding time committed by those sources.
 #[derive(Clone, Eq, PartialEq)]
-pub(crate) struct GovernedObligationCanonicalInputClosure {
+pub(crate) struct GovernedObligationCanonicalCommitmentClosure {
     bundle: StoredImmutableRunBundle,
     required_context: Vec<GovernedRequiredContextBindingPair>,
     required_context_closure_commitment: SpecContentHash,
 }
 
-impl GovernedObligationCanonicalInputClosure {
+impl GovernedObligationCanonicalCommitmentClosure {
     pub(crate) fn new(
         bundle: &StoredImmutableRunBundle,
         required_context: Vec<(
@@ -291,12 +295,7 @@ impl GovernedObligationCanonicalInputClosure {
             .canonical_definition()
             .as_workflow()
             .ok_or_else(|| composition_error("source_closure_incomplete"))?;
-        if required_context.len() > immutable_run_bundle_reference_max_count() {
-            return Err(composition_error("cardinality_exceeded"));
-        }
-        if required_context.len() != workflow.steps.len() {
-            return Err(composition_error("source_closure_incomplete"));
-        }
+        validate_required_context_pair_cardinality(required_context.len())?;
 
         let manifest = bundle.manifest();
         let mut seen_steps = BTreeSet::new();
@@ -343,10 +342,10 @@ impl GovernedObligationCanonicalInputClosure {
     }
 }
 
-impl fmt::Debug for GovernedObligationCanonicalInputClosure {
+impl fmt::Debug for GovernedObligationCanonicalCommitmentClosure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("GovernedObligationCanonicalInputClosure")
+            .debug_struct("GovernedObligationCanonicalCommitmentClosure")
             .field("bundle", &self.bundle)
             .field("required_context_count", &self.required_context.len())
             .field("required_context_closure_commitment", &"[REDACTED]")
@@ -419,7 +418,7 @@ impl fmt::Debug for GovernedObligationPlanProjectionBinding {
 // every accepted family against the plan without cross-module dispatch.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn extract_governed_obligation_plan(
-    closure: &GovernedObligationCanonicalInputClosure,
+    closure: &GovernedObligationCanonicalCommitmentClosure,
 ) -> Result<
     (
         GovernedObligationPlan,
@@ -658,7 +657,7 @@ fn compute_required_context_closure(
 }
 
 fn validate_extraction_cardinality(
-    closure: &GovernedObligationCanonicalInputClosure,
+    closure: &GovernedObligationCanonicalCommitmentClosure,
     workflow: &crate::WorkflowDefinition,
 ) -> Result<(usize, usize), WorkflowOsError> {
     let mut source_count = workflow.steps.len();
@@ -669,12 +668,8 @@ fn validate_extraction_cardinality(
         .count();
     for record in closure.bundle.definition_records() {
         if let Some(policy) = record.canonical_definition().as_policy() {
-            source_count = source_count
-                .checked_add(policy.rules.len())
-                .ok_or_else(|| composition_error("cardinality_exceeded"))?;
-            obligation_count = obligation_count
-                .checked_add(policy.rules.len())
-                .ok_or_else(|| composition_error("cardinality_exceeded"))?;
+            source_count = checked_add_cardinality(source_count, policy.rules.len())?;
+            obligation_count = checked_add_cardinality(obligation_count, policy.rules.len())?;
         }
     }
     for pair in &closure.required_context {
@@ -683,24 +678,15 @@ fn validate_extraction_cardinality(
         } else {
             pair.contract.requirements().len()
         };
-        source_count = source_count
-            .checked_add(source_increment)
-            .ok_or_else(|| composition_error("cardinality_exceeded"))?;
-        obligation_count = obligation_count
-            .checked_add(pair.contract.requirements().len())
-            .ok_or_else(|| composition_error("cardinality_exceeded"))?;
+        source_count = checked_add_cardinality(source_count, source_increment)?;
+        obligation_count =
+            checked_add_cardinality(obligation_count, pair.contract.requirements().len())?;
     }
     for record in closure.bundle.local_check_declaration_set_records() {
-        source_count = source_count
-            .checked_add(record.declarations().len())
-            .ok_or_else(|| composition_error("cardinality_exceeded"))?;
-        obligation_count = obligation_count
-            .checked_add(record.declarations().len())
-            .ok_or_else(|| composition_error("cardinality_exceeded"))?;
+        source_count = checked_add_cardinality(source_count, record.declarations().len())?;
+        obligation_count = checked_add_cardinality(obligation_count, record.declarations().len())?;
     }
-    source_count = source_count
-        .checked_add(1)
-        .ok_or_else(|| composition_error("cardinality_exceeded"))?;
+    source_count = checked_add_cardinality(source_count, 1)?;
     if workflow
         .report_artifact_requirements
         .high_assurance_approval
@@ -708,15 +694,34 @@ fn validate_extraction_cardinality(
         || workflow.report_artifact_requirements.approval_proof_markers
             != WorkReportArtifactApprovalProofMarkerRequirement::NotRequired
     {
-        obligation_count = obligation_count
-            .checked_add(1)
-            .ok_or_else(|| composition_error("cardinality_exceeded"))?;
+        obligation_count = checked_add_cardinality(obligation_count, 1)?;
     }
+    validate_extraction_count_bounds(source_count, obligation_count)?;
+    Ok((source_count, obligation_count))
+}
+
+fn validate_required_context_pair_cardinality(pair_count: usize) -> Result<(), WorkflowOsError> {
+    if pair_count > immutable_run_bundle_reference_max_count() {
+        return Err(composition_error("cardinality_exceeded"));
+    }
+    Ok(())
+}
+
+fn validate_extraction_count_bounds(
+    source_count: usize,
+    obligation_count: usize,
+) -> Result<(), WorkflowOsError> {
     let maximum = immutable_run_bundle_reference_max_count();
     if source_count > maximum || obligation_count > maximum {
         return Err(composition_error("cardinality_exceeded"));
     }
-    Ok((source_count, obligation_count))
+    Ok(())
+}
+
+fn checked_add_cardinality(current: usize, increment: usize) -> Result<usize, WorkflowOsError> {
+    current
+        .checked_add(increment)
+        .ok_or_else(|| composition_error("cardinality_exceeded"))
 }
 
 fn compute_projection_commitment(
@@ -1277,8 +1282,8 @@ mod tests {
     use super::*;
     use crate::required_context_execution_binding::RequiredContextExecutionBindingTestSubstitution;
     use crate::{
-        build_immutable_run_bundle_with_local_check_declarations, load_project,
-        validate_project_bundle, ActorId, GovernedContextAccessLevel,
+        build_immutable_run_bundle, build_immutable_run_bundle_with_local_check_declarations,
+        load_project, validate_project_bundle, ActorId, GovernedContextAccessLevel,
         GovernedContextReferenceTarget, HarnessContractId, HarnessContractVersion,
         ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
         ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
@@ -1493,6 +1498,149 @@ observability_requirements:
         })
         .expect("binding");
         (root, stored, contract, binding)
+    }
+
+    fn multi_step_extraction_fixture() -> (
+        TestRoot,
+        StoredImmutableRunBundle,
+        RequiredContextContractBinding,
+        Vec<RequiredContextExecutionBinding>,
+    ) {
+        let root = TestRoot::new("multi-step-extraction");
+        root.write(
+            "workflow-os.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nproject:\n  id: obligation/multi\n  name: Obligation Multi\n"
+            ),
+        );
+        root.write(
+            "workflows/build.workflow.yml",
+            &format!(
+                r"schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: obligation/multi-build
+version: v1
+display_name: Obligation Multi Build
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: first
+    skill_ref:
+      id: local/check
+      version: v1
+    policy_requirements:
+      - id: local/read-only
+    terminal_behavior: fail_workflow
+  - id: second
+    skill_ref:
+      id: local/check
+      version: v1
+    policy_requirements:
+      - id: local/read-only
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events: [RunCreated]
+  store_references_only: true
+observability_requirements:
+  metrics: [workflow_latency]
+  tracing: true
+  latency_tracking: true
+"
+            ),
+        );
+        root.write(
+            "skills/check.skill.yml",
+            &format!(
+                r"schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/check
+version: v1
+display_name: Check
+allowed_capabilities:
+  - name: local.read
+input_contract:
+  fields:
+    - name: request
+      field_type: string
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+failure_modes:
+  - code: failed
+    description: Failed.
+    retryable: false
+audit_requirements:
+  required: true
+  events: [SkillInvocationRequested]
+  store_references_only: true
+observability_requirements:
+  metrics: [skill_latency]
+  tracing: true
+  latency_tracking: true
+"
+            ),
+        );
+        root.write(
+            "policies/read-only.policy.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: local/read-only\nname: Read Only\nrules:\n  - id: allow-local\n    effect: allow_local\n"
+            ),
+        );
+        let loaded = load_project(root.path());
+        assert!(!loaded.has_errors(), "{:?}", loaded.diagnostics);
+        let project = loaded.bundle.expect("project");
+        let built = build_immutable_run_bundle(ImmutableRunBundleBuildRequest {
+            project: &project,
+            workflow_id: &WorkflowId::new("obligation/multi-build").expect("workflow"),
+            bundle_id: ImmutableRunBundleId::new("bundle/multi-obligation").expect("bundle"),
+            bundle_version: ImmutableRunBundleVersion::new("v1").expect("version"),
+            run_id: WorkflowRunId::new("run-multi-obligation").expect("run"),
+            resolved_execution_context_hash: SpecContentHash::from_text("context"),
+            execution_posture: ImmutableRunBundleExecutionPosture::new(
+                Vec::new(),
+                ImmutableRunBundleReferencePosture::NotSupplied,
+                ImmutableRunBundleReferencePosture::NotSupplied,
+                ImmutableRunBundleReferencePosture::NotSupplied,
+            )
+            .expect("posture"),
+            handlers: vec![ImmutableRunBundleHandlerReference {
+                skill_id: SkillId::new("local/check").expect("skill"),
+                skill_version: SkillVersion::new("v1").expect("skill version"),
+                posture: ImmutableRunBundleHandlerPosture::RegisteredUnattested,
+            }],
+            created_at: timestamp("2026-11-06T10:00:00Z"),
+            created_by: ActorId::new("system/kernel").expect("actor"),
+            sensitivity: ImmutableRunBundleSensitivity::Internal,
+            redaction_required: true,
+        })
+        .expect("bundle");
+        let store = LocalImmutableRunBundleStore::new(root.path().join("bundle-store"));
+        store.write_bundle(&built).expect("store");
+        let stored = store
+            .read_bundle(built.manifest().run_id(), built.manifest().bundle_id())
+            .expect("stored");
+        let contract = RequiredContextContractBinding::explicit_none_for_test(
+            HarnessContractId::new("harness/multi-obligation").expect("contract"),
+            HarnessContractVersion::new("v1").expect("version"),
+        )
+        .expect("contract");
+        let bindings = ["first", "second"]
+            .into_iter()
+            .map(|step| {
+                RequiredContextExecutionBinding::new(RequiredContextExecutionBindingInput {
+                    bundle: &stored,
+                    contract: &contract,
+                    actor: ActorId::new("agent/executor").expect("actor"),
+                    step_id: StepId::new(step).expect("step"),
+                    maximum_sensitivity: WorkReportSensitivity::Internal,
+                    bound_at: timestamp("2026-11-06T10:05:00Z"),
+                })
+                .expect("binding")
+            })
+            .collect();
+        (root, stored, contract, bindings)
     }
 
     fn success<T>(result: Result<T, WorkflowOsError>) -> T {
@@ -2223,7 +2371,7 @@ observability_requirements:
     #[test]
     fn canonical_extraction_binds_every_supported_source_without_authority() {
         let (_root, bundle, contract, binding) = extraction_fixture();
-        let closure = success(GovernedObligationCanonicalInputClosure::new(
+        let closure = success(GovernedObligationCanonicalCommitmentClosure::new(
             &bundle,
             vec![(contract, binding)],
         ));
@@ -2261,11 +2409,11 @@ observability_requirements:
     #[test]
     fn canonical_extraction_is_deterministic_and_redacts_projection_identity() {
         let (_root, bundle, contract, binding) = extraction_fixture();
-        let first = success(GovernedObligationCanonicalInputClosure::new(
+        let first = success(GovernedObligationCanonicalCommitmentClosure::new(
             &bundle,
             vec![(contract.clone(), binding.clone())],
         ));
-        let second = success(GovernedObligationCanonicalInputClosure::new(
+        let second = success(GovernedObligationCanonicalCommitmentClosure::new(
             &bundle,
             vec![(contract, binding)],
         ));
@@ -2283,9 +2431,34 @@ observability_requirements:
     }
 
     #[test]
+    fn multi_step_commitment_closure_is_independent_of_insertion_order() {
+        let (_root, bundle, contract, bindings) = multi_step_extraction_fixture();
+        let forward = success(GovernedObligationCanonicalCommitmentClosure::new(
+            &bundle,
+            vec![
+                (contract.clone(), bindings[0].clone()),
+                (contract.clone(), bindings[1].clone()),
+            ],
+        ));
+        let reversed = success(GovernedObligationCanonicalCommitmentClosure::new(
+            &bundle,
+            vec![
+                (contract.clone(), bindings[1].clone()),
+                (contract, bindings[0].clone()),
+            ],
+        ));
+        let (forward_plan, forward_projection) =
+            success(extract_governed_obligation_plan(&forward));
+        let (reversed_plan, reversed_projection) =
+            success(extract_governed_obligation_plan(&reversed));
+        assert_eq!(forward_plan, reversed_plan);
+        assert_eq!(forward_projection, reversed_projection);
+    }
+
+    #[test]
     fn missing_or_substituted_required_context_binding_fails_closed() {
         let (_root, bundle, contract, binding) = extraction_fixture();
-        let missing = failure(GovernedObligationCanonicalInputClosure::new(
+        let missing = failure(GovernedObligationCanonicalCommitmentClosure::new(
             &bundle,
             Vec::new(),
         ));
@@ -2299,7 +2472,7 @@ observability_requirements:
                 SpecContentHash::from_text("substituted"),
             ),
         );
-        let error = failure(GovernedObligationCanonicalInputClosure::new(
+        let error = failure(GovernedObligationCanonicalCommitmentClosure::new(
             &bundle,
             vec![(contract, substituted)],
         ));
@@ -2311,12 +2484,236 @@ observability_requirements:
     }
 
     #[test]
+    fn duplicate_required_context_step_fails_as_mismatched() {
+        let (_root, bundle, contract, binding) = extraction_fixture();
+        let error = failure(GovernedObligationCanonicalCommitmentClosure::new(
+            &bundle,
+            vec![(contract.clone(), binding.clone()), (contract, binding)],
+        ));
+        assert_eq!(
+            error.code(),
+            "governed_obligation_plan.runtime_composition.required_context_binding_mismatched"
+        );
+    }
+
+    #[test]
+    fn wrong_bundle_workflow_run_and_step_bindings_fail_closed() {
+        let (_root, bundle, contract, binding) = extraction_fixture();
+        let substitutions = [
+            RequiredContextExecutionBindingTestSubstitution::ImmutableRunBundle(
+                bundle
+                    .manifest()
+                    .run_binding()
+                    .with_test_root_hash(SpecContentHash::from_text("other-root")),
+            ),
+            RequiredContextExecutionBindingTestSubstitution::WorkflowId(
+                WorkflowId::new("obligation/other").expect("workflow"),
+            ),
+            RequiredContextExecutionBindingTestSubstitution::RunId(
+                WorkflowRunId::new("run-other").expect("run"),
+            ),
+            RequiredContextExecutionBindingTestSubstitution::StepId(
+                StepId::new("other").expect("step"),
+            ),
+        ];
+
+        for substitution in substitutions {
+            let changed = binding.with_test_substitution(substitution);
+            let error = failure(GovernedObligationCanonicalCommitmentClosure::new(
+                &bundle,
+                vec![(contract.clone(), changed)],
+            ));
+            assert_eq!(
+                error.code(),
+                "governed_obligation_plan.runtime_composition.required_context_binding_mismatched"
+            );
+        }
+    }
+
+    #[test]
+    fn wrong_contract_identity_version_and_content_bindings_fail_closed() {
+        let (_root, bundle, contract, binding) = extraction_fixture();
+        let substitutions = [
+            RequiredContextExecutionBindingTestSubstitution::HarnessContractId(
+                HarnessContractId::new("harness/other").expect("contract"),
+            ),
+            RequiredContextExecutionBindingTestSubstitution::HarnessContractVersion(
+                HarnessContractVersion::new("v2").expect("version"),
+            ),
+            RequiredContextExecutionBindingTestSubstitution::ContractContentHash(
+                SpecContentHash::from_text("other-contract"),
+            ),
+        ];
+
+        for substitution in substitutions {
+            let changed = binding.with_test_substitution(substitution);
+            let error = failure(GovernedObligationCanonicalCommitmentClosure::new(
+                &bundle,
+                vec![(contract.clone(), changed)],
+            ));
+            assert_eq!(
+                error.code(),
+                "governed_obligation_plan.runtime_composition.required_context_binding_mismatched"
+            );
+        }
+    }
+
+    #[test]
+    fn alternate_actor_is_a_distinct_valid_commitment() {
+        let (_root, bundle, contract, binding) = extraction_fixture();
+        let baseline = success(GovernedObligationCanonicalCommitmentClosure::new(
+            &bundle,
+            vec![(contract.clone(), binding)],
+        ));
+        let alternate = success(RequiredContextExecutionBinding::new(
+            RequiredContextExecutionBindingInput {
+                bundle: &bundle,
+                contract: &contract,
+                actor: ActorId::new("agent/alternate").expect("actor"),
+                step_id: StepId::new("inspect").expect("step"),
+                maximum_sensitivity: WorkReportSensitivity::Internal,
+                bound_at: timestamp("2026-11-06T10:05:00Z"),
+            },
+        ));
+        let alternate = success(GovernedObligationCanonicalCommitmentClosure::new(
+            &bundle,
+            vec![(contract, alternate)],
+        ));
+        let (_, baseline_projection) = success(extract_governed_obligation_plan(&baseline));
+        let (_, alternate_projection) = success(extract_governed_obligation_plan(&alternate));
+        assert_ne!(
+            baseline_projection.projection_commitment(),
+            alternate_projection.projection_commitment()
+        );
+    }
+
+    #[test]
+    fn alternate_known_sensitivity_is_a_distinct_valid_commitment() {
+        let (_root, bundle, contract, binding) = extraction_fixture();
+        let baseline = success(GovernedObligationCanonicalCommitmentClosure::new(
+            &bundle,
+            vec![(contract.clone(), binding)],
+        ));
+        let alternate = success(RequiredContextExecutionBinding::new(
+            RequiredContextExecutionBindingInput {
+                bundle: &bundle,
+                contract: &contract,
+                actor: ActorId::new("agent/executor").expect("actor"),
+                step_id: StepId::new("inspect").expect("step"),
+                maximum_sensitivity: WorkReportSensitivity::Confidential,
+                bound_at: timestamp("2026-11-06T10:05:00Z"),
+            },
+        ));
+        let alternate = success(GovernedObligationCanonicalCommitmentClosure::new(
+            &bundle,
+            vec![(contract, alternate)],
+        ));
+        let (_, baseline_projection) = success(extract_governed_obligation_plan(&baseline));
+        let (_, alternate_projection) = success(extract_governed_obligation_plan(&alternate));
+        assert_ne!(
+            baseline_projection.projection_commitment(),
+            alternate_projection.projection_commitment()
+        );
+    }
+
+    #[test]
+    fn alternate_non_pre_bundle_time_is_a_distinct_valid_commitment() {
+        let (_root, bundle, contract, binding) = extraction_fixture();
+        let baseline = success(GovernedObligationCanonicalCommitmentClosure::new(
+            &bundle,
+            vec![(contract.clone(), binding)],
+        ));
+        let alternate = success(RequiredContextExecutionBinding::new(
+            RequiredContextExecutionBindingInput {
+                bundle: &bundle,
+                contract: &contract,
+                actor: ActorId::new("agent/executor").expect("actor"),
+                step_id: StepId::new("inspect").expect("step"),
+                maximum_sensitivity: WorkReportSensitivity::Internal,
+                bound_at: timestamp("2026-11-06T10:06:00Z"),
+            },
+        ));
+        let alternate = success(GovernedObligationCanonicalCommitmentClosure::new(
+            &bundle,
+            vec![(contract, alternate)],
+        ));
+        let (_, baseline_projection) = success(extract_governed_obligation_plan(&baseline));
+        let (_, alternate_projection) = success(extract_governed_obligation_plan(&alternate));
+        assert_ne!(
+            baseline_projection.projection_commitment(),
+            alternate_projection.projection_commitment()
+        );
+    }
+
+    #[test]
+    fn unknown_sensitivity_and_pre_bundle_time_fail_at_binding_boundary() {
+        let (_root, bundle, contract, _binding) = extraction_fixture();
+        let unknown = failure(RequiredContextExecutionBinding::new(
+            RequiredContextExecutionBindingInput {
+                bundle: &bundle,
+                contract: &contract,
+                actor: ActorId::new("agent/executor").expect("actor"),
+                step_id: StepId::new("inspect").expect("step"),
+                maximum_sensitivity: WorkReportSensitivity::Unknown,
+                bound_at: timestamp("2026-11-06T10:05:00Z"),
+            },
+        ));
+        assert_eq!(
+            unknown.code(),
+            "required_context.execution_binding.sensitivity.unknown"
+        );
+
+        let early = failure(RequiredContextExecutionBinding::new(
+            RequiredContextExecutionBindingInput {
+                bundle: &bundle,
+                contract: &contract,
+                actor: ActorId::new("agent/executor").expect("actor"),
+                step_id: StepId::new("inspect").expect("step"),
+                maximum_sensitivity: WorkReportSensitivity::Internal,
+                bound_at: timestamp("2026-11-06T09:59:59Z"),
+            },
+        ));
+        assert_eq!(
+            early.code(),
+            "required_context.execution_binding.bound_at.before_bundle"
+        );
+    }
+
+    #[test]
+    fn shared_cardinality_bounds_accept_exact_maxima_and_reject_max_plus_one() {
+        let maximum = immutable_run_bundle_reference_max_count();
+        success(validate_required_context_pair_cardinality(maximum));
+        success(validate_extraction_count_bounds(maximum, maximum));
+
+        let pair_error = failure(validate_required_context_pair_cardinality(maximum + 1));
+        let source_error = failure(validate_extraction_count_bounds(maximum + 1, maximum));
+        let obligation_error = failure(validate_extraction_count_bounds(maximum, maximum + 1));
+        for error in [pair_error, source_error, obligation_error] {
+            assert_eq!(
+                error.code(),
+                "governed_obligation_plan.runtime_composition.cardinality_exceeded"
+            );
+        }
+    }
+
+    #[test]
+    fn checked_cardinality_arithmetic_rejects_overflow() {
+        let error = failure(checked_add_cardinality(usize::MAX, 1));
+        assert_eq!(
+            error.code(),
+            "governed_obligation_plan.runtime_composition.cardinality_exceeded"
+        );
+    }
+
+    #[test]
     fn required_context_cardinality_rejects_shared_bundle_maximum_plus_one() {
         let (_root, bundle, contract, binding) = extraction_fixture();
         let pairs = (0..=immutable_run_bundle_reference_max_count())
             .map(|_| (contract.clone(), binding.clone()))
             .collect();
-        let error = failure(GovernedObligationCanonicalInputClosure::new(&bundle, pairs));
+        let error = failure(GovernedObligationCanonicalCommitmentClosure::new(
+            &bundle, pairs,
+        ));
         assert_eq!(
             error.code(),
             "governed_obligation_plan.runtime_composition.cardinality_exceeded"
@@ -2340,7 +2737,7 @@ observability_requirements:
                 bound_at: timestamp("2026-11-06T10:05:00Z"),
             },
         ));
-        let closure = success(GovernedObligationCanonicalInputClosure::new(
+        let closure = success(GovernedObligationCanonicalCommitmentClosure::new(
             &bundle,
             vec![(contract, binding)],
         ));
