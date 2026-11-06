@@ -145,10 +145,24 @@ force=false
 if [ "$#" -gt 1 ]; then echo "usage: ./install.sh [--force]" >&2; exit 2; fi
 if [ "\${1:-}" = "--force" ]; then force=true; elif [ "\${1:-}" != "" ]; then echo "usage: ./install.sh [--force]" >&2; exit 2; fi
 destination="\${install_dir}/workflow-os"
-if [ -e "\${destination}" ] && [ "\${force}" != "true" ]; then echo "refusing to replace \${destination}; rerun with --force" >&2; exit 1; fi
 mkdir -p "\${install_dir}"
-cp "$(dirname "$0")/workflow-os" "\${destination}"
-chmod 755 "\${destination}"
+if [ -L "\${destination}" ]; then echo "refusing destination symlink \${destination}" >&2; exit 1; fi
+if [ -e "\${destination}" ] && [ ! -f "\${destination}" ]; then echo "refusing non-regular destination \${destination}" >&2; exit 1; fi
+if [ -e "\${destination}" ] && [ "\${force}" != "true" ]; then echo "refusing to replace \${destination}; rerun with --force" >&2; exit 1; fi
+umask 077
+temporary="$(mktemp "\${install_dir}/.workflow-os.install.XXXXXX")"
+trap 'rm -f "\${temporary}"' 0 HUP INT TERM
+cp "$(dirname "$0")/workflow-os" "\${temporary}"
+chmod 755 "\${temporary}"
+if [ "\${force}" = "true" ] && [ -e "\${destination}" ]; then
+  rm -f "\${destination}"
+fi
+if ! ln "\${temporary}" "\${destination}" 2>/dev/null; then
+  echo "refusing to replace \${destination}; rerun with --force" >&2
+  exit 1
+fi
+rm "\${temporary}"
+trap - 0 HUP INT TERM
 echo "installed workflow-os ${version} at \${destination}"
 `;
 }

@@ -50,6 +50,9 @@ test("candidate workflows admit final posture and emit bounded evidence only", (
     assert.match(workflow, /publication_authorized: false/);
     assert.match(workflow, /workflow_run_id: process\.env\.WORKFLOW_RUN_ID/);
     assert.match(workflow, /storage_artifact_name: process\.env\.ARTIFACT_NAME/);
+    assert.match(workflow, /binary_sha256: process\.env\.BINARY_SHA256/);
+    assert.match(workflow, /binary_shape: process\.env\.BINARY_SHAPE/);
+    assert.match(workflow, /native_machine: process\.env\.NATIVE_MACHINE/);
     assert.match(workflow, /rustc_version: process\.env\.RUSTC_VERSION/);
     assert.match(workflow, /retention-days: 7/);
     assert.match(workflow, /overwrite: false/);
@@ -77,4 +80,9 @@ test("Linux candidate workflow remains native musl and separately named", () => 
   assert.match(linuxWorkflow, /TARGET: x86_64-unknown-linux-musl/);
   assert.match(linuxWorkflow, /workflow-os-v0\.4\.0-preview\.1-linux-/);
   assert.match(linuxWorkflow, /musl-gcc/);
+  assert.match(linuxWorkflow, /sha256sum "\$\{package_root\}\/workflow-os"/);
+  assert.match(linuxWorkflow, /ELF 64-bit.*x86-64.*static/);
+  assert.match(linuxWorkflow, /BINARY_SHA256="\$\{binary_checksum\}"/);
+  assert.match(linuxWorkflow, /BINARY_SHAPE="\$\{binary_shape\}"/);
+  assert.match(linuxWorkflow, /NATIVE_MACHINE="\$\(uname -m\)"/);
 });
