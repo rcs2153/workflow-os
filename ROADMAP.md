@@ -1691,6 +1691,22 @@ exact test-only fix. Executor composition, persistence, public schema/SDK/CLI,
 providers, dependencies, Salsa, release behavior, and publication remain
 unauthorized.
 
+Focused maintainer/security review accepts the Phase 4 boundary-evidence fix
+without production changes. The review confirms that the valid fixture reaches
+the exact shared source ceiling through the real extractor, reaches the highest
+obligation count currently expressible by a valid authored project, and fails
+closed at source maximum plus one. Direct commitment assertions close the
+alternate actor, sensitivity, and time evidence gap. The helper-level
+independent obligation overflow remains appropriate defense in depth because
+the one-obligation-per-source invariant makes an obligation-only real overflow
+unreachable. See the [Phase 4 boundary test fix
+review](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_4_BOUNDARY_TEST_FIX_REVIEW.md).
+This closes the source-extraction correction gate. It does not authorize
+executor composition. Any composition work must return through the
+authoritative Active Delivery Queue and a separately governed plan naming one
+exact runtime consumer that owns the required authority and freshness
+expectations.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
