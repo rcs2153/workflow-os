@@ -1554,6 +1554,26 @@ of the corrected plan. Runtime implementation, persistence changes, public
 schema/SDK/CLI, providers, dependencies, Salsa, release behavior, and
 publication remain unauthorized until that review accepts the correction.
 
+The second focused maintainer/security review now accepts the corrected Phase
+4 plan for one private implementation slice only. The complete canonical input
+closure uses the exact stored immutable bundle plus one exact required-context
+contract and execution binding for every step; missing posture cannot mean
+none. The static projection remains subordinate to the existing durable
+`GovernanceAssessmentBinding`, and the persistence contract truthfully permits
+only an unactivated immutable bundle after a post-persistence read-back
+failure. The implementation must reuse shared bundle cardinality and record
+bijection, and it must correct the current private `WorkReportContract` source
+label before deriving workflow-authored `ReportArtifactRequirements`. It may
+validate required-context execution bindings in memory but cannot claim
+durable continuation ownership. See the [second focused corrected-plan
+review](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_4_PLAN_CORRECTION_REVIEW.md).
+The next authorized increment is one separately governed private
+canonical-input-closure, source-extractor, corrected-source-vocabulary, and
+projection-binding implementation with focused tests. Executor composition,
+persistence changes, public schema/SDK/CLI, providers, dependencies, Salsa,
+release behavior, and publication remain unauthorized pending focused review
+of that implementation.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
