@@ -1674,6 +1674,23 @@ the real boundary fixtures expose a concrete defect. Executor composition,
 persistence, public schema/SDK/CLI, providers, dependencies, Salsa, release
 behavior, and publication remain unauthorized.
 
+The Phase 4 boundary-evidence blocker fix is now implemented for focused
+review. Alternate actor, known-sensitivity, and later-time tests directly
+compare the required-context closure commitment as well as the final
+projection commitment. Generated valid-project fixtures prove successful
+extraction at the exact shared source ceiling, the highest obligation count
+reachable under the current authored contract (`maximum - 1`), and fail-closed
+rejection at source maximum plus one before a complete plan is returned. The
+remaining independent obligation maximum-plus-one branch stays helper-level
+because extraction admits at most one obligation per source and a real
+obligation-only overflow is structurally unreachable. See the [Phase 4
+boundary test fix
+report](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_4_BOUNDARY_TEST_FIX_REPORT.md).
+The next authorized increment is one focused maintainer/security review of the
+exact test-only fix. Executor composition, persistence, public schema/SDK/CLI,
+providers, dependencies, Salsa, release behavior, and publication remain
+unauthorized.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
