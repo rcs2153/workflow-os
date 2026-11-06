@@ -1449,6 +1449,24 @@ required before Phase 3 can be accepted. Phase 4 runtime composition,
 persistence, public schema/SDK/CLI, providers, incremental dependencies,
 Salsa, release behavior, and publication remain unauthorized.
 
+The focused Phase 3 oracle blocker correction is now implemented. The private
+comparator no longer defines a parallel canonical-outcome enum. Its observed
+side carries exact existing `PolicyDecision` and
+`ProportionalGovernanceWorkloadAssessment` values produced by the conservative
+policy engine and workload-assessment selector, plus the exact existing
+unsupported error when selection fails closed. The omitted-gate fixture now
+proves that Core still requires approval and denies missing required checks
+while the independently committed inventory detects the removed check gate.
+Direct regressions cover duplicate expectations, duplicate authoritative
+decisions, unexpected decisions, and a mismatched decision type. See the
+[authoritative-oracle correction
+report](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_3_AUTHORITATIVE_ORACLE_CORRECTION_REPORT.md).
+The next authorized increment is a second focused maintainer/security review
+of this correction. Phase 3 is not accepted and Phase 4 runtime composition,
+persistence, public schema/SDK/CLI, providers, incremental dependencies,
+Salsa, release behavior, and publication remain unauthorized until that review
+accepts the evidence boundary.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
