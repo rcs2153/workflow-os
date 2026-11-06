@@ -19,8 +19,11 @@ postures and has direct exhaustiveness coverage.
 The initial producer comparison relied on derived Rust enum ordering. That
 would have made future declaration order capable of changing authorization
 semantics. Producer comparison now uses an explicit closed table, parallel to
-the existing attestation comparison. The producer enum no longer derives
-ordering traits, so later code cannot silently reintroduce ordinal policy.
+the existing attestation comparison. Independent review later confirmed that
+the producer enum still derives ordering traits. Those traits are not consumed
+by the gate, but the original statement that they had been removed was
+incorrect; removal remains a bounded hardening follow-up before stronger
+producer posture is introduced.
 
 ## Reviewed Properties
 
@@ -68,9 +71,12 @@ signing, external witness, or automatic assurance upgrade was introduced.
   differently from what a reviewer expects; content binding identifies bytes,
   not semantic trustworthiness.
 - External verification remains unavailable.
-- Independent adversarial review has not yet tested downgrade, replay,
-  substitution, or malformed-declaration attacks across the complete public
-  surface.
+- Independent agent assurance reproduced downgrade, replay, substitution,
+  malformed-enum, ambiguity, compatibility, corruption, and reassessment
+  attacks without finding a P0, P1, or P2 blocker. It found one low-severity
+  unknown-field acceptance gap and the informational ordering-trait issue
+  corrected above. See [Local Check Evidence Assurance Minimum Gate Independent
+  Assurance](LOCAL_CHECK_EVIDENCE_ASSURANCE_MINIMUM_GATE_INDEPENDENT_ASSURANCE.md).
 
 These limits are disclosed and do not invalidate the narrow gate. They prevent
 using this slice as a claim of independent evidence or production-grade
