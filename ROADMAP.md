@@ -1414,6 +1414,22 @@ Runtime composition, persistence, public schema/SDK/CLI, providers,
 incremental dependencies, Salsa, release behavior, and publication remain
 unauthorized.
 
+Private Phase 3 deterministic explanation and differential validation are now
+implemented. The explanation binds ordered redaction-safe source traces to the
+accepted source-closure and inventory commitments. A separate fail-closed
+comparator requires independently authored expected obligations and canonical
+outcomes; it rejects stale explanations, omitted or unexpected gates,
+unsupported-field loss, unstable order, duplicate observations, and runtime
+outcome disagreement rather than selecting a permissive result. Runtime
+`SideEffect` observations remain facts and cannot manufacture static
+obligations. The implementation is crate-private, non-serializing,
+non-authorizing, non-persistent, and disconnected from executor control flow.
+See the [Phase 3 implementation
+report](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_3_REPORT.md). The next
+authorized increment is focused maintainer/security review of this slice.
+Phase 4 runtime composition remains unauthorized until that review accepts the
+independent-oracle, omission-detection, redaction, and fail-closed boundaries.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after

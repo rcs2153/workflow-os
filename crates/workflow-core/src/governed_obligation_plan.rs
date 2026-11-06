@@ -9,6 +9,7 @@ const SOURCE_ID_MAX_BYTES: usize = 256;
 const SOURCE_CLOSURE_DOMAIN: &str = "workflow-os/governed-obligation-source-closure/v1";
 const OBLIGATION_ID_DOMAIN: &str = "workflow-os/governed-obligation-id/v1";
 const INVENTORY_DOMAIN: &str = "workflow-os/governed-obligation-inventory/v1";
+const SOURCE_TRACE_DOMAIN: &str = "workflow-os/governed-obligation-source-trace/v1";
 
 /// Versioned private algorithm for the derived requirement inventory.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -258,6 +259,236 @@ impl fmt::Debug for GovernedObligationPlan {
     }
 }
 
+/// One redaction-safe trace from a derived obligation to its canonical source.
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct GovernedObligationExplanationEntry {
+    obligation_id: SpecContentHash,
+    source_kind: GovernedObligationSourceKind,
+    source_trace: SpecContentHash,
+    kind: GovernedObligationKind,
+    posture: GovernedObligationPosture,
+    evidence_class: Option<GovernedObligationEvidenceClass>,
+}
+
+impl fmt::Debug for GovernedObligationExplanationEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GovernedObligationExplanationEntry")
+            .field("obligation_id", &"[REDACTED]")
+            .field("source_kind", &self.source_kind)
+            .field("source_trace", &"[REDACTED]")
+            .field("kind", &self.kind)
+            .field("posture", &self.posture)
+            .field("evidence_class", &self.evidence_class)
+            .finish()
+    }
+}
+
+/// Deterministic, non-authorizing explanation of one private obligation plan.
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) struct GovernedObligationExplanation {
+    algorithm: GovernedObligationPlanAlgorithm,
+    source_closure_commitment: SpecContentHash,
+    inventory_commitment: SpecContentHash,
+    entries: Vec<GovernedObligationExplanationEntry>,
+}
+
+impl GovernedObligationExplanation {
+    #[must_use]
+    pub(crate) fn entries(&self) -> &[GovernedObligationExplanationEntry] {
+        &self.entries
+    }
+}
+
+impl fmt::Debug for GovernedObligationExplanation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GovernedObligationExplanation")
+            .field("algorithm", &self.algorithm)
+            .field("source_closure_commitment", &"[REDACTED]")
+            .field("inventory_commitment", &"[REDACTED]")
+            .field("entry_count", &self.entries.len())
+            .finish()
+    }
+}
+
+/// Independently authored canonical outcome used only for differential review.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum GovernedObligationCanonicalOutcome {
+    PolicyDecisionRequired,
+    ApprovalRequired,
+    RequiredContextRequired,
+    LocalCheckRequired,
+    WorkReportRequired,
+    UnsupportedDisclosed,
+    UnknownFailsClosed,
+}
+
+/// Independent oracle row. This is not constructed from a derived plan.
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct GovernedObligationDifferentialExpectation {
+    obligation_id: SpecContentHash,
+    source_trace: SpecContentHash,
+    kind: GovernedObligationKind,
+    posture: GovernedObligationPosture,
+    evidence_class: Option<GovernedObligationEvidenceClass>,
+    canonical_outcome: GovernedObligationCanonicalOutcome,
+}
+
+/// Independently observed canonical runtime or validation outcome.
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct GovernedObligationObservedOutcome {
+    obligation_id: SpecContentHash,
+    canonical_outcome: GovernedObligationCanonicalOutcome,
+}
+
+/// Independent review observation. Runtime `SideEffects` remain facts, not static
+/// obligations, and therefore cannot add entries to the compared plan.
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) enum GovernedObligationDifferentialObservation {
+    CanonicalOutcome(GovernedObligationObservedOutcome),
+    RuntimeSideEffectObserved,
+}
+
+/// Non-authorizing evidence that independent expectations and observations agree.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GovernedObligationDifferentialValidation {
+    compared_obligations: usize,
+    observed_runtime_side_effects: usize,
+}
+
+/// Projects stable explanation rows without exposing raw source identities.
+pub(crate) fn explain_governed_obligation_plan(
+    plan: &GovernedObligationPlan,
+) -> Result<GovernedObligationExplanation, WorkflowOsError> {
+    let entries = plan
+        .entries
+        .iter()
+        .map(|entry| {
+            Ok(GovernedObligationExplanationEntry {
+                obligation_id: entry.obligation_id.clone(),
+                source_kind: entry.source.kind,
+                source_trace: compute_source_trace(&entry.source)?,
+                kind: entry.kind,
+                posture: entry.posture,
+                evidence_class: entry.evidence_class,
+            })
+        })
+        .collect::<Result<Vec<_>, WorkflowOsError>>()?;
+
+    Ok(GovernedObligationExplanation {
+        algorithm: plan.algorithm,
+        source_closure_commitment: plan.source_closure_commitment.clone(),
+        inventory_commitment: plan.inventory_commitment.clone(),
+        entries,
+    })
+}
+
+/// Fails closed when a derived explanation, independent oracle, and observed
+/// canonical outcomes disagree. It never computes or selects an outcome.
+pub(crate) fn validate_governed_obligation_differential(
+    plan: &GovernedObligationPlan,
+    explanation: &GovernedObligationExplanation,
+    expected_source_closure: &SpecContentHash,
+    expected_inventory: &SpecContentHash,
+    expectations: &[GovernedObligationDifferentialExpectation],
+    observations: &[GovernedObligationDifferentialObservation],
+) -> Result<GovernedObligationDifferentialValidation, WorkflowOsError> {
+    if explanation.algorithm != plan.algorithm
+        || explanation.source_closure_commitment != plan.source_closure_commitment
+        || explanation.inventory_commitment != plan.inventory_commitment
+    {
+        return Err(model_error(
+            "explanation_stale",
+            "governed obligation explanation is not bound to the current plan",
+        ));
+    }
+    if &plan.source_closure_commitment != expected_source_closure {
+        return Err(model_error(
+            "source_closure_disagreement",
+            "governed obligation source closure disagrees with the independent expectation",
+        ));
+    }
+    if &plan.inventory_commitment != expected_inventory {
+        return Err(model_error(
+            "inventory_disagreement",
+            "governed obligation inventory disagrees with the independent expectation",
+        ));
+    }
+    if !is_strictly_sorted_by_obligation_id(&explanation.entries) {
+        return Err(model_error(
+            "explanation_order_unstable",
+            "governed obligation explanation ordering is not canonical",
+        ));
+    }
+
+    let expected_by_id = unique_expectations(expectations)?;
+    let observed_outcomes = observations
+        .iter()
+        .filter_map(|observation| match observation {
+            GovernedObligationDifferentialObservation::CanonicalOutcome(outcome) => Some(outcome),
+            GovernedObligationDifferentialObservation::RuntimeSideEffectObserved => None,
+        });
+    let observed_by_id = unique_observed_outcomes(observed_outcomes)?;
+    let observed_runtime_side_effects = observations
+        .iter()
+        .filter(|observation| {
+            matches!(
+                observation,
+                GovernedObligationDifferentialObservation::RuntimeSideEffectObserved
+            )
+        })
+        .count();
+    if expected_by_id.len() != explanation.entries.len() {
+        return Err(model_error(
+            "obligation_set_disagreement",
+            "governed obligation explanation and independent expectation sets differ",
+        ));
+    }
+
+    for entry in &explanation.entries {
+        let expected = expected_by_id.get(&entry.obligation_id).ok_or_else(|| {
+            model_error(
+                "obligation_set_disagreement",
+                "governed obligation explanation contains an unexpected obligation",
+            )
+        })?;
+        if expected.source_trace != entry.source_trace
+            || expected.kind != entry.kind
+            || expected.posture != entry.posture
+            || expected.evidence_class != entry.evidence_class
+        {
+            return Err(model_error(
+                "explanation_disagreement",
+                "governed obligation explanation disagrees with the independent expectation",
+            ));
+        }
+        let observed = observed_by_id.get(&entry.obligation_id).ok_or_else(|| {
+            model_error(
+                "runtime_outcome_missing",
+                "governed obligation is missing an independent canonical outcome",
+            )
+        })?;
+        if observed.canonical_outcome != expected.canonical_outcome {
+            return Err(model_error(
+                "runtime_outcome_disagreement",
+                "canonical runtime outcome disagrees with the independent expectation",
+            ));
+        }
+    }
+    if observed_by_id.len() != explanation.entries.len() {
+        return Err(model_error(
+            "runtime_outcome_unexpected",
+            "canonical runtime outcomes contain an obligation outside the derived plan",
+        ));
+    }
+
+    Ok(GovernedObligationDifferentialValidation {
+        compared_obligations: explanation.entries.len(),
+        observed_runtime_side_effects,
+    })
+}
+
 /// Builds the private static requirement index from already-derived canonical sources.
 pub(crate) fn build_governed_obligation_plan(
     canonical_sources: Vec<GovernedObligationSource>,
@@ -345,6 +576,60 @@ fn compute_obligation_id(
         source.content_commitment.as_str(),
         kind.as_str(),
     ])
+}
+
+fn compute_source_trace(
+    source: &GovernedObligationSource,
+) -> Result<SpecContentHash, WorkflowOsError> {
+    hash_segments([
+        SOURCE_TRACE_DOMAIN,
+        source.kind.as_str(),
+        &source.identity,
+        source.content_commitment.as_str(),
+    ])
+}
+
+fn is_strictly_sorted_by_obligation_id(entries: &[GovernedObligationExplanationEntry]) -> bool {
+    entries
+        .windows(2)
+        .all(|pair| pair[0].obligation_id < pair[1].obligation_id)
+}
+
+fn unique_expectations(
+    expectations: &[GovernedObligationDifferentialExpectation],
+) -> Result<BTreeMap<SpecContentHash, &GovernedObligationDifferentialExpectation>, WorkflowOsError>
+{
+    let mut by_id = BTreeMap::new();
+    for expectation in expectations {
+        if by_id
+            .insert(expectation.obligation_id.clone(), expectation)
+            .is_some()
+        {
+            return Err(model_error(
+                "expectation_duplicate",
+                "independent governed obligation expectations contain a duplicate identity",
+            ));
+        }
+    }
+    Ok(by_id)
+}
+
+fn unique_observed_outcomes<'a>(
+    outcomes: impl IntoIterator<Item = &'a GovernedObligationObservedOutcome>,
+) -> Result<BTreeMap<SpecContentHash, &'a GovernedObligationObservedOutcome>, WorkflowOsError> {
+    let mut by_id = BTreeMap::new();
+    for outcome in outcomes {
+        if by_id
+            .insert(outcome.obligation_id.clone(), outcome)
+            .is_some()
+        {
+            return Err(model_error(
+                "runtime_outcome_duplicate",
+                "independent canonical outcomes contain a duplicate obligation identity",
+            ));
+        }
+    }
+    Ok(by_id)
 }
 
 fn compute_source_closure_commitment(
@@ -495,6 +780,68 @@ mod tests {
             ),
         ];
         (vec![approval_source, check_source], obligations)
+    }
+
+    fn fixed_hash(value: &str) -> SpecContentHash {
+        success(SpecContentHash::new(value))
+    }
+
+    fn independent_expectations(
+        check_posture: GovernedObligationPosture,
+    ) -> Vec<GovernedObligationDifferentialExpectation> {
+        vec![
+            GovernedObligationDifferentialExpectation {
+                obligation_id: fixed_hash(
+                    "60071ad3666e43408c02ec79742f50a89218043a7a4fa438d133966a0ba1e9ba",
+                ),
+                source_trace: fixed_hash(
+                    "cb27124410714454269f57dbfc47f46f65673d0bae2c44cf7612cfc8905447cc",
+                ),
+                kind: GovernedObligationKind::LocalCheck,
+                posture: check_posture,
+                evidence_class: Some(GovernedObligationEvidenceClass::LocalCheckResult),
+                canonical_outcome: if check_posture == GovernedObligationPosture::Unsupported {
+                    GovernedObligationCanonicalOutcome::UnsupportedDisclosed
+                } else {
+                    GovernedObligationCanonicalOutcome::LocalCheckRequired
+                },
+            },
+            GovernedObligationDifferentialExpectation {
+                obligation_id: fixed_hash(
+                    "6bd9aeb9bb3c9cbf70fcf7d9b5f1fe65163d1865f90f25cdbdc4ad940836d4b4",
+                ),
+                source_trace: fixed_hash(
+                    "432788aea804b831b5aec3868c7b7ddeceb8e4d03394bf88e806a19bb0505f10",
+                ),
+                kind: GovernedObligationKind::Approval,
+                posture: GovernedObligationPosture::Mandatory,
+                evidence_class: Some(GovernedObligationEvidenceClass::ApprovalDecisionProof),
+                canonical_outcome: GovernedObligationCanonicalOutcome::ApprovalRequired,
+            },
+        ]
+    }
+
+    fn independent_observations(
+        check_outcome: GovernedObligationCanonicalOutcome,
+    ) -> Vec<GovernedObligationDifferentialObservation> {
+        vec![
+            GovernedObligationDifferentialObservation::CanonicalOutcome(
+                GovernedObligationObservedOutcome {
+                    obligation_id: fixed_hash(
+                        "60071ad3666e43408c02ec79742f50a89218043a7a4fa438d133966a0ba1e9ba",
+                    ),
+                    canonical_outcome: check_outcome,
+                },
+            ),
+            GovernedObligationDifferentialObservation::CanonicalOutcome(
+                GovernedObligationObservedOutcome {
+                    obligation_id: fixed_hash(
+                        "6bd9aeb9bb3c9cbf70fcf7d9b5f1fe65163d1865f90f25cdbdc4ad940836d4b4",
+                    ),
+                    canonical_outcome: GovernedObligationCanonicalOutcome::ApprovalRequired,
+                },
+            ),
+        ]
     }
 
     #[test]
@@ -753,6 +1100,180 @@ mod tests {
         assert_eq!(
             plan.entries()[0].evidence_class(),
             Some(GovernedObligationEvidenceClass::RequiredContextConsumption)
+        );
+    }
+
+    #[test]
+    fn explanation_is_deterministic_redacted_and_source_traceable() {
+        let (sources, obligations) = fixture();
+        let forward = success(build_governed_obligation_plan(
+            sources.clone(),
+            obligations.clone(),
+        ));
+        let mut reversed_sources = sources;
+        reversed_sources.reverse();
+        let mut reversed_obligations = obligations;
+        reversed_obligations.reverse();
+        let reversed = success(build_governed_obligation_plan(
+            reversed_sources,
+            reversed_obligations,
+        ));
+
+        let forward_explanation = success(explain_governed_obligation_plan(&forward));
+        let reversed_explanation = success(explain_governed_obligation_plan(&reversed));
+        assert_eq!(forward_explanation, reversed_explanation);
+        assert_eq!(
+            forward_explanation.entries()[0].source_trace.as_str(),
+            "cb27124410714454269f57dbfc47f46f65673d0bae2c44cf7612cfc8905447cc"
+        );
+        assert_eq!(
+            forward_explanation.entries()[1].source_trace.as_str(),
+            "432788aea804b831b5aec3868c7b7ddeceb8e4d03394bf88e806a19bb0505f10"
+        );
+        let debug = format!(
+            "{forward_explanation:?} {:?}",
+            forward_explanation.entries()[0]
+        );
+        assert!(!debug.contains("workflow/build/step/review"));
+        assert!(!debug.contains(forward_explanation.entries()[0].source_trace.as_str()));
+    }
+
+    #[test]
+    fn independently_specified_obligations_and_outcomes_agree() {
+        let (sources, obligations) = fixture();
+        let plan = success(build_governed_obligation_plan(sources, obligations));
+        let explanation = success(explain_governed_obligation_plan(&plan));
+        let validation = success(validate_governed_obligation_differential(
+            &plan,
+            &explanation,
+            &fixed_hash("422d11ca31afbbebf82884f4f0998f175bc0fa54f70c5816e1dcf1621ab697e2"),
+            &fixed_hash("39374d695aa0229dcaffb357d8f688a7c1993ba77c57c2b6fac7467866558a4e"),
+            &independent_expectations(GovernedObligationPosture::Mandatory),
+            &independent_observations(GovernedObligationCanonicalOutcome::LocalCheckRequired),
+        ));
+
+        assert_eq!(validation.compared_obligations, 2);
+        assert_eq!(validation.observed_runtime_side_effects, 0);
+    }
+
+    #[test]
+    fn omitted_gate_is_detected_even_when_runtime_outcomes_are_complete() {
+        let (sources, obligations) = fixture();
+        let incomplete = success(build_governed_obligation_plan(
+            sources,
+            vec![obligations[0].clone()],
+        ));
+        let explanation = success(explain_governed_obligation_plan(&incomplete));
+        let error = failure(validate_governed_obligation_differential(
+            &incomplete,
+            &explanation,
+            &fixed_hash("422d11ca31afbbebf82884f4f0998f175bc0fa54f70c5816e1dcf1621ab697e2"),
+            &fixed_hash("39374d695aa0229dcaffb357d8f688a7c1993ba77c57c2b6fac7467866558a4e"),
+            &independent_expectations(GovernedObligationPosture::Mandatory),
+            &independent_observations(GovernedObligationCanonicalOutcome::LocalCheckRequired),
+        ));
+
+        assert_eq!(
+            error.code(),
+            "governed_obligation_plan.inventory_disagreement"
+        );
+    }
+
+    #[test]
+    fn unsupported_requirement_remains_disclosed() {
+        let (sources, mut obligations) = fixture();
+        obligations[1].posture = GovernedObligationPosture::Unsupported;
+        let plan = success(build_governed_obligation_plan(sources, obligations));
+        let explanation = success(explain_governed_obligation_plan(&plan));
+        let validation = success(validate_governed_obligation_differential(
+            &plan,
+            &explanation,
+            &fixed_hash("422d11ca31afbbebf82884f4f0998f175bc0fa54f70c5816e1dcf1621ab697e2"),
+            &fixed_hash("476fe69fb7bb27e0978caea3c01c5a56f4fafcb1b13e99ae97918271c029bb55"),
+            &independent_expectations(GovernedObligationPosture::Unsupported),
+            &independent_observations(GovernedObligationCanonicalOutcome::UnsupportedDisclosed),
+        ));
+
+        assert_eq!(validation.compared_obligations, 2);
+        assert_eq!(
+            explanation.entries()[0].posture,
+            GovernedObligationPosture::Unsupported
+        );
+    }
+
+    #[test]
+    fn runtime_side_effect_observation_cannot_manufacture_static_obligation() {
+        let (sources, obligations) = fixture();
+        let plan = success(build_governed_obligation_plan(sources, obligations));
+        let explanation = success(explain_governed_obligation_plan(&plan));
+        let mut observations =
+            independent_observations(GovernedObligationCanonicalOutcome::LocalCheckRequired);
+        observations.push(GovernedObligationDifferentialObservation::RuntimeSideEffectObserved);
+        let validation = success(validate_governed_obligation_differential(
+            &plan,
+            &explanation,
+            &fixed_hash("422d11ca31afbbebf82884f4f0998f175bc0fa54f70c5816e1dcf1621ab697e2"),
+            &fixed_hash("39374d695aa0229dcaffb357d8f688a7c1993ba77c57c2b6fac7467866558a4e"),
+            &independent_expectations(GovernedObligationPosture::Mandatory),
+            &observations,
+        ));
+
+        assert_eq!(validation.compared_obligations, 2);
+        assert_eq!(validation.observed_runtime_side_effects, 1);
+        assert_eq!(explanation.entries().len(), 2);
+    }
+
+    #[test]
+    fn stale_closure_and_unstable_explanation_order_fail_closed() {
+        let (sources, obligations) = fixture();
+        let plan = success(build_governed_obligation_plan(sources, obligations));
+        let explanation = success(explain_governed_obligation_plan(&plan));
+        let stale_error = failure(validate_governed_obligation_differential(
+            &plan,
+            &explanation,
+            &SpecContentHash::from_text("stale-source-closure"),
+            plan.inventory_commitment(),
+            &independent_expectations(GovernedObligationPosture::Mandatory),
+            &independent_observations(GovernedObligationCanonicalOutcome::LocalCheckRequired),
+        ));
+        assert_eq!(
+            stale_error.code(),
+            "governed_obligation_plan.source_closure_disagreement"
+        );
+
+        let mut unstable = explanation;
+        unstable.entries.reverse();
+        let order_error = failure(validate_governed_obligation_differential(
+            &plan,
+            &unstable,
+            plan.source_closure_commitment(),
+            plan.inventory_commitment(),
+            &independent_expectations(GovernedObligationPosture::Mandatory),
+            &independent_observations(GovernedObligationCanonicalOutcome::LocalCheckRequired),
+        ));
+        assert_eq!(
+            order_error.code(),
+            "governed_obligation_plan.explanation_order_unstable"
+        );
+    }
+
+    #[test]
+    fn differential_disagreement_never_selects_permissive_result() {
+        let (sources, obligations) = fixture();
+        let plan = success(build_governed_obligation_plan(sources, obligations));
+        let explanation = success(explain_governed_obligation_plan(&plan));
+        let error = failure(validate_governed_obligation_differential(
+            &plan,
+            &explanation,
+            plan.source_closure_commitment(),
+            plan.inventory_commitment(),
+            &independent_expectations(GovernedObligationPosture::Mandatory),
+            &independent_observations(GovernedObligationCanonicalOutcome::PolicyDecisionRequired),
+        ));
+
+        assert_eq!(
+            error.code(),
+            "governed_obligation_plan.runtime_outcome_disagreement"
         );
     }
 }
