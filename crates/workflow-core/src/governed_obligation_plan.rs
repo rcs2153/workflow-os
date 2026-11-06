@@ -312,18 +312,6 @@ impl fmt::Debug for GovernedObligationExplanation {
     }
 }
 
-/// Independently authored canonical outcome used only for differential review.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub(crate) enum GovernedObligationCanonicalOutcome {
-    PolicyDecisionRequired,
-    ApprovalRequired,
-    RequiredContextRequired,
-    LocalCheckRequired,
-    WorkReportRequired,
-    UnsupportedDisclosed,
-    UnknownFailsClosed,
-}
-
 /// Independent oracle row. This is not constructed from a derived plan.
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct GovernedObligationDifferentialExpectation {
@@ -332,21 +320,31 @@ pub(crate) struct GovernedObligationDifferentialExpectation {
     kind: GovernedObligationKind,
     posture: GovernedObligationPosture,
     evidence_class: Option<GovernedObligationEvidenceClass>,
-    canonical_outcome: GovernedObligationCanonicalOutcome,
 }
 
-/// Independently observed canonical runtime or validation outcome.
-#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+/// Existing authoritative Core decision used as the observed side of review.
+///
+/// The variants carry canonical decision types rather than restating their
+/// semantics in a second outcome vocabulary.
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) enum GovernedObligationAuthoritativeDecision {
+    Policy(crate::PolicyDecision),
+    WorkloadAssessment(crate::ProportionalGovernanceWorkloadAssessment),
+    ValidationFailure(WorkflowOsError),
+}
+
+/// One independently obtained authoritative Core decision.
+#[derive(Clone, Eq, PartialEq)]
 pub(crate) struct GovernedObligationObservedOutcome {
     obligation_id: SpecContentHash,
-    canonical_outcome: GovernedObligationCanonicalOutcome,
+    decision: GovernedObligationAuthoritativeDecision,
 }
 
 /// Independent review observation. Runtime `SideEffects` remain facts, not static
 /// obligations, and therefore cannot add entries to the compared plan.
 #[derive(Clone, Eq, PartialEq)]
 pub(crate) enum GovernedObligationDifferentialObservation {
-    CanonicalOutcome(GovernedObligationObservedOutcome),
+    AuthoritativeDecision(Box<GovernedObligationObservedOutcome>),
     RuntimeSideEffectObserved,
 }
 
@@ -423,13 +421,15 @@ pub(crate) fn validate_governed_obligation_differential(
     }
 
     let expected_by_id = unique_expectations(expectations)?;
-    let observed_outcomes = observations
+    let observed_decisions = observations
         .iter()
         .filter_map(|observation| match observation {
-            GovernedObligationDifferentialObservation::CanonicalOutcome(outcome) => Some(outcome),
+            GovernedObligationDifferentialObservation::AuthoritativeDecision(outcome) => {
+                Some(outcome.as_ref())
+            }
             GovernedObligationDifferentialObservation::RuntimeSideEffectObserved => None,
         });
-    let observed_by_id = unique_observed_outcomes(observed_outcomes)?;
+    let observed_by_id = unique_observed_decisions(observed_decisions)?;
     let observed_runtime_side_effects = observations
         .iter()
         .filter(|observation| {
@@ -465,21 +465,16 @@ pub(crate) fn validate_governed_obligation_differential(
         }
         let observed = observed_by_id.get(&entry.obligation_id).ok_or_else(|| {
             model_error(
-                "runtime_outcome_missing",
-                "governed obligation is missing an independent canonical outcome",
+                "authoritative_decision_missing",
+                "governed obligation is missing an authoritative Core decision",
             )
         })?;
-        if observed.canonical_outcome != expected.canonical_outcome {
-            return Err(model_error(
-                "runtime_outcome_disagreement",
-                "canonical runtime outcome disagrees with the independent expectation",
-            ));
-        }
+        validate_authoritative_observation(expected, observed)?;
     }
     if observed_by_id.len() != explanation.entries.len() {
         return Err(model_error(
-            "runtime_outcome_unexpected",
-            "canonical runtime outcomes contain an obligation outside the derived plan",
+            "authoritative_decision_unexpected",
+            "authoritative Core decisions contain an obligation outside the derived plan",
         ));
     }
 
@@ -487,6 +482,52 @@ pub(crate) fn validate_governed_obligation_differential(
         compared_obligations: explanation.entries.len(),
         observed_runtime_side_effects,
     })
+}
+
+fn validate_authoritative_observation(
+    expected: &GovernedObligationDifferentialExpectation,
+    observed: &GovernedObligationObservedOutcome,
+) -> Result<(), WorkflowOsError> {
+    match (
+        expected.kind,
+        expected.posture,
+        expected.evidence_class,
+        &observed.decision,
+    ) {
+        (
+            GovernedObligationKind::Approval,
+            GovernedObligationPosture::Mandatory,
+            Some(GovernedObligationEvidenceClass::ApprovalDecisionProof),
+            GovernedObligationAuthoritativeDecision::Policy(decision),
+        ) if decision.requires_approval && decision.allowed => Ok(()),
+        (
+            GovernedObligationKind::LocalCheck,
+            GovernedObligationPosture::Mandatory,
+            Some(GovernedObligationEvidenceClass::LocalCheckResult),
+            GovernedObligationAuthoritativeDecision::WorkloadAssessment(assessment),
+        ) if assessment.decision().execution() == crate::GovernanceExecutionDisposition::Denied
+            && assessment
+                .decision()
+                .reasons()
+                .contains(&crate::GovernanceDecisionReason::EvidenceOrCheckRequirement) =>
+        {
+            Ok(())
+        }
+        (
+            GovernedObligationKind::LocalCheck,
+            GovernedObligationPosture::Unsupported,
+            Some(GovernedObligationEvidenceClass::LocalCheckResult),
+            GovernedObligationAuthoritativeDecision::ValidationFailure(error),
+        ) if error.kind() == crate::WorkflowOsErrorKind::Unsupported
+            && error.code() == "governance.proportional.requirement.unsupported" =>
+        {
+            Ok(())
+        }
+        _ => Err(model_error(
+            "authoritative_decision_disagreement",
+            "authoritative Core decision does not satisfy the independently expected obligation",
+        )),
+    }
 }
 
 /// Builds the private static requirement index from already-derived canonical sources.
@@ -614,7 +655,7 @@ fn unique_expectations(
     Ok(by_id)
 }
 
-fn unique_observed_outcomes<'a>(
+fn unique_observed_decisions<'a>(
     outcomes: impl IntoIterator<Item = &'a GovernedObligationObservedOutcome>,
 ) -> Result<BTreeMap<SpecContentHash, &'a GovernedObligationObservedOutcome>, WorkflowOsError> {
     let mut by_id = BTreeMap::new();
@@ -624,8 +665,8 @@ fn unique_observed_outcomes<'a>(
             .is_some()
         {
             return Err(model_error(
-                "runtime_outcome_duplicate",
-                "independent canonical outcomes contain a duplicate obligation identity",
+                "authoritative_decision_duplicate",
+                "authoritative Core decisions contain a duplicate obligation identity",
             ));
         }
     }
@@ -800,11 +841,6 @@ mod tests {
                 kind: GovernedObligationKind::LocalCheck,
                 posture: check_posture,
                 evidence_class: Some(GovernedObligationEvidenceClass::LocalCheckResult),
-                canonical_outcome: if check_posture == GovernedObligationPosture::Unsupported {
-                    GovernedObligationCanonicalOutcome::UnsupportedDisclosed
-                } else {
-                    GovernedObligationCanonicalOutcome::LocalCheckRequired
-                },
             },
             GovernedObligationDifferentialExpectation {
                 obligation_id: fixed_hash(
@@ -816,31 +852,99 @@ mod tests {
                 kind: GovernedObligationKind::Approval,
                 posture: GovernedObligationPosture::Mandatory,
                 evidence_class: Some(GovernedObligationEvidenceClass::ApprovalDecisionProof),
-                canonical_outcome: GovernedObligationCanonicalOutcome::ApprovalRequired,
             },
         ]
     }
 
+    fn authoritative_approval_decision() -> crate::PolicyDecision {
+        let mut policy_effects = crate::PolicyEffectSet::default();
+        policy_effects.insert(crate::PolicyEffect::AllowLocal);
+        policy_effects.insert(crate::PolicyEffect::RequireApproval);
+        crate::ConservativePolicyEngine::new().evaluate(&crate::PolicyEvaluationContext {
+            action: crate::Action::InvokeSkill,
+            capabilities: vec![crate::Capability::LocalRead],
+            actor: Some(success(crate::ActorId::new("system/obligation-review"))),
+            workflow_id: Some(success(crate::WorkflowId::new(
+                "workflow/obligation-review",
+            ))),
+            run_id: Some(success(crate::WorkflowRunId::new("run/obligation-review"))),
+            step_id: None,
+            skill_id: None,
+            autonomy_level: Some(crate::AutonomyLevel::Level1Assistive),
+            approval_sensitivity: Some(crate::ApprovalSensitivity::Low),
+            has_approval_policy: true,
+            policy_effects,
+            adapter_id: None,
+            correlation_id: Some(success(crate::CorrelationId::new(
+                "correlation/obligation-review",
+            ))),
+        })
+    }
+
+    fn authoritative_check_decision(
+        check_posture: GovernedObligationPosture,
+    ) -> GovernedObligationAuthoritativeDecision {
+        let evidence_and_check_minimum = if check_posture == GovernedObligationPosture::Unsupported
+        {
+            crate::GovernancePostureRequirement::new(
+                crate::GovernanceExecutionRequirement::Unsupported,
+                crate::GovernanceDisclosureObligation::QuietAllowed,
+            )
+        } else {
+            crate::GovernancePostureRequirement::quiet()
+        };
+        let result = crate::assess_proportional_governance_workload(
+            &crate::ProportionalGovernanceWorkloadAssessmentInput {
+                definition_root: SpecContentHash::from_text("obligation-review-definition"),
+                profile: crate::GovernanceStrictnessProfile::ObserveAndReport,
+                workflow_minimum: crate::GovernancePostureRequirement::quiet(),
+                policy_minimum: crate::GovernancePostureRequirement::quiet(),
+                action_class: crate::GovernanceWorkloadActionClass::ReadOnly,
+                authority: crate::GovernanceWorkloadAuthorityPosture::Sufficient,
+                authority_minimum: crate::GovernancePostureRequirement::quiet(),
+                evidence_and_checks:
+                    crate::GovernanceWorkloadEvidenceCheckPosture::RequiredUnavailable,
+                evidence_and_check_minimum,
+                sensitivity: crate::GovernanceWorkloadSensitivity::Routine,
+                sensitivity_minimum: crate::GovernancePostureRequirement::quiet(),
+                side_effect: crate::GovernanceWorkloadSideEffectPosture::None,
+                side_effect_minimum: crate::GovernancePostureRequirement::quiet(),
+                runtime_escalation: crate::GovernancePostureRequirement::quiet(),
+                prior_execution: None,
+                prior_disclosure: None,
+                steward_minimum: None,
+            },
+        );
+        match result {
+            Ok(assessment) => {
+                GovernedObligationAuthoritativeDecision::WorkloadAssessment(assessment)
+            }
+            Err(error) => GovernedObligationAuthoritativeDecision::ValidationFailure(error),
+        }
+    }
+
     fn independent_observations(
-        check_outcome: GovernedObligationCanonicalOutcome,
+        check_posture: GovernedObligationPosture,
     ) -> Vec<GovernedObligationDifferentialObservation> {
         vec![
-            GovernedObligationDifferentialObservation::CanonicalOutcome(
+            GovernedObligationDifferentialObservation::AuthoritativeDecision(Box::new(
                 GovernedObligationObservedOutcome {
                     obligation_id: fixed_hash(
                         "60071ad3666e43408c02ec79742f50a89218043a7a4fa438d133966a0ba1e9ba",
                     ),
-                    canonical_outcome: check_outcome,
+                    decision: authoritative_check_decision(check_posture),
                 },
-            ),
-            GovernedObligationDifferentialObservation::CanonicalOutcome(
+            )),
+            GovernedObligationDifferentialObservation::AuthoritativeDecision(Box::new(
                 GovernedObligationObservedOutcome {
                     obligation_id: fixed_hash(
                         "6bd9aeb9bb3c9cbf70fcf7d9b5f1fe65163d1865f90f25cdbdc4ad940836d4b4",
                     ),
-                    canonical_outcome: GovernedObligationCanonicalOutcome::ApprovalRequired,
+                    decision: GovernedObligationAuthoritativeDecision::Policy(
+                        authoritative_approval_decision(),
+                    ),
                 },
-            ),
+            )),
         ]
     }
 
@@ -1149,7 +1253,7 @@ mod tests {
             &fixed_hash("422d11ca31afbbebf82884f4f0998f175bc0fa54f70c5816e1dcf1621ab697e2"),
             &fixed_hash("39374d695aa0229dcaffb357d8f688a7c1993ba77c57c2b6fac7467866558a4e"),
             &independent_expectations(GovernedObligationPosture::Mandatory),
-            &independent_observations(GovernedObligationCanonicalOutcome::LocalCheckRequired),
+            &independent_observations(GovernedObligationPosture::Mandatory),
         ));
 
         assert_eq!(validation.compared_obligations, 2);
@@ -1164,13 +1268,36 @@ mod tests {
             vec![obligations[0].clone()],
         ));
         let explanation = success(explain_governed_obligation_plan(&incomplete));
+        let observations = independent_observations(GovernedObligationPosture::Mandatory);
+        assert!(matches!(
+            &observations[0],
+            GovernedObligationDifferentialObservation::AuthoritativeDecision(outcome)
+                if matches!(
+                    &outcome.decision,
+                    GovernedObligationAuthoritativeDecision::WorkloadAssessment(assessment)
+                        if assessment.decision().execution()
+                            == crate::GovernanceExecutionDisposition::Denied
+                            && assessment.decision().reasons().contains(
+                                &crate::GovernanceDecisionReason::EvidenceOrCheckRequirement
+                            )
+                )
+        ));
+        assert!(matches!(
+            &observations[1],
+            GovernedObligationDifferentialObservation::AuthoritativeDecision(outcome)
+                if matches!(
+                    &outcome.decision,
+                    GovernedObligationAuthoritativeDecision::Policy(decision)
+                        if decision.allowed && decision.requires_approval
+                )
+        ));
         let error = failure(validate_governed_obligation_differential(
             &incomplete,
             &explanation,
             &fixed_hash("422d11ca31afbbebf82884f4f0998f175bc0fa54f70c5816e1dcf1621ab697e2"),
             &fixed_hash("39374d695aa0229dcaffb357d8f688a7c1993ba77c57c2b6fac7467866558a4e"),
             &independent_expectations(GovernedObligationPosture::Mandatory),
-            &independent_observations(GovernedObligationCanonicalOutcome::LocalCheckRequired),
+            &observations,
         ));
 
         assert_eq!(
@@ -1191,7 +1318,7 @@ mod tests {
             &fixed_hash("422d11ca31afbbebf82884f4f0998f175bc0fa54f70c5816e1dcf1621ab697e2"),
             &fixed_hash("476fe69fb7bb27e0978caea3c01c5a56f4fafcb1b13e99ae97918271c029bb55"),
             &independent_expectations(GovernedObligationPosture::Unsupported),
-            &independent_observations(GovernedObligationCanonicalOutcome::UnsupportedDisclosed),
+            &independent_observations(GovernedObligationPosture::Unsupported),
         ));
 
         assert_eq!(validation.compared_obligations, 2);
@@ -1206,8 +1333,7 @@ mod tests {
         let (sources, obligations) = fixture();
         let plan = success(build_governed_obligation_plan(sources, obligations));
         let explanation = success(explain_governed_obligation_plan(&plan));
-        let mut observations =
-            independent_observations(GovernedObligationCanonicalOutcome::LocalCheckRequired);
+        let mut observations = independent_observations(GovernedObligationPosture::Mandatory);
         observations.push(GovernedObligationDifferentialObservation::RuntimeSideEffectObserved);
         let validation = success(validate_governed_obligation_differential(
             &plan,
@@ -1234,7 +1360,7 @@ mod tests {
             &SpecContentHash::from_text("stale-source-closure"),
             plan.inventory_commitment(),
             &independent_expectations(GovernedObligationPosture::Mandatory),
-            &independent_observations(GovernedObligationCanonicalOutcome::LocalCheckRequired),
+            &independent_observations(GovernedObligationPosture::Mandatory),
         ));
         assert_eq!(
             stale_error.code(),
@@ -1249,7 +1375,7 @@ mod tests {
             plan.source_closure_commitment(),
             plan.inventory_commitment(),
             &independent_expectations(GovernedObligationPosture::Mandatory),
-            &independent_observations(GovernedObligationCanonicalOutcome::LocalCheckRequired),
+            &independent_observations(GovernedObligationPosture::Mandatory),
         ));
         assert_eq!(
             order_error.code(),
@@ -1262,18 +1388,100 @@ mod tests {
         let (sources, obligations) = fixture();
         let plan = success(build_governed_obligation_plan(sources, obligations));
         let explanation = success(explain_governed_obligation_plan(&plan));
+        let mut observations = independent_observations(GovernedObligationPosture::Mandatory);
+        if let GovernedObligationDifferentialObservation::AuthoritativeDecision(outcome) =
+            &mut observations[0]
+        {
+            outcome.decision =
+                GovernedObligationAuthoritativeDecision::Policy(authoritative_approval_decision());
+        }
         let error = failure(validate_governed_obligation_differential(
             &plan,
             &explanation,
             plan.source_closure_commitment(),
             plan.inventory_commitment(),
             &independent_expectations(GovernedObligationPosture::Mandatory),
-            &independent_observations(GovernedObligationCanonicalOutcome::PolicyDecisionRequired),
+            &observations,
         ));
 
         assert_eq!(
             error.code(),
-            "governed_obligation_plan.runtime_outcome_disagreement"
+            "governed_obligation_plan.authoritative_decision_disagreement"
+        );
+    }
+
+    #[test]
+    fn duplicate_independent_expectation_fails_closed() {
+        let (sources, obligations) = fixture();
+        let plan = success(build_governed_obligation_plan(sources, obligations));
+        let explanation = success(explain_governed_obligation_plan(&plan));
+        let mut expectations = independent_expectations(GovernedObligationPosture::Mandatory);
+        expectations.push(expectations[0].clone());
+        let error = failure(validate_governed_obligation_differential(
+            &plan,
+            &explanation,
+            plan.source_closure_commitment(),
+            plan.inventory_commitment(),
+            &expectations,
+            &independent_observations(GovernedObligationPosture::Mandatory),
+        ));
+
+        assert_eq!(
+            error.code(),
+            "governed_obligation_plan.expectation_duplicate"
+        );
+    }
+
+    #[test]
+    fn duplicate_authoritative_decision_fails_closed() {
+        let (sources, obligations) = fixture();
+        let plan = success(build_governed_obligation_plan(sources, obligations));
+        let explanation = success(explain_governed_obligation_plan(&plan));
+        let mut observations = independent_observations(GovernedObligationPosture::Mandatory);
+        observations.push(observations[0].clone());
+        let error = failure(validate_governed_obligation_differential(
+            &plan,
+            &explanation,
+            plan.source_closure_commitment(),
+            plan.inventory_commitment(),
+            &independent_expectations(GovernedObligationPosture::Mandatory),
+            &observations,
+        ));
+
+        assert_eq!(
+            error.code(),
+            "governed_obligation_plan.authoritative_decision_duplicate"
+        );
+    }
+
+    #[test]
+    fn authoritative_decision_outside_derived_plan_fails_closed() {
+        let (sources, obligations) = fixture();
+        let plan = success(build_governed_obligation_plan(sources, obligations));
+        let explanation = success(explain_governed_obligation_plan(&plan));
+        let mut observations = independent_observations(GovernedObligationPosture::Mandatory);
+        observations.push(
+            GovernedObligationDifferentialObservation::AuthoritativeDecision(Box::new(
+                GovernedObligationObservedOutcome {
+                    obligation_id: SpecContentHash::from_text("unexpected-obligation"),
+                    decision: GovernedObligationAuthoritativeDecision::Policy(
+                        authoritative_approval_decision(),
+                    ),
+                },
+            )),
+        );
+        let error = failure(validate_governed_obligation_differential(
+            &plan,
+            &explanation,
+            plan.source_closure_commitment(),
+            plan.inventory_commitment(),
+            &independent_expectations(GovernedObligationPosture::Mandatory),
+            &observations,
+        ));
+
+        assert_eq!(
+            error.code(),
+            "governed_obligation_plan.authoritative_decision_unexpected"
         );
     }
 }
