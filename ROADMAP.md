@@ -1430,6 +1430,25 @@ authorized increment is focused maintainer/security review of this slice.
 Phase 4 runtime composition remains unauthorized until that review accepts the
 independent-oracle, omission-detection, redaction, and fail-closed boundaries.
 
+Focused maintainer/security review requests changes to the Phase 3
+differential boundary. The deterministic explanation, source-closure and
+inventory commitments, redaction posture, unsupported disclosure, and
+`SideEffect` non-inference are accepted. The claimed observed outcomes are not:
+they are manually authored through a new module-local canonical-outcome enum
+rather than obtained from existing authoritative executor or validation
+decisions. The current tests prove record comparison, not agreement with Core,
+and therefore do not satisfy the accepted Phase 3 plan. Direct regression
+coverage is also missing for duplicate expectations, duplicate observations,
+and unexpected outcomes. See the [focused Phase 3
+review](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_3_REVIEW.md). The next
+authorized increment is one separately governed private blocker correction
+that uses existing authoritative Core decisions or their canonical returned
+types as the observed side of differential validation and proves the
+omitted-gate case while Core still blocks or waits. A second focused review is
+required before Phase 3 can be accepted. Phase 4 runtime composition,
+persistence, public schema/SDK/CLI, providers, incremental dependencies,
+Salsa, release behavior, and publication remain unauthorized.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
