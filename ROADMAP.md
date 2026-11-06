@@ -1655,6 +1655,21 @@ exact correction and tests. Executor composition, persistence, public
 schema/SDK/CLI, providers, dependencies, Salsa, release behavior, and
 publication remain unauthorized.
 
+The focused maintainer/security review accepted the commitment-only production
+boundary but requested two test corrections before acceptance. Alternate actor,
+known-sensitivity, and later-time tests currently prove only the final
+projection hash changes, not the required-context closure commitment directly.
+Exact source and obligation maxima are currently asserted against private bound
+helpers rather than real extraction fixtures, so pre-construction counter and
+extraction-loop agreement is not yet proven at the boundary. See the [Phase 4
+source-extraction correction
+review](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_4_SOURCE_EXTRACTION_CORRECTION_REVIEW.md).
+The next authorized increment is one test-only blocker-fix phase for those two
+families, followed by focused review. Production semantics may change only if
+the real boundary fixtures expose a concrete defect. Executor composition,
+persistence, public schema/SDK/CLI, providers, dependencies, Salsa, release
+behavior, and publication remain unauthorized.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
