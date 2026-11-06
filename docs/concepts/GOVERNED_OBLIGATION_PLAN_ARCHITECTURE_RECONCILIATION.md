@@ -68,8 +68,8 @@ classes:
 
 | Proposed concept | Canonical Core source or path | Current posture and fact class | Gap, compatibility, and duplication verdict |
 | --- | --- | --- | --- |
-| Contract | `ProjectBundle` in `crates/workflow-core/src/project.rs`; `WorkflowDefinition`, `StepDefinition`, and `SkillDefinition` in `definitions.rs` | Validated authored requirements. | No new authored contract is justified. A separate `WorkContract` would duplicate the canonical source language and is rejected. |
-| Validated project bundle | `ProjectBundle` and the existing loader/validator path in `project.rs` | Validated canonical input closure. | The future index must accept validated inputs only and preserve their exact commitments. It must not parse a second source tree. |
+| Contract | `ProjectBundle` and `LoadedSpec` in `crates/workflow-core/src/loader.rs`; `ProjectManifest` and policy documents in `project.rs`; `WorkflowDefinition`, `StepDefinition`, and `SkillDefinition` in `definitions.rs` | Validated authored requirements. | No new authored contract is justified. A separate `WorkContract` would duplicate the canonical source language and is rejected. |
+| Validated project bundle | `ProjectBundle`, `LoadedSpec`, and `load_project` in `loader.rs`, followed by `validate_project_bundle` | Validated canonical input closure. | The future index must accept validated inputs only and preserve their exact commitments. It must not parse a second source tree. |
 | Workflow and step | `WorkflowDefinition` and `StepDefinition` in `definitions.rs` | Authored workflow topology, skill references, policy requirements, local-check declarations, and terminal behavior. | No semantic gap. These remain canonical; the index may only reference their stable identities and commitments. |
 | Resolved skill closure | `SkillDefinition` plus project resolution used by `derive_workflow_step_governance_assessment_input` in `proportional_governance_workflow_derivation.rs` | Validated authored requirements and derived static input. | Reuse the existing resolver and error posture. Copying its resolution rules would create drift and is rejected. |
 | Resolved policy closure | `PolicySpecDocument` in `project.rs`, typed `PolicyEffect` and `PolicyEffectSet` in `policy.rs`, and existing project resolution | Authored policy requirements become typed derived static requirements; raw rule shells alone are not runtime authority. | The index must consume validated typed effects, not reinterpret `PolicyRuleShell.effect` strings. Policy evaluation and `PolicyDecision` remain authoritative. |
@@ -104,22 +104,37 @@ minimum, a run-bound commitment would need:
 - report contract and artifact-requirement commitments;
 - proportional-governance assessment input or immutable assessment binding;
 - any other canonical source explicitly included by the derivation; and
-- deterministic ordering and duplicate/conflict rejection.
+- deterministic ordering and duplicate/conflict rejection;
+- one aggregate source-closure commitment over the complete sorted canonical
+  input set; and
+- one aggregate inventory commitment over the algorithm identity, source-
+  closure commitment, and complete sorted derived entry set.
 
 The source closure is not satisfied by workflow ID/version alone. Runtime code
 must not rederive an accepted inventory from mutable checkout files.
+Per-entry source references are also insufficient: without aggregate closure
+and inventory commitments, a derivation could silently omit one mandatory
+entry while every retained entry remained individually well formed.
 
 ## Minimal Model Boundary Justified By This Review
 
 Phase 1 supports evaluating a private model with only:
 
-- obligation identity;
-- obligation kind;
+- deterministic obligation identity derived from canonical source identity,
+  source commitment, and a closed obligation kind;
+- closed, Core-owned obligation kind rather than caller-authored text;
 - mandatory, optional, unsupported, or unknown posture;
 - canonical source reference and source commitment;
 - deterministic ordering key;
-- expected authoritative evidence class, when one already exists; and
-- explicit derivation-algorithm identity.
+- a closed reference to an existing authoritative evidence class, only when
+  Core already defines one;
+- explicit derivation-algorithm identity;
+- aggregate canonical source-closure commitment; and
+- aggregate inventory commitment.
+
+Constructors must derive identities and commitments from validated canonical
+inputs. Callers may not supply arbitrary obligation IDs, kinds, evidence-class
+strings, source-closure roots, or inventory roots.
 
 The model must not contain:
 
@@ -133,6 +148,9 @@ The model must not contain:
 - caller-authored satisfaction state of any kind.
 
 Those are runtime outcomes owned by existing Core paths.
+The model must also distinguish an authored requirement whose runtime support
+is deferred from the absence of any authored requirement. The latter cannot be
+promoted into an obligation merely by assigning it `unsupported` posture.
 
 ## Differential Validation Boundary
 
