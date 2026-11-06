@@ -418,12 +418,21 @@ are corrected in the produced artifacts. The cancelled duplicate macOS run is
 not an artifact-integrity blocker, but it is a release-process defect: future
 candidate dispatch must use an idempotent exact-source helper or connector path
 that reconciles ambiguous responses before retry and fails closed when a bound
-run already exists. See the [accepted review](docs/concepts/0.4.0-preview.1_HARDENED_CANDIDATE_PRODUCTION_REVIEW.md).
-The next release-admission lane is independent release/security inspection of
-this exact source and accepted artifact pair. A new governed publication
-decision may follow only after that inspection. Comparative benchmark work,
-provider mutation, tags, releases, asset promotion, registry publication, and
-announcement remain outside this lane.
+run already exists. See the [accepted
+review](docs/concepts/0.4.0-preview.1_HARDENED_CANDIDATE_PRODUCTION_REVIEW.md).
+Independent release/security inspection of merged evidence commit
+`85ff87825f8acf7a97c50ba5175ace11dc1aeb8d` accepts the exact source and
+artifact pair with no P0 or P1 finding and no artifact-integrity blocker. It
+independently reproduces the release authority, digests, manifests, native
+shapes, installer defenses, evidence symmetry, and terminal-green CI. It
+classifies the cancelled duplicate macOS run as a P2 process defect and
+requires an idempotent exact-source dispatch path before any future candidate
+dispatch. See the [independent assurance
+report](docs/concepts/0.4.0-preview.1_HARDENED_CANDIDATE_INDEPENDENT_ASSURANCE.md).
+The next release-admission lane is a new governed publication decision against
+this exact pair. Comparative benchmark work, provider mutation, tags, releases,
+asset promotion, registry publication, and announcement remain outside the
+assurance evidence update.
 
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and
