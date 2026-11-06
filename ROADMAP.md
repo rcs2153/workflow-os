@@ -1509,6 +1509,28 @@ incremental dependencies, Salsa, release behavior, and publication remain
 unauthorized until that review accepts the canonical extraction, immutable
 binding, cardinality, provenance, and fail-closed boundaries.
 
+Focused maintainer/security review requests changes to the Phase 4 plan. The
+immutable bundle is the required execution base, but it is not the complete
+canonical obligation source closure: `RequiredContextContractBinding` remains
+a separate content-addressed contract and is bound to a run and step through
+the existing `RequiredContextExecutionBinding`. Treating the bundle as the
+sole source would silently omit or manufacture required-context posture. The
+plan also does not reconcile its proposed private projection binding with the
+existing durable `GovernanceAssessmentBinding` and its current-fact
+reassessment lifecycle. Finally, its no-artifact promise is stronger than the
+create-only local store can provide after a bundle has been persisted but
+read-back or rederivation fails. See the [focused Phase 4 plan
+review](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_4_PLAN_REVIEW.md). The
+next authorized increment is one documentation-only blocker correction that
+defines a complete canonical input closure using existing exact bindings,
+makes the plan projection strictly subordinate to existing governance
+assessment, distinguishes pre- and post-persistence failures, shares
+cardinality and record-resolution invariants, and names an exact runtime
+consumer or leaves executor composition blocked. Runtime implementation,
+persistence changes, public schema/SDK/CLI, providers, dependencies, Salsa,
+release behavior, and publication remain unauthorized pending a second focused
+review.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
