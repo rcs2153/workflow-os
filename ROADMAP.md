@@ -320,9 +320,19 @@ risk because the producer enum still derives ordering traits even though the
 gate uses an explicit comparison table. See the [independent assurance
 report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_MINIMUM_GATE_INDEPENDENT_ASSURANCE.md).
 The narrow independent-assurance requirement for the current minimum gate is
-satisfied. Unknown-field rejection and ordering-trait removal are the next
-bounded validator-assurance hardening increment and must land before any
-stronger producer posture becomes reachable. This does not close separate
+satisfied. Its bounded validator-assurance hardening follow-up is implemented:
+projection and minimum wire records now reject unknown fields, the producer
+posture no longer exposes declaration-order traits, and direct regressions
+preserve both boundaries. The gate continues to use its explicit closed
+producer-assurance table, and the changes do not make a stronger producer
+posture reachable. See the [implementation
+report](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_WIRE_HARDENING_REPORT.md).
+Focused maintainer/security review is accepted after confirming that both
+publicly reachable wire records fail closed on unknown fields, the active gate
+still uses its explicit exhaustive producer-assurance table, and removing
+ordering traits changes no reachable runtime behavior. See the [accepted
+review](docs/concepts/LOCAL_CHECK_EVIDENCE_ASSURANCE_WIRE_HARDENING_REVIEW.md).
+The current minimum-gate hardening lane is closed. This does not close separate
 independent release/security-assurance requirements.
 
 The model-only **versioned complete WorkReport body commitment** is implemented

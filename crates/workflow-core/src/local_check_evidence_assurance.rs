@@ -41,7 +41,7 @@ impl<'de> Deserialize<'de> for LocalCheckEvidenceAssuranceProjectionAlgorithm {
 }
 
 /// Producer provenance established for the selected local-check implementation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalCheckEvidenceProducerPosture {
     /// An operator selected exact executable bytes that the trusted host content-bound.
@@ -480,6 +480,7 @@ impl fmt::Debug for LocalCheckEvidenceAssuranceProjection {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct LocalCheckEvidenceAssuranceProjectionWire {
     algorithm: LocalCheckEvidenceAssuranceProjectionAlgorithm,
     immutable_run_bundle: ImmutableRunBundleBinding,
@@ -544,6 +545,7 @@ impl<'de> Deserialize<'de> for LocalCheckEvidenceAssuranceProjection {
 
 /// Dimension-specific minimum assurance required by a later narrow gate.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocalCheckEvidenceAssuranceMinimum {
     producer: LocalCheckEvidenceProducerPosture,
     execution: LocalCheckEvidenceExecutionPosture,
@@ -1070,6 +1072,19 @@ mod tests {
         let mut value = serde_json::to_value(&projection).expect("value");
         value["producer_posture"] = json!("registered_content_bound");
         assert!(serde_json::from_value::<LocalCheckEvidenceAssuranceProjection>(value).is_err());
+
+        let mut value = serde_json::to_value(&projection).expect("value");
+        value["unrecognized_assurance_claim"] = json!("ignored");
+        assert!(serde_json::from_value::<LocalCheckEvidenceAssuranceProjection>(value).is_err());
+
+        let minimum = LocalCheckEvidenceAssuranceMinimum::new(
+            LocalCheckEvidenceProducerPosture::OperatorSelectedContentBound,
+            LocalCheckEvidenceExecutionPosture::TrustedHostObserved,
+            LocalCheckEvidenceAttestationPosture::Unattested,
+        );
+        let mut value = serde_json::to_value(minimum).expect("minimum value");
+        value["unrecognized_assurance_claim"] = json!("ignored");
+        assert!(serde_json::from_value::<LocalCheckEvidenceAssuranceMinimum>(value).is_err());
     }
 
     #[test]
