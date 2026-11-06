@@ -1363,6 +1363,23 @@ The next authorized increment is focused maintainer/security review of this
 matrix. Phase 2 model work remains unauthorized until that review accepts the
 source-of-truth, immutable-closure, and differential-validation boundaries.
 
+Focused maintainer/security review now accepts the matrix after correcting two
+model-boundary blockers and one source-reference defect. A future inventory
+must commit both the complete canonical source closure and complete sorted
+derived entry set, because per-entry commitments cannot detect omission. Its
+identities, kinds, evidence classes, and aggregate roots must be closed and
+source-derived rather than caller-authored. An unsupported authored
+requirement remains distinct from the absence of an authored requirement, so
+runtime SideEffect observations still cannot manufacture obligations. The
+review also corrects `ProjectBundle` ownership to the loader path and accepts
+the bounded inspectability gap, proportional-governance reuse boundary, and
+independent differential-validation design. See the [focused Phase 1
+review](docs/concepts/GOVERNED_OBLIGATION_PLAN_ARCHITECTURE_RECONCILIATION_REVIEW.md).
+The next authorized increment is the smallest private Phase 2 model-only
+requirement index. Persistence, runtime composition, public schema/SDK/CLI,
+provider behavior, a second evaluator, incremental dependencies, Salsa, and
+release behavior remain unauthorized.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
