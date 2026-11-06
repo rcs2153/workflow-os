@@ -1334,6 +1334,18 @@ See the
 [post-0.3 queue selection
 report](docs/concepts/POST_0_3_ROADMAP_QUEUE_SELECTION_REPORT.md) and the
 [planning report](docs/concepts/CAPABILITY_GATED_GITHUB_READ_ONLY_PUBLIC_ADOPTION_RECOVERY_PLAN_REPORT.md).
+The plan is now accepted after focused architecture/security review corrected
+three blockers: static requirements are separate from runtime satisfaction,
+any future run-bound plan commits the complete canonical source closure and
+derivation algorithm, and differential validation uses independently specified
+expectations rather than the implementation as its own oracle. The review also
+requires explicit reconciliation with existing proportional-governance
+workflow derivation and prohibits manufacturing authored SideEffect obligations
+from runtime observations. See the [focused plan
+review](docs/concepts/GOVERNED_OBLIGATION_PLAN_RECONCILIATION_PLAN_REVIEW.md).
+Phase 1 architecture reconciliation is the next authorized increment. Model,
+runtime, schema, SDK, CLI, dependency, Salsa, provider, and public-surface work
+remain unauthorized.
 
 #### Recently Closed Queue Evidence
 
