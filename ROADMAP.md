@@ -1467,6 +1467,24 @@ persistence, public schema/SDK/CLI, providers, incremental dependencies,
 Salsa, release behavior, and publication remain unauthorized until that review
 accepts the evidence boundary.
 
+The second focused maintainer/security review now accepts Phase 3. The
+correction invokes existing Core policy and proportional-governance decision
+paths, carries their exact returned types, and restricts reconciliation to
+three closed fail-closed pairings. It cannot select execution, grant approval,
+satisfy evidence, mark completion, or mutate runtime state. The review accepts
+the omission, duplicate, unexpected-decision, unsupported-requirement,
+redaction, and `SideEffect` non-inference evidence. It also makes the Phase 4
+boundary explicit: arbitrary caller-supplied decisions cannot become runtime
+proof; authoritative observations must be bound to the exact immutable run;
+the proportional-governance denial fixture is not local-check-result evidence;
+and a bounded canonical source extractor and cardinality limit are required
+before consumption. See the [second focused Phase 3
+review](docs/concepts/GOVERNED_OBLIGATION_PLAN_PHASE_3_AUTHORITATIVE_ORACLE_REVIEW.md).
+The next authorized increment is one separately governed private Phase 4 plan
+for the smallest opt-in runtime composition. Public schema/SDK/CLI,
+persistence, providers, incremental dependencies, Salsa, release behavior,
+and publication remain unauthorized.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
