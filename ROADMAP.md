@@ -397,6 +397,33 @@ before acceptance. See the [implementation
 report](docs/concepts/0.4.0-preview.1_CANDIDATE_HARDENING_REPORT.md) and
 [accepted focused
 review](docs/concepts/0.4.0-preview.1_CANDIDATE_HARDENING_REVIEW.md).
+Exact-head CI is terminal green and the hardened current-source pair is now
+produced from merge commit
+`6f8a38b080a21189dcfd82297f0c5917483b61ba`. Exact-source CI run
+`42172009453` passed all nine required jobs. Accepted macOS run `42173154695`
+and Linux run `42173177138` completed successfully on attempt 1, and their
+bounded artifacts passed independent digest, checksum, manifest, binary,
+native-shape, version, and install-lifecycle verification. The Linux evidence
+record carries the required binary hash, shape, and machine fields, and the
+macOS candidate rejects dangling destination symlinks with and without
+`--force`. A dispatch-wrapper defect created a second macOS run
+`42173175053`; it was cancelled and excluded from evidence, so the operational
+once-only dispatch invariant is explicitly recorded as missed rather than
+silently treated as satisfied. Publication remains unauthorized. See the
+[active transfer evidence
+report](docs/concepts/0.4.0-preview.1_SCOPED_CANDIDATE_TRANSFER_REPORT.md).
+Focused maintainer/security review accepts the exact pair for independent
+inspection and confirms that the prior installer and Linux evidence blockers
+are corrected in the produced artifacts. The cancelled duplicate macOS run is
+not an artifact-integrity blocker, but it is a release-process defect: future
+candidate dispatch must use an idempotent exact-source helper or connector path
+that reconciles ambiguous responses before retry and fails closed when a bound
+run already exists. See the [accepted review](docs/concepts/0.4.0-preview.1_HARDENED_CANDIDATE_PRODUCTION_REVIEW.md).
+The next release-admission lane is independent release/security inspection of
+this exact source and accepted artifact pair. A new governed publication
+decision may follow only after that inspection. Comparative benchmark work,
+provider mutation, tags, releases, asset promotion, registry publication, and
+announcement remain outside this lane.
 
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and
