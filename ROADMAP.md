@@ -1380,6 +1380,22 @@ requirement index. Persistence, runtime composition, public schema/SDK/CLI,
 provider behavior, a second evaluator, incremental dependencies, Salsa, and
 release behavior remain unauthorized.
 
+Phase 2 private model-only implementation is now complete. Core contains one
+crate-private, non-serializing static requirement inventory with closed source,
+obligation, posture, and evidence-reference vocabulary. Canonical sources and
+derived obligations are supplied independently; the model commits both the
+complete canonical source closure and complete sorted derived inventory so
+source omission and derivation omission remain distinguishable. Obligation
+identities are source-derived, malformed or conflicting sources fail closed,
+and Debug output redacts identities and commitments. Runtime `SideEffects`,
+satisfaction state, persistence, loader/executor composition, public
+schema/SDK/CLI, providers, incremental dependencies, Salsa, and release
+behavior remain absent. See the [Phase 2 model implementation
+report](docs/concepts/GOVERNED_OBLIGATION_PLAN_MODEL_IMPLEMENTATION_REPORT.md).
+The next authorized increment is focused maintainer/security review of this
+private model. Phase 3 deterministic explanation and independent differential
+validation remain unauthorized until that review accepts the implementation.
+
 #### Recently Closed Queue Evidence
 
 - **Accepted the capability-gated GitHub read-only contract foundation after
