@@ -63,7 +63,8 @@ invalid product shape.
 Required correction:
 
 - build bounded generated fixtures whose real extraction reaches exactly the
-  canonical-source maximum and a reachable exact obligation maximum;
+  canonical-source maximum and the highest obligation count reachable through
+  the current valid authored contract;
 - prove those extractions succeed;
 - add a real fixture at source maximum plus one and prove rejection occurs
   before a complete plan is returned;
@@ -72,6 +73,14 @@ Required correction:
   extraction invariant; and
 - continue deriving every size from
   `immutable_run_bundle_reference_max_count()` rather than copying its literal.
+
+The current valid authored contract always contributes one report source that
+does not become an obligation unless report enforcement is enabled. Report
+enforcement is not currently authorable in this fixture boundary. Therefore
+the highest reachable valid extraction at the exact source ceiling contains
+`maximum - 1` obligations. Requiring `maximum` obligations from a real fixture
+would require an unsupported authored shape and would weaken, rather than
+strengthen, the evidence.
 
 ## Accepted Properties
 

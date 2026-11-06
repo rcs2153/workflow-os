@@ -1275,6 +1275,7 @@ fn model_error(code: &'static str, message: &'static str) -> WorkflowOsError {
 mod tests {
     #![allow(clippy::expect_used, clippy::panic, clippy::too_many_lines)]
 
+    use std::fmt::Write as _;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1498,6 +1499,192 @@ observability_requirements:
         })
         .expect("binding");
         (root, stored, contract, binding)
+    }
+
+    fn bounded_extraction_fixture(
+        name: &str,
+        policy_rule_count: usize,
+        approval_required: bool,
+        required_context_required: bool,
+    ) -> (TestRoot, GovernedObligationCanonicalCommitmentClosure) {
+        let root = TestRoot::new(name);
+        root.write(
+            "workflow-os.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nproject:\n  id: obligation/bounded\n  name: Obligation Bounded\n"
+            ),
+        );
+        let approval_policy = if approval_required {
+            "    approval_policy:\n      policy:\n        id: local/bounded\n"
+        } else {
+            ""
+        };
+        let requirement_policy = if approval_required {
+            "local/read-only"
+        } else {
+            "local/bounded"
+        };
+        let policy_effect = if approval_required {
+            "require_approval"
+        } else {
+            "allow_local"
+        };
+        root.write(
+            "workflows/build.workflow.yml",
+            &format!(
+                r"schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: obligation/bounded-build
+version: v1
+display_name: Obligation Bounded Build
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: inspect
+    skill_ref:
+      id: local/check
+      version: v1
+    policy_requirements:
+      - id: {requirement_policy}
+{approval_policy}    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events: [RunCreated]
+  store_references_only: true
+observability_requirements:
+  metrics: [workflow_latency]
+  tracing: true
+  latency_tracking: true
+"
+            ),
+        );
+        root.write(
+            "skills/check.skill.yml",
+            &format!(
+                r"schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/check
+version: v1
+display_name: Check
+allowed_capabilities:
+  - name: local.read
+input_contract:
+  fields:
+    - name: request
+      field_type: string
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+failure_modes:
+  - code: failed
+    description: Failed.
+    retryable: false
+audit_requirements:
+  required: true
+  events: [SkillInvocationRequested]
+  store_references_only: true
+observability_requirements:
+  metrics: [skill_latency]
+  tracing: true
+  latency_tracking: true
+"
+            ),
+        );
+        let mut rules = String::new();
+        for index in 0..policy_rule_count {
+            write!(rules, "  - id: rule-{index}\n    effect: {policy_effect}\n")
+                .expect("policy rule");
+        }
+        root.write(
+            "policies/bounded.policy.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: local/bounded\nname: Bounded\nrules:\n{rules}"
+            ),
+        );
+        if approval_required {
+            root.write(
+                "policies/read-only.policy.yml",
+                &format!(
+                    "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: local/read-only\nname: Read Only\nrules:\n  - id: allow-local\n    effect: allow_local\n"
+                ),
+            );
+        }
+        let loaded = load_project(root.path());
+        assert!(!loaded.has_errors(), "{:?}", loaded.diagnostics);
+        let project = loaded.bundle.expect("project");
+        let validation = validate_project_bundle(&project);
+        assert!(
+            !validation.has_errors(),
+            "project validation: {:?}",
+            validation.diagnostics
+        );
+        let built = build_immutable_run_bundle(ImmutableRunBundleBuildRequest {
+            project: &project,
+            workflow_id: &WorkflowId::new("obligation/bounded-build").expect("workflow"),
+            bundle_id: ImmutableRunBundleId::new("bundle/bounded-obligation").expect("bundle"),
+            bundle_version: ImmutableRunBundleVersion::new("v1").expect("version"),
+            run_id: WorkflowRunId::new("run-bounded-obligation").expect("run"),
+            resolved_execution_context_hash: SpecContentHash::from_text("context"),
+            execution_posture: ImmutableRunBundleExecutionPosture::new(
+                Vec::new(),
+                ImmutableRunBundleReferencePosture::NotSupplied,
+                ImmutableRunBundleReferencePosture::NotSupplied,
+                ImmutableRunBundleReferencePosture::NotSupplied,
+            )
+            .expect("posture"),
+            handlers: vec![ImmutableRunBundleHandlerReference {
+                skill_id: SkillId::new("local/check").expect("skill"),
+                skill_version: SkillVersion::new("v1").expect("skill version"),
+                posture: ImmutableRunBundleHandlerPosture::RegisteredUnattested,
+            }],
+            created_at: timestamp("2026-11-06T10:00:00Z"),
+            created_by: ActorId::new("system/kernel").expect("actor"),
+            sensitivity: ImmutableRunBundleSensitivity::Internal,
+            redaction_required: true,
+        })
+        .expect("bundle");
+        let store = LocalImmutableRunBundleStore::new(root.path().join("bundle-store"));
+        store.write_bundle(&built).expect("store");
+        let stored = store
+            .read_bundle(built.manifest().run_id(), built.manifest().bundle_id())
+            .expect("stored");
+        let contract = if required_context_required {
+            RequiredContextContractBinding::new(
+                HarnessContractId::new("harness/bounded-obligation").expect("contract"),
+                HarnessContractVersion::new("v1").expect("version"),
+                vec![RequiredContextRequirement::new(
+                    RequiredContextRequirementId::new("report-current").expect("requirement"),
+                    GovernedContextReferenceTarget::WorkReport(
+                        WorkReportId::new("report/current").expect("report"),
+                    ),
+                    GovernedContextAccessLevel::ReferenceOnly,
+                    RequiredContextObligation::Required,
+                    WorkReportSensitivity::Internal,
+                )
+                .expect("requirement")],
+            )
+            .expect("contract")
+        } else {
+            RequiredContextContractBinding::explicit_none_for_test(
+                HarnessContractId::new("harness/bounded-obligation").expect("contract"),
+                HarnessContractVersion::new("v1").expect("version"),
+            )
+            .expect("contract")
+        };
+        let binding = RequiredContextExecutionBinding::new(RequiredContextExecutionBindingInput {
+            bundle: &stored,
+            contract: &contract,
+            actor: ActorId::new("agent/executor").expect("actor"),
+            step_id: StepId::new("inspect").expect("step"),
+            maximum_sensitivity: WorkReportSensitivity::Internal,
+            bound_at: timestamp("2026-11-06T10:05:00Z"),
+        })
+        .expect("binding");
+        let closure =
+            GovernedObligationCanonicalCommitmentClosure::new(&stored, vec![(contract, binding)])
+                .expect("closure");
+        (root, closure)
     }
 
     fn multi_step_extraction_fixture() -> (
@@ -2582,6 +2769,10 @@ observability_requirements:
         let (_, baseline_projection) = success(extract_governed_obligation_plan(&baseline));
         let (_, alternate_projection) = success(extract_governed_obligation_plan(&alternate));
         assert_ne!(
+            baseline.required_context_closure_commitment,
+            alternate.required_context_closure_commitment
+        );
+        assert_ne!(
             baseline_projection.projection_commitment(),
             alternate_projection.projection_commitment()
         );
@@ -2611,6 +2802,10 @@ observability_requirements:
         let (_, baseline_projection) = success(extract_governed_obligation_plan(&baseline));
         let (_, alternate_projection) = success(extract_governed_obligation_plan(&alternate));
         assert_ne!(
+            baseline.required_context_closure_commitment,
+            alternate.required_context_closure_commitment
+        );
+        assert_ne!(
             baseline_projection.projection_commitment(),
             alternate_projection.projection_commitment()
         );
@@ -2639,6 +2834,10 @@ observability_requirements:
         ));
         let (_, baseline_projection) = success(extract_governed_obligation_plan(&baseline));
         let (_, alternate_projection) = success(extract_governed_obligation_plan(&alternate));
+        assert_ne!(
+            baseline.required_context_closure_commitment,
+            alternate.required_context_closure_commitment
+        );
         assert_ne!(
             baseline_projection.projection_commitment(),
             alternate_projection.projection_commitment()
@@ -2694,6 +2893,50 @@ observability_requirements:
                 "governed_obligation_plan.runtime_composition.cardinality_exceeded"
             );
         }
+    }
+
+    #[test]
+    fn real_extraction_accepts_exact_source_and_reachable_obligation_maxima() {
+        let maximum = immutable_run_bundle_reference_max_count();
+        let policy_rule_count = maximum.checked_sub(4).expect("shared bound");
+        let (_root, closure) = bounded_extraction_fixture(
+            "exact-source-obligation-maxima",
+            policy_rule_count,
+            true,
+            true,
+        );
+        let workflow = canonical_workflow_record(closure.bundle())
+            .and_then(|record| {
+                record
+                    .canonical_definition()
+                    .as_workflow()
+                    .ok_or_else(|| composition_error("source_closure_incomplete"))
+            })
+            .expect("workflow");
+        assert_eq!(
+            validate_extraction_cardinality(&closure, workflow).expect("cardinality"),
+            (maximum, maximum - 1)
+        );
+
+        let (plan, projection) = extract_governed_obligation_plan(&closure).expect("extraction");
+        assert_eq!(plan.entries().len(), maximum - 1);
+        assert_eq!(
+            usize::try_from(projection.obligation_count()).expect("obligation count"),
+            maximum - 1
+        );
+    }
+
+    #[test]
+    fn real_extraction_rejects_source_maximum_plus_one_before_plan_construction() {
+        let maximum = immutable_run_bundle_reference_max_count();
+        let policy_rule_count = maximum.checked_sub(2).expect("shared bound");
+        let (_root, closure) =
+            bounded_extraction_fixture("source-maximum-plus-one", policy_rule_count, false, false);
+        let error = failure(extract_governed_obligation_plan(&closure));
+        assert_eq!(
+            error.code(),
+            "governed_obligation_plan.runtime_composition.cardinality_exceeded"
+        );
     }
 
     #[test]
