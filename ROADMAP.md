@@ -433,6 +433,21 @@ The next release-admission lane is a new governed publication decision against
 this exact pair. Comparative benchmark work, provider mutation, tags, releases,
 asset promotion, registry publication, and announcement remain outside the
 assurance evidence update.
+The governed publication decision admits the hardened macOS and Linux pair for
+release execution: the prior installer-boundary and Linux-evidence blockers are
+corrected, independent assurance found no P0 or P1 finding or artifact-integrity
+blocker, and the duplicate cancelled macOS dispatch produced no job or artifact.
+The P2 dispatch-process finding remains a required precondition for any future
+candidate dispatch, not a defect in the admitted pair. This admission does not
+authorize or perform an external transition. `publication_authorized` remains
+false until a separately scoped execution authorization enumerates tag creation,
+GitHub Release creation, each exact asset upload, any registry publication, and
+announcement posture. Execution must reverify the unchanged source, evidence,
+digests, available unexpired artifacts, and absence of a conflicting tag or
+release. See the [governed publication
+decision](docs/concepts/0.4.0-preview.1_HARDENED_CANDIDATE_PUBLICATION_DECISION.md).
+Comparative benchmark work and unrelated roadmap implementation remain outside
+the release-admission lane.
 
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and
