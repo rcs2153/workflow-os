@@ -52,10 +52,11 @@ Plan](../implementation-plans/continuity-of-authority-product-release-reconcilia
 - **Primary audience today:** maintainers, infrastructure engineers, security
   engineers, and teams evaluating governed agent work.
 - **Release blockers:** all three continuity gates and the private cross-gate
-  review are closed for their documented boundaries. Validator-assurance
-  persistence/enforcement, independent adversarial review, exact-source
-  re-candidating, and the repository's other active P0 lanes still block
-  publication, v1, and broader product claims.
+  review, validator-assurance minimum and wire hardening, exact-source
+  re-candidating, and independent release/security assurance are closed for
+  their documented boundaries. The separate publication decision, the
+  assurance review's disclosed P2 follow-ups, and the repository's other active
+  P0 lanes still block publication, v1, and broader product claims.
 
 ## Implemented Product Surfaces
 

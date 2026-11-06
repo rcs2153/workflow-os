@@ -354,6 +354,19 @@ release-state projection after preserving one machine authority path through
 the scoped-transfer report and confirming that the dispatch irregularities did
 not create duplicate runs. It is not independent assurance. See the [accepted
 review](docs/concepts/0.4.0-preview.1_CURRENT_SOURCE_CANDIDATE_REBUILD_REVIEW.md).
+Independent release/security assurance from a clean detached checkout accepts
+the exact candidate pair with no P0 or P1 blocker and closes the assurance gate
+for this source. It records three P2 follow-ups: the installer follows a
+dangling destination symlink, Linux candidate evidence omits binary hash and
+shape carried elsewhere, and the product-contract blocker list was stale. The
+contract drift and overly broad evidence sentence are corrected by the
+assurance evidence update. The separate publication decision must explicitly
+classify the installer and Linux evidence findings; assurance acceptance does
+not authorize publication. See the [independent assurance
+report](docs/concepts/0.4.0-preview.1_CURRENT_SOURCE_INDEPENDENT_ASSURANCE.md).
+The next release-admission lane is the separate governed publication decision.
+Comparative benchmark execution and provider-mutation broadening remain outside
+that decision.
 
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and
