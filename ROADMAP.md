@@ -380,6 +380,23 @@ evidence, followed by focused review, terminal-green exact-head CI, and a new
 exact-source native candidate pair. No tag, GitHub Release, asset upload,
 registry publication, or announcement is authorized. See the [publication
 decision](docs/concepts/0.4.0-preview.1_CURRENT_SOURCE_PUBLICATION_DECISION.md).
+The bounded candidate-hardening implementation is complete and accepted after
+focused maintainer/security review, subject to terminal-green exact-head CI.
+Generated
+installers reject regular and dangling destination symlinks even with
+`--force`, stage the binary privately inside the selected directory, and admit
+the final path through atomic no-follow hard-link creation. Forced replacement
+removes only an admitted regular destination entry before using the same
+creation boundary. Focused tests preserve ordinary install, overwrite refusal,
+explicit replacement, uninstall, state preservation, and no-write symlink
+rejection. The Linux candidate workflow now emits and tests the same binary
+hash, native shape, and machine evidence fields as macOS. No candidate was
+dispatched and publication authority remains false. Review added explicit
+non-regular-destination rejection and stronger Linux evidence-wiring tests
+before acceptance. See the [implementation
+report](docs/concepts/0.4.0-preview.1_CANDIDATE_HARDENING_REPORT.md) and
+[accepted focused
+review](docs/concepts/0.4.0-preview.1_CANDIDATE_HARDENING_REVIEW.md).
 
 The model-only **versioned complete WorkReport body commitment** is implemented
 and its focused maintainer/security review is accepted. V1 domain-separates and

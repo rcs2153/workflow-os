@@ -6,6 +6,8 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -204,10 +206,81 @@ test("archive installs, refuses overwrite, and uninstalls only the binary", () =
       env: { ...process.env, WORKFLOW_OS_INSTALL_DIR: installDir },
     }),
   );
+  execFileSync(join(root, "install.sh"), ["--force"], {
+    env: { ...process.env, WORKFLOW_OS_INSTALL_DIR: installDir },
+  });
+  assert.equal(
+    execFileSync(join(installDir, "workflow-os"), ["--version"], { encoding: "utf8" }).trim(),
+    `workflow-os ${version}`,
+  );
   execFileSync(join(root, "uninstall.sh"), { env: { ...process.env, WORKFLOW_OS_INSTALL_DIR: installDir } });
   execFileSync(join(root, "uninstall.sh"), { env: { ...process.env, WORKFLOW_OS_INSTALL_DIR: installDir } });
   assert.equal(existsSync(join(installDir, "workflow-os")), false);
   assert.equal(readFileSync(join(stateDir, "state"), "utf8"), "preserve\n");
+});
+
+test("installer rejects dangling destination symlinks without writing outside the install directory", () => {
+  const { directory, binaryPath } = provisionalFixture();
+  const result = packageProvisional(join(directory, "output"), binaryPath);
+  const extractDir = join(directory, "extract");
+  mkdirSync(extractDir);
+  execFileSync("tar", ["-xzf", result.archivePath, "-C", extractDir]);
+  const root = join(extractDir, `workflow-os-v${version}-aarch64-apple-darwin`);
+  const installDir = join(directory, "install");
+  const destination = join(installDir, "workflow-os");
+  const outsideTarget = join(directory, "outside-workflow-os");
+  mkdirSync(installDir);
+  symlinkSync(outsideTarget, destination);
+
+  for (const args of [[], ["--force"]]) {
+    const result = spawnSync(join(root, "install.sh"), args, {
+      encoding: "utf8",
+      env: { ...process.env, WORKFLOW_OS_INSTALL_DIR: installDir },
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /refusing destination symlink/);
+    assert.equal(existsSync(outsideTarget), false);
+    assert.equal(readlinkSync(destination), outsideTarget);
+  }
+
+  writeFileSync(outsideTarget, "preserve\n");
+  for (const args of [[], ["--force"]]) {
+    const result = spawnSync(join(root, "install.sh"), args, {
+      encoding: "utf8",
+      env: { ...process.env, WORKFLOW_OS_INSTALL_DIR: installDir },
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /refusing destination symlink/);
+    assert.equal(readFileSync(outsideTarget, "utf8"), "preserve\n");
+    assert.equal(readlinkSync(destination), outsideTarget);
+  }
+
+  const installer = readFileSync(join(root, "install.sh"), "utf8");
+  assert.match(installer, /mktemp/);
+  assert.match(installer, /ln "\$\{temporary\}" "\$\{destination\}"/);
+  assert.match(installer, /rm -f "\$\{destination\}"/);
+  assert.doesNotMatch(installer, /mv .*"\$\{destination\}"/);
+  assert.doesNotMatch(installer, /cp .*"\$\{destination\}"/);
+});
+
+test("installer rejects non-regular destination entries even with force", () => {
+  const { directory, binaryPath } = provisionalFixture();
+  const result = packageProvisional(join(directory, "output"), binaryPath);
+  const extractDir = join(directory, "extract");
+  mkdirSync(extractDir);
+  execFileSync("tar", ["-xzf", result.archivePath, "-C", extractDir]);
+  const root = join(extractDir, `workflow-os-v${version}-aarch64-apple-darwin`);
+  const installDir = join(directory, "install");
+  const destination = join(installDir, "workflow-os");
+  mkdirSync(destination, { recursive: true });
+
+  const resultWithForce = spawnSync(join(root, "install.sh"), ["--force"], {
+    encoding: "utf8",
+    env: { ...process.env, WORKFLOW_OS_INSTALL_DIR: installDir },
+  });
+  assert.equal(resultWithForce.status, 1);
+  assert.match(resultWithForce.stderr, /refusing non-regular destination/);
+  assert.equal(existsSync(destination), true);
 });
 
 test("rejects unsupported targets and inexact source commits before output", () => {

@@ -99,7 +99,17 @@ inputs in distinct output directories produce identical archives and checksums.
 - Default destination: `$HOME/.local/bin/workflow-os`
 - Override directory: `WORKFLOW_OS_INSTALL_DIR`
 - Existing binaries: fail closed unless the user passes `--force`
+- Destination symlinks, including dangling symlinks: always fail closed,
+  including when `--force` is present
+- Existing non-regular destination entries: always fail closed
 - Installed mode: executable (`0755`)
+
+The installer stages the binary in a private temporary file inside the selected
+directory. Installation uses atomic hard-link creation, which fails if the
+destination appears concurrently. Explicit replacement first removes only an
+admitted regular destination path entry, then uses the same no-follow hard-link
+creation boundary. The installer never copies directly through the final
+destination path.
 
 The script does not edit shell profiles, modify `PATH`, initialize a project,
 create runtime state, install services, or make network requests.

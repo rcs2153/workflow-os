@@ -130,7 +130,16 @@ jobs:
           test "$(cat "${state_root}/.workflow-os/state-marker")" = "preserve"
 
           checksum="$(cut -d ' ' -f 1 "${checksum_file}")"
-          CANDIDATE_VERSION="${version}" ARCHIVE_NAME="${archive_name}" ARCHIVE_SHA256="${checksum}" RUSTC_VERSION="$(rustc --version)" NODE_VERSION="$(node --version)" MUSL_CC_VERSION="$(musl-gcc --version | head -n 1)" node -e '
+          binary_checksum="$(sha256sum "${package_root}/workflow-os" | cut -d ' ' -f 1)"
+          binary_shape="$(file -b "${package_root}/workflow-os")"
+          case "${binary_shape}" in
+            *"ELF 64-bit"*"x86-64"*"static"*) ;;
+            *)
+              echo "candidate binary is not a native static x86-64 ELF executable" >&2
+              exit 1
+              ;;
+          esac
+          CANDIDATE_VERSION="${version}" ARCHIVE_NAME="${archive_name}" ARCHIVE_SHA256="${checksum}" BINARY_SHA256="${binary_checksum}" BINARY_SHAPE="${binary_shape}" NATIVE_MACHINE="$(uname -m)" RUSTC_VERSION="$(rustc --version)" NODE_VERSION="$(node --version)" MUSL_CC_VERSION="$(musl-gcc --version | head -n 1)" node -e '
             const { writeFileSync } = require("node:fs");
             const evidence = {
               schema_version: "workflowos.dev/final-candidate-evidence/v1",
@@ -142,6 +151,9 @@ jobs:
               storage_artifact_name: process.env.ARTIFACT_NAME,
               archive_name: process.env.ARCHIVE_NAME,
               archive_sha256: process.env.ARCHIVE_SHA256,
+              binary_sha256: process.env.BINARY_SHA256,
+              binary_shape: process.env.BINARY_SHAPE,
+              native_machine: process.env.NATIVE_MACHINE,
               rustc_version: process.env.RUSTC_VERSION,
               node_version: process.env.NODE_VERSION,
               musl_cc_version: process.env.MUSL_CC_VERSION,
