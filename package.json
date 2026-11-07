@@ -12,7 +12,7 @@
     "build:check-kernel": "cargo build -p workflow-cli --bin workflow-os",
     "check:contracts": "npm run build --workspace @workflow-os/sdk-typescript && node scripts/check-contracts.mjs",
     "check:docs": "node scripts/check-docs.mjs && node scripts/check-release-state.mjs",
-    "check:dogfood": "npm run test:dogfood-helper",
+    "check:dogfood": "npm run test:dogfood-helper && node --test scripts/claude-fixture-mcp.test.mjs",
     "check:integrations": "node scripts/check-integrations.mjs",
     "check:ts": "npm run typecheck --workspace @workflow-os/sdk-typescript && npm run lint --workspace @workflow-os/sdk-typescript && npm run test --workspace @workflow-os/sdk-typescript",
     "dogfood:benchmark": "node scripts/self-governed-benchmark.mjs",
