@@ -71,6 +71,36 @@ neither path mutates events or the SideEffect. Grant validation is independent
 of opening, so preparation can reuse it as a precondition rather than relying
 on a window to establish the grant.
 
+### Prepared Fixture And Public CLI Proof
+
+Core now exposes `prepare_github_pr_comment_fixture_continuation_window`.
+The caller supplies the persisted attempted SideEffect and the exact
+already-approved fixture request. The producer checks the immutable bundle,
+current run, original proof and check evidence, expected opening citation,
+and fixture preflight before opening one five-minute window through Core's
+existing atomic opening transaction. The bound run is checked again before
+opening. This fixture source has no provider capability grants, and the
+producer returns only the opening event ID, not a dispatch capability.
+
+The positive integration test persists isolated fixture evidence and the exact
+approval, opens the window through that public Core API, reopens the database
+read-only, and checks continuation. The actual CLI is exercised by building it
+and passing its absolute path to the same test:
+
+```sh
+cargo build -p workflow-cli
+WORKFLOW_OS_FIXTURE_CONTINUATION_TEST_CLI="$PWD/target/debug/workflow-os" \
+  cargo test -p workflow-core --test local_executor \
+  fixture_continuation_validates_prepared_window_and_rejects_drift
+```
+
+With the CLI probe enabled, the test verifies `fixture_validated`, linked
+approval evidence, no provider call or durable effects, rejection of a changed
+comment body, and byte-for-byte database equality. This is not a live-provider
+or check-attestation proof. The remaining adversarial evidence and authority
+cases and a second focused review are still required before milestone
+acceptance.
+
 ## Verdict
 
 The first public continuation bridge establishes useful durable identity,

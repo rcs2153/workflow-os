@@ -11571,6 +11571,188 @@ pub fn validate_github_pr_comment_fixture_continuation(
     })
 }
 
+/// Derives the opening event reference to cite on the attempted fixture `SideEffect`.
+///
+/// # Errors
+///
+/// Rejects invalid or non-fixture requests. No event is created.
+pub fn github_pr_comment_fixture_opening_event_id(
+    request: &GitHubPullRequestCommentWriteRequest,
+) -> Result<EventId, WorkflowOsError> {
+    crate::operational_execution_window_opening::operational_opening_event_id(
+        &fixture_comment_opening_id(&fixture_continuation_action_commitment(request)?)?,
+    )
+}
+
+fn fixture_comment_opening_id(
+    action: &SpecContentHash,
+) -> Result<crate::OperationalExecutionWindowOpeningOperationId, WorkflowOsError> {
+    crate::OperationalExecutionWindowOpeningOperationId::new(format!(
+        "opening/comment-fixture/{action}"
+    ))
+}
+
+/// Opens the pre-dispatch fixture window for one already approved action.
+///
+/// Records a window but grants no approval, live capability, or dispatch
+/// admission. The caller must already have persisted the attempted `SideEffect`.
+///
+/// # Errors
+///
+/// Fails closed on missing, stale, changed, or previously opened authority.
+pub fn prepare_github_pr_comment_fixture_continuation_window(
+    executor: &LocalExecutor<'_, crate::SqliteStateBackend>,
+    request: GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+) -> Result<EventId, WorkflowOsError> {
+    let backend = executor.backend;
+    let run = backend.rehydrate_run(request.write_request.run_id())?;
+    let invalid = || {
+        executor_error(
+            WorkflowOsErrorKind::Security,
+            "github_pr_comment_fixture_continuation.preparation_invalid",
+            "fixture preparation requires unchanged active state and an unopened window",
+        )
+    };
+    if &run != request.run
+        || run.snapshot.status != WorkflowRunStatus::Running
+        || run.snapshot.last_operational_opening_projection.is_some()
+        || request.delegated_by.is_some()
+        || request.presentation_policy.mode
+            == ApprovalPresentationDefaultEnforcementMode::NotRequired
+        || request.fixture.mode() != crate::GitHubPullRequestCommentWriteMode::Fixture
+        || backend
+            .read_side_effect_record(request.attempted_record.side_effect_id())?
+            .as_ref()
+            != Some(request.attempted_record)
+    {
+        return Err(invalid());
+    }
+    validate_fixture_continuation_identity(&run, &request)?;
+    let bundle = crate::ImmutableRunBundleStore::read_exact_bundle(
+        backend,
+        request.write_request.run_id(),
+        request.immutable_run_bundle.manifest().bundle_id(),
+    )?;
+    validate_fixture_continuation_check_evidence(&run, request.attempted_record, &bundle)?;
+    let action = fixture_continuation_action_commitment(&request.write_request)?;
+    validate_fixture_continuation_approved_action(
+        executor,
+        &run,
+        request.attempted_record,
+        &request.presentation_policy,
+        &action,
+    )?;
+    let step = request
+        .write_request
+        .step_id()
+        .cloned()
+        .ok_or_else(invalid)?;
+    let operation_id = fixture_comment_opening_id(&action)?;
+    let event_id =
+        crate::operational_execution_window_opening::operational_opening_event_id(&operation_id)?;
+    if !request
+        .attempted_record
+        .references()
+        .iter()
+        .any(|reference| {
+            reference.kind() == SideEffectReferenceKind::WorkflowEvent
+                && reference.reference() == event_id.as_str()
+        })
+    {
+        return Err(invalid());
+    }
+    let preflighted = GitHubPullRequestCommentPreflightedWrite::new(request.write_request)?;
+    crate::validate_github_pr_comment_fixture_write(&preflighted, request.fixture)?;
+    open_exact_comment_fixture_window(
+        backend,
+        &bundle,
+        &run,
+        request.replacement_actor,
+        step,
+        operation_id,
+        &action,
+    )?;
+    Ok(event_id)
+}
+
+fn open_exact_comment_fixture_window(
+    backend: &crate::SqliteStateBackend,
+    bundle: &crate::StoredImmutableRunBundle,
+    run: &WorkflowRun,
+    actor: &ActorId,
+    step_id: StepId,
+    operation_id: crate::OperationalExecutionWindowOpeningOperationId,
+    action: &SpecContentHash,
+) -> Result<(), WorkflowOsError> {
+    use crate::authorized_execution_continuity_state::internal::{
+        trusted_time_observation, ContinuityTrustedTimeEpochId, TrustedTimeSourceKind,
+    };
+    use crate::current_authority_source::RegisteredInMemoryCurrentAuthoritySource;
+    use crate::operational_execution_window_opening::{
+        open_with_registered_current_authority_for_run, OperationalExecutionWindowOpeningUseInput,
+    };
+    let observed_at = Timestamp::now_utc();
+    let expires_at = observed_at
+        .as_offset_date_time()
+        .checked_add(time::Duration::minutes(5))
+        .map(Timestamp::from_offset_date_time)
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "github_pr_comment_fixture_continuation.expiry_invalid",
+                "fixture execution window expiry is invalid",
+            )
+        })?;
+    let contract =
+        crate::RequiredContextContractBinding::explicit_none_for_github_comment_fixture()?;
+    let execution_binding =
+        crate::RequiredContextExecutionBinding::new(crate::RequiredContextExecutionBindingInput {
+            bundle,
+            contract: &contract,
+            actor: actor.clone(),
+            step_id,
+            maximum_sensitivity: WorkReportSensitivity::Internal,
+            bound_at: observed_at,
+        })?;
+    let source = RegisteredInMemoryCurrentAuthoritySource::register_github_comment_fixture(
+        action.clone(),
+        observed_at,
+        expires_at,
+    )?;
+    open_with_registered_current_authority_for_run(
+        &OperationalExecutionWindowOpeningUseInput {
+            source: &source,
+            backend,
+            execution_binding: &execution_binding,
+            contract: &contract,
+            invocation_binding_commitment: action,
+            operation_id,
+            receipt_id: crate::OperationalExecutionWindowOpeningReceiptId::new(format!(
+                "receipt/comment-fixture/{action}"
+            ))?,
+            window_id: crate::AuthorizedExecutionWindowId::new(format!(
+                "window/comment-fixture/{action}"
+            ))?,
+            attempt_id: crate::AuthorizedExecutionAttemptId::new(format!(
+                "attempt/comment-fixture/{action}"
+            ))?,
+            expires_at,
+            maximum_attempts: 1,
+            trusted_time: trusted_time_observation(
+                observed_at,
+                TrustedTimeSourceKind::CoreInjectedClockV1,
+                SpecContentHash::new(crate::sqlite_state::CONTINUITY_CLOCK_PROVENANCE)?,
+                ContinuityTrustedTimeEpochId::new(crate::sqlite_state::CONTINUITY_CLOCK_EPOCH)?,
+            ),
+            evaluated_at: observed_at,
+            redaction: &RedactionMetadata::empty(),
+            workflow_lifecycle: None,
+        },
+        Some(run),
+    )?;
+    Ok(())
+}
+
 /// Derives the payload-free action label for an exact fixture approval presentation.
 ///
 /// The label supplements the human-readable scope; it does not authorize work.

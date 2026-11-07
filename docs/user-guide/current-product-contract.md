@@ -88,6 +88,13 @@ call, and changes no durable state. It is an implementation increment toward
 the preregistered milestone, not an executable cross-harness integration or a
 live write command.
 
+The active blocker-correction candidate replaces terminal-run validation with
+an exact pre-dispatch window. Preparation is a separate Core operation for an
+already approved fixture, and `continue-sandbox` opens the existing SQLite
+state read-only. The candidate's public CLI success is tested with isolated
+fixture evidence. It does not establish live dispatch, authenticated
+cross-harness delegation, or independent check attestation.
+
 ## Maturity
 
 - **Release preparation identity:** `0.4.0-preview.1`.

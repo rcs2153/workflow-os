@@ -17644,7 +17644,7 @@ fn live_sandbox_approval_authority_rejects_non_proof_policy_before_provider_call
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn fixture_continuation_rejects_terminal_run_without_mutation() {
+fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
     let project = TestProject::new("fixture-continuation-success");
     project.write_approval_project();
     let registry = registry(Box::new(EchoHandler {
@@ -17654,9 +17654,13 @@ fn fixture_continuation_rejects_terminal_run_without_mutation() {
         SqliteStateBackend::open(project.path().join("state.sqlite3")).expect("state backend");
     let executor = LocalExecutor::new(&backend, &registry);
     let run_id = WorkflowRunId::new("run/fixture-continuation-success").expect("run id");
+    let active_path = project
+        .path()
+        .join("github-pr-comment-continuation.sqlite3");
+    let active_backend = SqliteStateBackend::open(&active_path).expect("active state backend");
     let paused = execute_with_immutable_run_bundle(
         &executor,
-        &backend,
+        &MirroredFixtureBundleStore(&backend, &active_backend),
         &project.immutable_bundle_request(run_id.clone(), "bundle/fixture-continuation-success"),
     )
     .expect("bundle-backed run pauses");
@@ -17749,8 +17753,6 @@ fn fixture_continuation_rejects_terminal_run_without_mutation() {
         error.code(),
         "github_pr_comment_fixture_continuation.run_not_active"
     );
-    let active_backend = SqliteStateBackend::open(project.path().join("active.sqlite3"))
-        .expect("active state backend");
     active_backend
         .write_approval_presentation_record(&presentation)
         .expect("original presentation persists in active fixture");
@@ -17786,8 +17788,8 @@ fn fixture_continuation_rejects_terminal_run_without_mutation() {
             },
         )
     };
-    let error =
-        validate(write_request).expect_err("active run without durable window fails closed");
+    let error = validate(write_request.clone())
+        .expect_err("active run without durable window fails closed");
     assert_eq!(
         error.code(),
         "github_pr_comment_fixture_continuation.execution_window_missing"
@@ -17814,6 +17816,202 @@ fn fixture_continuation_rejects_terminal_run_without_mutation() {
             .read_side_effect_record(attempted.side_effect_id())
             .expect("side-effect read after")
     );
+    let opening_id = workflow_core::github_pr_comment_fixture_opening_event_id(&write_request)
+        .expect("opening event id");
+    let result_id =
+        LocalCheckResultId::new("result/fixture-continuation-check").expect("result id");
+    let result = workflow_core::LocalCheckResultRecordedEvent::new(
+        workflow_core::LocalCheckResultRecordedEventDefinition {
+            result_id: result_id.clone(),
+            command_id: workflow_core::LocalCheckCommandId::new("local-check/docs")
+                .expect("command id"),
+            command_kind: workflow_core::LocalCheckCommandKind::DocsCheck,
+            status: workflow_core::LocalCheckResultStatus::Passed,
+            step_id: StepId::new("echo").expect("step"),
+            invocation_id: workflow_core::SkillInvocationId::new("invocation/fixture-check")
+                .expect("invocation"),
+            attempt_id: workflow_core::AuthorizedExecutionAttemptId::new("attempt/fixture-check")
+                .expect("attempt"),
+            profile_id: ExplicitLocalCheckProfileId::DocsCheck,
+            immutable_run_bundle: stored.manifest().run_binding(),
+            invocation_terminal_event_id: EventId::new("event/fixture-check").expect("event"),
+        },
+    )
+    .expect("fixture check result");
+    let mut event = active_events.last().expect("resume event").clone();
+    event.sequence_number =
+        EventSequenceNumber::new(event.sequence_number.get() + 1).expect("sequence");
+    event.event_id = EventId::new("event/fixture-check-result").expect("event");
+    event.kind = WorkflowRunEventKind::LocalCheckResultRecorded(Box::new(result));
+    active_backend
+        .append_event(&event)
+        .expect("fixture check event");
+    let mut record_json = serde_json::to_value(&attempted).expect("attempt serializes");
+    let references = record_json["references"]
+        .as_array_mut()
+        .expect("references array");
+    for reference in [
+        SideEffectReference::new(SideEffectReferenceKind::WorkflowEvent, opening_id.as_str()),
+        SideEffectReference::new(
+            SideEffectReferenceKind::LocalCheckResult,
+            result_id.as_str(),
+        ),
+    ] {
+        references
+            .push(serde_json::to_value(reference.expect("reference")).expect("reference JSON"));
+    }
+    let active_record: SideEffectRecord =
+        serde_json::from_value(record_json).expect("fixture attempt");
+    active_backend
+        .write_side_effect_record(&active_record)
+        .expect("attempt stored");
+    let approved_run = active_backend.rehydrate_run(&run_id).expect("approved run");
+    let request_for_run = |run| GitHubPrCommentFixtureContinuationValidationRequest {
+        run,
+        attempted_record: &active_record,
+        write_request: write_request.clone(),
+        fixture: &fixture,
+        replacement_actor: &replacement_actor,
+        delegated_by: None,
+        presentation_policy:
+            ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+            ),
+        immutable_run_bundle: &stored,
+    };
+    let opened = workflow_core::prepare_github_pr_comment_fixture_continuation_window(
+        &active_executor,
+        request_for_run(&approved_run),
+    )
+    .expect("exact fixture window opens");
+    assert_eq!(opened, opening_id);
+    let reader = SqliteStateBackend::open_read_only(&active_path).expect("replacement opens state");
+    let interrupted = reader.rehydrate_run(&run_id).expect("interrupted run");
+    let replacement = LocalExecutor::new(&reader, &registry);
+    let result = validate_github_pr_comment_fixture_continuation(
+        &replacement,
+        &reader,
+        request_for_run(&interrupted),
+    )
+    .expect("replacement validates exact interrupted action");
+    assert_eq!(
+        result.fixture_response().outcome(),
+        GitHubPullRequestCommentWriteOutcome::FixtureValidated
+    );
+    assert_eq!(
+        reader.rehydrate_run(&run_id).expect("run unchanged"),
+        interrupted
+    );
+    assert_eq!(
+        reader
+            .read_side_effect_record(active_record.side_effect_id())
+            .expect("record unchanged"),
+        Some(active_record.clone()),
+    );
+    if let Some(binary) = std::env::var_os("WORKFLOW_OS_FIXTURE_CONTINUATION_TEST_CLI") {
+        verify_fixture_continuation_cli(
+            &binary,
+            &project,
+            &write_request,
+            &replacement_actor,
+            &active_path,
+        );
+    }
+}
+
+fn verify_fixture_continuation_cli(
+    binary: &std::ffi::OsStr,
+    project: &TestProject,
+    request: &GitHubPullRequestCommentWriteRequest,
+    actor: &ActorId,
+    database: &Path,
+) {
+    let path = project.path().join("continuation.json");
+    let mut input = serde_json::json!({
+        "request": request,
+        "replacement_actor": actor,
+        "fixture": {
+            "target": request.target(),
+            "side_effect_id": request.side_effect_id(),
+            "idempotency_key": request.idempotency_key(),
+            "mode": request.mode(),
+            "fixture_reference": "fixture/github-pr-comment/continuation",
+            "summary": "fixture continuation validated without provider call",
+            "sensitivity": request.sensitivity(),
+            "redaction": request.redaction(),
+        },
+    });
+    let invoke = |input: &serde_json::Value| {
+        fs::write(
+            &path,
+            serde_json::to_vec(input).expect("fixture input serializes"),
+        )
+        .expect("fixture input writes");
+        std::process::Command::new(binary)
+            .arg("--project-dir")
+            .arg(project.path())
+            .arg("--state-dir")
+            .arg(project.path())
+            .args([
+                "--json",
+                "provider",
+                "github-pr-comment",
+                "continue-sandbox",
+                "--request",
+            ])
+            .arg(&path)
+            .output()
+            .expect("continuation CLI runs")
+    };
+    let before = fs::read(database).expect("database before inspection");
+    let output = invoke(&input);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).expect("CLI JSON");
+    assert_eq!(response["status"], "validated");
+    assert_eq!(response["outcome"], "fixture_validated");
+    assert_eq!(response["linked_approval_reference_count"], 1);
+    for key in [
+        "provider_call_performed",
+        "side_effect_mutated",
+        "workflow_event_appended",
+        "report_artifact_written",
+    ] {
+        assert_eq!(response[key], false, "unexpected CLI effect: {key}");
+    }
+    assert!(!String::from_utf8_lossy(&output.stdout).contains(request.comment_body()));
+    input["request"]["comment_body"] = serde_json::json!("Changed CLI fixture comment.");
+    let output = invoke(&input);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("approved_action_mismatch"));
+    assert_eq!(
+        before,
+        fs::read(database).expect("database after inspection")
+    );
+}
+
+struct MirroredFixtureBundleStore<'a>(&'a SqliteStateBackend, &'a SqliteStateBackend);
+
+impl ImmutableRunBundleStore for MirroredFixtureBundleStore<'_> {
+    fn publish_bundle_create_only(
+        &self,
+        bundle: &workflow_core::ImmutableRunBundleBuildResult,
+    ) -> Result<workflow_core::ImmutableRunBundlePublishOutcome, WorkflowOsError> {
+        self.1.publish_bundle_create_only(bundle)?;
+        self.0.publish_bundle_create_only(bundle)
+    }
+
+    fn read_exact_bundle(
+        &self,
+        run_id: &WorkflowRunId,
+        bundle_id: &ImmutableRunBundleId,
+    ) -> Result<workflow_core::StoredImmutableRunBundle, WorkflowOsError> {
+        self.0.read_exact_bundle(run_id, bundle_id)
+    }
 }
 
 #[test]

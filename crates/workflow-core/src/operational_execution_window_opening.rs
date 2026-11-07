@@ -422,14 +422,22 @@ pub(crate) struct OperationalExecutionWindowOpeningUseInput<'a> {
         Option<&'a crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext>,
 }
 
-#[allow(clippy::too_many_lines)]
 pub(crate) fn open_with_registered_current_authority(
     input: &OperationalExecutionWindowOpeningUseInput<'_>,
+) -> Result<ProjectedOperationalExecutionWindowOpeningResult, WorkflowOsError> {
+    open_with_registered_current_authority_for_run(input, None)
+}
+
+#[allow(clippy::too_many_lines)]
+pub(crate) fn open_with_registered_current_authority_for_run(
+    input: &OperationalExecutionWindowOpeningUseInput<'_>,
+    expected_run: Option<&crate::WorkflowRun>,
 ) -> Result<ProjectedOperationalExecutionWindowOpeningResult, WorkflowOsError> {
     let run = input
         .backend
         .rehydrate_run(input.execution_binding.run_id())?;
-    if run.snapshot.identity.workflow_id != *input.execution_binding.workflow_id()
+    if expected_run.is_some_and(|expected| expected != &run)
+        || run.snapshot.identity.workflow_id != *input.execution_binding.workflow_id()
         || run.snapshot.identity.run_id != *input.execution_binding.run_id()
         || !matches!(
             run.snapshot.status,

@@ -645,6 +645,26 @@ impl fmt::Debug for RegisteredCurrentAuthorityResolutionAssessment {
 }
 
 impl RegisteredInMemoryCurrentAuthoritySource {
+    pub(crate) fn register_github_comment_fixture(
+        action: SpecContentHash,
+        observed_at: Timestamp,
+        expires_at: Timestamp,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::register(RegisteredInMemoryCurrentAuthoritySourceInput {
+            source_id: CurrentAuthoritySourceId::new("source/github-comment-fixture")?,
+            contract_version: CurrentAuthoritySourceContractVersion::new("v1")?,
+            configuration_commitment: action,
+            core_maximum_observation_age_seconds: 300,
+            sensitivity: WorkReportSensitivity::Internal,
+            observed_at,
+            source_valid_through: Some(expires_at),
+            generation: Some(CurrentAuthoritySourceGeneration::new(1)?),
+            complete_grant_inventory: Vec::new(),
+            complete_availability_inventory: Vec::new(),
+            complete_context_reference_inventory: Vec::new(),
+        })
+    }
+
     pub(crate) fn register_explicit_zero_local_check(
         input: RegisteredExplicitZeroLocalCheckSourceInput<'_>,
     ) -> Result<Self, WorkflowOsError> {

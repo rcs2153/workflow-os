@@ -1,5 +1,9 @@
 # Cross-Harness Fixture Continuation Bridge Implementation Report
 
+This report records the initial bridge. Its terminal-run posture was rejected
+in focused review. The [blocker correction evidence](CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_REVIEW.md#prepared-fixture-and-public-cli-proof)
+documents the active-window candidate and the successful public CLI probe.
+
 ## Outcome
 
 Implemented the first fixture-only public continuation bridge for the existing
