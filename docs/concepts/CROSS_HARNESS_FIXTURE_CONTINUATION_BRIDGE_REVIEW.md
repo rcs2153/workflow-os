@@ -97,9 +97,43 @@ WORKFLOW_OS_FIXTURE_CONTINUATION_TEST_CLI="$PWD/target/debug/workflow-os" \
 With the CLI probe enabled, the test verifies `fixture_validated`, linked
 approval evidence, no provider call or durable effects, rejection of a changed
 comment body, and byte-for-byte database equality. This is not a live-provider
-or check-attestation proof. The remaining adversarial evidence and authority
-cases and a second focused review are still required before milestone
-acceptance.
+or check-attestation proof. A second focused review is required before
+milestone acceptance.
+
+### Adversarial Correction Evidence
+
+- The actual public CLI rejects a changed body, actor substitution, dry-run
+  fixture mode, and malformed optional fixture reference without modifying
+  the fixture database or echoing the comment body.
+- Core rejects a terminal run and an approved Running run without a window,
+  refuses to open without the cited check, and refuses to reopen an existing
+  window. A later failed result for the same step and command invalidates the
+  earlier cited pass. Conflicting duplicate result IDs also fail closed.
+- SQLite tests exercise exact active inspection and reject identity drift,
+  expiry, fixture-simulated revocation, and consumed dispatch. The revocation
+  case is a disposable storage fixture, not a new production revocation API.
+
+The positive case uses synthetic check evidence in a disposable test project.
+It does not establish an independently attested check, provider effect,
+exactly-once provider reconciliation, or cross-principal delegation. The
+second review must assess the composition and its remaining claim limits.
+
+### Blocker Phase Closeout
+
+The delegated maintainer closed `dg/blocker` run
+`run-1794026064962845000-2` under grant
+`approval/run-1794026064962845000-2/fix-approved`. The kernel reported
+Completed, proof enforced with presentation `presentation/070b2c76f5e656cd`,
+39 events, one grant, no retries, and no escalations.
+
+Validation outside the kernel: 354 local-executor tests passed (one live
+credential test ignored), 183 CLI tests passed, 74 SQLite opening tests
+passed, the focused fixture suite passed with the real CLI probe enabled,
+warnings-denied Core and CLI Clippy passed, and docs and diff checks passed.
+Repository edits, test commands, and Git work were performed outside the
+kernel. The dogfood skills coordinated the phase; they did not execute these
+checks or write a WorkReport. No live provider, release, PR, or merge action
+was taken in this implementation phase.
 
 ## Verdict
 

@@ -1384,6 +1384,52 @@ mod tests {
     }
 
     #[test]
+    fn fixture_predispatch_inspection_rejects_revoked_window_without_mutation() {
+        let fixture = Fixture::new();
+        let authorization = fixture.authorization();
+        let request = fixture.request(&authorization, "opening/fixture-revoked");
+        let actor = request.subject_actor_id.clone();
+        let window_id = request.window_id.clone();
+        fixture
+            .backend
+            .open_window_and_start_attempt_projected(request)
+            .expect("opening");
+        let mut connection = fixture.backend.connection().expect("fixture connection");
+        let transaction = connection
+            .transaction()
+            .expect("fixture revocation transaction");
+        let mut state = super::super::continuity_codec::load_snapshot(&transaction)
+            .expect("fixture continuity state");
+        let window = state.windows.get_mut(&window_id).expect("fixture window");
+        window.state = crate::authorized_execution_continuity_state::internal::AuthoritativeWindowState::Revoked;
+        super::super::continuity_store::persist_window(&transaction, window)
+            .expect("persist fixture revocation");
+        transaction.commit().expect("commit fixture revocation");
+        let run = fixture.backend.rehydrate_run(&fixture.run_id).expect("run");
+        let opening = run
+            .snapshot
+            .last_operational_opening_projection
+            .as_ref()
+            .expect("opening");
+        assert!(!fixture
+            .backend
+            .fixture_predispatch_attempt_is_current(
+                &run,
+                Some(&actor),
+                Some(&fixture.step_id),
+                opening,
+            )
+            .expect("revoked window inspection"));
+        assert_eq!(
+            fixture
+                .backend
+                .rehydrate_run(&fixture.run_id)
+                .expect("unchanged run"),
+            run
+        );
+    }
+
+    #[test]
     fn same_operation_id_with_different_receipt_fails_closed() {
         let fixture = Fixture::new();
         let authorization = fixture.authorization();
@@ -2886,6 +2932,22 @@ mod tests {
             },
         })
         .expect("first dispatch");
+        let run = fixture.backend.rehydrate_run(&fixture.run_id).expect("run");
+        let opening = run
+            .snapshot
+            .last_operational_opening_projection
+            .as_ref()
+            .expect("opening");
+        let actor = ActorId::new("agent/opening-test").expect("actor");
+        assert!(!fixture
+            .backend
+            .fixture_predispatch_attempt_is_current(
+                &run,
+                Some(&actor),
+                Some(&fixture.step_id),
+                opening,
+            )
+            .expect("consumed attempt inspection"));
         let error = supervise_one_local_skill_attempt(TrustedHostSupervisorInput {
             backend: &fixture.backend,
             capability: TrustedHostSupervisorAttemptCapability::Opened(stale),

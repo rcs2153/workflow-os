@@ -253,10 +253,11 @@ cross-harness product claim may proceed until the corrected bridge passes a
 second focused review.
 
 The correction candidate can now open an exact fixture window and validate it
-from the public CLI after reopening SQLite read-only. The remaining work in
-this same phase is the adversarial authority and evidence matrix; do not
-advance to the independent harness corpus on the positive fixture result
-alone. See the [prepared-fixture evidence](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_REVIEW.md#prepared-fixture-and-public-cli-proof).
+from the public CLI after reopening SQLite read-only. Its negative tests cover
+request and actor drift, missing or superseded check evidence, terminal runs,
+and expired, revoked, or consumed windows at their respective boundaries.
+The candidate requires a second focused maintainer/security review before
+the independent harness corpus. See the [prepared-fixture evidence](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_REVIEW.md#prepared-fixture-and-public-cli-proof).
 
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,

@@ -17838,14 +17838,12 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
         },
     )
     .expect("fixture check result");
+    let mut changed_result = serde_json::to_value(&result).expect("check JSON");
     let mut event = active_events.last().expect("resume event").clone();
     event.sequence_number =
         EventSequenceNumber::new(event.sequence_number.get() + 1).expect("sequence");
     event.event_id = EventId::new("event/fixture-check-result").expect("event");
     event.kind = WorkflowRunEventKind::LocalCheckResultRecorded(Box::new(result));
-    active_backend
-        .append_event(&event)
-        .expect("fixture check event");
     let mut record_json = serde_json::to_value(&attempted).expect("attempt serializes");
     let references = record_json["references"]
         .as_array_mut()
@@ -17880,6 +17878,23 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
             ),
         immutable_run_bundle: &stored,
     };
+    let missing = workflow_core::prepare_github_pr_comment_fixture_continuation_window(
+        &active_executor,
+        request_for_run(&approved_run),
+    )
+    .expect_err("opening without cited check fails");
+    assert_eq!(
+        missing.code(),
+        "github_pr_comment_fixture_continuation.check_evidence_invalid"
+    );
+    assert_eq!(
+        active_backend.rehydrate_run(&run_id).expect("no opening"),
+        approved_run
+    );
+    active_backend
+        .append_event(&event)
+        .expect("fixture check event");
+    let approved_run = active_backend.rehydrate_run(&run_id).expect("checked run");
     let opened = workflow_core::prepare_github_pr_comment_fixture_continuation_window(
         &active_executor,
         request_for_run(&approved_run),
@@ -17918,6 +17933,46 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
             &active_path,
         );
     }
+    assert!(
+        workflow_core::prepare_github_pr_comment_fixture_continuation_window(
+            &active_executor,
+            request_for_run(&interrupted),
+        )
+        .is_err(),
+        "an existing window must not be reopened"
+    );
+    assert_eq!(
+        reader.rehydrate_run(&run_id).expect("single window"),
+        interrupted
+    );
+    changed_result["result_id"] = serde_json::json!("result/fixture-continuation-failed");
+    changed_result["status"] =
+        serde_json::to_value(workflow_core::LocalCheckResultStatus::Failed).expect("status JSON");
+    event.kind = WorkflowRunEventKind::LocalCheckResultRecorded(
+        serde_json::from_value(changed_result).expect("later check fact"),
+    );
+    event.sequence_number =
+        EventSequenceNumber::new(interrupted.snapshot.last_sequence_number.get() + 1)
+            .expect("later sequence");
+    event.event_id = EventId::new("event/fixture-check-later-failure").expect("event");
+    active_backend
+        .append_event(&event)
+        .expect("later check event");
+    let drifted = reader.rehydrate_run(&run_id).expect("changed facts");
+    let error = validate_github_pr_comment_fixture_continuation(
+        &replacement,
+        &reader,
+        request_for_run(&drifted),
+    )
+    .expect_err("earlier pass cannot mask later failure");
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_fixture_continuation.check_evidence_invalid"
+    );
+    assert_eq!(
+        reader.rehydrate_run(&run_id).expect("unchanged drift"),
+        drifted
+    );
 }
 
 fn verify_fixture_continuation_cli(
@@ -17928,7 +17983,7 @@ fn verify_fixture_continuation_cli(
     database: &Path,
 ) {
     let path = project.path().join("continuation.json");
-    let mut input = serde_json::json!({
+    let input = serde_json::json!({
         "request": request,
         "replacement_actor": actor,
         "fixture": {
@@ -17984,10 +18039,36 @@ fn verify_fixture_continuation_cli(
         assert_eq!(response[key], false, "unexpected CLI effect: {key}");
     }
     assert!(!String::from_utf8_lossy(&output.stdout).contains(request.comment_body()));
-    input["request"]["comment_body"] = serde_json::json!("Changed CLI fixture comment.");
-    let output = invoke(&input);
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("approved_action_mismatch"));
+    for (pointer, value, code) in [
+        (
+            "/request/comment_body",
+            serde_json::json!("Changed CLI fixture comment."),
+            "approved_action_mismatch",
+        ),
+        (
+            "/fixture/mode",
+            serde_json::to_value(GitHubPullRequestCommentWriteMode::DryRun).expect("mode JSON"),
+            "fixture_mode_required",
+        ),
+        (
+            "/fixture/fixture_reference",
+            serde_json::json!(17),
+            "fixture_reference_invalid",
+        ),
+        (
+            "/replacement_actor",
+            serde_json::json!("operator/replacement"),
+            "actor_mismatch",
+        ),
+    ] {
+        let mut changed = input.clone();
+        *changed.pointer_mut(pointer).expect("fixture input field") = value;
+        let output = invoke(&changed);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "accepted {pointer}");
+        assert!(stderr.contains(code), "{pointer}: {stderr}");
+        assert!(!stderr.contains(request.comment_body()));
+    }
     assert_eq!(
         before,
         fs::read(database).expect("database after inspection")

@@ -11969,25 +11969,33 @@ fn validate_fixture_continuation_check_evidence(
         ));
     }
     for reference in &check_references {
-        let matches = run
-            .events
-            .iter()
-            .filter(|event| {
-                matches!(
-                    &event.kind,
-                    WorkflowRunEventKind::LocalCheckResultRecorded(result)
-                        if result.result_id().as_str() == reference.reference()
-                            && result.status() == crate::LocalCheckResultStatus::Passed
-                            && result.immutable_run_bundle() == bundle
-                )
-            })
-            .count();
-        if matches != 1 {
-            return Err(executor_error(
+        let mut matches = run.events.iter().filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::LocalCheckResultRecorded(result)
+                if result.result_id().as_str() == reference.reference() =>
+            {
+                Some((event.sequence_number, result))
+            }
+            _ => None,
+        });
+        let invalid = || {
+            executor_error(
                 WorkflowOsErrorKind::InvalidState,
                 "github_pr_comment_fixture_continuation.check_evidence_invalid",
                 "fixture continuation check evidence is missing, failed, duplicated, or changed",
-            ));
+            )
+        };
+        let (sequence, result) = matches.next().ok_or_else(invalid)?;
+        if matches.next().is_some()
+            || result.status() != crate::LocalCheckResultStatus::Passed
+            || result.immutable_run_bundle() != bundle
+            || run.events.iter().any(|event| {
+                event.sequence_number > sequence
+                    && matches!(&event.kind, WorkflowRunEventKind::LocalCheckResultRecorded(later)
+                        if later.step_id() == result.step_id()
+                            && later.command_id() == result.command_id())
+            })
+        {
+            return Err(invalid());
         }
     }
     let workflow = immutable_continuation_workflow(stored)?;
