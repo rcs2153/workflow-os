@@ -330,7 +330,7 @@ mod tests {
             sensitivity: WorkReportSensitivity::Internal,
         };
         let commitment = intent.commitment().expect("exact intent");
-        let issued = Timestamp::parse_rfc3339("2026-11-07T07:00:00Z").expect("issued");
+        let start = Timestamp::parse_rfc3339("2026-11-07T07:00:00Z").expect("issued");
         let expires = Timestamp::parse_rfc3339("2026-11-07T07:04:00Z").expect("expires");
         let grant = |lifecycle, subject: &ActorId| {
             CapabilityGrant::new(CapabilityGrantDefinition {
@@ -340,7 +340,7 @@ mod tests {
                 resource: resource.clone(),
                 scope: scope.clone(),
                 issuer: issuer.clone(),
-                issued_at: issued,
+                issued_at: start,
                 expires_at: Some(expires),
                 lifecycle,
                 revocation_reference: (lifecycle == CapabilityGrantLifecycle::Revoked)
@@ -360,16 +360,16 @@ mod tests {
             scope.harness_contract_id().expect("exact harness").clone(),
             &[42; 32],
         );
-        let verified = verifier.authenticate(&[42; 32]).expect("replacement proof");
+        let proof = verifier.authenticate(&[42; 32]).expect("replacement proof");
         let active = grant(CapabilityGrantLifecycle::Active, &replacement);
         let check = LocalFixtureReplacementGrantCheck {
-            principal: &verified,
+            principal: &proof,
             grant: &active,
             stored_intent: &commitment,
             intent: &intent,
             authorized_issuer: &issuer,
             current_requirements: &requirements,
-            observed_at: issued,
+            observed_at: start,
             window_expires_at: expires,
         };
         assert!(validate_local_fixture_replacement_grant(check).is_ok());
@@ -397,7 +397,7 @@ mod tests {
                 ..check
             },
             LocalFixtureReplacementGrantCheck {
-                window_expires_at: issued,
+                window_expires_at: start,
                 ..check
             },
             LocalFixtureReplacementGrantCheck {
