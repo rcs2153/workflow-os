@@ -3205,6 +3205,293 @@ mod tests {
         input
     }
 
+    fn persist_live_grant_test_approval(
+        fixture: &Fixture,
+        facts: crate::live_sandbox_continuation_authority::LiveSandboxContinuationFacts<'_>,
+    ) -> ContinuityCursor {
+        use crate::{ApprovalPresentationRecordStore, ApprovalRequest};
+        let mut event = fixture
+            .backend
+            .read_events(&fixture.run_id)
+            .expect("history")
+            .pop()
+            .expect("running event");
+        let request = ApprovalRequest {
+            approval_id: facts.approval.as_str().to_owned(),
+            run_id: fixture.run_id.clone(),
+            workflow_id: fixture.workflow_id.clone(),
+            schema_version: event.schema_version.clone(),
+            workflow_version: event.workflow_version.clone(),
+            spec_content_hash: event.spec_content_hash.clone(),
+            resolved_execution_context_hash: Some(SpecContentHash::from_text("live context")),
+            step_id: Some(fixture.step_id.clone()),
+            skill_id: Some(SkillId::new("local/comment").expect("skill")),
+            skill_version: Some(SkillVersion::new("v1").expect("skill version")),
+            governance_approval_binding: None,
+            requested_by: facts.action.original_actor.clone(),
+            correlation_id: facts.decision.correlation_id.clone(),
+            idempotency_key: Some(facts.action.idempotency_key.clone()),
+            reason: "Exact synthetic sandbox comment".to_owned(),
+            requested_at: facts.decision.decided_at,
+            expires_after: None,
+            expires_at: facts.approval_expires_at,
+            decision: None,
+        };
+        for (id, kind) in [
+            (
+                EventId::new("event/live-approval-requested").expect("request"),
+                WorkflowRunEventKind::ApprovalRequested(Box::new(request)),
+            ),
+            (
+                facts.approval_event.clone(),
+                WorkflowRunEventKind::ApprovalGranted(facts.decision.clone()),
+            ),
+            (
+                EventId::new("event/live-run-resumed").expect("resume"),
+                WorkflowRunEventKind::RunResumed,
+            ),
+        ] {
+            event.event_id = id;
+            event.sequence_number =
+                EventSequenceNumber::new(event.sequence_number.get() + 1).expect("sequence");
+            event.kind = kind;
+            event.timestamp = facts.decision.decided_at;
+            fixture
+                .backend
+                .append_event(&event)
+                .expect("append approval history");
+        }
+        fixture
+            .backend
+            .write_approval_presentation_record(facts.presentation)
+            .expect("persist exact presentation");
+        ContinuityCursor {
+            sequence_number: event.sequence_number,
+            event_id: event.event_id,
+        }
+    }
+
+    #[test]
+    fn live_grant_consumption_survives_only_the_committed_reservation() {
+        exercise_live_grant_reservation(LiveGrantTrial::AmbiguousCommit);
+    }
+
+    #[test]
+    fn live_grant_concurrent_reservation_returns_one_dispatch_right() {
+        exercise_live_grant_reservation(LiveGrantTrial::Contended);
+    }
+
+    #[test]
+    fn live_grant_revocation_blocks_new_reservation_without_fallback() {
+        exercise_live_grant_reservation(LiveGrantTrial::Revoked);
+    }
+
+    #[derive(Clone, Copy)]
+    enum LiveGrantTrial {
+        AmbiguousCommit,
+        Contended,
+        Revoked,
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn exercise_live_grant_reservation(trial: LiveGrantTrial) {
+        use super::super::live_sandbox_grant_store::LiveGrantAdmission;
+        use crate::dispatch_reservation::{request_commitment, DispatchReservationStore};
+        use crate::live_sandbox_continuation_authority::{
+            tests::{with_live_grant_test_facts, LiveGrantTestContext},
+            LIVE_CAPABILITY,
+        };
+        use crate::provider_write::GitHubCommentContinuationAction;
+        use crate::{
+            CapabilityGrantLifecycle, GitHubPullRequestCommentTarget,
+            GitHubPullRequestCommentWriteMode, SideEffectId,
+        };
+
+        let fixture = Fixture::new();
+        let actor = ActorId::new("agent/opening-test").expect("actor");
+        let action = GitHubCommentContinuationAction {
+            run: &fixture.run_id,
+            step: &fixture.step_id,
+            bundle_root: fixture.bundle.root_hash(),
+            original_actor: &actor,
+            side_effect: &SideEffectId::new("effect/comment").expect("effect"),
+            target: &GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target"),
+            body: "synthetic approved comment",
+            idempotency_key: &IdempotencyKey::new("comment/live-reservation").expect("key"),
+            mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
+        };
+        let invocation = action.commitment().expect("live action");
+        let authorization = OperationalExecutionWindowOpeningAuthorization::new(
+            SpecContentHash::from_text("current authority"),
+            SpecContentHash::from_text("core governance"),
+            operation_binding_commitment(
+                &fixture.workflow_id,
+                &fixture.run_id,
+                &fixture.step_id,
+                &invocation,
+            ),
+        );
+        let opening_identity = fixture.request(&authorization, "opening/live-grant");
+        let now = Timestamp::now_utc();
+        let expiry = Timestamp::from_offset_date_time(
+            now.as_offset_date_time() + time::Duration::minutes(4),
+        );
+        with_live_grant_test_facts(
+            LiveGrantTestContext {
+                action,
+                workflow: &fixture.workflow_id,
+                window: &opening_identity.window_id,
+                attempt: &opening_identity.attempt_id,
+                now,
+                expiry,
+                window_expiry: opening_identity.expires_at,
+            },
+            |facts, grant_for| {
+                let cursor = persist_live_grant_test_approval(&fixture, facts);
+                let mut opening = fixture.request(&authorization, "opening/live-grant");
+                opening.expected_cursor = cursor;
+                opening.invocation_binding_commitment = invocation.clone();
+                opening.trusted_time =
+                    super::super::continuity_store::observe_continuity_trusted_time()
+                        .expect("trusted time");
+                opening.request_commitment = opening_request_commitment(&opening);
+                let opened = fixture
+                    .backend
+                    .open_window_and_start_attempt_projected(opening)
+                    .expect("open");
+                let OperationalExecutionWindowOpeningResult::Opened { capability, .. } =
+                    opened.result
+                else {
+                    panic!("fresh opening");
+                };
+                let grant = grant_for(LIVE_CAPABILITY, CapabilityGrantLifecycle::Active);
+                assert!(fixture
+                    .backend
+                    .issue_live_sandbox_grant(facts, &grant)
+                    .is_err());
+                fixture
+                    .backend
+                    .enable_live_sandbox_grant_store()
+                    .expect("explicit upgrade");
+                let backend = SqliteStateBackend::open(&fixture.path).expect("reopen V11");
+                let reader =
+                    SqliteStateBackend::open_read_only(&fixture.path).expect("inspect V11");
+                assert!(reader.health_check().expect("V11 health").healthy);
+                backend
+                    .enable_live_sandbox_grant_store()
+                    .expect("exact repeat upgrade");
+                let fixture_only = grant_for(
+                    "fixture/github-pr-comment-continuation",
+                    CapabilityGrantLifecycle::Active,
+                );
+                assert!(backend
+                    .issue_live_sandbox_grant(facts, &fixture_only)
+                    .is_err());
+                let binding = backend
+                    .issue_live_sandbox_grant(facts, &grant)
+                    .expect("durable grant");
+                let backend =
+                    SqliteStateBackend::open(&fixture.path).expect("reopen durable grant");
+                assert!(backend.issue_live_sandbox_grant(facts, &grant).is_err());
+                let request = || {
+                    let mut request = checked_reservation_request(&capability);
+                    request.invocation_commitment = invocation.clone();
+                    request.executor_commitment = binding.clone();
+                    request.request_commitment = request_commitment(&request);
+                    request
+                };
+                let connection = backend.connection().expect("independent connection");
+                let event_count = || backend.read_events(&fixture.run_id).expect("events").len();
+                let before = event_count();
+                let counts = || {
+                    connection
+                        .query_row(
+                            "SELECT (SELECT COUNT(*) FROM live_sandbox_grant_uses),
+                        (SELECT COUNT(*) FROM dispatch_reservations)",
+                            [],
+                            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                        )
+                        .expect("count")
+                };
+                let admission = LiveGrantAdmission {
+                    grant_id: grant.grant_id(),
+                    facts,
+                };
+                assert!(backend.reserve_attempt_dispatch(request()).is_err());
+                let stale = LiveGrantAdmission {
+                    facts:
+                        crate::live_sandbox_continuation_authority::LiveSandboxContinuationFacts {
+                            evidence_commitment: &SpecContentHash::from_text("changed evidence"),
+                            ..facts
+                        },
+                    ..admission
+                };
+                assert!(backend
+                    .reserve_live_sandbox_dispatch(request(), stale)
+                    .is_err());
+                assert_eq!(counts(), (0, 0));
+                assert_eq!(event_count(), before);
+                inject_dispatch_commit_fault(InjectedDispatchCommitFault::Before);
+                assert!(backend
+                    .reserve_live_sandbox_dispatch(request(), admission)
+                    .is_err());
+                assert_eq!(counts(), (0, 0));
+                assert_eq!(event_count(), before);
+                match trial {
+                    LiveGrantTrial::AmbiguousCommit => {
+                        inject_dispatch_commit_fault(InjectedDispatchCommitFault::After);
+                        assert!(backend
+                            .reserve_live_sandbox_dispatch(request(), admission)
+                            .expect("uncertain")
+                            .is_none());
+                    }
+                    LiveGrantTrial::Contended => {
+                        let winners = std::thread::scope(|scope| {
+                            let invoke = || {
+                                backend
+                                    .reserve_live_sandbox_dispatch(request(), admission)
+                                    .expect("serialized reservation")
+                                    .is_some()
+                            };
+                            let first = scope.spawn(invoke);
+                            let second = scope.spawn(invoke);
+                            u8::from(first.join().expect("first caller"))
+                                + u8::from(second.join().expect("second caller"))
+                        });
+                        assert_eq!(winners, 1);
+                    }
+                    LiveGrantTrial::Revoked => {
+                        backend
+                            .revoke_live_sandbox_grant(grant.grant_id())
+                            .expect("revoke");
+                        let restarted =
+                            SqliteStateBackend::open(&fixture.path).expect("reopen revoked grant");
+                        assert!(restarted
+                            .reserve_live_sandbox_dispatch(request(), admission)
+                            .is_err());
+                        assert!(restarted.reserve_attempt_dispatch(request()).is_err());
+                        assert!(restarted.issue_live_sandbox_grant(facts, &grant).is_err());
+                        assert_eq!(counts(), (0, 0));
+                        assert_eq!(event_count(), before);
+                        return;
+                    }
+                }
+                assert_eq!(counts(), (1, 1));
+                assert_eq!(event_count(), before + 1);
+                assert!(backend
+                    .reserve_live_sandbox_dispatch(request(), admission)
+                    .expect("replay")
+                    .is_none());
+                assert!(backend.reserve_attempt_dispatch(request()).is_err());
+                backend
+                    .revoke_live_sandbox_grant(grant.grant_id())
+                    .expect("revoke without removing use");
+                assert!(backend.revoke_live_sandbox_grant(grant.grant_id()).is_err());
+                assert_eq!(counts(), (1, 1));
+            },
+        );
+    }
+
     #[test]
     fn dispatch_admission_check_and_reservation_share_commit_and_rollback() {
         use crate::dispatch_reservation::DispatchReservationOutcome;

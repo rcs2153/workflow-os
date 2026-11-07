@@ -106,6 +106,25 @@ revocation to the atomic guard, consume the grant with the reservation, and
 prove replay cannot regain an invocation right. No provider call or CLI
 surface was added.
 
+The private SQLite path in implementation run `run-1794080442376776000-2`
+adds explicit V10-to-V11 opt-in for ready stores. The default and transfer
+format remain V10; no command enables live storage. The live path verifies
+the exact persisted opening, latest effective approval and presentation
+before grant issuance and use. It records an immutable grant binding and
+durable revocation. An attempt with a live grant cannot fall back to
+ordinary reservation, including after revocation.
+
+The grant use and reservation share an immediate transaction and the use
+has a deferred foreign key to its exact attempt's reservation. A failure
+before commit leaves neither record; a lost result after commit exposes no
+dispatch right. A contended trial returns exactly one right. These are
+synthetic Core tests with no provider call. The store still accepts evidence,
+policy, and principal facts only from a trusted Core caller. The live
+opening and resolver must authenticate the replacement, reconstruct those
+facts and the attempted SideEffect from durable sources, and prevent
+ordinary reservation before issuance. Do not expose this private path to
+the harness until those boundaries are implemented.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes

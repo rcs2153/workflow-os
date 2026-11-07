@@ -14,7 +14,7 @@ use crate::dispatch_reservation::{
     reservation_error, DispatchAdmissionProjectionCursor, DispatchAdmissionProjectionEvent,
     DispatchAdmissionProjectionEventDefinition, DispatchReservationBinding,
     DispatchReservationOutcome, DispatchReservationRecord, DispatchReservationReplayReceipt,
-    DispatchReservationRequest, DispatchReservationStore,
+    DispatchReservationRequest, DispatchReservationStore, ReservedAttemptDispatchCapability,
 };
 use crate::{
     IdempotencyKey, Timestamp, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent,
@@ -22,6 +22,7 @@ use crate::{
 };
 
 use super::continuity_codec::timestamp_parts;
+use super::live_sandbox_grant_store::{check_dispatch_lane, LiveGrantAdmission};
 use super::{
     append_event_and_project_snapshot, encode_json, snapshot_commitment, SqliteStateBackend,
 };
@@ -73,13 +74,45 @@ impl SqliteStateBackend {
     /// a capability; its receipt is for trusted callers, not caller authentication.
     /// The check may persist a grant-use binding but must not end the transaction
     /// or perform any external effect.
-    #[allow(clippy::too_many_lines)]
     pub(crate) fn reserve_attempt_dispatch_checked(
+        &self,
+        request: DispatchReservationRequest,
+        lifecycle: Option<
+            &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+        >,
+        check_admission: impl FnOnce(
+            &rusqlite::Transaction<'_>,
+            Timestamp,
+            Timestamp,
+        ) -> Result<(), WorkflowOsError>,
+    ) -> Result<DispatchReservationOutcome, WorkflowOsError> {
+        self.reserve_dispatch(request, lifecycle, None, check_admission)
+    }
+
+    /// Live-only admission. Exact replays and ambiguous commits yield no
+    /// dispatch right or receipt through this entry point.
+    #[allow(dead_code)] // The private live opening path is not connected yet.
+    pub(super) fn reserve_live_sandbox_dispatch(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+    ) -> Result<Option<Box<ReservedAttemptDispatchCapability>>, WorkflowOsError> {
+        let outcome = self.reserve_dispatch(request, None, Some(admission), |_, _, _| Ok(()))?;
+        Ok(match outcome {
+            DispatchReservationOutcome::Admitted { capability } => Some(capability),
+            DispatchReservationOutcome::AlreadyAdmitted { .. }
+            | DispatchReservationOutcome::CommittedButCapabilityUnavailable { .. } => None,
+        })
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn reserve_dispatch(
         &self,
         mut request: DispatchReservationRequest,
         lifecycle: Option<
             &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
         >,
+        live: Option<LiveGrantAdmission<'_>>,
         check_admission: impl FnOnce(
             &rusqlite::Transaction<'_>,
             Timestamp,
@@ -101,6 +134,7 @@ impl SqliteStateBackend {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| storage_error("begin_failed"))?;
+        check_dispatch_lane(&transaction, &request.capability.attempt_id, live.is_some())?;
         let observation = continuity_store::observe_continuity_trusted_time()?;
 
         if let Some((record, binding)) = read_existing(&transaction, request.operation_id.as_str())?
@@ -141,6 +175,9 @@ impl SqliteStateBackend {
                 .trusted_time
                 .last_observed_at
                 .is_some_and(|prior| observation.observed_at() < prior)
+            || (live.is_some()
+                && (observation.epoch_id() != &window.trusted_time_epoch_id
+                    || observation.observed_at() < window.trusted_time_watermark))
             || observation.observed_at() >= window.expires_at
             || window.state != AuthoritativeWindowState::Executing
             || attempt.state != AuthoritativeAttemptState::Started
@@ -188,6 +225,14 @@ impl SqliteStateBackend {
             return Err(not_dispatchable());
         }
         check_admission(&transaction, observation.observed_at(), window.expires_at)?;
+        if let Some(admission) = live {
+            admission.consume(
+                &transaction,
+                &request,
+                observation.observed_at(),
+                window.expires_at,
+            )?;
+        }
         let next_sequence = crate::EventSequenceNumber::new(
             last.sequence_number
                 .get()
