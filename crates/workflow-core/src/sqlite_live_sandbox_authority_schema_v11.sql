@@ -1,7 +1,14 @@
+CREATE TABLE live_sandbox_principals (
+  principal_id TEXT PRIMARY KEY CHECK (length(principal_id) BETWEEN 1 AND 128),
+  verifier_payload TEXT NOT NULL CHECK (length(verifier_payload) BETWEEN 2 AND 4096),
+  revoked INTEGER NOT NULL DEFAULT 0 CHECK (revoked IN (0, 1))
+);
+
 CREATE TABLE live_sandbox_grants (
   grant_id TEXT PRIMARY KEY CHECK (length(grant_id) BETWEEN 1 AND 128),
   attempt_id TEXT NOT NULL REFERENCES continuity_attempts(attempt_id) ON DELETE RESTRICT,
   binding TEXT NOT NULL CHECK (length(binding) = 64),
+  registration_binding TEXT NOT NULL CHECK (length(registration_binding) = 64),
   payload TEXT NOT NULL CHECK (length(payload) BETWEEN 2 AND 32768),
   revoked INTEGER NOT NULL DEFAULT 0 CHECK (revoked IN (0, 1)),
   UNIQUE (grant_id, attempt_id)

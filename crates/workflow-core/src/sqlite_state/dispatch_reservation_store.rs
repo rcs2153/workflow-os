@@ -141,6 +141,11 @@ impl SqliteStateBackend {
             live.is_some(),
         )?;
         let observation = continuity_store::observe_continuity_trusted_time()?;
+        let live = live
+            .map(|admission| {
+                admission.authenticate(&transaction, &request, observation.observed_at())
+            })
+            .transpose()?;
 
         if let Some((record, binding)) = read_existing(&transaction, request.operation_id.as_str())?
         {

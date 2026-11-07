@@ -45,11 +45,10 @@ use crate::{
 const ADAPTER_SCHEMA_VERSION: u32 = 10;
 const LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION: u32 = 11;
 const LIVE_AUTHORITY_SCHEMA_DIGEST: &str =
-    "d73239544f08c79a64ce001bfea57a2adc8212809499dcf561f1ed2c03df0d51";
-// Commit to the V11 manifest and live opening protocol so an earlier V11
-// writer rejects a store whose reserved opening namespace it cannot enforce.
+    "7315dc4257a066e01e1f90398b0c5dc79510ce9ac67e55e88e13f65e5555ef68";
+// Commit to the manifest and live opening/registration protocol together.
 const LIVE_AUTHORITY_SCHEMA_CHECKSUM: &str =
-    "sha256:1dddc6985e2bb5cc014db4c86900a7591fbef63ef89ca10e759f85795f2eff9a";
+    "sha256:b7e9eb9418679612571c6c30654d8a11ed65a11ee857ff6fda8f7e92e7c014c5";
 const RUN_SCOPE_ADAPTER_SCHEMA_VERSION: u32 = 9;
 const CAPABILITY_SOURCE_CONTINUITY_ADAPTER_SCHEMA_VERSION: u32 = 8;
 const IMMUTABLE_RUN_BUNDLE_ADAPTER_SCHEMA_VERSION: u32 = 7;

@@ -140,6 +140,19 @@ the unchanged physical schema. Earlier V11 dispatch writers reject this
 checksum in their transaction; the new writer also rejects earlier
 experimental V11 stores. There is no implicit upgrade or change to V10.
 
+Implementation run `run-1794083121561276000-2` adds distinct private
+live principal registrations. Issuance binds the current registration
+from SQLite rather than a caller-provided commitment. Reservation resolves
+the principal and harness from the persisted grant, verifies possession
+against the live verifier, and checks registration and grant status under
+the same write lock before replay or consumption. Revocation survives
+restart and the same principal ID cannot be re-registered. The fixture
+registry cannot issue live grants. Raw credentials are not stored.
+The opt-in V11 manifest and readiness checksum cover the new tables and
+registration binding; earlier experimental V11 stores remain unsupported.
+This is not a public authentication path. The durable attempted record,
+policy, and evidence resolver is still required.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes
