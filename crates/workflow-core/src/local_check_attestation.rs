@@ -23,6 +23,8 @@ pub(crate) mod runtime;
 mod structural_coverage;
 
 pub(crate) use structural_coverage::authoritative_record_for_step;
+#[cfg(test)]
+pub(crate) use verifier::tests::verified_docs_check_projection_for_test;
 pub use verifier::AcceptedLocalCheckAttestation;
 pub(crate) use verifier::StoredAcceptedLocalCheckAttestation;
 

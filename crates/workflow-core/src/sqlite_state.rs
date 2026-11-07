@@ -43,11 +43,16 @@ use crate::{
 };
 
 const ADAPTER_SCHEMA_VERSION: u32 = 10;
-const LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION: u32 = 11;
+const LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION: u32 = 11;
+const LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION: u32 = 12;
 const LIVE_AUTHORITY_SCHEMA_DIGEST: &str =
+    "25cf61a4ee86b8b9c52d7f9183316eac648ce9c38e501f11be84008c2028eaac";
+const LIVE_AUTHORITY_SCHEMA_CHECKSUM: &str =
+    "sha256:e4538d7416eaf603d866b98ffe0907bd6735cbb3087e53d955cb8339cdde10c8";
+const LIVE_AUTHORITY_PREVIOUS_SCHEMA_DIGEST: &str =
     "7315dc4257a066e01e1f90398b0c5dc79510ce9ac67e55e88e13f65e5555ef68";
 // Commit to the manifest and live opening/registration protocol together.
-const LIVE_AUTHORITY_SCHEMA_CHECKSUM: &str =
+const LIVE_AUTHORITY_PREVIOUS_SCHEMA_CHECKSUM: &str =
     "sha256:b7e9eb9418679612571c6c30654d8a11ed65a11ee857ff6fda8f7e92e7c014c5";
 const RUN_SCOPE_ADAPTER_SCHEMA_VERSION: u32 = 9;
 const CAPABILITY_SOURCE_CONTINUITY_ADAPTER_SCHEMA_VERSION: u32 = 8;
@@ -207,6 +212,8 @@ const FIXTURE_REPLACEMENT_AUTHORITY_SCHEMA_V10: &str =
     include_str!("sqlite_fixture_replacement_authority_schema_v10.sql");
 const LIVE_SANDBOX_AUTHORITY_SCHEMA_V11: &str =
     include_str!("sqlite_live_sandbox_authority_schema_v11.sql");
+const LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12: &str =
+    include_str!("sqlite_live_check_proof_schema_v12.sql");
 pub(crate) const CONTINUITY_CLOCK_PROVENANCE: &str =
     "77efdb5ae4c8696d8573d816a52dce594793b1749471a98cc58a85fc8129e50f";
 pub(crate) const CONTINUITY_CLOCK_EPOCH: &str = "epoch/sqlite-local-live-state/1";
@@ -1252,6 +1259,9 @@ impl SqliteStateBackend {
             RUN_SCOPE_ADAPTER_SCHEMA_VERSION => validate_v9_upgrade_eligibility(&connection)?,
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(&connection)?,
             LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => validate_live_authority_schema(&connection)?,
+            LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION => {
+                validate_previous_live_authority_schema(&connection)?;
+            }
             _ => return Err(schema_recovery_required()),
         }
         Ok(backend)
@@ -2337,6 +2347,9 @@ impl SqliteStateBackend {
             }
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(connection),
             LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => validate_live_authority_schema(connection),
+            LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION => {
+                validate_previous_live_authority_schema(connection)
+            }
             _ => Err(sqlite_state_error(
                 "schema.incompatible",
                 "SQLite state schema version is not supported",
@@ -4079,6 +4092,8 @@ fn validate_operational_schema(connection: &Connection) -> Result<u32, WorkflowO
         .map_err(|_| schema_recovery_required())?;
     if version == LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION {
         validate_live_authority_schema(connection)?;
+    } else if version == LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION {
+        validate_previous_live_authority_schema(connection)?;
     } else if version == ADAPTER_SCHEMA_VERSION {
         validate_schema_metadata(connection)?;
     } else {
@@ -4093,6 +4108,15 @@ fn validate_live_authority_schema(connection: &Connection) -> Result<(), Workflo
         LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
         LIVE_AUTHORITY_SCHEMA_CHECKSUM,
         LIVE_AUTHORITY_SCHEMA_DIGEST,
+    )
+}
+
+fn validate_previous_live_authority_schema(connection: &Connection) -> Result<(), WorkflowOsError> {
+    validate_schema_metadata_version(
+        connection,
+        LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION,
+        LIVE_AUTHORITY_PREVIOUS_SCHEMA_CHECKSUM,
+        LIVE_AUTHORITY_PREVIOUS_SCHEMA_DIGEST,
     )
 }
 

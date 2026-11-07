@@ -139,6 +139,7 @@ pub struct AcceptedLocalCheckAttestation {
     requirement_fingerprint: SpecContentHash,
     candidate_binding_fingerprint: SpecContentHash,
     execution_binding_fingerprint: SpecContentHash,
+    command_contract_fingerprint: Option<SpecContentHash>,
     immutable_run_bundle: ImmutableRunBundleBinding,
     workflow_id: WorkflowId,
     run_id: WorkflowRunId,
@@ -165,6 +166,8 @@ struct AcceptedLocalCheckAttestationWire {
     requirement_fingerprint: SpecContentHash,
     candidate_binding_fingerprint: SpecContentHash,
     execution_binding_fingerprint: SpecContentHash,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    command_contract_fingerprint: Option<SpecContentHash>,
     immutable_run_bundle: ImmutableRunBundleBinding,
     workflow_id: WorkflowId,
     run_id: WorkflowRunId,
@@ -227,6 +230,10 @@ impl AcceptedLocalCheckAttestation {
     #[must_use]
     pub const fn execution_binding_fingerprint(&self) -> &SpecContentHash {
         &self.execution_binding_fingerprint
+    }
+
+    pub(crate) const fn command_contract_fingerprint(&self) -> Option<&SpecContentHash> {
+        self.command_contract_fingerprint.as_ref()
     }
 
     /// Returns the exact immutable run-bundle binding.
@@ -532,6 +539,12 @@ pub(crate) fn verify_local_check_attestation(
         requirement_fingerprint: input.requirement.requirement_fingerprint.clone(),
         candidate_binding_fingerprint: input.candidate.binding_fingerprint.clone(),
         execution_binding_fingerprint: input.execution_binding.binding_fingerprint().clone(),
+        command_contract_fingerprint: Some(
+            input
+                .execution_binding
+                .command_contract_fingerprint()
+                .clone(),
+        ),
         immutable_run_bundle: stored_run_binding,
         workflow_id: input.observation.workflow_id.clone(),
         run_id: input.observation.run_id.clone(),
@@ -634,7 +647,7 @@ fn verification_error(suffix: &str, message: &'static str) -> WorkflowOsError {
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::too_many_lines)]
-mod tests {
+pub(super) mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -793,18 +806,69 @@ mod tests {
         freshness: LocalCheckAttestationFreshnessPolicy,
         stored_bundle: StoredImmutableRunBundle,
     ) -> Fixture {
-        let bundle = stored_bundle.manifest().run_binding();
-        let workflow_id = WorkflowId::new("workflow/test").expect("workflow id");
-        let run_id = WorkflowRunId::new("run-test").expect("run id");
         let step_id = StepId::new("check-docs").expect("step id");
+        let invocation_id = SkillInvocationId::new("invocation/check-docs").expect("invocation");
+        let result_id = LocalCheckResultId::new("result/check-docs").expect("result id");
+        let evaluated_at = Timestamp::parse_rfc3339("2026-07-19T12:00:03Z").expect("evaluated");
+        fixture_for_subject(
+            freshness,
+            stored_bundle,
+            step_id,
+            invocation_id,
+            result_id,
+            evaluated_at,
+        )
+    }
+
+    pub(crate) fn verified_docs_check_projection_for_test(
+        freshness: LocalCheckAttestationFreshnessPolicy,
+        stored_bundle: StoredImmutableRunBundle,
+        event: &crate::LocalCheckResultRecordedEvent,
+        evaluated_at: Timestamp,
+        attested: bool,
+    ) -> crate::LocalCheckEvidenceAssuranceProjection {
+        let fixture = fixture_for_subject(
+            freshness,
+            stored_bundle,
+            event.step_id().clone(),
+            event.invocation_id().clone(),
+            event.result_id().clone(),
+            evaluated_at,
+        );
+        let accepted = verify_local_check_attestation(&fixture.input()).expect("fixture proof");
+        crate::LocalCheckEvidenceAssuranceProjection::new(
+            crate::LocalCheckEvidenceAssuranceProjectionDefinition {
+                execution_binding: &fixture.execution_binding,
+                resolved_execution_fingerprint: SpecContentHash::from_text("synthetic observation"),
+                result_id: event.result_id().clone(),
+                result: &fixture.result,
+                accepted_attestation: attested.then_some(&accepted),
+            },
+        )
+        .expect("fixture projection")
+    }
+
+    fn fixture_for_subject(
+        freshness: LocalCheckAttestationFreshnessPolicy,
+        stored_bundle: StoredImmutableRunBundle,
+        step_id: StepId,
+        invocation_id: SkillInvocationId,
+        result_id: LocalCheckResultId,
+        evaluated_at: Timestamp,
+    ) -> Fixture {
+        let bundle = stored_bundle.manifest().run_binding();
+        let workflow_id = stored_bundle.manifest().workflow_id().clone();
+        let run_id = stored_bundle.manifest().run_id().clone();
         let skill_id = SkillId::new("local/check-docs").expect("skill id");
         let skill_version = SkillVersion::new("v0").expect("skill version");
-        let invocation_id = SkillInvocationId::new("invocation/check-docs").expect("invocation");
         let idempotency_key = IdempotencyKey::new("idempotency/check-docs").expect("key");
-        let result_id = LocalCheckResultId::new("result/check-docs").expect("result id");
-        let started_at = Timestamp::parse_rfc3339("2026-07-19T12:00:01Z").expect("start");
-        let completed_at = Timestamp::parse_rfc3339("2026-07-19T12:00:02Z").expect("complete");
-        let evaluated_at = Timestamp::parse_rfc3339("2026-07-19T12:00:03Z").expect("evaluated");
+        let at = |seconds| {
+            Timestamp::from_offset_date_time(
+                evaluated_at.as_offset_date_time() - time::Duration::seconds(seconds),
+            )
+        };
+        let started_at = at(2);
+        let completed_at = at(1);
         let contract = LocalCheckCommandContract::docs_check_model_only().expect("contract");
         let handler = ImmutableLocalCheckHandlerSelection::registered_unattested(
             LocalCheckCommandKind::DocsCheck,
@@ -821,7 +885,7 @@ mod tests {
                 skill_version,
                 command_contract: &contract,
                 handler_selection: handler,
-                created_at: Timestamp::parse_rfc3339("2026-07-19T12:00:00Z").expect("binding time"),
+                created_at: at(3),
             },
         )
         .expect("execution binding");
