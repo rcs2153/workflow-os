@@ -1,6 +1,7 @@
 # Cross-Harness Authoritative Continuation Milestone Plan
 
-Status: queued after hosted partial-run creation recovery; execution not started
+Status: preregistration selections accepted for focused review; runtime and live
+provider execution not started
 
 ## 1. Product Question
 
@@ -224,9 +225,72 @@ This milestone does not implement:
 - a UI requirement; or
 - a general comparative superiority claim.
 
-## 13. Next Phase
+## 13. Accepted Preregistration Selections
 
-After hosted partial-run recovery closes, perform a planning/review phase that
-selects the two harnesses, one existing effect path, exact interruption point,
-public integration contract, and preregistered evaluation fixture. Do not begin
-integration code before that focused plan is accepted.
+The focused planning review selected:
+
+- **starting harness:** Codex;
+- **replacement harness:** a pinned, independently implemented LangGraph Python
+  adapter;
+- **consequential effect:** the existing bounded GitHub PR-comment live-sandbox
+  provider-write family;
+- **target:** one maintainer-owned disposable pull request in a non-production
+  repository posture, bound to the exact repository, pull request, head, comment
+  request, and idempotency commitment;
+- **interruption point:** after the immutable run bundle, approval-presentation
+  proof, granted approval, actor/delegation posture, required evidence and checks,
+  execution window, exact target/request commitment, and attempted SideEffect or
+  pre-effect intent are durable, but before provider HTTP dispatch; and
+- **review boundary:** the replacement harness receives no transcript, private
+  session state, expected answer, or copied authority. It must identify its actor
+  and delegation and recover lawful continuation through public Workflow OS
+  surfaces.
+
+`next-action` remains non-authorizing. The first implementation must add a narrow,
+explicit continuation bridge rather than implying that a preview or checkpoint
+can execute the effect. The candidate public shape is:
+
+```text
+workflow-os --json provider github-pr-comment continue-sandbox \
+  --request <bounded-request.json> --auth-stdin
+```
+
+The exact spelling may change during implementation review, but the contract must:
+
+- load the exact durable run and immutable run bundle;
+- resolve actor and delegation in the same invocation;
+- verify approval presentation, evidence and checks, execution window, target
+  commitment, attempted SideEffect, and idempotency posture;
+- call the existing reviewed GitHub PR-comment sandbox composition rather than
+  introducing a generic provider-write path;
+- preserve post-effect/pre-ack ambiguity without retry or manufactured success;
+- persist eligible SideEffect event proof and bounded WorkReport disclosure;
+- emit stable, redacted JSON; and
+- accept provider authentication explicitly through standard input without
+  storing or logging the credential.
+
+## 14. Implementation Sequence
+
+Implement the milestone in three separately governed slices:
+
+1. **Public continuation bridge, fixture first.** Add the narrow CLI/JSON bridge,
+   reuse the existing GitHub PR-comment sandbox composition, and prove fail-closed
+   behavior without a live credential or provider mutation.
+2. **Independent harness corpus.** Add the pinned Codex and LangGraph adapters,
+   adversarial fixtures, measurement capture, and reviewer tooling. Keep this
+   slice fixture-only.
+3. **Live disposable-sandbox proof.** After the first two slices and their
+   focused reviews pass, authorize one exact live target, perform the interrupted
+   handoff, reconcile the effect, and obtain an independent rerun and review.
+
+The fixture and live evaluation must cover approved exact continuation, denial,
+changed target or action, unauthorized actor, missing/expired/revoked delegation,
+stale approval or execution window, missing evidence, post-effect/pre-ack
+ambiguity, terminal replay, a second replacement attempt, and conflicting
+idempotency or provider observation.
+
+No slice may claim fixed token savings, production interoperability, general
+provider writes, nested harness runtime, or production multi-agent orchestration.
+
+The accepted preregistration review is recorded in
+[Cross-Harness Authoritative Continuation Milestone Preregistration Review](../concepts/CROSS_HARNESS_AUTHORITATIVE_CONTINUATION_MILESTONE_PREREGISTRATION_REVIEW.md).

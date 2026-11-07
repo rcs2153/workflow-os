@@ -205,6 +205,23 @@ authenticated delegation, packaged stable harness contracts, one real
 sandboxed provider write, post-effect/pre-ack reconciliation, duplicate
 prevention, and independent reconstruction through public surfaces.
 
+The focused preregistration review now selects Codex as the starting harness, a
+pinned independently implemented LangGraph Python adapter as the replacement,
+and the existing GitHub PR-comment live-sandbox family as the bounded
+consequential effect. The handoff interrupts after immutable input, approval
+presentation and grant, actor/delegation posture, evidence/checks, execution
+window, exact target/request commitment, and attempted SideEffect intent are
+durable, but before provider HTTP dispatch. The replacement receives no
+transcript or copied authority and must re-resolve lawful continuation through
+public Workflow OS surfaces.
+
+The next implementation phase is a narrow, fixture-first CLI/JSON continuation
+bridge for that existing provider family. It is not a generic provider-write
+surface. Two thin harness adapters and the adversarial measurement corpus follow
+only after that bridge passes focused review; one explicitly authorized live
+disposable-sandbox run and independent rerun are the final slice. See the
+[preregistration review](docs/concepts/CROSS_HARNESS_AUTHORITATIVE_CONTINUATION_MILESTONE_PREREGISTRATION_REVIEW.md).
+
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
 recursive agents, nested-harness runtime, a new provider mutation family, or a
