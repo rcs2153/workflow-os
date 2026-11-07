@@ -17922,6 +17922,16 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
         .append_event(&event)
         .expect("fixture check event");
     let approved_run = active_backend.rehydrate_run(&run_id).expect("checked run");
+    #[cfg(unix)]
+    if export
+        .as_ref()
+        .is_some_and(claude_fixture_export::Export::reservation_input)
+    {
+        export
+            .expect("reservation exporter")
+            .stage_reservation(&write_request);
+        return;
+    }
     let opened = workflow_core::prepare_github_pr_comment_fixture_continuation_window(
         &active_executor,
         request_for_run(&approved_run),
