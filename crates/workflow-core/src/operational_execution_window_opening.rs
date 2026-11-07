@@ -366,6 +366,16 @@ impl OperationalExecutionWindowOpeningProjectionSnapshot {
     pub(crate) const fn window_id(&self) -> &AuthorizedExecutionWindowId {
         &self.window_id
     }
+
+    pub(crate) const fn attempt_id(&self) -> &AuthorizedExecutionAttemptId {
+        &self.attempt_id
+    }
+
+    pub(crate) const fn committed_result_cursor(
+        &self,
+    ) -> &OperationalExecutionWindowOpeningProjectionCursor {
+        &self.committed_result_cursor
+    }
 }
 
 impl fmt::Debug for OperationalExecutionWindowOpeningProjectionSnapshot {

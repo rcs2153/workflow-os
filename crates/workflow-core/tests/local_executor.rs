@@ -136,9 +136,10 @@ use workflow_core::{
     HighAssuranceApprovalRevocationPolicy, HighAssuranceApprovalSuppliedReference,
     HighAssuranceProtectedActionKind, HighAssuranceRequesterApproverRule, IdempotencyKey,
     ImmutableRunBundleHandlerPosture, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
-    ImmutableRunBundleVersion, IntegrationId, LocalApprovalDecisionRequest,
-    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationDefaultDecisionRequest,
-    LocalApprovalPresentationProof, LocalApprovalPresentationResolvedContextDecisionRequest,
+    ImmutableRunBundleStore, ImmutableRunBundleVersion, IntegrationId,
+    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
+    LocalApprovalPresentationDefaultDecisionRequest, LocalApprovalPresentationProof,
+    LocalApprovalPresentationResolvedContextDecisionRequest,
     LocalApprovalProofMarkerAuditProjectionStore,
     LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalAuditSink,
     LocalCancellationRequest, LocalCheckCommandContract, LocalCheckEvidenceAttestationPosture,
@@ -201,12 +202,12 @@ use workflow_core::{
     SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
-    SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
-    StepGovernanceRuntimeFacts, StepId, TerminalLocalWorkReportAuthorityReceiptInput,
-    TerminalLocalWorkReportInput, TerminalReportApprovalProofMarkerCitationPolicy,
-    TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
-    UnverifiedGovernanceDecisionAuthorityReceipt, ValidationReferenceId,
-    WorkReportArtifactApprovalProofMarkerGatePolicy,
+    SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash,
+    SqliteStateBackend, StateBackend, StepGovernanceRuntimeFacts, StepId,
+    TerminalLocalWorkReportAuthorityReceiptInput, TerminalLocalWorkReportInput,
+    TerminalReportApprovalProofMarkerCitationPolicy, TestOnlyWorkflowOsValidateDogfoodHandler,
+    TimeoutBehavior, Timestamp, TypedHandoffId, UnverifiedGovernanceDecisionAuthorityReceipt,
+    ValidationReferenceId, WorkReportArtifactApprovalProofMarkerGatePolicy,
     WorkReportArtifactAuthorityReceiptIntegrityInput,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
     WorkReportArtifactStore, WorkReportBodyCommitmentPosture, WorkReportCitationKind,
@@ -3385,7 +3386,7 @@ fn github_pr_comment_attempted_record_for_provider_write(
 }
 
 fn github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
-    backend: &LocalStateBackend,
+    backend: &impl SideEffectRecordStore,
     project: &TestProject,
     run_id: WorkflowRunId,
     approval_reference: SideEffectReference,
@@ -3401,7 +3402,7 @@ fn github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
 }
 
 fn github_pr_comment_attempted_record_for_provider_write_target(
-    backend: &LocalStateBackend,
+    backend: &impl SideEffectRecordStore,
     project: &TestProject,
     run_id: WorkflowRunId,
     approval_reference: SideEffectReference,
@@ -17629,19 +17630,19 @@ fn live_sandbox_approval_authority_rejects_non_proof_policy_before_provider_call
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn fixture_continuation_validates_exact_replacement_without_mutation() {
+fn fixture_continuation_rejects_terminal_run_without_mutation() {
     let project = TestProject::new("fixture-continuation-success");
     project.write_approval_project();
     let registry = registry(Box::new(EchoHandler {
         calls: Rc::new(Cell::new(0)),
     }));
-    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
-    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let backend =
+        SqliteStateBackend::open(project.path().join("state.sqlite3")).expect("state backend");
     let executor = LocalExecutor::new(&backend, &registry);
     let run_id = WorkflowRunId::new("run/fixture-continuation-success").expect("run id");
     let paused = execute_with_immutable_run_bundle(
         &executor,
-        &bundle_store,
+        &backend,
         &project.immutable_bundle_request(run_id.clone(), "bundle/fixture-continuation-success"),
     )
     .expect("bundle-backed run pauses");
@@ -17680,8 +17681,8 @@ fn fixture_continuation_validates_exact_replacement_without_mutation() {
     let write_request =
         github_pr_comment_fixture_continuation_request(&project, run_id.clone(), &attempted);
     let fixture = github_pr_comment_fixture_continuation_fixture(&attempted);
-    let stored = bundle_store
-        .read_bundle(
+    let stored = backend
+        .read_exact_bundle(
             &run_id,
             completed
                 .snapshot
@@ -17698,11 +17699,49 @@ fn fixture_continuation_validates_exact_replacement_without_mutation() {
         .expect("side-effect read");
     let replacement_actor = ActorId::new("operator/reviewer").expect("replacement actor");
 
-    let result = validate_github_pr_comment_fixture_continuation(
+    let error = validate_github_pr_comment_fixture_continuation(
         &executor,
         &backend,
         GitHubPrCommentFixtureContinuationValidationRequest {
             run: &completed,
+            attempted_record: &attempted,
+            write_request: write_request.clone(),
+            fixture: &fixture,
+            replacement_actor: &replacement_actor,
+            delegated_by: None,
+            presentation_policy:
+                ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                    LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                    ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+                ),
+            immutable_run_bundle: &stored,
+        },
+    )
+    .expect_err("terminal continuation fails closed");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_fixture_continuation.run_not_active"
+    );
+    let active_backend = SqliteStateBackend::open(project.path().join("active.sqlite3"))
+        .expect("active state backend");
+    for event in &events_before {
+        active_backend
+            .append_event(event)
+            .expect("durable event replay");
+        if matches!(event.kind, WorkflowRunEventKind::RunResumed) {
+            break;
+        }
+    }
+    let active_run = active_backend.rehydrate_run(&run_id).expect("active run");
+    assert_eq!(active_run.snapshot.status, WorkflowRunStatus::Running);
+    let active_events = active_backend.read_events(&run_id).expect("active events");
+    let active_executor = LocalExecutor::new(&active_backend, &registry);
+    let error = validate_github_pr_comment_fixture_continuation(
+        &active_executor,
+        &backend,
+        GitHubPrCommentFixtureContinuationValidationRequest {
+            run: &active_run,
             attempted_record: &attempted,
             write_request,
             fixture: &fixture,
@@ -17716,20 +17755,17 @@ fn fixture_continuation_validates_exact_replacement_without_mutation() {
             immutable_run_bundle: &stored,
         },
     )
-    .expect("exact fixture continuation validates");
-
+    .expect_err("active run without durable window fails closed");
     assert_eq!(
-        result.fixture_response().outcome(),
-        GitHubPullRequestCommentWriteOutcome::FixtureValidated
+        error.code(),
+        "github_pr_comment_fixture_continuation.execution_window_missing"
     );
     assert_eq!(
-        result.approval_linkage().linked_approval_reference_count(),
-        1
+        active_events,
+        active_backend
+            .read_events(&run_id)
+            .expect("unchanged events")
     );
-    assert!(!result.provider_call_performed());
-    assert!(!result.side_effect_mutated());
-    assert!(!result.workflow_event_appended());
-    assert!(!result.report_artifact_written());
     assert_eq!(
         events_before,
         backend.read_events(&run_id).expect("events after")
@@ -17749,13 +17785,13 @@ fn fixture_continuation_rejects_actor_substitution_before_fixture_validation() {
     let registry = registry(Box::new(EchoHandler {
         calls: Rc::new(Cell::new(0)),
     }));
-    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
-    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let backend =
+        SqliteStateBackend::open(project.path().join("state.sqlite3")).expect("state backend");
     let executor = LocalExecutor::new(&backend, &registry);
     let run_id = WorkflowRunId::new("run/fixture-continuation-actor-mismatch").expect("run id");
     let paused = execute_with_immutable_run_bundle(
         &executor,
-        &bundle_store,
+        &backend,
         &project
             .immutable_bundle_request(run_id.clone(), "bundle/fixture-continuation-actor-mismatch"),
     )
@@ -17795,8 +17831,8 @@ fn fixture_continuation_rejects_actor_substitution_before_fixture_validation() {
     let write_request =
         github_pr_comment_fixture_continuation_request(&project, run_id.clone(), &attempted);
     let fixture = github_pr_comment_fixture_continuation_fixture(&attempted);
-    let stored = bundle_store
-        .read_bundle(
+    let stored = backend
+        .read_exact_bundle(
             &run_id,
             completed
                 .snapshot
@@ -17842,13 +17878,13 @@ fn fixture_continuation_rejects_unimplemented_delegation_contract() {
     let registry = registry(Box::new(EchoHandler {
         calls: Rc::new(Cell::new(0)),
     }));
-    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
-    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let backend =
+        SqliteStateBackend::open(project.path().join("state.sqlite3")).expect("state backend");
     let executor = LocalExecutor::new(&backend, &registry);
     let run_id = WorkflowRunId::new("run/fixture-continuation-delegation").expect("run id");
     let paused = execute_with_immutable_run_bundle(
         &executor,
-        &bundle_store,
+        &backend,
         &project.immutable_bundle_request(run_id.clone(), "bundle/fixture-continuation-delegation"),
     )
     .expect("bundle-backed run pauses");
@@ -17887,8 +17923,8 @@ fn fixture_continuation_rejects_unimplemented_delegation_contract() {
     let write_request =
         github_pr_comment_fixture_continuation_request(&project, run_id.clone(), &attempted);
     let fixture = github_pr_comment_fixture_continuation_fixture(&attempted);
-    let stored = bundle_store
-        .read_bundle(
+    let stored = backend
+        .read_exact_bundle(
             &run_id,
             completed
                 .snapshot

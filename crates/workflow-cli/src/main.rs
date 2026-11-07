@@ -453,7 +453,7 @@ fn provider_github_pr_comment_continue_sandbox_command(
         replacement_actor,
         delegated_by,
     } = load_github_pr_comment_fixture_continuation_input(invocation, request_path)?;
-    let backend = local_backend(invocation)?;
+    let backend = github_pr_comment_continuation_backend(invocation)?;
     let durable_run = backend.rehydrate_run(write_request.run_id())?;
     let attempted_record = backend
         .read_side_effect_record(write_request.side_effect_id())?
@@ -476,8 +476,11 @@ fn provider_github_pr_comment_continue_sandbox_command(
                 "fixture continuation requires a durable immutable run-bundle binding",
             )
         })?;
-    let immutable_bundle = authoritative_immutable_bundle_store(invocation)
-        .read_bundle(write_request.run_id(), binding.bundle_id())?;
+    let immutable_bundle = ImmutableRunBundleStore::read_exact_bundle(
+        &backend,
+        write_request.run_id(),
+        binding.bundle_id(),
+    )?;
     let registry = LocalSkillRegistry::new();
     let executor = LocalExecutor::new(&backend, &registry);
     let result = workflow_core::validate_github_pr_comment_fixture_continuation(
@@ -501,6 +504,19 @@ fn provider_github_pr_comment_continue_sandbox_command(
     )?;
     print_github_pr_comment_fixture_continuation_result(invocation, &result);
     Ok(())
+}
+
+fn github_pr_comment_continuation_backend(
+    invocation: &Invocation,
+) -> Result<SqliteStateBackend, WorkflowOsError> {
+    let database = invocation
+        .state_dir()
+        .join("github-pr-comment-continuation.sqlite3");
+    if database.is_file() {
+        SqliteStateBackend::upgrade_operational_opening_run_scope_v8_to_v9(database)
+    } else {
+        SqliteStateBackend::open(database)
+    }
 }
 
 struct ParsedGitHubPrCommentFixtureContinuation {

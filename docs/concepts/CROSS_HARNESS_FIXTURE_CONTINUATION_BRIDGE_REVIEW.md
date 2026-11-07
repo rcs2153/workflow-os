@@ -3,6 +3,40 @@
 Status: not accepted; blocker correction required before the independent
 Codex/LangGraph fixture corpus
 
+## Blocker Correction In Progress
+
+The active correction is governed by `dg/blocker`, run
+`run-1794026064962845000-2`, approval
+`approval/run-1794026064962845000-2/fix-approved`, with persisted presentation
+`presentation/070b2c76f5e656cd`. Its state store is
+`/private/tmp/workflow-os-cross-harness-bridge-blocker-state`.
+The 39-event mock-backed governance run is Completed; this does not establish
+completion of external implementation work or acceptance of this review.
+
+Commit `adcfdf95` rejects non-fixture modes and malformed optional fixture
+references. The subsequent worktree correction moves continuation to SQLite,
+rejects terminal runs, and adds a read-only exact pre-dispatch attempt check.
+The generic continuity disposition is deliberately not used: an Executing
+window returns Blocked there, rather than ResumeNow. Fixture validation must
+not reinterpret that result as dispatch permission.
+
+Remaining acceptance work includes a successful public CLI continuation,
+declared evidence/check obligation coverage, stale/expired/revoked/consumed
+window cases, exact action binding, complete validation, and matching product
+contract/report updates. Do not begin the independent harness corpus or claim
+live cross-harness continuation until those requirements are proven. No
+provider dispatch authority is issued by this validation-only path.
+
+Candidate checkpoint validation: warnings-denied Clippy for Core and CLI with
+all targets/features passed; the three focused local-executor continuation
+tests passed, including terminal rejection and the approved Running prefix
+without an execution window; docs validation passed. These are rejection-path
+and compile/lint results, not evidence of a successful active continuation.
+The candidate additionally compares the supplied SideEffect to its stored
+record and checks cited results against required commands on the immutable
+workflow prefix. Attestation, freshness, exact-action authority, and the
+successful public path still require the acceptance work listed above.
+
 ## Verdict
 
 The first public continuation bridge establishes useful durable identity,

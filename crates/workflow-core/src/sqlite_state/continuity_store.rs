@@ -1542,6 +1542,70 @@ impl AuthorizedExecutionContinuityEligibilityReader for SqliteStateBackend {
     }
 }
 
+impl SqliteStateBackend {
+    pub(crate) fn fixture_predispatch_attempt_is_current(
+        &self,
+        run: &WorkflowRun,
+        record: &crate::SideEffectRecord,
+        opening: &crate::OperationalExecutionWindowOpeningProjectionSnapshot,
+    ) -> Result<bool, WorkflowOsError> {
+        let observation = observe_continuity_trusted_time()?;
+        let connection = self.connection()?;
+        let transaction = connection.unchecked_transaction().map_err(|error| {
+            map_sqlite_error(
+                error,
+                "fixture_continuation.read_failed",
+                "fixture continuation state could not be read",
+            )
+        })?;
+        let state = super::continuity_codec::load_snapshot(&transaction)?;
+        let Some(window) = state.windows.get(opening.window_id()) else {
+            return Ok(false);
+        };
+        let Some(attempt) = state.attempts.get(opening.attempt_id()) else {
+            return Ok(false);
+        };
+        let dispatched: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM dispatch_reservations WHERE attempt_id = ?1)",
+                [opening.attempt_id().as_str()],
+                |row| row.get(0),
+            )
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "fixture_continuation.read_failed",
+                    "fixture continuation dispatch posture could not be read",
+                )
+            })?;
+        Ok(!dispatched
+            && state.trusted_time.eligibility == ContinuityInstanceEligibility::LiveStateEligible
+            && state.trusted_time.posture != TrustedTimePosture::Quarantined
+            && observation.source() == state.trusted_time.source
+            && observation.provenance_commitment() == &state.trusted_time.provenance_commitment
+            && observation.epoch_id() == &state.trusted_time.epoch_id
+            && window.trusted_time_epoch_id == state.trusted_time.epoch_id
+            && state
+                .trusted_time
+                .last_observed_at
+                .map_or(true, |prior| observation.observed_at() >= prior)
+            && observation.observed_at() >= window.trusted_time_watermark
+            && observation.observed_at() < window.expires_at
+            && window.state == AuthoritativeWindowState::Executing
+            && window.workflow_id == run.snapshot.identity.workflow_id
+            && window.run_id == run.snapshot.identity.run_id
+            && Some(&window.step_id) == record.step_id()
+            && Some(&window.subject_actor_id) == record.actor()
+            && Some(&window.immutable_run_bundle)
+                == run.snapshot.identity.immutable_run_bundle.as_ref()
+            && attempt.state == AuthoritativeAttemptState::Started
+            && attempt.window_id == window.window_id
+            && attempt.subject_actor_id == window.subject_actor_id
+            && attempt.authority_commitment == window.authority_commitment
+            && attempt.cursor == window.cursor)
+    }
+}
+
 impl AuthorizedExecutionAttemptDispatchValidator for SqliteStateBackend {
     fn attempt_dispatch_is_current(
         &self,

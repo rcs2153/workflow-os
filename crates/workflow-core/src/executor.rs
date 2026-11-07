@@ -11465,14 +11465,11 @@ impl fmt::Debug for GitHubPrCommentFixtureContinuationValidationResult {
 /// Returns stable, non-leaking errors when durable state, immutable identity,
 /// actor posture, approval proof/linkage, request identity, or fixture input
 /// is missing, stale, changed, or unsupported.
-pub fn validate_github_pr_comment_fixture_continuation<B>(
-    executor: &LocalExecutor<'_, B>,
+pub fn validate_github_pr_comment_fixture_continuation(
+    executor: &LocalExecutor<'_, crate::SqliteStateBackend>,
     store: &impl SideEffectRecordStore,
     request: GitHubPrCommentFixtureContinuationValidationRequest<'_>,
-) -> Result<GitHubPrCommentFixtureContinuationValidationResult, WorkflowOsError>
-where
-    B: StateBackend,
-{
+) -> Result<GitHubPrCommentFixtureContinuationValidationResult, WorkflowOsError> {
     if request.presentation_policy.mode == ApprovalPresentationDefaultEnforcementMode::NotRequired {
         return Err(executor_error(
             WorkflowOsErrorKind::Validation,
@@ -11514,9 +11511,24 @@ where
             "fixture continuation requires caller run to match durable state",
         ));
     }
-    validate_live_sandbox_approval_authority_run(&durable_run, request.attempted_record)?;
-
     validate_fixture_continuation_identity(&durable_run, &request)?;
+    if store
+        .read_side_effect_record(request.attempted_record.side_effect_id())?
+        .as_ref()
+        != Some(request.attempted_record)
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "github_pr_comment_fixture_continuation.side_effect_state_mismatch",
+            "fixture continuation requires the exact durable attempted side effect",
+        ));
+    }
+    validate_fixture_continuation_authoritative_state(
+        executor.backend,
+        &durable_run,
+        request.attempted_record,
+        request.immutable_run_bundle,
+    )?;
 
     provider_write_approval_presentation_gate_for_record(
         executor,
@@ -11544,6 +11556,153 @@ where
         fixture_response,
         approval_linkage,
     })
+}
+
+fn validate_fixture_continuation_authoritative_state(
+    backend: &crate::SqliteStateBackend,
+    run: &WorkflowRun,
+    attempted_record: &SideEffectRecord,
+    stored: &crate::StoredImmutableRunBundle,
+) -> Result<(), WorkflowOsError> {
+    if !matches!(
+        run.snapshot.status,
+        WorkflowRunStatus::Running | WorkflowRunStatus::Retrying
+    ) {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "github_pr_comment_fixture_continuation.run_not_active",
+            "fixture continuation requires an active resumable workflow run",
+        ));
+    }
+    let opening = run
+        .snapshot
+        .last_operational_opening_projection
+        .as_ref()
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "github_pr_comment_fixture_continuation.execution_window_missing",
+                "fixture continuation requires a durable operational execution window",
+            )
+        })?;
+    if !backend.fixture_predispatch_attempt_is_current(run, attempted_record, opening)? {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "github_pr_comment_fixture_continuation.execution_window_not_resumable",
+            "fixture continuation execution window is not currently resumable",
+        ));
+    }
+    let opening_event_id = opening.committed_result_cursor().event_id().as_str();
+    if !attempted_record.references().iter().any(|reference| {
+        reference.kind() == crate::SideEffectReferenceKind::WorkflowEvent
+            && reference.reference() == opening_event_id
+    }) {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.execution_window_unbound",
+            "fixture continuation side effect is not bound to the current execution window",
+        ));
+    }
+    validate_fixture_continuation_check_evidence(run, attempted_record, stored)
+}
+
+fn validate_fixture_continuation_check_evidence(
+    run: &WorkflowRun,
+    attempted_record: &SideEffectRecord,
+    stored: &crate::StoredImmutableRunBundle,
+) -> Result<(), WorkflowOsError> {
+    let bundle = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "github_pr_comment_fixture_continuation.immutable_run_bundle_missing",
+                "fixture continuation requires an immutable run bundle",
+            )
+        })?;
+    let check_references = attempted_record
+        .references()
+        .iter()
+        .filter(|reference| reference.kind() == crate::SideEffectReferenceKind::LocalCheckResult)
+        .collect::<Vec<_>>();
+    if check_references.is_empty() {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "github_pr_comment_fixture_continuation.check_evidence_missing",
+            "fixture continuation requires durable passing check evidence",
+        ));
+    }
+    for reference in &check_references {
+        let matches = run
+            .events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    &event.kind,
+                    WorkflowRunEventKind::LocalCheckResultRecorded(result)
+                        if result.result_id().as_str() == reference.reference()
+                            && result.status() == crate::LocalCheckResultStatus::Passed
+                            && result.immutable_run_bundle() == bundle
+                )
+            })
+            .count();
+        if matches != 1 {
+            return Err(executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "github_pr_comment_fixture_continuation.check_evidence_invalid",
+                "fixture continuation check evidence is missing, failed, duplicated, or changed",
+            ));
+        }
+    }
+    let workflow = immutable_continuation_workflow(stored)?;
+    let selected_index = workflow
+        .steps
+        .iter()
+        .position(|step| Some(&step.id) == attempted_record.step_id())
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "github_pr_comment_fixture_continuation.step_missing",
+                "fixture continuation step is absent from the immutable workflow",
+            )
+        })?;
+    for step in &workflow.steps[..=selected_index] {
+        for requirement in &step.local_check_requirements {
+            if requirement.requirement_level() != crate::LocalCheckRequirementLevel::Required {
+                continue;
+            }
+            let satisfied = run.events.iter().any(|event| {
+                let WorkflowRunEventKind::LocalCheckResultRecorded(result) = &event.kind else {
+                    return false;
+                };
+                result.step_id() == &step.id
+                    && result.command_id() == requirement.command_id()
+                    && requirement.accepted_statuses().contains(&result.status())
+                    && result.immutable_run_bundle() == bundle
+                    && check_references.iter().any(|reference| {
+                        reference.reference() == result.result_id().as_str()
+                    })
+                    && run.events.iter().any(|terminal| {
+                        terminal.event_id == *result.invocation_terminal_event_id()
+                            && terminal.sequence_number > event.sequence_number
+                            && matches!(&terminal.kind,
+                                WorkflowRunEventKind::SkillInvocationSucceeded { invocation_id, step_id, .. }
+                                    if invocation_id == result.invocation_id() && step_id == &step.id)
+                    })
+            });
+            if !satisfied {
+                return Err(executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "github_pr_comment_fixture_continuation.required_check_unsatisfied",
+                    "fixture continuation declared check obligation is not durably satisfied",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_fixture_continuation_identity(
