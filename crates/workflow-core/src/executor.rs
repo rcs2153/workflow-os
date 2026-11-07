@@ -11484,15 +11484,7 @@ pub fn validate_github_pr_comment_fixture_continuation(
             "fixture continuation does not yet support delegated actor substitution",
         ));
     }
-    if request.write_request.mode() != crate::GitHubPullRequestCommentWriteMode::Fixture
-        || request.fixture.mode() != crate::GitHubPullRequestCommentWriteMode::Fixture
-    {
-        return Err(executor_error(
-            WorkflowOsErrorKind::Validation,
-            "github_pr_comment_fixture_continuation.fixture_mode_required",
-            "fixture continuation accepts only fixture-mode request and response inputs",
-        ));
-    }
+    require_fixture_continuation_modes(&request)?;
 
     let durable_run = executor
         .backend
@@ -11542,7 +11534,6 @@ pub fn validate_github_pr_comment_fixture_continuation(
         &action,
     )?;
     validate_fixture_continuation_authoritative_state(
-        executor.backend,
         &durable_run,
         request.attempted_record,
         request.immutable_run_bundle,
@@ -11565,10 +11556,56 @@ pub fn validate_github_pr_comment_fixture_continuation(
     let preflighted = GitHubPullRequestCommentPreflightedWrite::new(request.write_request)?;
     let fixture_response =
         crate::validate_github_pr_comment_fixture_write(&preflighted, request.fixture)?;
+    validate_fixture_continuation_snapshot(
+        executor.backend,
+        &durable_run,
+        request.attempted_record,
+    )?;
     Ok(GitHubPrCommentFixtureContinuationValidationResult {
         fixture_response,
         approval_linkage,
     })
+}
+
+fn require_fixture_continuation_modes(
+    request: &GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+) -> Result<(), WorkflowOsError> {
+    if request.write_request.mode() != crate::GitHubPullRequestCommentWriteMode::Fixture
+        || request.fixture.mode() != crate::GitHubPullRequestCommentWriteMode::Fixture
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.fixture_mode_required",
+            "fixture continuation accepts only fixture-mode request and response inputs",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_fixture_continuation_snapshot(
+    backend: &crate::SqliteStateBackend,
+    durable_run: &WorkflowRun,
+    record: &SideEffectRecord,
+) -> Result<(), WorkflowOsError> {
+    let opening = durable_run
+        .snapshot
+        .last_operational_opening_projection
+        .as_ref()
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "github_pr_comment_fixture_continuation.execution_window_missing",
+                "fixture continuation requires a durable operational execution window",
+            )
+        })?;
+    if !backend.fixture_continuation_snapshot_is_current(durable_run, record, opening)? {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "github_pr_comment_fixture_continuation.execution_window_not_resumable",
+            "fixture continuation window or checked state is no longer current",
+        ));
+    }
+    Ok(())
 }
 
 /// Derives the opening event reference to cite on the attempted fixture `SideEffect`.
@@ -11889,7 +11926,6 @@ fn validate_fixture_continuation_approved_action(
 }
 
 fn validate_fixture_continuation_authoritative_state(
-    backend: &crate::SqliteStateBackend,
     run: &WorkflowRun,
     attempted_record: &SideEffectRecord,
     stored: &crate::StoredImmutableRunBundle,
@@ -11911,18 +11947,6 @@ fn validate_fixture_continuation_authoritative_state(
             WorkflowOsErrorKind::Security,
             "github_pr_comment_fixture_continuation.approval_after_opening",
             "fixture continuation window must be opened after the exact action was approved",
-        ));
-    }
-    if !backend.fixture_predispatch_attempt_is_current(
-        run,
-        attempted_record.actor(),
-        attempted_record.step_id(),
-        opening,
-    )? {
-        return Err(executor_error(
-            WorkflowOsErrorKind::InvalidState,
-            "github_pr_comment_fixture_continuation.execution_window_not_resumable",
-            "fixture continuation execution window is not currently resumable",
         ));
     }
     let opening_event_id = opening.committed_result_cursor().event_id().as_str();
@@ -12010,40 +12034,62 @@ fn validate_fixture_continuation_check_evidence(
                 "fixture continuation step is absent from the immutable workflow",
             )
         })?;
-    for step in &workflow.steps[..=selected_index] {
-        for requirement in &step.local_check_requirements {
-            if requirement.requirement_level() != crate::LocalCheckRequirementLevel::Required {
-                continue;
-            }
-            let satisfied = run.events.iter().any(|event| {
-                let WorkflowRunEventKind::LocalCheckResultRecorded(result) = &event.kind else {
-                    return false;
-                };
-                result.step_id() == &step.id
-                    && result.command_id() == requirement.command_id()
-                    && requirement.accepted_statuses().contains(&result.status())
-                    && result.immutable_run_bundle() == bundle
-                    && check_references.iter().any(|reference| {
-                        reference.reference() == result.result_id().as_str()
-                    })
-                    && run.events.iter().any(|terminal| {
-                        terminal.event_id == *result.invocation_terminal_event_id()
-                            && terminal.sequence_number > event.sequence_number
-                            && matches!(&terminal.kind,
-                                WorkflowRunEventKind::SkillInvocationSucceeded { invocation_id, step_id, .. }
-                                    if invocation_id == result.invocation_id() && step_id == &step.id)
-                    })
-            });
-            if !satisfied {
-                return Err(executor_error(
-                    WorkflowOsErrorKind::InvalidState,
-                    "github_pr_comment_fixture_continuation.required_check_unsatisfied",
-                    "fixture continuation declared check obligation is not durably satisfied",
-                ));
-            }
-        }
+    require_verifiable_fixture_checks(&workflow.steps[..=selected_index])
+}
+
+fn require_verifiable_fixture_checks(steps: &[StepDefinition]) -> Result<(), WorkflowOsError> {
+    if steps
+        .iter()
+        .flat_map(|step| &step.local_check_requirements)
+        .any(|requirement| {
+            requirement.requirement_level() == crate::LocalCheckRequirementLevel::Required
+        })
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Unsupported,
+            "github_pr_comment_fixture_continuation.required_check_attestation_unavailable",
+            "fixture continuation cannot verify the declared check attestation and constraints",
+        ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod fixture_check_policy_tests {
+    use super::*;
+
+    #[test]
+    fn fixture_continuation_refuses_unverifiable_required_check_declarations() {
+        let step: StepDefinition = serde_yaml::from_str(
+            r"
+id: validate
+skill_ref:
+  id: local/echo
+  version: v0
+local_check_requirements:
+  - id: docs-required
+    command_id: local-check/docs
+    requirement_level: required
+    minimum_assurance: kernel_observed_local_process
+    accepted_statuses: [passed]
+    freshness:
+      mode: no_reuse
+    exact_immutable_run_binding_required: true
+    truncation_allowed: false
+    network_maximum: disabled
+    side_effect_maximum: no_source_writes
+",
+        )
+        .expect("required check declaration");
+        let error = require_verifiable_fixture_checks(&[step])
+            .expect_err("fixture cannot attest to declared constraints");
+        assert_eq!(
+            error.code(),
+            "github_pr_comment_fixture_continuation.required_check_attestation_unavailable"
+        );
+        require_verifiable_fixture_checks(&[]).expect("no required declarations");
+    }
 }
 
 fn validate_fixture_continuation_identity(

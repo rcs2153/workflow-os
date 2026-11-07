@@ -1543,12 +1543,39 @@ impl AuthorizedExecutionContinuityEligibilityReader for SqliteStateBackend {
 }
 
 impl SqliteStateBackend {
+    pub(crate) fn fixture_continuation_snapshot_is_current(
+        &self,
+        run: &WorkflowRun,
+        record: &crate::SideEffectRecord,
+        opening: &crate::OperationalExecutionWindowOpeningProjectionSnapshot,
+    ) -> Result<bool, WorkflowOsError> {
+        self.fixture_predispatch_snapshot_matches(
+            run,
+            record.actor(),
+            record.step_id(),
+            opening,
+            Some(record),
+        )
+    }
+
+    #[cfg(test)]
     pub(crate) fn fixture_predispatch_attempt_is_current(
         &self,
         run: &WorkflowRun,
         actor: Option<&crate::ActorId>,
         step_id: Option<&crate::StepId>,
         opening: &crate::OperationalExecutionWindowOpeningProjectionSnapshot,
+    ) -> Result<bool, WorkflowOsError> {
+        self.fixture_predispatch_snapshot_matches(run, actor, step_id, opening, None)
+    }
+
+    fn fixture_predispatch_snapshot_matches(
+        &self,
+        run: &WorkflowRun,
+        actor: Option<&crate::ActorId>,
+        step_id: Option<&crate::StepId>,
+        opening: &crate::OperationalExecutionWindowOpeningProjectionSnapshot,
+        record: Option<&crate::SideEffectRecord>,
     ) -> Result<bool, WorkflowOsError> {
         let observation = observe_continuity_trusted_time()?;
         let connection = self.connection()?;
@@ -1559,6 +1586,23 @@ impl SqliteStateBackend {
                 "fixture continuation state could not be read",
             )
         })?;
+        if Self::read_events_with_connection(&transaction, &run.snapshot.identity.run_id)?
+            != run.events
+        {
+            return Ok(false);
+        }
+        if let Some(expected) = record {
+            let actual: Option<crate::SideEffectRecord> = super::read_optional_payload(
+                &transaction,
+                "side_effect_records",
+                "side_effect_id",
+                expected.side_effect_id().as_str(),
+                "side-effect record",
+            )?;
+            if actual.as_ref() != Some(expected) {
+                return Ok(false);
+            }
+        }
         let state = super::continuity_codec::load_snapshot(&transaction)?;
         let Some(window) = state.windows.get(opening.window_id()) else {
             return Ok(false);

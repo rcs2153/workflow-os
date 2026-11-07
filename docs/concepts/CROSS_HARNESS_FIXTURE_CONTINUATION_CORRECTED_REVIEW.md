@@ -3,6 +3,34 @@
 Reviewed head: `9d6f6466`. Verdict: not accepted for the independent harness
 corpus. The fixture success path is real; two authority checks need correction.
 
+## Correction Candidate
+
+The final read transaction now compares the exact event history and durable
+SideEffect against the facts used by validation in the same snapshot as the
+continuity tables and dispatch reservation. The approval proof and immutable
+bundle are create-only. The returned fixture verdict is valid at that read
+snapshot; it is not a capability or a promise about later dispatch.
+
+A regression commits a later failed check after the initial run read, during
+approval linkage lookup, while the execution window remains open. The old
+verdict is rejected at the final snapshot boundary. Rereading the updated run
+also rejects the superseded pass.
+
+The fixture bridge refuses workflows with required check declarations in
+the selected prefix when the durable record cannot prove their attestation
+and constraints. A parsed declaration regression covers that refusal. The
+existing positive fixture has no required check declaration and does not
+prove support for declared attested checks. No broader authority is issued.
+
+Correction governance: `dg/blocker`, run `run-1794030899775173000-2`,
+grant `approval/run-1794030899775173000-2/fix-approved`, presentation
+`presentation/34e30d508a7f667e`, proof-backed delegated approval. Closeout:
+Completed, 39 events, one grant, no retries or escalations. Three focused
+continuation tests with the rebuilt CLI probe, 35 fixture-filtered Core unit
+tests, warnings-denied Core and CLI Clippy, format, docs, and diff checks
+passed. Source edits, test commands, docs and Git work occurred outside the
+kernel. No WorkReport, live call, PR, or merge was performed.
+
 ## Findings
 
 ### P0: Current authority is assembled from separate database snapshots

@@ -17955,9 +17955,22 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
         EventSequenceNumber::new(interrupted.snapshot.last_sequence_number.get() + 1)
             .expect("later sequence");
     event.event_id = EventId::new("event/fixture-check-later-failure").expect("event");
-    active_backend
-        .append_event(&event)
-        .expect("later check event");
+    let interleaving_store = FixtureEvidenceDriftStore {
+        backend: &active_backend,
+        event: &event,
+        reads: Cell::new(0),
+    };
+    let stale = validate_github_pr_comment_fixture_continuation(
+        &replacement,
+        &interleaving_store,
+        request_for_run(&interrupted),
+    )
+    .expect_err("evidence changed after initial read must invalidate the verdict");
+    assert_eq!(
+        stale.code(),
+        "github_pr_comment_fixture_continuation.execution_window_not_resumable"
+    );
+    assert_eq!(interleaving_store.reads.get(), 2);
     let drifted = reader.rehydrate_run(&run_id).expect("changed facts");
     let error = validate_github_pr_comment_fixture_continuation(
         &replacement,
@@ -17973,6 +17986,46 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
         reader.rehydrate_run(&run_id).expect("unchanged drift"),
         drifted
     );
+}
+
+struct FixtureEvidenceDriftStore<'a> {
+    backend: &'a SqliteStateBackend,
+    event: &'a WorkflowRunEvent,
+    reads: Cell<u32>,
+}
+
+impl SideEffectRecordStore for FixtureEvidenceDriftStore<'_> {
+    fn write_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        self.backend.write_side_effect_record(record)
+    }
+
+    fn read_side_effect_record(
+        &self,
+        id: &SideEffectId,
+    ) -> Result<Option<SideEffectRecord>, WorkflowOsError> {
+        let result = self.backend.read_side_effect_record(id)?;
+        self.reads.set(self.reads.get() + 1);
+        if self.reads.get() == 2 {
+            self.backend.append_event(self.event)?;
+        }
+        Ok(result)
+    }
+
+    fn list_side_effect_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+        self.backend.list_side_effect_records(run_id)
+    }
+
+    fn list_side_effect_records_for_workflow_run(
+        &self,
+        workflow_id: &WorkflowId,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+        self.backend
+            .list_side_effect_records_for_workflow_run(workflow_id, run_id)
+    }
 }
 
 fn verify_fixture_continuation_cli(

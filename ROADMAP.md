@@ -263,6 +263,11 @@ or fail closed when those facts cannot be verified. Keep the independent
 harness corpus gated. The [prepared-fixture evidence](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_REVIEW.md#prepared-fixture-and-public-cli-proof)
 remains valid for its tested boundary.
 
+The snapshot correction candidate now rechecks the event history, SideEffect,
+window, and dispatch reservation in one final SQLite read transaction, and
+rejects required check declarations that the fixture cannot attest. The
+independent harness corpus remains gated pending review of this correction.
+
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
 recursive agents, nested-harness runtime, a new provider mutation family, or a
