@@ -3302,11 +3302,17 @@ mod tests {
         exercise_live_grant_reservation(LiveGrantTrial::Revoked);
     }
 
+    #[test]
+    fn live_grant_principal_revocation_survives_reopen() {
+        exercise_live_grant_reservation(LiveGrantTrial::PrincipalRevoked);
+    }
+
     #[derive(Clone, Copy)]
     enum LiveGrantTrial {
         AmbiguousCommit,
         Contended,
         Revoked,
+        PrincipalRevoked,
     }
 
     #[allow(clippy::too_many_lines)]
@@ -3315,8 +3321,9 @@ mod tests {
         use crate::dispatch_reservation::{request_commitment, DispatchReservationStore};
         use crate::live_sandbox_continuation_authority::{
             tests::{with_live_grant_test_facts, LiveGrantTestContext},
-            LIVE_CAPABILITY,
+            LiveSandboxPrincipalVerifier, LIVE_CAPABILITY,
         };
+        use crate::local_fixture_replacement_authority::LocalFixturePrincipalVerifier;
         use crate::provider_write::GitHubCommentContinuationAction;
         use crate::{
             CapabilityGrantLifecycle, GitHubPullRequestCommentTarget,
@@ -3393,8 +3400,8 @@ mod tests {
                     super::super::validate_schema_metadata_version(
                         &connection,
                         super::super::LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
-                        "sha256:d73239544f08c79a64ce001bfea57a2adc8212809499dcf561f1ed2c03df0d51",
-                        super::super::LIVE_AUTHORITY_SCHEMA_DIGEST,
+                        "sha256:1dddc6985e2bb5cc014db4c86900a7591fbef63ef89ca10e759f85795f2eff9a",
+                        "d73239544f08c79a64ce001bfea57a2adc8212809499dcf561f1ed2c03df0d51",
                     )
                     .expect_err("older V11 writer must not accept the live opening protocol")
                     .code(),
@@ -3426,6 +3433,8 @@ mod tests {
                     panic!("fresh opening");
                 };
                 let grant = grant_for(LIVE_CAPABILITY, CapabilityGrantLifecycle::Active);
+                let live_credential = [43; 32];
+                let fixture_credential = [17; 32];
                 let backend = SqliteStateBackend::open(&fixture.path).expect("reopen V11");
                 assert!(matches!(
                     backend
@@ -3448,7 +3457,8 @@ mod tests {
                         checked_reservation_request(&capability),
                         LiveGrantAdmission {
                             grant_id: grant.grant_id(),
-                            facts
+                            facts,
+                            credential: &live_credential,
                         }
                     )
                     .is_err());
@@ -3462,6 +3472,24 @@ mod tests {
                     "fixture/github-pr-comment-continuation",
                     CapabilityGrantLifecycle::Active,
                 );
+                let harness = facts.scope.harness_contract_id().expect("harness").clone();
+                backend
+                    .register_local_fixture_principal(&LocalFixturePrincipalVerifier::new(
+                        facts.replacement.clone(),
+                        harness.clone(),
+                        &fixture_credential,
+                    ))
+                    .expect("register separate fixture principal");
+                assert!(backend.issue_live_sandbox_grant(facts, &grant).is_err());
+                let verifier = LiveSandboxPrincipalVerifier::new(
+                    facts.replacement.clone(),
+                    harness,
+                    &live_credential,
+                );
+                backend
+                    .register_live_sandbox_principal(&verifier)
+                    .expect("register live principal");
+                assert!(backend.register_live_sandbox_principal(&verifier).is_err());
                 assert!(backend
                     .issue_live_sandbox_grant(facts, &fixture_only)
                     .is_err());
@@ -3494,7 +3522,15 @@ mod tests {
                 let admission = LiveGrantAdmission {
                     grant_id: grant.grant_id(),
                     facts,
+                    credential: &live_credential,
                 };
+                let unauthenticated = LiveGrantAdmission {
+                    credential: &fixture_credential,
+                    ..admission
+                };
+                assert!(backend
+                    .reserve_live_sandbox_dispatch(request(), unauthenticated)
+                    .is_err());
                 assert!(backend.reserve_attempt_dispatch(request()).is_err());
                 let stale = LiveGrantAdmission {
                     facts:
@@ -3553,6 +3589,22 @@ mod tests {
                         assert_eq!(event_count(), before);
                         return;
                     }
+                    LiveGrantTrial::PrincipalRevoked => {
+                        backend
+                            .revoke_live_sandbox_principal(facts.replacement)
+                            .expect("revoke principal");
+                        let restarted = SqliteStateBackend::open(&fixture.path)
+                            .expect("reopen revoked principal");
+                        assert!(restarted
+                            .reserve_live_sandbox_dispatch(request(), admission)
+                            .is_err());
+                        assert!(restarted
+                            .register_live_sandbox_principal(&verifier)
+                            .is_err());
+                        assert_eq!(counts(), (0, 0));
+                        assert_eq!(event_count(), before);
+                        return;
+                    }
                 }
                 assert_eq!(counts(), (1, 1));
                 assert_eq!(event_count(), before + 1);
@@ -3560,7 +3612,16 @@ mod tests {
                     .reserve_live_sandbox_dispatch(request(), admission)
                     .expect("replay")
                     .is_none());
+                assert!(backend
+                    .reserve_live_sandbox_dispatch(request(), unauthenticated)
+                    .is_err());
                 assert!(backend.reserve_attempt_dispatch(request()).is_err());
+                backend
+                    .revoke_live_sandbox_principal(facts.replacement)
+                    .expect("revoke principal after reservation");
+                assert!(backend
+                    .reserve_live_sandbox_dispatch(request(), admission)
+                    .is_err());
                 backend
                     .revoke_live_sandbox_grant(grant.grant_id())
                     .expect("revoke without removing use");

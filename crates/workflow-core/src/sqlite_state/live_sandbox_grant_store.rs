@@ -10,17 +10,65 @@ use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeAttemptState, AuthoritativeWindowState,
 };
 use crate::dispatch_reservation::DispatchReservationRequest;
-use crate::live_sandbox_continuation_authority::LiveSandboxContinuationFacts;
+use crate::live_sandbox_continuation_authority::{
+    LiveSandboxContinuationFacts, LiveSandboxPrincipalVerifier, LIVE_CAPABILITY,
+};
 use crate::operational_execution_window_opening::{
     operation_binding_commitment, OperationalExecutionWindowOpeningRequest,
 };
 use crate::{
-    ApprovalPresentationRecord, AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId,
-    CapabilityGrant, CapabilityGrantId, SpecContentHash, Timestamp, WorkflowOsError, WorkflowRun,
-    WorkflowRunEventKind, WorkflowRunStatus,
+    ActorId, ApprovalPresentationRecord, AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId,
+    CapabilityGrant, CapabilityGrantId, CapabilityGrantLifecycle, SpecContentHash, Timestamp,
+    WorkflowOsError, WorkflowRun, WorkflowRunEventKind, WorkflowRunStatus,
 };
 
 impl SqliteStateBackend {
+    pub(crate) fn register_live_sandbox_principal(
+        &self,
+        verifier: &LiveSandboxPrincipalVerifier,
+    ) -> Result<(), WorkflowOsError> {
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| denied())?;
+        validate_live_store(&tx)?;
+        let changed = tx
+            .execute(
+                "INSERT INTO live_sandbox_principals (principal_id, verifier_payload)
+             VALUES (?1, ?2) ON CONFLICT(principal_id) DO NOTHING",
+                params![
+                    verifier.principal().as_str(),
+                    encode_json(verifier, "live principal verifier")?
+                ],
+            )
+            .map_err(|_| denied())?;
+        if changed != 1 {
+            return Err(denied());
+        }
+        tx.commit().map_err(|_| denied())
+    }
+
+    pub(crate) fn revoke_live_sandbox_principal(
+        &self,
+        principal: &ActorId,
+    ) -> Result<(), WorkflowOsError> {
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| denied())?;
+        validate_live_store(&tx)?;
+        let changed = tx
+            .execute(
+                "UPDATE live_sandbox_principals SET revoked=1 WHERE principal_id=?1 AND revoked=0",
+                [principal.as_str()],
+            )
+            .map_err(|_| denied())?;
+        if changed != 1 {
+            return Err(denied());
+        }
+        tx.commit().map_err(|_| denied())
+    }
+
     pub(crate) fn enable_live_sandbox_grant_store(&self) -> Result<(), WorkflowOsError> {
         let mut connection = self.existing_connection()?;
         let tx = connection
@@ -96,19 +144,22 @@ impl SqliteStateBackend {
             return Err(denied());
         }
         verify_opening(&tx, facts, &facts.action.commitment()?)?;
-        let binding = facts.grant_commitment(grant, observation.observed_at())?;
+        let registration = active_principal(&tx, grant)?.commitment()?;
+        let binding = facts.grant_commitment(grant, observation.observed_at(), &registration)?;
         let payload = encode_json(grant, "live sandbox grant")?;
         let count = tx
             .execute(
-                "INSERT INTO live_sandbox_grants (grant_id, attempt_id, binding, payload)
-             SELECT ?1, ?2, ?3, ?4 WHERE NOT EXISTS
+                "INSERT INTO live_sandbox_grants
+                 (grant_id, attempt_id, binding, payload, registration_binding)
+             SELECT ?1, ?2, ?3, ?4, ?5 WHERE NOT EXISTS
                (SELECT 1 FROM dispatch_reservations WHERE attempt_id=?2)
              ON CONFLICT(grant_id) DO NOTHING",
                 params![
                     grant.grant_id().as_str(),
                     facts.attempt.as_str(),
                     binding.as_str(),
-                    payload
+                    payload,
+                    registration.as_str(),
                 ],
             )
             .map_err(|_| denied())?;
@@ -145,9 +196,63 @@ impl SqliteStateBackend {
 pub(super) struct LiveGrantAdmission<'a> {
     pub(crate) grant_id: &'a CapabilityGrantId,
     pub(crate) facts: LiveSandboxContinuationFacts<'a>,
+    pub(crate) credential: &'a [u8; 32],
 }
 
-impl LiveGrantAdmission<'_> {
+pub(super) struct AuthenticatedLiveGrant<'a> {
+    facts: LiveSandboxContinuationFacts<'a>,
+    grant: CapabilityGrant,
+    registration: SpecContentHash,
+}
+
+impl<'a> LiveGrantAdmission<'a> {
+    pub(super) fn authenticate(
+        self,
+        tx: &Transaction<'_>,
+        request: &DispatchReservationRequest,
+        now: Timestamp,
+    ) -> Result<AuthenticatedLiveGrant<'a>, WorkflowOsError> {
+        let (binding, payload, registration_binding): (String, String, String) = tx
+            .query_row(
+                "SELECT binding, payload, registration_binding FROM live_sandbox_grants
+                 WHERE grant_id=?1 AND attempt_id=?2 AND revoked=0",
+                params![
+                    self.grant_id.as_str(),
+                    request.capability.attempt_id.as_str()
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|_| denied())?
+            .ok_or_else(denied)?;
+        let grant: CapabilityGrant = decode_json(&payload, "live sandbox grant")?;
+        let expires_at = grant.expires_at().ok_or_else(denied)?;
+        if grant.grant_id() != self.grant_id
+            || binding != request.executor_commitment.as_str()
+            || grant.lifecycle() != CapabilityGrantLifecycle::Active
+            || grant.capability().as_str() != LIVE_CAPABILITY
+            || grant.issued_at() > now
+            || now >= expires_at
+        {
+            return Err(denied());
+        }
+        let verifier = active_principal(tx, &grant)?;
+        verifier
+            .authenticate(self.credential)
+            .map_err(|_| denied())?;
+        let registration = verifier.commitment()?;
+        if registration.as_str() != registration_binding {
+            return Err(denied());
+        }
+        Ok(AuthenticatedLiveGrant {
+            facts: self.facts,
+            grant,
+            registration,
+        })
+    }
+}
+
+impl AuthenticatedLiveGrant<'_> {
     pub(super) fn consume(
         self,
         tx: &Transaction<'_>,
@@ -175,28 +280,37 @@ impl LiveGrantAdmission<'_> {
             return Err(denied());
         }
         verify_opening(tx, facts, &action)?;
-        let (binding, payload): (String, String) = tx
-            .query_row(
-                "SELECT binding, payload FROM live_sandbox_grants
-             WHERE grant_id=?1 AND attempt_id=?2 AND revoked=0",
-                params![self.grant_id.as_str(), facts.attempt.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .map_err(|_| denied())?
-            .ok_or_else(denied)?;
-        let grant: CapabilityGrant = decode_json(&payload, "live sandbox grant")?;
-        if grant.grant_id() != self.grant_id || binding != request.executor_commitment.as_str() {
-            return Err(denied());
-        }
-        facts.verify_bound_grant(&grant, now, &request.executor_commitment)?;
+        facts.verify_bound_grant(
+            &self.grant,
+            now,
+            &self.registration,
+            &request.executor_commitment,
+        )?;
         tx.execute(
             "INSERT INTO live_sandbox_grant_uses (grant_id, attempt_id) VALUES (?1,?2)",
-            params![self.grant_id.as_str(), facts.attempt.as_str()],
+            params![self.grant.grant_id().as_str(), facts.attempt.as_str()],
         )
         .map_err(|_| denied())?;
         Ok(())
     }
+}
+
+fn active_principal(
+    tx: &Connection,
+    grant: &CapabilityGrant,
+) -> Result<LiveSandboxPrincipalVerifier, WorkflowOsError> {
+    let payload: String = tx.query_row(
+        "SELECT verifier_payload FROM live_sandbox_principals WHERE principal_id=?1 AND revoked=0",
+        [grant.subject().as_str()],
+        |row| row.get(0),
+    ).optional().map_err(|_| denied())?.ok_or_else(denied)?;
+    let verifier: LiveSandboxPrincipalVerifier = decode_json(&payload, "live principal verifier")?;
+    if verifier.principal() != grant.subject()
+        || Some(verifier.harness()) != grant.scope().harness_contract_id()
+    {
+        return Err(denied());
+    }
+    Ok(verifier)
 }
 
 pub(super) fn check_dispatch_lane(

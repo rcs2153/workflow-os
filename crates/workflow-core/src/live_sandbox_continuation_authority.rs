@@ -1,7 +1,9 @@
 //! Payload-free binding for a live sandbox continuation grant. Verification
 //! must use facts resolved under the admission transaction, not a tool's claims.
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
@@ -13,6 +15,69 @@ use crate::{
 };
 
 pub(crate) const LIVE_CAPABILITY: &str = "live-sandbox/github-pr-comment-continuation";
+
+/// Provisioned by the trusted operator, never deserialized from a harness.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LiveSandboxPrincipalVerifier {
+    principal: ActorId,
+    harness: crate::HarnessContractId,
+    digest: [u8; 32],
+}
+
+impl LiveSandboxPrincipalVerifier {
+    pub(crate) fn new(
+        principal: ActorId,
+        harness: crate::HarnessContractId,
+        credential: &[u8; 32],
+    ) -> Self {
+        let digest = Self::derive(&principal, &harness, credential);
+        Self {
+            principal,
+            harness,
+            digest,
+        }
+    }
+
+    pub(crate) const fn principal(&self) -> &ActorId {
+        &self.principal
+    }
+
+    pub(crate) const fn harness(&self) -> &crate::HarnessContractId {
+        &self.harness
+    }
+
+    pub(crate) fn authenticate(&self, credential: &[u8; 32]) -> Result<(), WorkflowOsError> {
+        let derived = Self::derive(&self.principal, &self.harness, credential);
+        if bool::from(self.digest.ct_eq(&derived)) {
+            Ok(())
+        } else {
+            Err(denied())
+        }
+    }
+
+    pub(crate) fn commitment(&self) -> Result<SpecContentHash, WorkflowOsError> {
+        let mut hash = Sha256::new();
+        hash.update(b"workflow-os/live-sandbox-registration/v1\0");
+        hash.update(serde_json::to_vec(self).map_err(|_| denied())?);
+        SpecContentHash::new(format!("{:x}", hash.finalize()))
+    }
+
+    fn derive(
+        principal: &ActorId,
+        harness: &crate::HarnessContractId,
+        credential: &[u8; 32],
+    ) -> [u8; 32] {
+        let mut hash = Sha256::new();
+        hash.update(b"workflow-os/live-sandbox-principal/v1\0");
+        hash.update(principal.as_str().as_bytes());
+        hash.update(b"\0");
+        hash.update(harness.as_str().as_bytes());
+        hash.update(b"\0");
+        hash.update(credential);
+        hash.finalize().into()
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct LiveSandboxContinuationFacts<'a> {
@@ -30,7 +95,6 @@ pub(crate) struct LiveSandboxContinuationFacts<'a> {
     pub(crate) requirements: &'a CapabilityGrantRequirements,
     pub(crate) evidence_commitment: &'a SpecContentHash,
     pub(crate) policy_commitment: &'a SpecContentHash,
-    pub(crate) principal_registration_commitment: &'a SpecContentHash,
     pub(crate) sensitivity: WorkReportSensitivity,
 }
 
@@ -74,6 +138,7 @@ impl LiveSandboxContinuationFacts<'_> {
         &self,
         grant: &CapabilityGrant,
         observed_at: Timestamp,
+        registration: &SpecContentHash,
     ) -> Result<SpecContentHash, WorkflowOsError> {
         self.verify_exact_approval(observed_at)?;
         let expires_at = grant.expires_at().ok_or_else(denied)?;
@@ -110,7 +175,7 @@ impl LiveSandboxContinuationFacts<'_> {
             (
                 self.evidence_commitment,
                 self.policy_commitment,
-                self.principal_registration_commitment,
+                registration,
             ),
         ))
         .map_err(|_| denied())?;
@@ -124,9 +189,10 @@ impl LiveSandboxContinuationFacts<'_> {
         &self,
         grant: &CapabilityGrant,
         observed_at: Timestamp,
+        registration: &SpecContentHash,
         expected: &SpecContentHash,
     ) -> Result<(), WorkflowOsError> {
-        if self.grant_commitment(grant, observed_at)? != *expected {
+        if self.grant_commitment(grant, observed_at, registration)? != *expected {
             return Err(denied());
         }
         Ok(())
@@ -281,7 +347,6 @@ pub(crate) mod tests {
             requirements: &requirements,
             evidence_commitment: &SpecContentHash::from_text("passing evidence"),
             policy_commitment: &SpecContentHash::from_text("exact policy"),
-            principal_registration_commitment: &SpecContentHash::from_text("registration one"),
             sensitivity: WorkReportSensitivity::Internal,
         };
         let grant = |capability: &str, lifecycle: CapabilityGrantLifecycle| {
@@ -338,10 +403,21 @@ pub(crate) mod tests {
             },
             |facts, grant| {
                 let active = grant(LIVE_CAPABILITY, CapabilityGrantLifecycle::Active);
-                let binding = facts.grant_commitment(&active, now).expect("binding");
+                let registration = SpecContentHash::from_text("registration one");
+                let binding = facts
+                    .grant_commitment(&active, now, &registration)
+                    .expect("binding");
                 facts
-                    .verify_bound_grant(&active, now, &binding)
+                    .verify_bound_grant(&active, now, &registration, &binding)
                     .expect("exact recheck");
+                assert!(facts
+                    .verify_bound_grant(
+                        &active,
+                        now,
+                        &SpecContentHash::from_text("changed registration"),
+                        &binding,
+                    )
+                    .is_err());
                 for changed in [
                     LiveSandboxContinuationFacts {
                         action: GitHubCommentContinuationAction {
@@ -359,12 +435,6 @@ pub(crate) mod tests {
                         ..facts
                     },
                     LiveSandboxContinuationFacts {
-                        principal_registration_commitment: &SpecContentHash::from_text(
-                            "changed registration",
-                        ),
-                        ..facts
-                    },
-                    LiveSandboxContinuationFacts {
                         replacement: action.original_actor,
                         ..facts
                     },
@@ -374,7 +444,9 @@ pub(crate) mod tests {
                         ..facts
                     },
                 ] {
-                    assert!(changed.verify_bound_grant(&active, now, &binding).is_err());
+                    assert!(changed
+                        .verify_bound_grant(&active, now, &registration, &binding)
+                        .is_err());
                 }
                 let fixture = grant(
                     "fixture/github-pr-comment-continuation",
@@ -388,7 +460,9 @@ pub(crate) mod tests {
                     (&active, stale),
                     (&active, expiry),
                 ] {
-                    assert!(facts.verify_bound_grant(invalid, at, &binding).is_err());
+                    assert!(facts
+                        .verify_bound_grant(invalid, at, &registration, &binding)
+                        .is_err());
                 }
             },
         );
