@@ -17,7 +17,7 @@ use crate::dispatch_reservation::{
     DispatchReservationRequest, DispatchReservationStore,
 };
 use crate::{
-    IdempotencyKey, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent,
+    IdempotencyKey, Timestamp, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent,
     WorkflowRunEventKind, WorkflowRunSnapshot,
 };
 
@@ -55,7 +55,7 @@ impl DispatchReservationStore for SqliteStateBackend {
         &self,
         request: DispatchReservationRequest,
     ) -> Result<DispatchReservationOutcome, WorkflowOsError> {
-        self.reserve_attempt_dispatch_inner(request, None)
+        self.reserve_attempt_dispatch_checked(request, None, |_, _, _| Ok(()))
     }
 }
 
@@ -65,16 +65,26 @@ impl SqliteStateBackend {
         request: DispatchReservationRequest,
         lifecycle: &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
     ) -> Result<DispatchReservationOutcome, WorkflowOsError> {
-        self.reserve_attempt_dispatch_inner(request, Some(lifecycle))
+        self.reserve_attempt_dispatch_checked(request, Some(lifecycle), |_, _, _| Ok(()))
     }
 
+    /// Runs a kernel-owned admission check on the locked, current state before
+    /// writing a new reservation. Exact replay never calls the check or issues
+    /// a capability; its receipt is for trusted callers, not caller authentication.
+    /// The check may persist a grant-use binding but must not end the transaction
+    /// or perform any external effect.
     #[allow(clippy::too_many_lines)]
-    fn reserve_attempt_dispatch_inner(
+    pub(crate) fn reserve_attempt_dispatch_checked(
         &self,
         mut request: DispatchReservationRequest,
         lifecycle: Option<
             &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
         >,
+        check_admission: impl FnOnce(
+            &rusqlite::Transaction<'_>,
+            Timestamp,
+            Timestamp,
+        ) -> Result<(), WorkflowOsError>,
     ) -> Result<DispatchReservationOutcome, WorkflowOsError> {
         let expected_request = request_commitment(&request);
         if request.request_commitment != expected_request
@@ -87,11 +97,11 @@ impl SqliteStateBackend {
                 "dispatch reservation request is invalid",
             ));
         }
-        let observation = continuity_store::observe_continuity_trusted_time()?;
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| storage_error("begin_failed"))?;
+        let observation = continuity_store::observe_continuity_trusted_time()?;
 
         if let Some((record, binding)) = read_existing(&transaction, request.operation_id.as_str())?
         {
@@ -177,6 +187,7 @@ impl SqliteStateBackend {
         {
             return Err(not_dispatchable());
         }
+        check_admission(&transaction, observation.observed_at(), window.expires_at)?;
         let next_sequence = crate::EventSequenceNumber::new(
             last.sequence_number
                 .get()
