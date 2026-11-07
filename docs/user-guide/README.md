@@ -1,8 +1,11 @@
 # Workflow OS User Guide
 
 These guides cover the current Workflow OS `0.4.0-preview.1` preparation
-identity on `main`. Workflow OS is an advanced local governance preview, not a
-production enterprise control plane.
+identity on `main`. Workflow OS is a continuity-of-authority kernel for agentic
+work: it preserves the relationship among declared intent, scoped authority,
+actual execution, and the next lawful action across interruptions and executor
+replacement. It is an advanced local governance preview, not a production
+enterprise control plane.
 
 Start with the [Current Product Contract](current-product-contract.md) when a
 guide, implementation report, or older release document appears to disagree
@@ -60,6 +63,7 @@ with current behavior.
 - [Security](../security/README.md)
 - [Troubleshooting](../operations/TROUBLESHOOTING.md)
 - [Known limitations](../release/V0_KNOWN_LIMITATIONS.md)
+- [V1 readiness criteria](../release/V1_READINESS_CRITERIA.md)
 
 Older release, readiness, review, and implementation-plan documents are
 historical evidence for the version or phase named in the file. They should not

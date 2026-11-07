@@ -2,7 +2,7 @@
 
 This document is the standing engineering standard for Workflow OS. Every future implementation, review, and Codex task must follow it unless a change is explicitly approved through a documented architecture decision record (ADR).
 
-Workflow OS is intended to become an enterprise-grade open-source framework for defining, validating, testing, executing, governing, observing, and scaling AI-driven workflows. It must not be treated as a prototype, demo, hackathon artifact, or generic automation script.
+Workflow OS is intended to become an enterprise-grade open-source continuity-of-authority kernel for agentic work. It converts ephemeral execution context into a durable, policy-governed run whose intent, authority, execution state, evidence, and next permissible action can be recovered across people, agents, processes, and interruptions. It must not be treated as a prototype, demo, hackathon artifact, generic automation script, audit logger, or report generator.
 
 ## 1. Production-Grade Scope Control
 
@@ -19,7 +19,29 @@ Required practices:
 
 ## 2. Product Boundary
 
-Workflow OS Core is a local-first, declarative framework for defining, validating, testing, and executing governed AI workflows through pluggable skills and adapters.
+Workflow OS Core is a local-first continuity-of-authority kernel for defining, validating, testing, and governing AI workflows executed through pluggable skills, adapters, people, agents, and external runtimes.
+
+The primary product contract is:
+
+```text
+Agent executes. Workflow OS governs.
+```
+
+The kernel maintains four connected truths:
+
+1. **Intent:** what exact work was declared.
+2. **Authority:** which exact action was permitted, under which policy,
+   approval, capability, scope, and restrictions.
+3. **Execution:** what actually ran, completed, failed, remained blocked, or
+   produced an externally observed outcome.
+4. **Continuity:** what the next authorized executor may safely do without
+   reconstructing permission from conversation history.
+
+Evidence references, events, audit records, SideEffects, and WorkReports make
+those truths inspectable. They are mechanisms and proof surfaces, not the
+product category by themselves. A feature that records more data but weakens
+the relationship among intent, authority, execution, and lawful continuation
+does not advance the product.
 
 Workflow OS Core is not:
 
@@ -34,6 +56,18 @@ Workflow OS Core is not:
 - A UI product in v0.
 
 Implementation work must preserve this boundary. Features that pull Core toward orchestration platforms, SaaS workflow builders, chat-agent products, or one-off integration bots must be rejected or deferred unless the product boundary is intentionally changed through an ADR.
+
+Roadmap and implementation decisions must be evaluated first against continuity
+of authority. They must not allow a restart, replacement executor, retry,
+compaction, restore, adapter, or operator to:
+
+- reuse authority after its scope or required facts changed;
+- widen authority beyond its recorded action and execution window;
+- apply evidence or reports to a different run or operation;
+- repeat an already accepted effect without the declared idempotency and
+  reconciliation contract;
+- infer approval or next action from conversational memory; or
+- terminate non-terminal lawful work merely because one executor yielded.
 
 ## 3. Architecture
 

@@ -4,17 +4,29 @@
 [![Release](https://img.shields.io/github/v/release/rcs2153/workflow-os?include_prereleases)](https://github.com/rcs2153/workflow-os/releases)
 [![License](https://img.shields.io/github/license/rcs2153/workflow-os)](LICENSE)
 
-Workflow OS is a local-first governance kernel for AI agent work. It binds
-declared authority, policy, evidence references, approvals, side-effect records,
-and completion claims into one inspectable work history without replacing the
-agent runtime.
+Workflow OS is a local-first continuity-of-authority kernel for agentic work.
+It converts ephemeral conversation and execution context into a durable,
+policy-governed run whose intent, authority, execution state, evidence, and
+next permissible action can be recovered by another person, process, or agent.
+It does this without replacing the agent runtime.
 
 ```text
 Agent executes. Workflow OS governs.
 ```
 
-Agents can already write code, call tools, and change external systems. What is
-usually missing is a durable, bounded, and fail-closed answer to:
+Agents can already write code, call tools, and change external systems. Most
+systems preserve context, traces, or task state. Workflow OS is designed to
+preserve whether the work is still legitimate to continue. It maintains four
+connected truths:
+
+- **Intent:** what exact work was declared.
+- **Authority:** which exact action was permitted, under which policy and
+  restrictions.
+- **Execution:** what actually ran, completed, failed, or remains blocked.
+- **Continuity:** what the next authorized executor may safely do without
+  recreating permission from chat history.
+
+That produces durable, bounded, and fail-closed answers to:
 
 - What was the agent authorized to do?
 - Which workflow, policy, and inputs governed the action?
@@ -25,6 +37,9 @@ usually missing is a durable, bounded, and fail-closed answer to:
 
 Workflow OS puts those facts in a deterministic, fail-closed kernel instead of
 leaving them inside prompts, chat history, model traces, or agent memory.
+Evidence references, events, audit records, SideEffects, and WorkReports make
+the governed state inspectable; they are outputs of the control function, not
+the product category by themselves.
 
 The current source tree is preparing **Workflow OS `0.4.0-preview.1` - Governed
 Authority and Repository Adoption Preview**. It is useful today for local
@@ -88,8 +103,9 @@ inspect: workflow-os inspect run-...
 ```
 
 That is the core product loop: execution stays flexible inside a governed work
-envelope; authorization, evidence posture, side-effect records, and completion
-claims remain inspectable.
+envelope, while the exact authority-to-execution relationship and the next
+lawful action remain recoverable. Evidence posture, side-effect records, and
+completion claims make that continuity inspectable.
 
 ## How It Works
 
