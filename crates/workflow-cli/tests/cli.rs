@@ -7454,6 +7454,30 @@ fn state_migration_cli_stages_inactive_then_explicitly_activates() {
 }
 
 #[test]
+fn state_upgrade_sqlite_is_explicit_and_never_creates_a_missing_database() {
+    let project = TestProject::new("state-upgrade-ready");
+    let database = project.path().join("ready.sqlite3");
+    let path = database.to_str().expect("fixture path");
+    let invoke = || {
+        workflow_os(
+            &project,
+            &["--json", "state", "upgrade-sqlite", "--database", path],
+        )
+    };
+    assert!(!invoke().status.success());
+    assert!(!database.exists());
+    SqliteStateBackend::open(&database).expect("ready fixture");
+    let upgraded = invoke();
+    assert!(upgraded.status.success(), "{}", stderr(&upgraded));
+    let result: serde_json::Value = serde_json::from_slice(&upgraded.stdout).expect("JSON result");
+    assert_eq!(
+        result["adapter_schema_version"],
+        SqliteStateBackend::adapter_schema_version()
+    );
+    assert_eq!(result["authority_issued"], false);
+}
+
+#[test]
 fn state_migration_cli_requires_explicit_older_writer_assertion() {
     let project = TestProject::new("state-migration-assertion");
     project.write_valid_project(false, false);

@@ -11374,6 +11374,7 @@ where
 /// recovered the exact durable run, immutable bundle, actor, approval proof,
 /// side-effect authority, and fixture request before a later live slice is
 /// permitted to perform an external action.
+#[derive(Clone)]
 pub struct GitHubPrCommentFixtureContinuationValidationRequest<'a> {
     /// Caller-supplied run; it must exactly match durable state.
     pub run: &'a WorkflowRun,
@@ -11470,6 +11471,227 @@ pub fn validate_github_pr_comment_fixture_continuation(
     store: &impl SideEffectRecordStore,
     request: GitHubPrCommentFixtureContinuationValidationRequest<'_>,
 ) -> Result<GitHubPrCommentFixtureContinuationValidationResult, WorkflowOsError> {
+    require_same_fixture_actor(&request)?;
+    let attempted_record = request.attempted_record;
+    let checked = check_original_fixture_continuation(executor, store, request)?;
+    validate_fixture_continuation_snapshot(executor.backend, &checked.run, attempted_record)?;
+    Ok(checked.result)
+}
+
+struct CheckedOriginalFixture {
+    run: WorkflowRun,
+    action: SpecContentHash,
+    grant_sequence: EventSequenceNumber,
+    result: GitHubPrCommentFixtureContinuationValidationResult,
+}
+
+/// Issues one exact fixture-only grant from the trusted local operator boundary.
+/// The operator must be the actor who granted the exact original approval. The
+/// model-facing transport must not expose this operation or writable state.
+///
+/// # Errors
+///
+/// Rejects invalid fixture state, an unauthorized issuer, or conflicting issuance.
+pub fn issue_local_fixture_replacement_grant(
+    executor: &LocalExecutor<'_, crate::SqliteStateBackend>,
+    request: &GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+    operator: &ActorId,
+    grant: &crate::CapabilityGrant,
+) -> Result<(), WorkflowOsError> {
+    let checked = check_original_fixture_continuation(executor, executor.backend, request.clone())?;
+    with_bound_local_fixture_grant(
+        executor,
+        request,
+        &checked,
+        grant,
+        rusqlite::TransactionBehavior::Immediate,
+        |transaction, issuer, intent| {
+            if issuer != operator {
+                return Err(local_fixture_grant_denied());
+            }
+            crate::sqlite_state::fixture_replacement_authority_store::create_checked_fixture_grant(
+                transaction,
+                grant,
+                intent,
+            )
+        },
+    )
+}
+
+/// Validates an exact approved fixture through a distinct authenticated local principal.
+/// It performs no provider call, state transition, reservation, or report write.
+///
+/// # Errors
+///
+/// Rejects unavailable, changed, stale, revoked, or incorrectly scoped authority.
+pub fn validate_local_fixture_replacement_continuation(
+    executor: &LocalExecutor<'_, crate::SqliteStateBackend>,
+    request: &GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+    grant_id: &crate::CapabilityGrantId,
+    credential: &[u8; 32],
+) -> Result<GitHubPrCommentFixtureContinuationValidationResult, WorkflowOsError> {
+    let stored = executor.backend.read_active_fixture_authority(grant_id)?;
+    let principal = stored.verifier.authenticate(credential)?;
+    let checked = check_original_fixture_continuation(executor, executor.backend, request.clone())?;
+    with_bound_local_fixture_grant(
+        executor,
+        request,
+        &checked,
+        &stored.grant,
+        rusqlite::TransactionBehavior::Deferred,
+        |transaction, _, intent| {
+            let current = crate::sqlite_state::fixture_replacement_authority_store::read_active_fixture_authority(transaction, grant_id)?;
+            if current != stored
+                || !principal.matches_registration(&current.verifier)
+                || &current.intent != intent
+            {
+                return Err(local_fixture_grant_denied());
+            }
+            Ok(())
+        },
+    )?;
+    Ok(checked.result)
+}
+
+fn with_bound_local_fixture_grant(
+    executor: &LocalExecutor<'_, crate::SqliteStateBackend>,
+    request: &GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+    checked: &CheckedOriginalFixture,
+    grant: &crate::CapabilityGrant,
+    behavior: rusqlite::TransactionBehavior,
+    operation: impl FnOnce(
+        &rusqlite::Transaction<'_>,
+        &ActorId,
+        &SpecContentHash,
+    ) -> Result<(), WorkflowOsError>,
+) -> Result<(), WorkflowOsError> {
+    use crate::local_fixture_replacement_authority::{
+        validate_local_fixture_grant_binding, LocalFixtureReplacementIntent,
+    };
+    if grant.subject() != request.replacement_actor {
+        return Err(local_fixture_grant_denied());
+    }
+    let run = &checked.run;
+    let record = request.attempted_record;
+    let opening = run
+        .snapshot
+        .last_operational_opening_projection
+        .as_ref()
+        .ok_or_else(local_fixture_grant_denied)?;
+    let approval_id = provider_write_approval_reference(record)?;
+    let approval = run
+        .snapshot
+        .approval_requests
+        .iter()
+        .find(|approval| approval.approval_id == approval_id)
+        .ok_or_else(local_fixture_grant_denied)?;
+    let event = run
+        .events
+        .iter()
+        .find(|event| event.sequence_number == checked.grant_sequence)
+        .ok_or_else(local_fixture_grant_denied)?;
+    let WorkflowRunEventKind::ApprovalGranted(decision) = &event.kind else {
+        return Err(local_fixture_grant_denied());
+    };
+    let marker = decision
+        .proof_marker
+        .as_ref()
+        .ok_or_else(local_fixture_grant_denied)?;
+    let presentation = executor.resolve_approval_presentation_proof(
+        approval,
+        &LocalApprovalPresentationProof::PresentationId(marker.presentation_id().clone()),
+    )?;
+    let approval_id = crate::ApprovalReferenceId::new(approval_id)?;
+    let requirements = crate::CapabilityGrantRequirements::new(
+        vec![],
+        vec![approval_id.clone()],
+        vec![],
+        record
+            .references()
+            .iter()
+            .filter(|reference| reference.kind() == SideEffectReferenceKind::LocalCheckResult)
+            .map(|reference| crate::LocalCheckResultId::new(reference.reference()))
+            .collect::<Result<Vec<_>, _>>()?,
+    )?;
+    let scope = crate::CapabilityGrantScope::new(
+        run.snapshot.identity.workflow_id.clone(),
+        Some(run.snapshot.identity.run_id.clone()),
+        record.step_id().cloned(),
+        grant.scope().harness_contract_id().cloned(),
+    )?;
+    let resource = crate::CapabilityResourceScope::new(
+        crate::CapabilityResourceKind::AdapterResource,
+        request.write_request.target().reference(),
+    )?;
+    let intent = LocalFixtureReplacementIntent {
+        original_actor: request.write_request.actor(),
+        scope: &scope,
+        resource: &resource,
+        bundle_root: request.immutable_run_bundle.manifest().root_hash(),
+        action_commitment: &checked.action,
+        approval_id: &approval_id,
+        approval_decision_event_id: &event.event_id,
+        presentation_id: marker.presentation_id(),
+        presentation_hash: marker.presentation_content_hash(),
+        side_effect_id: record.side_effect_id(),
+        window_id: opening.window_id(),
+        attempt_id: opening.attempt_id(),
+        sensitivity: local_fixture_sensitivity(request),
+    };
+    let intent_hash = intent.commitment()?;
+    let Some(max_age) = request.presentation_policy.max_presentation_age else {
+        return Err(local_fixture_grant_denied());
+    };
+    let current = executor.backend.with_current_fixture_snapshot(run, record, opening, behavior,
+        |transaction, now, window_expires| {
+            let age = now.as_offset_date_time() - presentation.presented_at().as_offset_date_time();
+            if grant.issued_at() < decision.decided_at
+                || approval.expires_at.is_some_and(|expiry| now >= expiry)
+                || age.is_negative() || age.unsigned_abs() > max_age
+                || !crate::sqlite_state::fixture_replacement_authority_store::fixture_presentation_is_current(transaction, &presentation)? {
+                return Err(local_fixture_grant_denied());
+            }
+            validate_local_fixture_grant_binding(grant, &intent_hash, &intent, &decision.actor, &requirements, now, window_expires)?;
+            operation(transaction, &decision.actor, &intent_hash)?;
+            Ok(true)
+        })?;
+    if !current {
+        return Err(local_fixture_grant_denied());
+    }
+    Ok(())
+}
+
+fn local_fixture_sensitivity(
+    request: &GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+) -> WorkReportSensitivity {
+    let record = match request.attempted_record.sensitivity() {
+        crate::SideEffectSensitivity::Public => WorkReportSensitivity::Public,
+        crate::SideEffectSensitivity::Internal => WorkReportSensitivity::Internal,
+        crate::SideEffectSensitivity::Confidential => WorkReportSensitivity::Confidential,
+        crate::SideEffectSensitivity::Regulated => WorkReportSensitivity::Regulated,
+        crate::SideEffectSensitivity::Secret => WorkReportSensitivity::Secret,
+        crate::SideEffectSensitivity::Unknown => WorkReportSensitivity::Unknown,
+    };
+    let bundle = match request.immutable_run_bundle.manifest().sensitivity() {
+        crate::ImmutableRunBundleSensitivity::Internal => WorkReportSensitivity::Internal,
+        crate::ImmutableRunBundleSensitivity::Confidential => WorkReportSensitivity::Confidential,
+        crate::ImmutableRunBundleSensitivity::Restricted => WorkReportSensitivity::Secret,
+    };
+    record.max(bundle)
+}
+
+fn local_fixture_grant_denied() -> WorkflowOsError {
+    WorkflowOsError::security(
+        "local_fixture_replacement_authority.denied",
+        "local fixture replacement authority could not be verified",
+    )
+}
+
+fn check_original_fixture_continuation(
+    executor: &LocalExecutor<'_, crate::SqliteStateBackend>,
+    store: &impl SideEffectRecordStore,
+    request: GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+) -> Result<CheckedOriginalFixture, WorkflowOsError> {
     if request.presentation_policy.mode == ApprovalPresentationDefaultEnforcementMode::NotRequired {
         return Err(executor_error(
             WorkflowOsErrorKind::Validation,
@@ -11556,15 +11778,35 @@ pub fn validate_github_pr_comment_fixture_continuation(
     let preflighted = GitHubPullRequestCommentPreflightedWrite::new(request.write_request)?;
     let fixture_response =
         crate::validate_github_pr_comment_fixture_write(&preflighted, request.fixture)?;
-    validate_fixture_continuation_snapshot(
-        executor.backend,
-        &durable_run,
-        request.attempted_record,
-    )?;
-    Ok(GitHubPrCommentFixtureContinuationValidationResult {
-        fixture_response,
-        approval_linkage,
+    Ok(CheckedOriginalFixture {
+        run: durable_run,
+        action,
+        grant_sequence,
+        result: GitHubPrCommentFixtureContinuationValidationResult {
+            fixture_response,
+            approval_linkage,
+        },
     })
+}
+
+fn require_same_fixture_actor(
+    request: &GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+) -> Result<(), WorkflowOsError> {
+    if request.delegated_by.is_some() {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.delegation_unsupported",
+            "the same-actor fixture entry point does not accept delegated authority",
+        ));
+    }
+    if request.write_request.actor() != request.replacement_actor {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.actor_mismatch",
+            "fixture continuation replacement actor does not match durable authority",
+        ));
+    }
+    Ok(())
 }
 
 fn require_fixture_continuation_modes(
@@ -11664,6 +11906,7 @@ pub fn prepare_github_pr_comment_fixture_continuation_window(
     {
         return Err(invalid());
     }
+    require_same_fixture_actor(&request)?;
     validate_fixture_continuation_identity(&run, &request)?;
     let bundle = crate::ImmutableRunBundleStore::read_exact_bundle(
         backend,
@@ -12140,9 +12383,7 @@ fn validate_fixture_continuation_identity(
             "fixture continuation requires an attempted GitHub write side effect",
         ));
     }
-    if request.write_request.actor() != request.replacement_actor
-        || request.attempted_record.actor() != Some(request.replacement_actor)
-    {
+    if request.attempted_record.actor() != Some(request.write_request.actor()) {
         return Err(executor_error(
             WorkflowOsErrorKind::Validation,
             "github_pr_comment_fixture_continuation.actor_mismatch",

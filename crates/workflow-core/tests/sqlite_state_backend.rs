@@ -109,7 +109,7 @@ fn sqlite_backend_passes_common_conformance_without_overclaiming() {
     );
     assert_eq!(
         contract.schema().adapter_schema_version(),
-        Some(9),
+        Some(10),
         "SQLite schema version is explicit"
     );
     assert_eq!(
@@ -265,7 +265,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
     let secret = "secret-schema-token-marker";
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 10)
+        .pragma_update(None, "user_version", 11)
         .expect("set newer schema");
     drop(connection);
 
@@ -278,7 +278,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 9)
+        .pragma_update(None, "user_version", 10)
         .expect("restore schema version");
     connection
         .execute(
@@ -298,7 +298,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 }
 
 #[test]
-fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v9() {
+fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v10() {
     let fixture = Fixture::new();
     fixture
         .backend
@@ -334,6 +334,7 @@ fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v9() {
     let upgraded =
         SqliteStateBackend::upgrade_operational_opening_run_scope_v8_to_v9(&fixture.path)
             .expect("upgrade exact V8 database");
+    assert_and_upgrade_fixture_authority(&fixture);
     let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
     assert_eq!(
         reopened
@@ -361,13 +362,11 @@ fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v9() {
             |row| row.get(0),
         )
         .expect("capability source continuity table");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
     assert_eq!(trusted_time_rows, 1);
     assert_eq!(source_continuity_rows, 0);
     assert_populated_v9_rows(&connection);
 
-    SqliteStateBackend::upgrade_operational_opening_run_scope_v8_to_v9(&fixture.path)
-        .expect("upgrade is idempotent for exact V9");
     assert_eq!(
         v3.read_events(&fixture.created.run_id)
             .expect("V3 handle remains readable"),
@@ -399,6 +398,55 @@ fn sqlite_backend_requires_each_explicit_schema_upgrade_through_v9() {
             .expect("V5 handle remains readable after upgrade"),
         vec![fixture.created.clone()]
     );
+}
+
+fn assert_and_upgrade_fixture_authority(fixture: &Fixture) {
+    assert_sqlite_upgrade_required(&fixture.path, "V10");
+    let v9_read_only = SqliteStateBackend::open_same_actor_fixture_read_only(&fixture.path)
+        .expect("legacy same-actor fixture remains readable without an upgrade");
+    assert_eq!(
+        v9_read_only
+            .read_events(&fixture.created.run_id)
+            .expect("read V9 events"),
+        vec![fixture.created.clone()]
+    );
+    SqliteStateBackend::upgrade_operational_opening_run_scope_v8_to_v9(&fixture.path)
+        .expect("upgrade is idempotent for exact V9");
+    assert_v9_schema_drift_does_not_upgrade(&fixture.path);
+    SqliteStateBackend::upgrade_fixture_replacement_authority_v9_to_v10(&fixture.path)
+        .expect("upgrade exact V9 database");
+    let connection = Connection::open(&fixture.path).expect("inspect V10 schema");
+    let fixture_authority_rows: u32 = connection
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM local_fixture_principal_registrations)
+              + (SELECT COUNT(*) FROM local_fixture_replacement_grants)",
+            [],
+            |row| row.get(0),
+        )
+        .expect("fixture authority tables");
+    assert_eq!(fixture_authority_rows, 0);
+    SqliteStateBackend::upgrade_fixture_replacement_authority_v9_to_v10(&fixture.path)
+        .expect("upgrade is idempotent for exact V10");
+}
+
+fn assert_v9_schema_drift_does_not_upgrade(path: &Path) {
+    let connection = Connection::open(path).expect("inspect V9 schema");
+    connection
+        .execute_batch("CREATE TABLE unexpected_fixture_authority (id TEXT PRIMARY KEY)")
+        .expect("simulate unexpected schema drift");
+    assert_eq!(
+        SqliteStateBackend::upgrade_fixture_replacement_authority_v9_to_v10(path)
+            .expect_err("drifted V9 cannot be upgraded")
+            .code(),
+        "state.sqlite.schema.recovery_required"
+    );
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("unchanged schema version");
+    assert_eq!(version, 9);
+    connection
+        .execute_batch("DROP TABLE unexpected_fixture_authority")
+        .expect("restore exact V9 fixture");
 }
 
 fn seed_populated_v8_run_scoped_tables(path: &Path) {
@@ -612,6 +660,8 @@ fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
         .expect("finish explicit V8 upgrade");
     SqliteStateBackend::upgrade_operational_opening_run_scope_v8_to_v9(&fixture.path)
         .expect("finish explicit V9 upgrade");
+    SqliteStateBackend::upgrade_fixture_replacement_authority_v9_to_v10(&fixture.path)
+        .expect("finish explicit V10 upgrade");
     let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
     assert_eq!(
         reopened
@@ -630,7 +680,7 @@ fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
             |row| row.get(0),
         )
         .expect("trusted time singleton");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
     assert_eq!(trusted_time_rows, 1);
 }
 
@@ -939,6 +989,8 @@ fn downgrade_fixture_to_v1(path: &Path) {
     connection
         .execute_batch(
             "PRAGMA foreign_keys = OFF;
+             DROP TABLE local_fixture_replacement_grants;
+             DROP TABLE local_fixture_principal_registrations;
              DROP TABLE immutable_run_bundles;
              DROP TABLE capability_source_continuity;
              DROP TABLE dispatch_reservation_projection_bindings;

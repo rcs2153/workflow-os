@@ -1,6 +1,9 @@
 # Local Fixture Replacement Authority Contract
 
-Status: implementation contract; no delegated fixture runtime or app setup yet.
+Status: local fixture-only implementation candidate; staged SQLite migration
+integrity and V9 activation compatibility corrected. See the
+[implementation report](../concepts/LOCAL_FIXTURE_REPLACEMENT_AUTHORITY_IMPLEMENTATION_REPORT.md)
+and [focused review](../concepts/LOCAL_FIXTURE_REPLACEMENT_AUTHORITY_REVIEW.md).
 
 ## Trust Boundary
 

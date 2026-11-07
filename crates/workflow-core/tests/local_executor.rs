@@ -17914,6 +17914,12 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
         result.fixture_response().outcome(),
         GitHubPullRequestCommentWriteOutcome::FixtureValidated
     );
+    verify_distinct_fixture_authority(
+        &active_backend,
+        &registry,
+        &active_path,
+        request_for_run(&interrupted),
+    );
     assert_eq!(
         reader.rehydrate_run(&run_id).expect("run unchanged"),
         interrupted
@@ -17988,6 +17994,167 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
     );
 }
 
+fn verify_distinct_fixture_authority(
+    backend: &SqliteStateBackend,
+    registry: &LocalSkillRegistry,
+    path: &Path,
+    request: GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+) {
+    use workflow_core::local_fixture_replacement_authority::LocalFixturePrincipalVerifier;
+    use workflow_core::{CapabilityGrant, HarnessContractId};
+
+    let principal = ActorId::new("agent/claude-desktop").expect("distinct fixture principal");
+    let decision = request
+        .run
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::ApprovalGranted(decision) => Some(decision),
+            _ => None,
+        })
+        .expect("original approval");
+    let actor = request.write_request.actor().clone();
+    let mut request = GitHubPrCommentFixtureContinuationValidationRequest {
+        replacement_actor: &principal,
+        presentation_policy: request
+            .presentation_policy
+            .with_max_presentation_age(std::time::Duration::from_secs(120)),
+        ..request
+    };
+    let verifier = LocalFixturePrincipalVerifier::new(
+        principal.clone(),
+        HarnessContractId::new("harness/claude-desktop").expect("harness"),
+        &[42; 32],
+    );
+    backend
+        .register_local_fixture_principal(&verifier)
+        .expect("register fixture principal");
+    assert!(backend.register_local_fixture_principal(&verifier).is_err());
+    let executor = LocalExecutor::new(backend, registry);
+    let wrong_issuer = ActorId::new("user/not-issuer").expect("wrong issuer");
+    let first = exact_fixture_grant("grant/fixture-first", &request, decision);
+    assert!(workflow_core::issue_local_fixture_replacement_grant(
+        &executor,
+        &request,
+        &wrong_issuer,
+        &first
+    )
+    .is_err());
+    workflow_core::issue_local_fixture_replacement_grant(
+        &executor,
+        &request,
+        &decision.actor,
+        &first,
+    )
+    .expect("issue exact grant");
+    assert!(workflow_core::issue_local_fixture_replacement_grant(
+        &executor,
+        &request,
+        &decision.actor,
+        &first
+    )
+    .is_err());
+    let second = exact_fixture_grant("grant/fixture-second", &request, decision);
+    workflow_core::issue_local_fixture_replacement_grant(
+        &executor,
+        &request,
+        &decision.actor,
+        &second,
+    )
+    .expect("issue second fixture grant");
+    let reader = SqliteStateBackend::open_read_only(path).expect("open read-only state");
+    let replacement = LocalExecutor::new(&reader, registry);
+    let validate = |request: &GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+                    grant: &CapabilityGrant,
+                    credential: &[u8; 32]| {
+        workflow_core::validate_local_fixture_replacement_continuation(
+            &replacement,
+            request,
+            grant.grant_id(),
+            credential,
+        )
+    };
+    assert!(validate(&request, &first, &[43; 32]).is_err());
+    assert!(validate(&request, &first, &[42; 32]).is_ok());
+    if let Some(binary) = std::env::var_os("WORKFLOW_OS_FIXTURE_CONTINUATION_TEST_CLI") {
+        verify_delegated_fixture_cli(
+            &binary,
+            path,
+            &request.write_request,
+            &exact_fixture_grant("grant/fixture-cli", &request, decision),
+        );
+    }
+    request.replacement_actor = &actor;
+    assert!(validate(&request, &first, &[42; 32]).is_err());
+    request.replacement_actor = &principal;
+    backend
+        .revoke_local_fixture_grant(first.grant_id())
+        .expect("revoke grant");
+    assert!(validate(&request, &first, &[42; 32]).is_err());
+    assert!(validate(&request, &second, &[42; 32]).is_ok());
+    backend
+        .revoke_local_fixture_principal(&principal)
+        .expect("revoke principal");
+    assert!(validate(&request, &second, &[42; 32]).is_err());
+    assert!(backend.register_local_fixture_principal(&verifier).is_err());
+}
+
+fn exact_fixture_grant(
+    id: &str,
+    request: &GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+    decision: &workflow_core::ApprovalDecision,
+) -> workflow_core::CapabilityGrant {
+    use workflow_core::{
+        CapabilityDelegationPosture, CapabilityGrant, CapabilityGrantDefinition, CapabilityGrantId,
+        CapabilityGrantLifecycle, CapabilityGrantRequirements, CapabilityGrantScope,
+        CapabilityReference, CapabilityResourceKind, CapabilityResourceScope, HarnessContractId,
+    };
+    let identity = &request.run.snapshot.identity;
+    let issued = Timestamp::now_utc();
+    CapabilityGrant::new(CapabilityGrantDefinition {
+        grant_id: CapabilityGrantId::new(id).expect("grant id"),
+        subject: request.replacement_actor.clone(),
+        capability: CapabilityReference::new("fixture/github-pr-comment-continuation")
+            .expect("fixture capability"),
+        resource: CapabilityResourceScope::new(
+            CapabilityResourceKind::AdapterResource,
+            request.write_request.target().reference(),
+        )
+        .expect("exact resource"),
+        scope: CapabilityGrantScope::new(
+            identity.workflow_id.clone(),
+            Some(identity.run_id.clone()),
+            request.write_request.step_id().cloned(),
+            Some(HarnessContractId::new("harness/claude-desktop").expect("harness")),
+        )
+        .expect("exact scope"),
+        issuer: decision.actor.clone(),
+        issued_at: issued,
+        expires_at: Some(Timestamp::from_offset_date_time(
+            issued.as_offset_date_time() + time::Duration::seconds(30),
+        )),
+        lifecycle: CapabilityGrantLifecycle::Active,
+        revocation_reference: None,
+        delegation: CapabilityDelegationPosture::Disabled,
+        requirements: CapabilityGrantRequirements::new(
+            vec![],
+            vec![
+                workflow_core::ApprovalReferenceId::new(&decision.approval_id)
+                    .expect("approval id"),
+            ],
+            vec![],
+            vec![LocalCheckResultId::new("result/fixture-continuation-check").expect("check id")],
+        )
+        .expect("requirements"),
+        sensitivity_ceiling: workflow_core::WorkReportSensitivity::Secret,
+        redaction: workflow_core::RedactionMetadata {
+            redacted_fields: vec![],
+            field_states: vec![],
+        },
+    })
+    .expect("grant declaration")
+}
+
 struct FixtureEvidenceDriftStore<'a> {
     backend: &'a SqliteStateBackend,
     event: &'a WorkflowRunEvent,
@@ -18028,6 +18195,122 @@ impl SideEffectRecordStore for FixtureEvidenceDriftStore<'_> {
     }
 }
 
+fn fixture_cli_input(request: &GitHubPullRequestCommentWriteRequest) -> serde_json::Value {
+    serde_json::json!({
+        "request": request,
+        "fixture": {
+            "target": request.target(), "side_effect_id": request.side_effect_id(),
+            "idempotency_key": request.idempotency_key(), "mode": request.mode(),
+            "fixture_reference": "fixture/github-pr-comment/continuation",
+            "summary": "fixture continuation validated without provider call",
+            "sensitivity": request.sensitivity(), "redaction": request.redaction(),
+        },
+    })
+}
+
+fn verify_delegated_fixture_cli(
+    binary: &std::ffi::OsStr,
+    database: &Path,
+    request: &GitHubPullRequestCommentWriteRequest,
+    grant: &workflow_core::CapabilityGrant,
+) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let root = database.parent().expect("fixture state root");
+    let command = || {
+        let mut command = Command::new(binary);
+        command
+            .arg("--project-dir")
+            .arg(root)
+            .arg("--state-dir")
+            .arg(root)
+            .args(["--json", "provider", "github-pr-comment"]);
+        command
+    };
+    let input = fixture_cli_input(request);
+    let request_path = root.join("delegated-request.json");
+    let grant_path = root.join("delegated-grant.json");
+    fs::write(
+        &request_path,
+        serde_json::to_vec(&input).expect("request JSON"),
+    )
+    .expect("request file");
+    fs::write(&grant_path, serde_json::to_vec(grant).expect("grant JSON")).expect("grant file");
+    let issued = command()
+        .args(["fixture-authority", "issue", "--request"])
+        .arg(request_path)
+        .arg("--grant-file")
+        .arg(grant_path)
+        .arg("--operator")
+        .arg(grant.issuer().as_str())
+        .output()
+        .expect("issue grant CLI");
+    assert!(
+        issued.status.success(),
+        "{}",
+        String::from_utf8_lossy(&issued.stderr)
+    );
+    let invoke = |value: &serde_json::Value, credential: u8| {
+        let mut child = command()
+            .args([
+                "continue-sandbox-delegated",
+                "--grant",
+                grant.grant_id().as_str(),
+                "--credential-and-request-stdin",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start delegated CLI");
+        let mut frame = vec![credential; 32];
+        frame.extend(serde_json::to_vec(value).expect("request JSON"));
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(&frame)
+            .expect("fixture input");
+        child.wait_with_output().expect("delegated CLI exits")
+    };
+    let before = fs::read(database).expect("database before validation");
+    let accepted = invoke(&input, 42);
+    assert!(
+        accepted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    let result: serde_json::Value =
+        serde_json::from_slice(&accepted.stdout).expect("bounded result");
+    assert_eq!(result["actor_posture"], "verified_delegation");
+    assert_eq!(result["provider_call_performed"], false);
+    assert_eq!(result["workflow_event_appended"], false);
+    let mut override_input = input.clone();
+    override_input["replacement_actor"] = serde_json::json!("agent/forged");
+    for rejected in [invoke(&override_input, 42), invoke(&input, 43)] {
+        assert!(!rejected.status.success());
+        assert!(rejected.stdout.is_empty());
+        let error = String::from_utf8_lossy(&rejected.stderr);
+        assert!(!error.contains("agent/forged"));
+        assert!(!error.contains(&"*".repeat(32)));
+    }
+    assert_eq!(
+        before,
+        fs::read(database).expect("database after validation")
+    );
+    let revoked = command()
+        .args([
+            "fixture-authority",
+            "revoke-grant",
+            "--grant",
+            grant.grant_id().as_str(),
+        ])
+        .output()
+        .expect("revoke grant CLI");
+    assert!(revoked.status.success());
+    assert!(!invoke(&input, 42).status.success());
+}
+
 fn verify_fixture_continuation_cli(
     binary: &std::ffi::OsStr,
     project: &TestProject,
@@ -18036,20 +18319,8 @@ fn verify_fixture_continuation_cli(
     database: &Path,
 ) {
     let path = project.path().join("continuation.json");
-    let input = serde_json::json!({
-        "request": request,
-        "replacement_actor": actor,
-        "fixture": {
-            "target": request.target(),
-            "side_effect_id": request.side_effect_id(),
-            "idempotency_key": request.idempotency_key(),
-            "mode": request.mode(),
-            "fixture_reference": "fixture/github-pr-comment/continuation",
-            "summary": "fixture continuation validated without provider call",
-            "sensitivity": request.sensitivity(),
-            "redaction": request.redaction(),
-        },
-    });
+    let mut input = fixture_cli_input(request);
+    input["replacement_actor"] = serde_json::json!(actor);
     let invoke = |input: &serde_json::Value| {
         fs::write(
             &path,

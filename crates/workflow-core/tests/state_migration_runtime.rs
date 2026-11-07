@@ -170,6 +170,85 @@ fn exact_verified_staging_resumes_without_duplicate_import() {
 }
 
 #[test]
+fn staged_fixture_authority_is_rejected_on_resume_and_activation() {
+    for (label, insert) in [
+        ("principal", "INSERT INTO local_fixture_principal_registrations VALUES ('agent/inserted', '{}', 1)"),
+        ("grant", "INSERT INTO local_fixture_replacement_grants VALUES ('grant/inserted', 'agent/inserted', '{}', 'not-imported', 1)"),
+    ] {
+        let fixture = Fixture::new(label);
+        let source = fixture.source();
+        let plan = plan(&source);
+        let receipt = stage(&source, &plan, &fixture.database);
+        let connection = rusqlite::Connection::open(&fixture.database).expect("test connection");
+        connection.execute_batch("PRAGMA foreign_keys=OFF").expect("test tamper setup");
+        connection.execute_batch(insert).expect("insert unexpected authority");
+        let resumed = SqliteStateBackend::stage_filesystem_migration(FilesystemToSqliteMigrationInput {
+            source: &source,
+            plan: &plan,
+            destination_path: fixture.database.clone(),
+            verified_by: ActorId::new("user/migration-operator").expect("actor"),
+            verified_at: Timestamp::now_utc(),
+            incompatible_older_writers_stopped: true,
+        }).expect_err("resume must reject unexpected authority");
+        let activated = SqliteStateBackend::activate_verified_migration(&fixture.database, &receipt)
+            .expect_err("activation must reject unexpected authority");
+        for error in [resumed, activated] {
+            assert_eq!(error.code(), "state.migration.destination.fixture_authority_unexpected");
+        }
+        let state: String = connection.query_row("SELECT migration_state FROM schema_metadata", [], |row| row.get(0)).expect("state");
+        assert_eq!(state, "verified_inactive");
+        let table = if label == "principal" { "local_fixture_principal_registrations" } else { "local_fixture_replacement_grants" };
+        let rows: u32 = connection.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0)).expect("preserved unexpected row");
+        assert_eq!(rows, 1);
+    }
+}
+
+#[test]
+fn verified_v9_staging_activates_and_upgrades_without_rewriting_receipt() {
+    let fixture = Fixture::new("v9-activation");
+    let source = fixture.source();
+    source.append_event(&event(1)).expect("created event");
+    let receipt = stage(&source, &plan(&source), &fixture.database);
+    let connection = rusqlite::Connection::open(&fixture.database).expect("test connection");
+    connection
+        .execute_batch(
+            "DROP TABLE local_fixture_replacement_grants;
+         DROP TABLE local_fixture_principal_registrations;
+         UPDATE schema_metadata SET schema_version=9,
+            checksum='sha256:71a366f33b04ec681ae01692365eef3603eff0a7c32d93a10abdcd6199886bdd';
+         PRAGMA user_version=9;",
+        )
+        .expect("construct exact V9 staged schema");
+    let read_receipt = || -> String {
+        connection
+            .query_row(
+                "SELECT verification_receipt FROM migration_metadata",
+                [],
+                |row| row.get(0),
+            )
+            .expect("stored receipt")
+    };
+    let original = read_receipt();
+    assert!(
+        SqliteStateBackend::upgrade_fixture_replacement_authority_v9_to_v10(&fixture.database)
+            .is_err()
+    );
+    let backend = SqliteStateBackend::activate_verified_migration(&fixture.database, &receipt)
+        .expect("activate and atomically upgrade exact verified V9 store");
+    assert_eq!(
+        backend
+            .read_events(&event(1).run_id)
+            .expect("preserved events"),
+        vec![event(1)]
+    );
+    assert_eq!(read_receipt(), original);
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("schema version");
+    assert_eq!(version, 10);
+}
+
+#[test]
 fn changed_source_and_mismatched_receipt_fail_closed_without_leakage() {
     let fixture = Fixture::new("fail-closed");
     let source = fixture.source();

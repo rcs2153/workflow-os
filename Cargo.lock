@@ -1871,6 +1871,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "workflow-cli"
 version = "0.4.0-preview.1"
 dependencies = [
+ "serde",
  "serde_json",
  "sha2 0.10.9",
  "time",
@@ -1891,6 +1892,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.10.9",
+ "subtle",
  "time",
  "toml",
  "ureq",

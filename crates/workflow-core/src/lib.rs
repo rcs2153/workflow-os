@@ -87,6 +87,7 @@ mod local_check_declaration;
 mod local_check_declaration_set;
 mod local_check_evidence_assurance;
 mod local_check_execution_binding;
+pub mod local_fixture_replacement_authority;
 mod observability;
 #[allow(dead_code)]
 mod operational_execution_window_opening;
@@ -329,7 +330,7 @@ pub use executor::{
     execute_with_report_artifact_and_projected_proof_markers,
     execute_with_report_artifact_and_proof_marker_gates,
     execute_with_report_artifact_and_side_effect_gates, github_pr_comment_fixture_approval_action,
-    github_pr_comment_fixture_opening_event_id,
+    github_pr_comment_fixture_opening_event_id, issue_local_fixture_replacement_grant,
     load_github_pr_comment_proposed_side_effect_event_input,
     persist_authoritative_governance_report_artifact,
     persist_governance_authority_receipt_report_artifact,
@@ -341,7 +342,8 @@ pub use executor::{
     route_selected_project_validation_governance,
     route_selected_project_validation_governance_with_resolved_context,
     route_selected_project_validation_governance_with_resolved_context_reference,
-    validate_github_pr_comment_fixture_continuation, ApprovalPresentationDefaultEnforcementMode,
+    validate_github_pr_comment_fixture_continuation,
+    validate_local_fixture_replacement_continuation, ApprovalPresentationDefaultEnforcementMode,
     ApprovalPresentationDefaultEnforcementPolicy, ApprovalPresentationSensitiveActionPosture,
     AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeGovernanceArtifactPersistenceInput,
     AuthoritativeGovernanceArtifactPersistenceResult, AuthoritativeGovernanceArtifactPosture,

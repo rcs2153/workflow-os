@@ -42,7 +42,8 @@ use crate::{
     WorkflowRunSnapshot,
 };
 
-const ADAPTER_SCHEMA_VERSION: u32 = 9;
+const ADAPTER_SCHEMA_VERSION: u32 = 10;
+const RUN_SCOPE_ADAPTER_SCHEMA_VERSION: u32 = 9;
 const CAPABILITY_SOURCE_CONTINUITY_ADAPTER_SCHEMA_VERSION: u32 = 8;
 const IMMUTABLE_RUN_BUNDLE_ADAPTER_SCHEMA_VERSION: u32 = 7;
 const TIME_WINDOW_WAIT_ADAPTER_SCHEMA_VERSION: u32 = 6;
@@ -82,10 +83,14 @@ const CAPABILITY_SOURCE_CONTINUITY_SCHEMA_CHECKSUM: &str =
     "sha256:3e7de1025e2cb35520690254b0bc4e97f44f8b2d310cb4c60e4f81a21861e851";
 const CAPABILITY_SOURCE_CONTINUITY_SCHEMA_MANIFEST_DIGEST: &str =
     "3e7de1025e2cb35520690254b0bc4e97f44f8b2d310cb4c60e4f81a21861e851";
-const SCHEMA_CHECKSUM: &str =
+const RUN_SCOPE_SCHEMA_CHECKSUM: &str =
     "sha256:71a366f33b04ec681ae01692365eef3603eff0a7c32d93a10abdcd6199886bdd";
-const SCHEMA_MANIFEST_DIGEST: &str =
+const RUN_SCOPE_SCHEMA_MANIFEST_DIGEST: &str =
     "71a366f33b04ec681ae01692365eef3603eff0a7c32d93a10abdcd6199886bdd";
+const SCHEMA_CHECKSUM: &str =
+    "sha256:9424924a32d0d2db45ec6d47692e29fb6cfc6c69f4fa1d6cdf19662071b9cc87";
+const SCHEMA_MANIFEST_DIGEST: &str =
+    "9424924a32d0d2db45ec6d47692e29fb6cfc6c69f4fa1d6cdf19662071b9cc87";
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(2);
 
 const BASE_SCHEMA: &str = r"
@@ -192,6 +197,8 @@ const CAPABILITY_SOURCE_CONTINUITY_SCHEMA_V8: &str =
     include_str!("sqlite_capability_source_continuity_schema_v8.sql");
 const OPERATIONAL_OPENING_RUN_SCOPE_SCHEMA_V9: &str =
     include_str!("sqlite_operational_opening_run_scope_schema_v9.sql");
+const FIXTURE_REPLACEMENT_AUTHORITY_SCHEMA_V10: &str =
+    include_str!("sqlite_fixture_replacement_authority_schema_v10.sql");
 pub(crate) const CONTINUITY_CLOCK_PROVENANCE: &str =
     "77efdb5ae4c8696d8573d816a52dce594793b1749471a98cc58a85fc8129e50f";
 pub(crate) const CONTINUITY_CLOCK_EPOCH: &str = "epoch/sqlite-local-live-state/1";
@@ -200,6 +207,7 @@ pub(crate) mod capability_source_continuity_store;
 mod continuity_codec;
 mod continuity_store;
 mod dispatch_reservation_store;
+pub(crate) mod fixture_replacement_authority_store;
 mod operational_opening_store;
 #[allow(dead_code)]
 mod trusted_host_explicit_local_operation;
@@ -942,6 +950,13 @@ impl SqliteStateBackend {
                 .map_err(|_| schema_recovery_required())?;
             return Ok(backend);
         }
+        if version == RUN_SCOPE_ADAPTER_SCHEMA_VERSION {
+            validate_v9_upgrade_eligibility(&transaction)?;
+            transaction
+                .commit()
+                .map_err(|_| schema_recovery_required())?;
+            return Ok(backend);
+        }
         if version != CAPABILITY_SOURCE_CONTINUITY_ADAPTER_SCHEMA_VERSION {
             return Err(sqlite_state_error(
                 "schema.incompatible",
@@ -954,11 +969,48 @@ impl SqliteStateBackend {
             .and_then(|()| {
                 transaction.execute(
                     "UPDATE schema_metadata SET schema_version=?1, checksum=?2 WHERE singleton=1",
-                    params![ADAPTER_SCHEMA_VERSION, SCHEMA_CHECKSUM],
+                    params![RUN_SCOPE_ADAPTER_SCHEMA_VERSION, RUN_SCOPE_SCHEMA_CHECKSUM],
                 )?;
-                transaction.pragma_update(None, "user_version", ADAPTER_SCHEMA_VERSION)
+                transaction.pragma_update(None, "user_version", RUN_SCOPE_ADAPTER_SCHEMA_VERSION)
             })
             .map_err(|_| schema_recovery_required())?;
+        validate_v9_upgrade_eligibility(&transaction)?;
+        transaction
+            .commit()
+            .map_err(|_| schema_recovery_required())?;
+        Ok(backend)
+    }
+
+    /// Explicitly upgrades an exact V9 database with empty fixture authority tables.
+    /// Existing records are not changed and no authority is issued.
+    ///
+    /// # Errors
+    ///
+    /// Rejects absent, incompatible, or unverifiable databases.
+    pub fn upgrade_fixture_replacement_authority_v9_to_v10(
+        database_path: impl Into<PathBuf>,
+    ) -> Result<Self, WorkflowOsError> {
+        let backend = Self {
+            database_path: database_path.into(),
+            busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
+        };
+        let mut connection = backend.existing_connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| schema_recovery_required())?;
+        let version: u32 = transaction
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|_| schema_recovery_required())?;
+        if version == RUN_SCOPE_ADAPTER_SCHEMA_VERSION {
+            validate_v9_upgrade_eligibility(&transaction)?;
+            apply_fixture_authority_schema(&transaction).map_err(|_| schema_recovery_required())?;
+        } else if version != ADAPTER_SCHEMA_VERSION {
+            return Err(sqlite_state_error(
+                "schema.incompatible",
+                "SQLite state schema version is not supported",
+            ));
+        }
         validate_schema_metadata(&transaction)?;
         transaction
             .commit()
@@ -1076,28 +1128,7 @@ impl SqliteStateBackend {
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
             read_only: false,
         };
-        let mut connection = backend.migration_connection()?;
-        let persisted = Self::read_receipt_payload(&connection)?;
-        if persisted != *receipt {
-            return Err(migration_runtime_error(
-                "activation.receipt_mismatch",
-                "state migration activation receipt does not match",
-            ));
-        }
-        let state = read_migration_state(&connection)?;
-        if state != MIGRATION_STATE_VERIFIED_INACTIVE {
-            return Err(migration_runtime_error(
-                "activation.state_invalid",
-                "state migration destination is not verified inactive",
-            ));
-        }
-        let current_digest = Self::destination_content_digest(&connection)?;
-        if current_digest != receipt.destination_content_digest {
-            return Err(migration_runtime_error(
-                "activation.destination_changed",
-                "state migration destination changed after verification",
-            ));
-        }
+        let mut connection = backend.existing_connection()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| {
@@ -1107,24 +1138,37 @@ impl SqliteStateBackend {
                     "state migration activation transaction could not start",
                 )
             })?;
-        validate_schema_manifest(&transaction, SCHEMA_MANIFEST_DIGEST).map_err(|_| {
-            migration_runtime_error(
-                "activation.schema_invalid",
-                "state migration destination schema is invalid",
-            )
-        })?;
-        validate_continuity_security_state(&transaction).map_err(|_| {
-            migration_runtime_error(
-                "activation.schema_invalid",
-                "state migration destination schema is invalid",
-            )
-        })?;
-        let locked_digest = Self::destination_content_digest(&transaction)?;
-        if locked_digest != receipt.destination_content_digest {
+        let persisted = Self::read_receipt_payload(&transaction)?;
+        if persisted != *receipt {
+            return Err(migration_runtime_error(
+                "activation.receipt_mismatch",
+                "state migration activation receipt does not match",
+            ));
+        }
+        let state = read_migration_state(&transaction)?;
+        if state != MIGRATION_STATE_VERIFIED_INACTIVE {
+            return Err(migration_runtime_error(
+                "activation.state_invalid",
+                "state migration destination is not verified inactive",
+            ));
+        }
+        let legacy_v9 = validate_inactive_activation_schema(&transaction)?;
+        if !legacy_v9 {
+            require_empty_staged_fixture_authority(&transaction)?;
+        }
+        validate_continuity_security_state(&transaction)
+            .map_err(|_| activation_schema_invalid())?;
+        let current_digest = Self::destination_content_digest(&transaction)?;
+        if current_digest != receipt.destination_content_digest {
             return Err(migration_runtime_error(
                 "activation.destination_changed",
                 "state migration destination changed after verification",
             ));
+        }
+        if legacy_v9 {
+            apply_fixture_authority_schema(&transaction)
+                .map_err(|_| activation_schema_invalid())?;
+            require_empty_staged_fixture_authority(&transaction)?;
         }
         transaction
             .execute(
@@ -1138,6 +1182,7 @@ impl SqliteStateBackend {
                     "state migration destination could not be activated",
                 )
             })?;
+        validate_schema_metadata(&transaction).map_err(|_| activation_schema_invalid())?;
         transaction.commit().map_err(|error| {
             map_sqlite_error(
                 error,
@@ -1171,6 +1216,33 @@ impl SqliteStateBackend {
         };
         let connection = backend.existing_read_only_connection()?;
         validate_schema_metadata(&connection)?;
+        Ok(backend)
+    }
+
+    /// Opens the original same-actor fixture store without upgrading an exact V9
+    /// database. Use [`Self::open_read_only`] for any path that reads fixture
+    /// replacement authority.
+    ///
+    /// # Errors
+    ///
+    /// Rejects absent, incompatible, or unverifiable databases.
+    pub fn open_same_actor_fixture_read_only(
+        database_path: impl Into<PathBuf>,
+    ) -> Result<Self, WorkflowOsError> {
+        let backend = Self {
+            database_path: database_path.into(),
+            busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: true,
+        };
+        let connection = backend.existing_read_only_connection()?;
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|_| schema_recovery_required())?;
+        match version {
+            RUN_SCOPE_ADAPTER_SCHEMA_VERSION => validate_v9_upgrade_eligibility(&connection)?,
+            ADAPTER_SCHEMA_VERSION => validate_schema_metadata(&connection)?,
+            _ => return Err(schema_recovery_required()),
+        }
         Ok(backend)
     }
 
@@ -1328,6 +1400,7 @@ impl SqliteStateBackend {
                 })?;
             transaction
                 .execute_batch(OPERATIONAL_OPENING_RUN_SCOPE_SCHEMA_V9)
+                .and_then(|()| transaction.execute_batch(FIXTURE_REPLACEMENT_AUTHORITY_SCHEMA_V10))
                 .map_err(|_| {
                     migration_runtime_error(
                         "destination.initialize_failed",
@@ -1417,6 +1490,7 @@ impl SqliteStateBackend {
                 "state migration destination schema is incompatible",
             )
         })?;
+        require_empty_staged_fixture_authority(connection)?;
         validate_continuity_security_state(connection).map_err(|_| {
             migration_runtime_error(
                 "destination.schema_incompatible",
@@ -1832,6 +1906,10 @@ impl SqliteStateBackend {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| verification_failed())?;
+        require_empty_staged_fixture_authority(&transaction)?;
+        if Self::destination_content_digest(&transaction)? != receipt.destination_content_digest {
+            return Err(verification_failed());
+        }
         transaction
             .execute(
                 "UPDATE migration_metadata
@@ -1853,7 +1931,11 @@ impl SqliteStateBackend {
         connection: &Connection,
         attempt: &StateMigrationAttempt,
     ) -> Result<StateMigrationVerificationReceipt, WorkflowOsError> {
-        let receipt = Self::read_receipt_payload(connection)?;
+        let transaction = connection
+            .unchecked_transaction()
+            .map_err(|_| verification_failed())?;
+        require_empty_staged_fixture_authority(&transaction)?;
+        let receipt = Self::read_receipt_payload(&transaction)?;
         if receipt.attempt_fingerprint != *attempt.attempt_fingerprint()
             || receipt.plan_fingerprint != *attempt.plan_fingerprint()
             || receipt.source_fingerprint != *attempt.source_fingerprint()
@@ -1864,6 +1946,10 @@ impl SqliteStateBackend {
                 "state migration destination belongs to another attempt",
             ));
         }
+        if Self::destination_content_digest(&transaction)? != receipt.destination_content_digest {
+            return Err(verification_failed());
+        }
+        transaction.commit().map_err(|_| verification_failed())?;
         Ok(receipt)
     }
 
@@ -2124,6 +2210,9 @@ impl SqliteStateBackend {
                     })?;
                 transaction
                     .execute_batch(OPERATIONAL_OPENING_RUN_SCOPE_SCHEMA_V9)
+                    .and_then(|()| {
+                        transaction.execute_batch(FIXTURE_REPLACEMENT_AUTHORITY_SCHEMA_V10)
+                    })
                     .map_err(|error| {
                         map_sqlite_error(
                             error,
@@ -2226,6 +2315,13 @@ impl SqliteStateBackend {
                 Err(sqlite_state_error(
                     "schema.upgrade_required",
                     "SQLite state schema requires an explicit operational-opening run-scope upgrade",
+                ))
+            }
+            RUN_SCOPE_ADAPTER_SCHEMA_VERSION => {
+                validate_v9_upgrade_eligibility(connection)?;
+                Err(sqlite_state_error(
+                    "schema.upgrade_required",
+                    "SQLite state schema requires an explicit fixture authority upgrade",
                 ))
             }
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(connection),
@@ -3888,7 +3984,90 @@ fn validate_v7_upgrade_eligibility(connection: &Connection) -> Result<(), Workfl
     validate_time_window_wait_binding_columns(connection)
 }
 
+fn apply_fixture_authority_schema(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(FIXTURE_REPLACEMENT_AUTHORITY_SCHEMA_V10)?;
+    connection.execute(
+        "UPDATE schema_metadata SET schema_version=?1, checksum=?2 WHERE singleton=1",
+        params![ADAPTER_SCHEMA_VERSION, SCHEMA_CHECKSUM],
+    )?;
+    connection.pragma_update(None, "user_version", ADAPTER_SCHEMA_VERSION)
+}
+
+fn validate_inactive_activation_schema(connection: &Connection) -> Result<bool, WorkflowOsError> {
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|_| activation_schema_invalid())?;
+    let (checksum, manifest) = match version {
+        RUN_SCOPE_ADAPTER_SCHEMA_VERSION => {
+            (RUN_SCOPE_SCHEMA_CHECKSUM, RUN_SCOPE_SCHEMA_MANIFEST_DIGEST)
+        }
+        ADAPTER_SCHEMA_VERSION => (SCHEMA_CHECKSUM, SCHEMA_MANIFEST_DIGEST),
+        _ => return Err(activation_schema_invalid()),
+    };
+    let valid_metadata: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_metadata
+         WHERE singleton=1 AND schema_version=?1 AND migration_state=?2 AND checksum=?3)",
+            params![version, MIGRATION_STATE_VERIFIED_INACTIVE, checksum],
+            |row| row.get(0),
+        )
+        .map_err(|_| activation_schema_invalid())?;
+    if !valid_metadata {
+        return Err(activation_schema_invalid());
+    }
+    validate_schema_manifest(connection, manifest).map_err(|_| activation_schema_invalid())?;
+    Ok(version == RUN_SCOPE_ADAPTER_SCHEMA_VERSION)
+}
+
+fn require_empty_staged_fixture_authority(connection: &Connection) -> Result<(), WorkflowOsError> {
+    let present: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_fixture_principal_registrations)
+             OR EXISTS(SELECT 1 FROM local_fixture_replacement_grants)",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| verification_failed())?;
+    if present {
+        return Err(migration_runtime_error(
+            "destination.fixture_authority_unexpected",
+            "staged filesystem migration contains unexpected fixture authority",
+        ));
+    }
+    Ok(())
+}
+
+fn activation_schema_invalid() -> WorkflowOsError {
+    migration_runtime_error(
+        "activation.schema_invalid",
+        "state migration destination schema is invalid",
+    )
+}
+
 fn validate_schema_metadata(connection: &Connection) -> Result<(), WorkflowOsError> {
+    validate_schema_metadata_version(
+        connection,
+        ADAPTER_SCHEMA_VERSION,
+        SCHEMA_CHECKSUM,
+        SCHEMA_MANIFEST_DIGEST,
+    )
+}
+
+fn validate_v9_upgrade_eligibility(connection: &Connection) -> Result<(), WorkflowOsError> {
+    validate_schema_metadata_version(
+        connection,
+        RUN_SCOPE_ADAPTER_SCHEMA_VERSION,
+        RUN_SCOPE_SCHEMA_CHECKSUM,
+        RUN_SCOPE_SCHEMA_MANIFEST_DIGEST,
+    )
+}
+
+fn validate_schema_metadata_version(
+    connection: &Connection,
+    expected_version: u32,
+    expected_checksum: &str,
+    expected_manifest: &str,
+) -> Result<(), WorkflowOsError> {
     let metadata = connection
         .query_row(
             "SELECT schema_version, migration_state, checksum
@@ -3911,10 +4090,10 @@ fn validate_schema_metadata(connection: &Connection) -> Result<(), WorkflowOsErr
             )
         })?;
     match metadata {
-        Some((ADAPTER_SCHEMA_VERSION, state, checksum))
-            if state == "ready" && checksum == SCHEMA_CHECKSUM =>
+        Some((version, state, checksum))
+            if version == expected_version && state == "ready" && checksum == expected_checksum =>
         {
-            validate_schema_manifest(connection, SCHEMA_MANIFEST_DIGEST)?;
+            validate_schema_manifest(connection, expected_manifest)?;
             validate_continuity_security_state(connection)?;
             validate_time_window_wait_binding_columns(connection)
         }
