@@ -234,10 +234,23 @@ and writes no report artifact. This is a public continuity validation boundary,
 not an executable live continuation or packaged harness adapter. See the
 [implementation report](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_IMPLEMENTATION_REPORT.md).
 
-The next phase is focused maintainer/security review of this bridge. It must
-verify the exact identity and proof gates, stable non-leaking failures, explicit
-same-actor boundary, immutable-state behavior, and CLI disclosure before the
-independent Codex/LangGraph fixture corpus is implemented.
+Focused maintainer/security review did not accept the first bridge. The
+identity, immutable-bundle, same-actor, approval-presentation, approval-linkage,
+SideEffect, target, and idempotency foundations are useful, but the public
+boundary currently requires a terminal run rather than the preregistered active
+interruption posture. It also does not reassess durable evidence/check or
+current execution-window facts. The CLI accepts dry-run input while reporting
+fixture mode, silently treats a malformed optional fixture reference as absent,
+and lacks a successful end-to-end public-boundary test. See the [focused bridge
+review](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_REVIEW.md).
+
+The next phase is a narrow blocker correction. It must model the exact
+non-terminal interruption posture, bind current execution-window and
+evidence/check facts from kernel-owned durable state, enforce fixture-only and
+strict input behavior, and prove the public CLI success and adversarial paths.
+No Codex/LangGraph adapter, live provider call, generic write surface, or
+cross-harness product claim may proceed until the corrected bridge passes a
+second focused review.
 
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
