@@ -11529,6 +11529,7 @@ pub fn validate_github_pr_comment_fixture_continuation(
         request.attempted_record,
         request.immutable_run_bundle,
     )?;
+    validate_fixture_continuation_action_binding(&durable_run, &request.write_request)?;
 
     provider_write_approval_presentation_gate_for_record(
         executor,
@@ -11556,6 +11557,50 @@ pub fn validate_github_pr_comment_fixture_continuation(
         fixture_response,
         approval_linkage,
     })
+}
+
+fn validate_fixture_continuation_action_binding(
+    run: &WorkflowRun,
+    request: &GitHubPullRequestCommentWriteRequest,
+) -> Result<(), WorkflowOsError> {
+    let payload = serde_json::to_vec(request).map_err(|_| {
+        executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.action_commitment_invalid",
+            "fixture continuation action commitment could not be derived",
+        )
+    })?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"workflow-os/github-pr-comment-fixture-continuation-action/v1\0");
+    hasher.update(payload);
+    let invocation = SpecContentHash::new(hex_digest(hasher.finalize()))?;
+    let Some(step_id) = request.step_id() else {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.action_step_missing",
+            "fixture continuation requires an exact action step",
+        ));
+    };
+    let expected = crate::operational_execution_window_opening::operation_binding_commitment(
+        &run.snapshot.identity.workflow_id,
+        &run.snapshot.identity.run_id,
+        step_id,
+        &invocation,
+    );
+    let matches = run.events.iter().rev().find_map(|event| match &event.kind {
+        WorkflowRunEventKind::OperationalExecutionWindowOpened(opening) => {
+            Some(opening.operation_binding_commitment() == &expected)
+        }
+        _ => None,
+    });
+    if matches != Some(true) {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Security,
+            "github_pr_comment_fixture_continuation.action_binding_mismatch",
+            "fixture continuation action does not match the durable execution window",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_fixture_continuation_authoritative_state(

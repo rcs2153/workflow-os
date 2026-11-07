@@ -37,6 +37,15 @@ record and checks cited results against required commands on the immutable
 workflow prefix. Attestation, freshness, exact-action authority, and the
 successful public path still require the acceptance work listed above.
 
+The next candidate also compares the latest operational opening's operation
+commitment to a domain-separated hash of the complete typed comment request,
+including its body and preflight. Matching the target and SideEffect IDs alone
+was insufficient to establish exact-action continuity. No existing generic
+local-check window is thereby upgraded to comment authority. A fixture
+preparation path must establish the corresponding binding through existing
+current-authority admission before the positive test can pass; that path is
+not implemented by this checkpoint.
+
 ## Verdict
 
 The first public continuation bridge establishes useful durable identity,

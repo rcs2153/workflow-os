@@ -259,6 +259,10 @@ impl OperationalExecutionWindowOpeningProjectionEvent {
         self.operation_binding
     }
 
+    pub(crate) const fn operation_binding_commitment(&self) -> &SpecContentHash {
+        &self.operation_binding_commitment
+    }
+
     #[must_use]
     /// Returns the payload-free projection commitment.
     pub const fn projection_commitment(&self) -> &SpecContentHash {
