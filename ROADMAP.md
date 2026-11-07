@@ -148,6 +148,43 @@ The ordered queue is:
    [Cross-Harness Authoritative Continuation Milestone
    Plan](docs/implementation-plans/cross-harness-authoritative-continuation-milestone-plan.md).
 
+The Core/PostgreSQL implementation for item 2 is complete on the current
+implementation branch and its focused maintainer/security review is accepted.
+Hosted creation now derives a deterministic semantic prefix from the exact
+immutable bundle, classifies and completes a missing suffix under one
+transaction-scoped run lock, and repairs the snapshot in the same transaction.
+It accepts legacy
+random event headers only when every authoritative event field and typed
+payload still match; conflicting semantics fail closed. Permanent PostgreSQL
+coverage exercises the three reproduced cut points, transaction rollback,
+exact replay, backend restart, and concurrent repair. This does not close the
+P0: exact-head CI, independent rerun, broader hosted/API contention evidence,
+and restore rehearsal remain acceptance gates. See the [implementation
+report](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_RECOVERY_IMPLEMENTATION_REPORT.md).
+
+The cross-harness milestone tests a first-class platform property, not a demo
+integration: Workflow OS is a **shared governance kernel** whose authority and
+execution truth must remain portable across independently implemented
+harnesses. The milestone must keep three layers distinct:
+
+1. **Procedure authority:** who may define, revise, activate, or retire the
+   workflow and its policy/check requirements.
+2. **Invocation authority:** who authorized this exact run, action, resource,
+   execution window, and replacement executor.
+3. **Execution truth:** what effect was attempted or observed, whether it was
+   accepted exactly once at the declared boundary, and what reconciliation is
+   still required.
+
+An evaluator-authored Codex-to-LangGraph handoff has already shown the shape of
+this property: one harness started a run, another resumed it without transcript
+authority, denial and drift prevented the effect, and a fresh reviewer could
+reconstruct the decision. That evidence used synthetic identities,
+evaluator-written integrations, and a simulated ambiguous target. It is not a
+plug-and-play cross-harness product claim. Productization still requires
+authenticated delegation, packaged stable harness contracts, one real
+sandboxed provider write, post-effect/pre-ack reconciliation, duplicate
+prevention, and independent reconstruction through public surfaces.
+
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
 recursive agents, nested-harness runtime, a new provider mutation family, or a

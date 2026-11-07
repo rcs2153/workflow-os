@@ -1,6 +1,6 @@
 # Hosted Partial-Run Creation Recovery Plan
 
-Status: P0 planning complete; implementation not started
+Status: Core/PostgreSQL implementation complete; focused review and full acceptance pending
 
 ## 1. Decision
 

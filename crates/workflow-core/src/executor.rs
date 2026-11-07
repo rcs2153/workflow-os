@@ -14500,11 +14500,10 @@ pub fn execute_with_hosted_no_write_dispatch(
         LocalExecutor::<PostgresStateBackend>::prepare_execution(execution, run_id.clone())?;
     validate_hosted_no_write_plan(&plan)?;
     bind_hosted_dispatch_context(&mut plan, &request.dispatch)?;
-    if !executor.backend.read_events(&run_id)?.is_empty() {
-        return reconcile_existing_hosted_no_write_run(executor, request, plan, &run_id);
+    let existing_events = executor.backend.read_events(&run_id)?;
+    if existing_events.is_empty() {
+        executor.evaluate_pre_run_policy(&plan, &execution.actor, &execution.correlation_id)?;
     }
-
-    executor.evaluate_pre_run_policy(&plan, &execution.actor, &execution.correlation_id)?;
     let project = load_validated_project_bundle(
         &execution.project_root,
         ProjectValidationCapability::Default,
@@ -14538,65 +14537,27 @@ pub fn execute_with_hosted_no_write_dispatch(
 
     let binding = bundle.manifest().run_binding();
     plan.immutable_run_bundle = Some(binding.clone());
-    executor.append_run_start(&mut plan)?;
-    executor.append_step_scheduled(&mut plan)?;
-    plan.step_scheduled = true;
-    let run = if plan.policy_effects.requires_approval() {
-        executor.pause_for_approval(plan)?
-    } else {
-        // Hosted dispatch atomically advances an existing durable snapshot.
-        // Project the run-start prefix before entering that transaction.
-        executor.rehydrate_and_project(&plan.event_builder.run_id)?;
-        dispatch_hosted_plan(executor, plan, &request.dispatch)?
-    };
-    Ok(LocalExecutionWithImmutableRunBundleResult {
-        run,
-        bundle_binding: binding,
-    })
-}
-
-fn reconcile_existing_hosted_no_write_run(
-    executor: &LocalExecutor<'_, PostgresStateBackend>,
-    request: &LocalExecutionWithHostedDispatchRequest,
-    mut plan: ExecutionPlan,
-    run_id: &WorkflowRunId,
-) -> Result<LocalExecutionWithImmutableRunBundleResult, WorkflowOsError> {
-    let execution = &request.execution.execution;
-    let run = executor.backend.rehydrate_run(run_id)?;
-    let binding = run
-        .snapshot
-        .identity
-        .immutable_run_bundle
-        .clone()
-        .ok_or_else(immutable_run_bundle_binding_error)?;
-    let stored = executor
+    let expected_prefix = hosted_creation_prefix_events(&plan, *bundle.manifest().created_at())?;
+    let reconciliation = executor
         .backend
-        .read_immutable_run_bundle(run_id)?
-        .ok_or_else(immutable_run_bundle_binding_error)?;
-    if stored.manifest().run_binding() != binding
-        || !existing_immutable_run_bundle_request_matches(
-            stored.manifest(),
-            execution,
-            &request.execution.bundle,
-            None,
-        )?
-        || validate_immutable_run_bundle_matches_plan(stored.manifest(), &plan).is_err()
-    {
-        return Err(immutable_run_bundle_binding_error());
+        .reconcile_hosted_creation_prefix(&expected_prefix)?;
+    for event in reconciliation.appended_events() {
+        executor.emit_runtime_signals(event)?;
     }
-    let run = match run.snapshot.status {
-        WorkflowRunStatus::WaitingForApproval => run,
-        status if status.is_terminal() => run,
-        WorkflowRunStatus::Running => {
-            plan.immutable_run_bundle = Some(binding.clone());
-            plan.step_scheduled = true;
-            plan.event_builder = EventBuilder::from_snapshot(
-                &run.snapshot,
-                execution.correlation_id.clone(),
-                execution.actor.clone(),
-            );
-            dispatch_hosted_plan(executor, plan, &request.dispatch)?
+    let reconciled_run = reconciliation.run().clone();
+    plan.step_scheduled = true;
+    plan.event_builder = EventBuilder::from_snapshot(
+        &reconciled_run.snapshot,
+        execution.correlation_id.clone(),
+        execution.actor.clone(),
+    );
+    let run = match reconciled_run.snapshot.status {
+        WorkflowRunStatus::WaitingForApproval => reconciled_run,
+        status if status.is_terminal() => reconciled_run,
+        WorkflowRunStatus::Running if plan.policy_effects.requires_approval() => {
+            executor.pause_for_approval(plan)?
         }
+        WorkflowRunStatus::Running => dispatch_hosted_plan(executor, plan, &request.dispatch)?,
         _ => {
             return Err(executor_error(
                 WorkflowOsErrorKind::InvalidState,
@@ -14609,6 +14570,81 @@ fn reconcile_existing_hosted_no_write_run(
         run,
         bundle_binding: binding,
     })
+}
+
+fn hosted_creation_prefix_events(
+    plan: &ExecutionPlan,
+    timestamp: Timestamp,
+) -> Result<Vec<WorkflowRunEvent>, WorkflowOsError> {
+    let binding = plan
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(immutable_run_bundle_binding_error)?;
+    let mut kinds = vec![(
+        "created",
+        WorkflowRunEventKind::RunCreated {
+            summary: Some("local executor run created".to_owned()),
+            immutable_run_bundle: Some(binding.clone()),
+        },
+        None,
+    )];
+    if let Some(assessment) = plan.governance_assessment_binding.clone() {
+        let key = governance_assessment_binding_idempotency_key(&assessment)?;
+        kinds.push((
+            "governance-assessment",
+            WorkflowRunEventKind::GovernanceAssessmentBound(Box::new(assessment)),
+            Some(key),
+        ));
+    }
+    if let Some(receipt) = plan.governance_disclosure_surface_acceptance.clone() {
+        let key = governance_disclosure_surface_acceptance_idempotency_key(&receipt)?;
+        kinds.push((
+            "governance-disclosure",
+            WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(Box::new(receipt)),
+            Some(key),
+        ));
+    }
+    kinds.extend([
+        ("validated", WorkflowRunEventKind::RunValidated, None),
+        ("started", WorkflowRunEventKind::RunStarted, None),
+        (
+            "step-scheduled",
+            WorkflowRunEventKind::StepScheduled {
+                step_id: plan.step.id.clone(),
+            },
+            None,
+        ),
+    ]);
+
+    let mut sequence_number = EventSequenceNumber::first();
+    kinds
+        .into_iter()
+        .map(|(label, kind, idempotency_key)| {
+            let identity_hash = crate::SpecContentHash::from_text(&format!(
+                "workflow-os/hosted-creation/v1/{}/{}/{}/{}",
+                plan.event_builder.run_id,
+                binding.root_hash(),
+                sequence_number.get(),
+                label
+            ));
+            let event = WorkflowRunEvent {
+                sequence_number,
+                event_id: EventId::new(format!("event/hosted-create/{}", identity_hash.as_str()))?,
+                timestamp,
+                run_id: plan.event_builder.run_id.clone(),
+                workflow_id: plan.event_builder.workflow_id.clone(),
+                schema_version: plan.event_builder.schema_version.clone(),
+                workflow_version: plan.event_builder.workflow_version.clone(),
+                spec_content_hash: plan.event_builder.spec_hash.clone(),
+                correlation_id: Some(plan.event_builder.correlation_id.clone()),
+                actor: Some(plan.event_builder.actor.clone()),
+                idempotency_key,
+                kind,
+            };
+            sequence_number = sequence_number.next();
+            Ok(event)
+        })
+        .collect()
 }
 
 /// Applies proof-enforced approval and dispatches the approved single-step

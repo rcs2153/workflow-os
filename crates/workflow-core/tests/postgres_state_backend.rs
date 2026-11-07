@@ -259,6 +259,7 @@ fn postgresql_backend_proves_shared_state_milestone() {
 
     let hosted_recovery_project = TestProject::new();
     hosted_recovery_project.write_valid_project();
+    prove_hosted_creation_prefix_reconciliation(&backend, &config);
     prove_hosted_dispatch_recovery(&backend, &config, &hosted_recovery_project);
     prove_hosted_approval_dispatch_recovery(&backend, &config);
 
@@ -2875,6 +2876,165 @@ fn prove_hosted_dispatch_recovery(
             .expect("queue metrics after concurrent recovery")
             .queued_work_items(),
         queued_before_concurrent + 1
+    );
+}
+
+fn prove_hosted_creation_prefix_reconciliation(backend: &PostgresStateBackend, config: &Config) {
+    for cut in 1..=3 {
+        let mut expected = event_sequence(&format!("hosted-creation-prefix-{cut}"));
+        let base = expected[0].clone();
+        expected.push(event(
+            &base,
+            4,
+            "scheduled",
+            WorkflowRunEventKind::StepScheduled {
+                step_id: StepId::new("hosted-read").expect("step"),
+            },
+        ));
+        for (index, event) in expected.iter().take(cut).enumerate() {
+            let mut legacy = event.clone();
+            legacy.event_id = EventId::new(format!(
+                "event-postgres-hosted-creation-prefix-{cut}-legacy-{index}"
+            ))
+            .expect("legacy event id");
+            backend
+                .append_event(&legacy)
+                .expect("seed legacy partial prefix");
+        }
+
+        let blocked_sequence = i64::try_from(cut + 1).expect("blocked sequence");
+        let function_name = format!("test_block_hosted_creation_{cut}");
+        let trigger_name = format!("test_block_hosted_creation_trigger_{cut}");
+        let run_id = expected[0].run_id.as_str();
+        let mut fault_connection = config.connect(NoTls).expect("connect creation fault");
+        fault_connection
+            .batch_execute(&format!(
+                "CREATE OR REPLACE FUNCTION workflow_os.{function_name}()
+                 RETURNS trigger LANGUAGE plpgsql AS $$
+                 BEGIN
+                   IF NEW.run_id = '{run_id}' AND NEW.sequence_number = {blocked_sequence} THEN
+                     RAISE EXCEPTION 'blocked hosted creation prefix';
+                   END IF;
+                   RETURN NEW;
+                 END;
+                 $$;
+                 CREATE TRIGGER {trigger_name}
+                 BEFORE INSERT ON workflow_os.events
+                 FOR EACH ROW EXECUTE FUNCTION workflow_os.{function_name}();"
+            ))
+            .expect("install hosted creation fault");
+        let error = backend
+            .reconcile_hosted_creation_prefix(&expected)
+            .expect_err("creation-prefix fault must roll back");
+        assert_eq!(error.code(), "postgres_state.backend.unavailable");
+        assert_eq!(
+            backend
+                .read_events(&expected[0].run_id)
+                .expect("read rolled-back prefix")
+                .len(),
+            cut
+        );
+        fault_connection
+            .batch_execute(&format!(
+                "DROP TRIGGER {trigger_name} ON workflow_os.events;
+                 DROP FUNCTION workflow_os.{function_name}();"
+            ))
+            .expect("remove hosted creation fault");
+
+        let repaired = backend
+            .reconcile_hosted_creation_prefix(&expected)
+            .expect("repair partial creation prefix");
+        assert_eq!(repaired.appended_events(), &expected[cut..]);
+        assert_eq!(repaired.run().snapshot.status, WorkflowRunStatus::Running);
+        let replayed = backend
+            .reconcile_hosted_creation_prefix(&expected)
+            .expect("exact creation prefix replay");
+        assert_eq!(replayed.appended_events(), []);
+
+        let restarted = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
+            config.clone(),
+        )));
+        assert_eq!(
+            restarted
+                .reconcile_hosted_creation_prefix(&expected)
+                .expect("restart creation prefix replay")
+                .appended_events(),
+            []
+        );
+    }
+
+    let mut expected = event_sequence("hosted-creation-prefix-concurrent");
+    let base = expected[0].clone();
+    expected.push(event(
+        &base,
+        4,
+        "scheduled",
+        WorkflowRunEventKind::StepScheduled {
+            step_id: StepId::new("hosted-read").expect("step"),
+        },
+    ));
+    backend
+        .append_event(&expected[0])
+        .expect("seed concurrent prefix");
+    let expected = Arc::new(expected);
+    let barrier = Arc::new(Barrier::new(3));
+    let mut workers = Vec::new();
+    for _ in 0..2 {
+        let backend = backend.clone();
+        let expected = Arc::clone(&expected);
+        let barrier = Arc::clone(&barrier);
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            backend.reconcile_hosted_creation_prefix(&expected)
+        }));
+    }
+    barrier.wait();
+    let results = workers
+        .into_iter()
+        .map(|worker| worker.join().expect("creation repair worker"))
+        .collect::<Vec<_>>();
+    assert!(results.iter().all(Result::is_ok), "{results:?}");
+    assert_eq!(
+        results
+            .iter()
+            .map(|result| {
+                result
+                    .as_ref()
+                    .expect("successful repair")
+                    .appended_events()
+                    .len()
+            })
+            .sum::<usize>(),
+        3
+    );
+    assert_eq!(
+        backend
+            .read_events(&expected[0].run_id)
+            .expect("read concurrent repair")
+            .len(),
+        4
+    );
+
+    let expected = event_sequence("hosted-creation-prefix-conflict");
+    let mut conflicting = expected[0].clone();
+    conflicting.event_id = EventId::new("event-postgres-hosted-creation-prefix-conflict-legacy")
+        .expect("legacy event id");
+    conflicting.actor = Some(ActorId::new("system/substituted-actor").expect("actor"));
+    backend
+        .append_event(&conflicting)
+        .expect("seed conflicting legacy prefix");
+    let error = backend
+        .reconcile_hosted_creation_prefix(&expected)
+        .expect_err("changed legacy authority metadata must fail closed");
+    assert_eq!(
+        error.code(),
+        "postgres_state.hosted_creation.prefix_conflict"
+    );
+    assert_eq!(
+        backend
+            .read_events(&expected[0].run_id)
+            .expect("read conflicting prefix"),
+        vec![conflicting]
     );
 }
 
