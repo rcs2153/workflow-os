@@ -157,7 +157,18 @@ matrix](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_REPRODUCTION_AND_TRANSITION_MA
 The next authorized phase is focused maintainer/security review of the exact
 durable-prefix classification, the proposed Core-owned reconciliation seam,
 and the permanent fault/concurrency/restart/restore test obligations.
-Production code remains unauthorized until that review accepts the boundary.
+The review is now accepted after four corrections: the four observed fixture
+events are not treated as the complete general grammar; missing bootstrap
+events require a deterministic identity recipe instead of fresh event IDs and
+timestamps; classification and suffix repair must occur under one
+transaction-scoped PostgreSQL lock; and post-commit runtime-signal delivery
+must remain distinct from durable event authority. See the [focused transition
+matrix
+review](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_TRANSITION_MATRIX_REVIEW.md).
+
+The next authorized phase is the bounded Core/PostgreSQL implementation and
+permanent fault/concurrency/restart/restore coverage. Schema changes, generic
+event-semantic changes, or a second dispatch path require a new blocker review.
 
 The earlier P0 **continuity of authority release-gate** preemption established
 the three closed gates summarized below. Continuity of authority means that the

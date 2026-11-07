@@ -57,8 +57,8 @@ does not make the exact request recoverable.
 
 ## Source-Of-Truth Analysis
 
-The hosted create path persists the immutable run bundle and then calls four
-separate event appends:
+The reproduced fixture's hosted create path persists the immutable run bundle
+and then calls four separate event appends:
 
 1. `RunCreated`;
 2. `RunValidated`;
@@ -67,6 +67,13 @@ separate event appends:
 
 Each append owns a separate PostgreSQL transaction. An interruption can
 therefore leave any event prefix durable.
+
+This four-event list is the observed fixture sequence, not the complete general
+grammar. `append_run_start` may also append a governance-assessment binding and
+a disclosure-surface acceptance between `RunCreated` and `RunValidated`.
+Implementation must derive and validate the complete expected creation-event
+sequence for the exact request. It must not hard-code sequence numbers or
+assume that every lawful hosted prefix contains only these four event kinds.
 
 On exact retry, `reconcile_existing_hosted_no_write_run` rehydrates the run and
 accepts only:
@@ -116,22 +123,33 @@ The operation should:
 3. compare the exact immutable bundle and resolved execution inputs;
 4. classify the last lawful creation transition;
 5. deterministically rederive each missing event from the immutable request;
-6. append only missing transitions with stable event and idempotency identity;
-7. continue through the existing approval or dispatch seam only after
+6. construct bootstrap events with deterministic IDs, timestamps, sequence
+   positions, correlation, actor, and idempotency identity derived from the
+   immutable creation inputs rather than a fresh `EventBuilder` clock/ID call;
+7. append only missing transitions whose complete persisted form matches that
+   deterministic recipe;
+8. continue through the existing approval or dispatch seam only after
    `StepScheduled` is durably proven; and
-8. return an explicit repaired, existing-wait, existing-dispatch, terminal,
+9. return an explicit repaired, existing-wait, existing-dispatch, terminal,
    conflict, or recovery-required outcome.
 
 The seam must not set `step_scheduled = true` from `Running` status alone. It
 must not synthesize history from a snapshot, accept caller-authored repair
 events, or add a second queue mechanism.
 
-The focused implementation review must decide whether the missing creation
-events can be appended in one fenced PostgreSQL transaction without changing
-the event-store contract. If not, the repair may use individually create-only
-appends under one recovery lease, but only with deterministic stable event
-identity and restart-safe classification after every append. It must not claim
-atomicity that the persistence contract does not provide.
+The accepted review selects one serializable PostgreSQL transaction guarded by
+a run-scoped transaction lock as the initial seam. That transaction must read
+and semantically validate the existing prefix, compare it with the exact
+deterministic expected sequence, append every missing creation event, and
+commit the authoritative snapshot projection. The operation must return the
+events it actually appended so runtime audit, observability, and structured-log
+signals can be emitted after commit without treating signal delivery as the
+authority for durable history. If signal emission then fails, exact retry must
+acknowledge the durable prefix without appending it again.
+
+This is a narrow PostgreSQL hosted-path operation, not a weakening of the
+general event-store contract. Implementation must not claim cross-backend
+atomicity or silently reuse ordinary unfenced `append_event` calls.
 
 ## Permanent Test Requirements
 
@@ -144,6 +162,7 @@ coverage and add:
   rejection;
 - concurrent exact-retry winner election;
 - process restart between interruption and retry;
+- failure of post-commit runtime signal delivery followed by exact retry;
 - PostgreSQL backup and restore of at least one early prefix;
 - API response and operator-inspection assertions;
 - zero duplicate events, work items, invocations, approvals, SideEffects,
