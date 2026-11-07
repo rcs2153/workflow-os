@@ -7,14 +7,41 @@ use subtle::ConstantTimeEq;
 
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
-    ActorId, ApprovalDecision, ApprovalDecisionKind, ApprovalPresentationRecord,
-    ApprovalReferenceId, AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId,
+    Action, ActorId, ApprovalDecision, ApprovalDecisionKind, ApprovalPresentationRecord,
+    ApprovalReferenceId, AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId, Capability,
     CapabilityDelegationPosture, CapabilityGrant, CapabilityGrantLifecycle,
     CapabilityGrantRequirements, CapabilityGrantScope, CapabilityResourceKind, EventId,
-    SpecContentHash, Timestamp, WorkReportSensitivity, WorkflowOsError,
+    GitHubPullRequestCommentTarget, PolicyDecision, SpecContentHash, Timestamp,
+    WorkReportSensitivity, WorkflowOsError,
 };
 
 pub(crate) const LIVE_CAPABILITY: &str = "live-sandbox/github-pr-comment-continuation";
+
+/// Exact target selected by the trusted operator, not by a replacement harness.
+/// No public decoder, provider credentials, or repository-wide authorization.
+pub(crate) struct LiveSandboxPolicyTarget {
+    target: GitHubPullRequestCommentTarget,
+    operator: ActorId,
+    revision: SpecContentHash,
+    valid_until: Timestamp,
+}
+
+impl LiveSandboxPolicyTarget {
+    pub(crate) fn provision(
+        target: GitHubPullRequestCommentTarget,
+        operator: ActorId,
+        revision: SpecContentHash,
+        valid_until: Timestamp,
+    ) -> Result<Self, WorkflowOsError> {
+        target.validate()?;
+        Ok(Self {
+            target,
+            operator,
+            revision,
+            valid_until,
+        })
+    }
+}
 
 /// Provisioned by the trusted operator, never deserialized from a harness.
 #[derive(Serialize, Deserialize)]
@@ -82,6 +109,7 @@ impl LiveSandboxPrincipalVerifier {
 #[derive(Clone, Copy)]
 pub(crate) struct LiveSandboxContinuationFacts<'a> {
     pub(crate) action: GitHubCommentContinuationAction<'a>,
+    pub(crate) policy_target: &'a LiveSandboxPolicyTarget,
     pub(crate) replacement: &'a ActorId,
     pub(crate) scope: &'a CapabilityGrantScope,
     pub(crate) approval: &'a ApprovalReferenceId,
@@ -103,6 +131,64 @@ pub(crate) struct ResolvedLiveEffect {
 }
 
 impl LiveSandboxContinuationFacts<'_> {
+    /// Evaluate only this private capability; the general policy engine is unchanged.
+    pub(crate) fn scoped_policy_decision(
+        &self,
+        now: Timestamp,
+    ) -> Result<PolicyDecision, WorkflowOsError> {
+        self.verify_exact_approval(now)?;
+        let target = self.policy_target;
+        if &target.target != self.action.target
+            || target.operator != self.decision.actor
+            || self.replacement == self.action.original_actor
+            || self.replacement == &target.operator
+            || self.window_expires_at > target.valid_until
+            || now >= self.window_expires_at
+        {
+            return Err(denied());
+        }
+        let material = serde_json::to_vec(&(
+            self.action.commitment()?,
+            (
+                &target.target,
+                &target.operator,
+                &target.revision,
+                target.valid_until,
+            ),
+            (
+                self.approval,
+                self.approval_event,
+                self.presentation.content_hash(),
+                self.decision.decided_at,
+                self.approval_expires_at,
+            ),
+            (
+                self.replacement,
+                self.scope,
+                self.window,
+                self.attempt,
+                self.window_expires_at,
+            ),
+            self.requirements,
+        ))
+        .map_err(|_| denied())?;
+        let mut hash = Sha256::new();
+        hash.update(b"workflow-os/live-sandbox-comment-policy/v1\0");
+        hash.update(material);
+        Ok(PolicyDecision {
+            allowed: true,
+            requires_approval: true,
+            reason_codes: vec![format!("live_sandbox_comment_scope/{:x}", hash.finalize())],
+            violations: Vec::new(),
+            action: Action::InvokeAdapter,
+            capabilities: vec![Capability::ExternalWrite, Capability::AdapterInvoke],
+            actor: Some(self.action.original_actor.clone()),
+            workflow_id: Some(self.scope.workflow_id().clone()),
+            run_id: Some(self.action.run.clone()),
+            correlation_id: Some(self.decision.correlation_id.clone()),
+        })
+    }
+
     pub(crate) fn verify_exact_approval(
         &self,
         observed_at: Timestamp,
@@ -339,8 +425,16 @@ pub(crate) mod tests {
                 .expect("marker"),
             ),
         };
+        let policy_target = LiveSandboxPolicyTarget::provision(
+            action.target.clone(),
+            issuer.clone(),
+            SpecContentHash::from_text("test sandbox target"),
+            window_expiry,
+        )
+        .expect("test sandbox policy target");
         let facts = LiveSandboxContinuationFacts {
             action,
+            policy_target: &policy_target,
             replacement: &replacement,
             scope: &scope,
             approval: &approval,

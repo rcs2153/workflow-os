@@ -227,6 +227,18 @@ dispatch reservation. Ordinary stores and checks without required proof
 keep their existing behavior. No sandbox dispatch, external action, or
 public schema changes are enabled here.
 
+Implementation run `run-1794094353607782000-2` replaces the generic adapter
+allow check with an exact private sandbox policy decision. The trusted
+operator supplies one provisioned target, revision, and validity bound.
+The policy event commits to the comment action, approval proof, replacement,
+requirements, and opening window without carrying the comment text or
+credentials. Issuance and reservation both require the latest correlated
+decision to match, after the approval event. A generic allow, later denial,
+or changed provisioning revision cannot admit. V12 now requires an explicit
+protocol checksum upgrade before operational writes; no physical schema or
+ordinary policy changes. Tests provision synthetic targets only. A trusted
+production resolver and provider route remain unconnected.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes

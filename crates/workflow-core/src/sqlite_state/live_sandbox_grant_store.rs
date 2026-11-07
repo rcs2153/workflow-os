@@ -4,10 +4,11 @@ use sha2::{Digest, Sha256};
 
 use super::{
     decode_json, encode_json, schema_recovery_required, validate_live_authority_schema,
-    validate_previous_live_authority_schema, validate_schema_metadata, SqliteStateBackend,
-    ADAPTER_SCHEMA_VERSION, LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
-    LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION, LIVE_AUTHORITY_SCHEMA_CHECKSUM,
-    LIVE_SANDBOX_AUTHORITY_SCHEMA_V11, LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12,
+    validate_previous_live_authority_schema, validate_schema_metadata,
+    validate_unscoped_v12_schema, SqliteStateBackend, ADAPTER_SCHEMA_VERSION,
+    LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION, LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION,
+    LIVE_AUTHORITY_SCHEMA_CHECKSUM, LIVE_SANDBOX_AUTHORITY_SCHEMA_V11,
+    LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12,
 };
 use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeAttemptState, AuthoritativeWindowState,
@@ -24,11 +25,11 @@ use crate::operational_execution_window_opening::{
 };
 use crate::{
     Action, ActorId, ApprovalPresentationRecord, AuthorizedExecutionAttemptId,
-    AuthorizedExecutionWindowId, Capability, CapabilityGrant, CapabilityGrantId,
-    CapabilityGrantLifecycle, LocalCheckResultStatus, SideEffectAuthorityDecision,
-    SideEffectCapability, SideEffectLifecycleState, SideEffectRecord, SideEffectReferenceKind,
-    SideEffectSensitivity, SideEffectTargetKind, SpecContentHash, Timestamp, WorkReportSensitivity,
-    WorkflowOsError, WorkflowRun, WorkflowRunEventKind, WorkflowRunStatus,
+    AuthorizedExecutionWindowId, CapabilityGrant, CapabilityGrantId, CapabilityGrantLifecycle,
+    LocalCheckResultStatus, SideEffectAuthorityDecision, SideEffectCapability,
+    SideEffectLifecycleState, SideEffectRecord, SideEffectReferenceKind, SideEffectSensitivity,
+    SideEffectTargetKind, SpecContentHash, Timestamp, WorkReportSensitivity, WorkflowOsError,
+    WorkflowRun, WorkflowRunEventKind, WorkflowRunStatus,
 };
 
 impl SqliteStateBackend {
@@ -120,7 +121,8 @@ impl SqliteStateBackend {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| schema_recovery_required())?;
-        let upgrading = match version(&tx)? {
+        let current = version(&tx)?;
+        let updating = match current {
             ADAPTER_SCHEMA_VERSION => {
                 validate_schema_metadata(&tx)?;
                 tx.execute_batch(LIVE_SANDBOX_AUTHORITY_SCHEMA_V11)
@@ -131,23 +133,33 @@ impl SqliteStateBackend {
                 validate_previous_live_authority_schema(&tx)?;
                 true
             }
-            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => false,
+            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => {
+                if validate_live_authority_schema(&tx).is_ok() {
+                    false
+                } else {
+                    validate_unscoped_v12_schema(&tx)?;
+                    true
+                }
+            }
             _ => return Err(schema_recovery_required()),
         };
-        if upgrading {
-            tx.execute_batch(LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12)
-                .and_then(|()| {
-                    tx.execute(
-                        "UPDATE schema_metadata SET schema_version=?1, checksum=?2
+        if updating {
+            if current != LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION {
+                tx.execute_batch(LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12)
+                    .map_err(|_| schema_recovery_required())?;
+            }
+            tx.execute(
+                "UPDATE schema_metadata SET schema_version=?1, checksum=?2
                          WHERE singleton=1",
-                        params![
-                            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
-                            LIVE_AUTHORITY_SCHEMA_CHECKSUM
-                        ],
-                    )?;
-                    tx.pragma_update(None, "user_version", LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION)
-                })
-                .map_err(|_| schema_recovery_required())?;
+                params![
+                    LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
+                    LIVE_AUTHORITY_SCHEMA_CHECKSUM
+                ],
+            )
+            .and_then(|_| {
+                tx.pragma_update(None, "user_version", LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION)
+            })
+            .map_err(|_| schema_recovery_required())?;
         }
         validate_live_authority_schema(&tx)?;
         tx.commit().map_err(|_| schema_recovery_required())
@@ -506,7 +518,7 @@ pub(super) fn verify_live_opening_approval(
 ) -> Result<(), WorkflowOsError> {
     let observation = super::continuity_store::observe_continuity_trusted_time()?;
     let now = observation.observed_at();
-    facts.verify_exact_approval(now)?;
+    facts.scoped_policy_decision(now)?;
     if now >= facts.window_expires_at
         || facts.window_expires_at.as_offset_date_time() - now.as_offset_date_time()
             > time::Duration::minutes(5)
@@ -589,7 +601,7 @@ fn resolve_live_effect(
     {
         return Err(denied());
     }
-    let policy = resolve_effect_policy(run, &record)?;
+    let policy = resolve_effect_policy(run, &record, facts, now)?;
     let checks = resolve_effect_checks(run, &record, facts, bundle)?;
     let proofs = resolve_required_check_proofs(tx, &stored, facts.action.step, &checks, now)?;
     let bundle_sensitivity = match stored.manifest().sensitivity() {
@@ -825,11 +837,19 @@ fn required_check_unverified() -> WorkflowOsError {
 fn resolve_effect_policy<'a>(
     run: &'a WorkflowRun,
     record: &SideEffectRecord,
+    facts: LiveSandboxContinuationFacts<'_>,
+    now: Timestamp,
 ) -> Result<&'a crate::WorkflowRunEvent, WorkflowOsError> {
     let [reference] = record.authority().policy_references.as_slice() else {
         return Err(denied());
     };
     let correlation = record.correlation_id().ok_or_else(denied)?;
+    let approval_sequence = run
+        .events
+        .iter()
+        .find(|event| event.event_id == *facts.approval_event)
+        .ok_or_else(denied)?
+        .sequence_number;
     let latest = run
         .events
         .iter()
@@ -846,19 +866,10 @@ fn resolve_effect_policy<'a>(
         .ok_or_else(denied)?;
     if reference.kind() != SideEffectReferenceKind::PolicyDecision
         || reference.reference() != latest.0.event_id.as_str()
-        || !latest.1.allowed
-        || !latest.1.requires_approval
-        || !latest.1.violations.is_empty()
-        || latest.1.actor.as_ref() != record.actor()
-        || latest.1.workflow_id.as_ref() != Some(record.workflow_id())
-        || latest.1.run_id.as_ref() != Some(record.run_id())
-        || !latest.1.capabilities.contains(&Capability::ExternalWrite)
-        || latest.1.capabilities.iter().any(|capability| {
-            !matches!(
-                capability,
-                Capability::ExternalWrite | Capability::AdapterInvoke
-            )
-        })
+        || latest.0.sequence_number <= approval_sequence
+        || latest.0.timestamp < facts.decision.decided_at
+        || latest.0.timestamp > now
+        || latest.1.as_ref() != &facts.scoped_policy_decision(now)?
     {
         return Err(denied());
     }
