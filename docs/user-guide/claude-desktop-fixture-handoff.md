@@ -69,8 +69,8 @@ WORKFLOW_OS_CLAUDE_FIXTURE_KERNEL="$PWD/target/debug/workflow-os" \
 ```
 
 It creates a fresh mode-0700 directory under the system temporary directory
-and prints the manifest path and exact grant expiry only after verifying the
-fixture through the real delegated CLI. The files containing the manifest and
+and prints the manifest path after verifying the fixture through the real
+delegated CLI. The baseline also prints the exact grant expiry. The files containing the manifest and
 principal inputs are mode 0600. The exact grant lasts 210 seconds from issue;
 prepare the app session before exporting and regenerate a fresh fixture if it
 expires. An expired run is not made current by reusing its manifest.
@@ -79,10 +79,30 @@ This exporter uses Core execution, a replayed event prefix, and synthetic
 check evidence to prepare the pre-dispatch state. It is not proof that a live
 run can be suspended at that boundary. The manifest covers `exact` (run it
 twice), `action-drift`, `target-drift`, `wrong-principal`, `missing-grant`,
-`revoked-grant`, and `expired-grant`. The exporter additionally probes actor
-override rejection at the CLI; the bridge does not accept that field.
-The operator must prepare the remaining
-cases separately; a missing case is not a pass.
+`revoked-grant`, `expired-grant`, `denied-approval`, and `terminal-replay`.
+The denied run has a durable proof-backed denial and no attempted effect; the
+CLI rejects it at the missing-effect boundary. The completed run has a
+synthetic attempted record but is rejected as no longer active. Neither run
+has its own continuation grant; the calls present the original fixture
+principal and try to reuse the positive case's grant. The exporter additionally
+probes actor override rejection at the CLI; the bridge does not accept that field.
+
+For a separate one-case manifest, prefix the export command with
+`WORKFLOW_OS_CLAUDE_FIXTURE_VARIANT=changed-evidence` or
+`WORKFLOW_OS_CLAUDE_FIXTURE_VARIANT=stale-window`. Both first verify the
+unchanged request through the public delegated CLI. The first appends a
+superseding failed check using the Core event store and verifies the original
+grant no longer validates. The second waits approximately five minutes for
+the real execution window to expire, verifies the window-specific error via
+Core's same-actor validator, then verifies the delegated denial. The stale
+grant also expires; the delegated result does not distinguish the two clocks.
+Neither variant edits the database directly or changes the trusted clock.
+
+The dispatch-reservation conflict remains a separate case. The fixture
+opening discards its dispatch capability; the evaluator must use a test-only
+Core path to reserve that exact attempt without dispatching. Do not insert a
+reservation row or grant fixture tools dispatch authority to fabricate this
+case. A missing case is not a pass.
 
 Prepare cases for exact allow and repeat, denial, target and action drift,
 missing/expired/revoked grants, wrong principal, stale window, changed
