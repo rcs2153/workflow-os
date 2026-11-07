@@ -1,5 +1,42 @@
 # Corrected Fixture Continuation Security Review
 
+## Final Maintainer Recheck
+
+Exact implementation head `47947650` is accepted for the fixture-only bridge.
+The earlier rejection below applies to `9d6f6466`. This is delegated maintainer
+review, not independent security assurance or acceptance of the harness corpus.
+
+The final SQLite read compares the full event history and exact SideEffect
+against the same transaction's operational window and dispatch reservation.
+The interleaving regression invalidates a stale result when a check failure
+commits after the initial read. Approval presentation and immutable bundle
+material are create-only. The verdict is non-authorizing and applies at the
+read snapshot, not to future dispatch.
+
+Required check declarations in the selected prefix fail closed when their
+attestation cannot be verified. The synthetic fixture success case remains
+valid only within that boundary. No attested-check support, live provider
+effect, or cross-principal delegation is accepted.
+
+Next: separately govern exact-head PR delivery and local sync, then the
+independent fixture harness corpus. No publication or merge was performed
+under this review grant.
+
+### Recheck Governance
+
+- Workflow: `dg/review`
+- Run: `run-1794031321127705000-2`
+- Approval: `approval/run-1794031321127705000-2/review-scope-approved`
+- Presentation: `presentation/7e9e59f1b60292ae`
+- Outcome: granted under standing delegation with persisted proof
+- Closeout: Completed, 39 events, one grant, no retries or escalations
+- Validation: three focused continuation tests with the rebuilt CLI probe,
+  35 fixture-filtered Core unit tests, docs check, and diff check passed
+- Out-of-kernel work: source inspection, rebuilt CLI probe, tests, docs and
+  Git commit. No WorkReport, live calls, release, or PR mutations.
+
+## Earlier Review
+
 Reviewed head: `9d6f6466`. Verdict: not accepted for the independent harness
 corpus. The fixture success path is real; two authority checks need correction.
 

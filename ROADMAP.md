@@ -263,10 +263,13 @@ or fail closed when those facts cannot be verified. Keep the independent
 harness corpus gated. The [prepared-fixture evidence](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_REVIEW.md#prepared-fixture-and-public-cli-proof)
 remains valid for its tested boundary.
 
-The snapshot correction candidate now rechecks the event history, SideEffect,
+The snapshot correction now rechecks the event history, SideEffect,
 window, and dispatch reservation in one final SQLite read transaction, and
 rejects required check declarations that the fixture cannot attest. The
-independent harness corpus remains gated pending review of this correction.
+[exact-head maintainer recheck](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_CORRECTED_REVIEW.md#final-maintainer-recheck)
+accepts this fixture-only boundary. The next increment is governed PR delivery
+and local sync before the independent fixture corpus. This does not authorize
+live dispatch, unverifiable check declarations, or cross-principal delegation.
 
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
