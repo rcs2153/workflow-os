@@ -699,6 +699,9 @@ fn help_explains_explicit_mock_local_skill_flag() {
     assert!(stdout(&output).contains("existing-repo governance scaffold"));
     assert!(stdout(&output).contains("first-run"));
     assert!(stdout(&output).contains("report-ready first-run context"));
+    assert!(
+        stdout(&output).contains("provider github-pr-comment continue-sandbox --request <path>")
+    );
 }
 
 #[test]
@@ -825,6 +828,43 @@ fn provider_lookup_operator_recovery_summary_missing_input_is_non_leaking() {
     assert!(!output.status.success());
     assert!(stderr.contains("provider_lookup_operator_recovery_cli.input.missing"));
     assert!(!stderr.contains("missing-secret-token.json"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn provider_fixture_continuation_requires_explicit_request_path() {
+    let project = TestProject::new("provider-fixture-continuation-request-required");
+
+    let output = workflow_os(
+        &project,
+        &["provider", "github-pr-comment", "continue-sandbox"],
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr(&output)
+        .contains("provider github-pr-comment continue-sandbox requires --request <path>"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn provider_fixture_continuation_missing_input_is_non_leaking() {
+    let project = TestProject::new("provider-fixture-continuation-missing");
+
+    let output = workflow_os(
+        &project,
+        &[
+            "provider",
+            "github-pr-comment",
+            "continue-sandbox",
+            "--request",
+            "missing-sensitive-continuation.json",
+        ],
+    );
+
+    let stderr = stderr(&output);
+    assert!(!output.status.success());
+    assert!(stderr.contains("github_pr_comment_fixture_continuation_cli.input.missing"));
+    assert!(!stderr.contains("missing-sensitive-continuation.json"));
     assert!(!project.state_root().exists());
 }
 

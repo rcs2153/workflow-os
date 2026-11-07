@@ -70,9 +70,9 @@ use crate::{
     CollaborativeApprovalAuthorityReceiptId, CollaborativeApprovalAuthorityReceiptWriteOutcome,
     CollaborativeIdentityAuthorityQuery, ConservativePolicyEngine, CorrelationId, EscalationRecord,
     EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
-    GitHubPullRequestCommentLiveSandboxValidationInput,
-    GitHubPullRequestCommentLiveSandboxValidationResult, GitHubPullRequestCommentProvider,
-    GitHubPullRequestCommentProviderCallOrchestrationError,
+    GitHubPullRequestCommentFixture, GitHubPullRequestCommentLiveSandboxValidationInput,
+    GitHubPullRequestCommentLiveSandboxValidationResult, GitHubPullRequestCommentPreflightedWrite,
+    GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderCallOrchestrationError,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
     GitHubPullRequestCommentProviderWriteReconciliationCandidate,
@@ -80,16 +80,17 @@ use crate::{
     GitHubPullRequestCommentProviderWriteReconciliationStatus,
     GitHubPullRequestCommentReportArtifactCitationPolicy,
     GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentWriteOutcome,
-    GitHubPullRequestCommentWriteResponse, GovernanceDecisionAuthorityReceiptRecordStore,
-    GovernanceDecisionAuthorityReceiptWriteOutcome, HighAssuranceApprovalControl,
-    HighAssuranceApprovalDecisionValidationInput, HighAssuranceApprovalDisclosureDiscoveryInput,
-    HighAssuranceApprovalSuppliedReference, HostedCatalogEntryId, HostedExecutionBudget,
-    HostedExecutionPolicyBinding, HostedExecutionRequest, HostedProjectCapability,
-    HostedProjectScope, HostedSkillDispatch, HostedWorkItem, HostedWorkItemId, IdempotencyKey,
-    IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalApprovalProofMarkerAuditProjectionStore,
-    LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger, MappingExpression,
-    ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
-    PolicyEffect, PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument,
+    GitHubPullRequestCommentWriteRequest, GitHubPullRequestCommentWriteResponse,
+    GovernanceDecisionAuthorityReceiptRecordStore, GovernanceDecisionAuthorityReceiptWriteOutcome,
+    HighAssuranceApprovalControl, HighAssuranceApprovalDecisionValidationInput,
+    HighAssuranceApprovalDisclosureDiscoveryInput, HighAssuranceApprovalSuppliedReference,
+    HostedCatalogEntryId, HostedExecutionBudget, HostedExecutionPolicyBinding,
+    HostedExecutionRequest, HostedProjectCapability, HostedProjectScope, HostedSkillDispatch,
+    HostedWorkItem, HostedWorkItemId, IdempotencyKey, IdempotencyResult, IdempotencyWrite,
+    LoadedSpec, LocalApprovalProofMarkerAuditProjectionStore, LocalAuditSink,
+    LocalObservabilitySink, LocalStructuredLogger, MappingExpression, ObservabilityEvent,
+    ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect,
+    PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument,
     PostgresDispatchHostedSkillRequest, PostgresRecordCollaborativeApprovalDecisionRequest,
     PostgresStateBackend, ProjectBundle, ProjectValidationCapability, RedactionDisposition,
     RedactionFieldState, RedactionMetadata, ReportArtifactWriteIntegrationInput,
@@ -11364,6 +11365,236 @@ where
             approval_linkage,
         ),
     )
+}
+
+/// Input for validating a replacement executor's fixture-only continuation.
+///
+/// This boundary deliberately accepts no provider, auth material, runtime
+/// handler, or mutable store. It proves that the replacement executor has
+/// recovered the exact durable run, immutable bundle, actor, approval proof,
+/// side-effect authority, and fixture request before a later live slice is
+/// permitted to perform an external action.
+pub struct GitHubPrCommentFixtureContinuationValidationRequest<'a> {
+    /// Caller-supplied run; it must exactly match durable state.
+    pub run: &'a WorkflowRun,
+    /// Persisted attempted side-effect record for the interrupted action.
+    pub attempted_record: &'a SideEffectRecord,
+    /// Exact fixture-mode write request reconstructed by the replacement.
+    pub write_request: GitHubPullRequestCommentWriteRequest,
+    /// Fixture expected to match the reconstructed request.
+    pub fixture: &'a GitHubPullRequestCommentFixture,
+    /// Actor re-resolved by the replacement executor.
+    pub replacement_actor: &'a ActorId,
+    /// Delegating actor, when a future persisted delegation contract exists.
+    /// The fixture-first slice fails closed when this is present.
+    pub delegated_by: Option<&'a ActorId>,
+    /// Proof-enforced approval-presentation policy.
+    pub presentation_policy: ApprovalPresentationDefaultEnforcementPolicy,
+    /// Exact immutable bundle loaded from the create-only bundle store.
+    pub immutable_run_bundle: &'a crate::StoredImmutableRunBundle,
+}
+
+/// Bounded result for fixture-only cross-harness continuation validation.
+pub struct GitHubPrCommentFixtureContinuationValidationResult {
+    fixture_response: GitHubPullRequestCommentWriteResponse,
+    approval_linkage: SideEffectApprovalLinkageFromStoreResult,
+}
+
+impl GitHubPrCommentFixtureContinuationValidationResult {
+    /// Returns the fixture validation response.
+    #[must_use]
+    pub const fn fixture_response(&self) -> &GitHubPullRequestCommentWriteResponse {
+        &self.fixture_response
+    }
+
+    /// Returns store-backed approval-linkage evidence counts.
+    #[must_use]
+    pub const fn approval_linkage(&self) -> &SideEffectApprovalLinkageFromStoreResult {
+        &self.approval_linkage
+    }
+
+    /// Returns whether a provider call occurred.
+    #[must_use]
+    pub const fn provider_call_performed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether the side-effect store was mutated.
+    #[must_use]
+    pub const fn side_effect_mutated(&self) -> bool {
+        false
+    }
+
+    /// Returns whether a workflow event was appended.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        false
+    }
+
+    /// Returns whether a report artifact was written.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Debug for GitHubPrCommentFixtureContinuationValidationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPrCommentFixtureContinuationValidationResult")
+            .field("fixture_response", &self.fixture_response)
+            .field("approval_linkage", &self.approval_linkage)
+            .field("provider_call_performed", &false)
+            .field("side_effect_mutated", &false)
+            .field("workflow_event_appended", &false)
+            .field("report_artifact_written", &false)
+            .finish()
+    }
+}
+
+/// Validates one fixture-only GitHub PR-comment continuation recovered by a
+/// replacement executor.
+///
+/// The function is validation-only. It performs no provider call, credential
+/// read, lifecycle transition, event append, report write, or state mutation.
+/// Delegated-actor continuation is intentionally unsupported until a durable
+/// delegation contract is implemented; same-actor replacement is accepted.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when durable state, immutable identity,
+/// actor posture, approval proof/linkage, request identity, or fixture input
+/// is missing, stale, changed, or unsupported.
+pub fn validate_github_pr_comment_fixture_continuation<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &impl SideEffectRecordStore,
+    request: GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+) -> Result<GitHubPrCommentFixtureContinuationValidationResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    if request.presentation_policy.mode == ApprovalPresentationDefaultEnforcementMode::NotRequired {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.presentation_policy_required",
+            "fixture continuation requires proof-enforced presentation policy",
+        ));
+    }
+    if request.delegated_by.is_some() {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.delegation_unsupported",
+            "fixture continuation does not yet support delegated actor substitution",
+        ));
+    }
+
+    let durable_run = executor
+        .backend
+        .rehydrate_run(&request.run.snapshot.identity.run_id)
+        .map_err(|_| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "github_pr_comment_fixture_continuation.durable_run_unavailable",
+                "fixture continuation requires durable workflow run state",
+            )
+        })?;
+    if &durable_run != request.run {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "github_pr_comment_fixture_continuation.durable_run_mismatch",
+            "fixture continuation requires caller run to match durable state",
+        ));
+    }
+    validate_live_sandbox_approval_authority_run(&durable_run, request.attempted_record)?;
+
+    validate_fixture_continuation_identity(&durable_run, &request)?;
+
+    provider_write_approval_presentation_gate_for_record(
+        executor,
+        &durable_run,
+        request.attempted_record,
+        &request.presentation_policy,
+    )?;
+    let side_effect_ids = [request.attempted_record.side_effect_id().clone()];
+    let approval_linkage = crate::validate_side_effect_approval_linkage_from_store(
+        store,
+        SideEffectApprovalLinkageFromStoreInput {
+            run: &durable_run,
+            side_effect_ids: &side_effect_ids,
+            load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
+            missing_record_policy: SideEffectMissingRecordPolicy::RequireAll,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+        },
+    )?;
+
+    let preflighted = GitHubPullRequestCommentPreflightedWrite::new(request.write_request)?;
+    let fixture_response =
+        crate::validate_github_pr_comment_fixture_write(&preflighted, request.fixture)?;
+    Ok(GitHubPrCommentFixtureContinuationValidationResult {
+        fixture_response,
+        approval_linkage,
+    })
+}
+
+fn validate_fixture_continuation_identity(
+    durable_run: &WorkflowRun,
+    request: &GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+) -> Result<(), WorkflowOsError> {
+    let identity = &durable_run.snapshot.identity;
+    let bundle_binding = identity.immutable_run_bundle.as_ref().ok_or_else(|| {
+        executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.immutable_run_bundle_missing",
+            "fixture continuation requires an immutable run-bundle binding",
+        )
+    })?;
+    if request.immutable_run_bundle.manifest().run_id() != &identity.run_id
+        || request.immutable_run_bundle.manifest().run_binding() != *bundle_binding
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.immutable_run_bundle_mismatch",
+            "fixture continuation immutable run bundle does not match durable run identity",
+        ));
+    }
+
+    if request.write_request.run_id() != &identity.run_id
+        || request.write_request.workflow_id() != &identity.workflow_id
+        || request.write_request.workflow_version() != &identity.workflow_version
+        || request.write_request.schema_version() != &identity.schema_version
+        || request.write_request.spec_hash() != &identity.spec_content_hash
+        || request.write_request.side_effect_id() != request.attempted_record.side_effect_id()
+        || request.write_request.step_id() != request.attempted_record.step_id()
+        || request.write_request.target().reference()
+            != request.attempted_record.target().reference()
+        || request.write_request.idempotency_key() != request.attempted_record.idempotency().key()
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.request_identity_mismatch",
+            "fixture continuation request does not match durable run and side-effect identity",
+        ));
+    }
+    if request.attempted_record.lifecycle_state() != SideEffectLifecycleState::Attempted
+        || request.attempted_record.capability() != crate::SideEffectCapability::GitHubWrite
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.side_effect_not_attempted",
+            "fixture continuation requires an attempted GitHub write side effect",
+        ));
+    }
+    if request.write_request.actor() != request.replacement_actor
+        || request.attempted_record.actor() != Some(request.replacement_actor)
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.actor_mismatch",
+            "fixture continuation replacement actor does not match durable authority",
+        ));
+    }
+    Ok(())
 }
 
 /// Composes an already-accepted GitHub PR comment live sandbox runtime result

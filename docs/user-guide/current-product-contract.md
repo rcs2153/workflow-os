@@ -73,6 +73,21 @@ the ambiguous target was simulated. Current `main` therefore does not claim
 packaged plug-and-play interoperability, authenticated cross-harness
 delegation, or a production execution-framework integration.
 
+Current `main` now includes a fixture-only public continuation validation
+boundary for the existing GitHub PR-comment family:
+
+```text
+workflow-os --json provider github-pr-comment continue-sandbox \
+  --request <bounded-request.json>
+```
+
+It loads the exact durable run, immutable bundle, attempted `SideEffect`,
+approval-presentation proof, approval linkage, and replacement actor before
+validating one matching fixture. It accepts no credential, performs no provider
+call, and changes no durable state. It is an implementation increment toward
+the preregistered milestone, not an executable cross-harness integration or a
+live write command.
+
 ## Maturity
 
 - **Release preparation identity:** `0.4.0-preview.1`.

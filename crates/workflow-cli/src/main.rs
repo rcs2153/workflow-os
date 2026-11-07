@@ -29,24 +29,29 @@ use workflow_core::{
     AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, ApprovalDecisionKind,
     ApprovalPresentationChannel, ApprovalPresentationId, ApprovalPresentationRecord,
     ApprovalPresentationRecordDefinition, ApprovalPresentationRecordStore,
-    ApprovalPresentationSensitivity, AuthoritativeDocsCheckReportReferenceInputs,
-    AuthoritativeExecutionConfiguration, AuthoritativeGovernanceArtifactPersistenceInput,
+    ApprovalPresentationSensitiveActionPosture, ApprovalPresentationSensitivity,
+    AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeExecutionConfiguration,
+    AuthoritativeGovernanceArtifactPersistenceInput,
     AuthoritativeGovernanceArtifactPersistenceResult, AuthoritativeGovernanceArtifactPosture,
     AuthoritativeGovernanceReportPosture, BackendHealthCheck, CorrelationId, Diagnostic,
     DiagnosticSeverity, EventLogStore, ExplicitLocalCheckProfileSelection,
     FilesystemToSqliteMigrationInput, GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter,
     GitHubActionsReadOnlyConfig, GitHubFixtureClient,
+    GitHubPrCommentFixtureContinuationValidationRequest, GitHubPullRequestCommentFixture,
+    GitHubPullRequestCommentFixtureDefinition,
     GitHubPullRequestCommentProviderEventProofRecoveryPosture,
     GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction,
     GitHubPullRequestCommentProviderLookupOperatorRecoverySummary,
-    GitHubPullRequestCommentProviderLookupReconciliationPosture, GitHubReadOnlyAdapter,
-    GitHubReadOnlyConfig, GitHubRepositoryMetadataFixtureExecutionPosture,
+    GitHubPullRequestCommentProviderLookupReconciliationPosture, GitHubPullRequestCommentTarget,
+    GitHubPullRequestCommentWriteMode, GitHubPullRequestCommentWriteOutcome,
+    GitHubPullRequestCommentWriteRequest, GitHubReadOnlyAdapter, GitHubReadOnlyConfig,
+    GitHubRepositoryMetadataFixtureExecutionPosture,
     GitHubRepositoryMetadataFixtureExecutionRequest, GovernanceAssessmentCompleteness,
     GovernanceAssessmentUnknownFact, GovernanceDisclosureDeliveryHandler,
     GovernanceDisclosureDeliveryId, GovernanceDisclosureDeliveryRequest,
     GovernanceDisclosureRequirement, GovernanceDisclosureSensitivity, GovernanceDisclosureSurface,
     GovernanceDisclosureSurfaceKind, GovernanceExecutionDisposition, GovernanceStrictnessProfile,
-    GovernedContinuationBrief, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
+    GovernedContinuationBrief, IdempotencyKey, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
     ImmutableRunBundleStore, ImmutableRunBundleVersion, JiraFixtureClient, JiraReadOnlyAdapter,
     JiraReadOnlyConfig, LifecycleStatus, LoadedSpec, LocalApprovalDecisionRequest,
     LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
@@ -72,9 +77,10 @@ use workflow_core::{
     LocalSelectedProjectValidationResolvedContextReassessmentInput,
     LocalSelectedProjectValidationResolvedContextRequest, LocalSkillRegistry, LocalStateBackend,
     LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity, LocalWorkflowCatalogStore,
-    RedactionMetadata, SkillDefinition, SkillHandler, SkillInput, SkillOutput, SpecContentHash,
-    SqliteStateBackend, StateBackend, StateMigrationDestinationId, StateMigrationId,
-    StateMigrationPlan, StateMigrationVerificationReceipt, Timestamp, WorkReport,
+    RedactionMetadata, SideEffectId, SideEffectRecordStore, SideEffectSensitivity, SkillDefinition,
+    SkillHandler, SkillInput, SkillOutput, SpecContentHash, SqliteStateBackend, StateBackend,
+    StateMigrationDestinationId, StateMigrationId, StateMigrationPlan,
+    StateMigrationVerificationReceipt, Timestamp, WorkReport,
     WorkReportArtifactHighAssuranceRequirement, WorkReportArtifactLocationExpectation,
     WorkReportArtifactLocatorClass, WorkReportArtifactStore, WorkReportBodyCommitmentPosture,
     WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationKind,
@@ -202,7 +208,8 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             author_workflow_steward_review_dispatch(&invocation)
         }
         Command::AuthorWorkflowPromote { .. } => author_workflow_promote_dispatch(&invocation),
-        Command::ProviderGitHubPrCommentRecoverySummary { .. } => {
+        Command::ProviderGitHubPrCommentRecoverySummary { .. }
+        | Command::ProviderGitHubPrCommentContinueSandbox { .. } => {
             provider_command_dispatch(&invocation)
         }
         Command::DogfoodApprovalPresentationPersist { .. } => {
@@ -429,7 +436,256 @@ fn provider_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsEr
         Command::ProviderGitHubPrCommentRecoverySummary { summary } => {
             provider_github_pr_comment_recovery_summary_command(invocation, summary)
         }
+        Command::ProviderGitHubPrCommentContinueSandbox { request } => {
+            provider_github_pr_comment_continue_sandbox_command(invocation, request)
+        }
         _ => unreachable!("provider dispatch only handles provider commands"),
+    }
+}
+
+fn provider_github_pr_comment_continue_sandbox_command(
+    invocation: &Invocation,
+    request_path: &Path,
+) -> Result<(), WorkflowOsError> {
+    let ParsedGitHubPrCommentFixtureContinuation {
+        write_request,
+        fixture,
+        replacement_actor,
+        delegated_by,
+    } = load_github_pr_comment_fixture_continuation_input(invocation, request_path)?;
+    let backend = local_backend(invocation)?;
+    let durable_run = backend.rehydrate_run(write_request.run_id())?;
+    let attempted_record = backend
+        .read_side_effect_record(write_request.side_effect_id())?
+        .ok_or_else(|| {
+            WorkflowOsError::new(
+                WorkflowOsErrorKind::InvalidState,
+                "github_pr_comment_fixture_continuation_cli.side_effect.missing",
+                "fixture continuation could not resolve the attempted side effect",
+            )
+        })?;
+    let binding = durable_run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| {
+            WorkflowOsError::new(
+                WorkflowOsErrorKind::InvalidState,
+                "github_pr_comment_fixture_continuation_cli.immutable_run_bundle.missing",
+                "fixture continuation requires a durable immutable run-bundle binding",
+            )
+        })?;
+    let immutable_bundle = authoritative_immutable_bundle_store(invocation)
+        .read_bundle(write_request.run_id(), binding.bundle_id())?;
+    let registry = LocalSkillRegistry::new();
+    let executor = LocalExecutor::new(&backend, &registry);
+    let result = workflow_core::validate_github_pr_comment_fixture_continuation(
+        &executor,
+        &backend,
+        GitHubPrCommentFixtureContinuationValidationRequest {
+            run: &durable_run,
+            attempted_record: &attempted_record,
+            write_request,
+            fixture: &fixture,
+            replacement_actor: &replacement_actor,
+            delegated_by: delegated_by.as_ref(),
+            presentation_policy:
+                workflow_core::ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                    LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                    ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+                )
+                .with_max_presentation_age(AUTHORITATIVE_GOVERNANCE_PRESENTATION_MAX_AGE),
+            immutable_run_bundle: &immutable_bundle,
+        },
+    )?;
+    print_github_pr_comment_fixture_continuation_result(invocation, &result);
+    Ok(())
+}
+
+struct ParsedGitHubPrCommentFixtureContinuation {
+    write_request: GitHubPullRequestCommentWriteRequest,
+    fixture: GitHubPullRequestCommentFixture,
+    replacement_actor: ActorId,
+    delegated_by: Option<ActorId>,
+}
+
+fn load_github_pr_comment_fixture_continuation_input(
+    invocation: &Invocation,
+    request_path: &Path,
+) -> Result<ParsedGitHubPrCommentFixtureContinuation, WorkflowOsError> {
+    let path = if request_path.is_absolute() {
+        request_path.to_path_buf()
+    } else {
+        invocation.project_dir.join(request_path)
+    };
+    let source = fs::read_to_string(path).map_err(|_| {
+        WorkflowOsError::validation(
+            "github_pr_comment_fixture_continuation_cli.input.missing",
+            "fixture continuation request is missing or unreadable",
+        )
+    })?;
+    let value: serde_json::Value = serde_json::from_str(&source).map_err(|_| {
+        WorkflowOsError::validation(
+            "github_pr_comment_fixture_continuation_cli.input.invalid",
+            "fixture continuation request JSON was rejected",
+        )
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        WorkflowOsError::validation(
+            "github_pr_comment_fixture_continuation_cli.input.invalid",
+            "fixture continuation request must be a JSON object",
+        )
+    })?;
+    let write_request = serde_json::from_value::<GitHubPullRequestCommentWriteRequest>(
+        continuation_json_field(object, "request")?.clone(),
+    )
+    .map_err(|_| continuation_cli_input_error("request"))?;
+    let replacement_actor = serde_json::from_value::<ActorId>(
+        continuation_json_field(object, "replacement_actor")?.clone(),
+    )
+    .map_err(|_| continuation_cli_input_error("replacement_actor"))?;
+    let delegated_by = object
+        .get("delegated_by")
+        .filter(|value| !value.is_null())
+        .map(|value| serde_json::from_value::<ActorId>(value.clone()))
+        .transpose()
+        .map_err(|_| continuation_cli_input_error("delegated_by"))?;
+    let fixture =
+        parse_github_pr_comment_continuation_fixture(continuation_json_field(object, "fixture")?)?;
+    Ok(ParsedGitHubPrCommentFixtureContinuation {
+        write_request,
+        fixture,
+        replacement_actor,
+        delegated_by,
+    })
+}
+
+fn print_github_pr_comment_fixture_continuation_result(
+    invocation: &Invocation,
+    result: &workflow_core::GitHubPrCommentFixtureContinuationValidationResult,
+) {
+    let outcome = github_pr_comment_write_outcome_label(result.fixture_response().outcome());
+    if invocation.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "status": "validated",
+                "mode": "fixture",
+                "outcome": outcome,
+                "actor_posture": "exact_actor",
+                "approval_reference_count": result.approval_linkage().approval_reference_count(),
+                "linked_approval_reference_count": result.approval_linkage().linked_approval_reference_count(),
+                "provider_call_performed": result.provider_call_performed(),
+                "side_effect_mutated": result.side_effect_mutated(),
+                "workflow_event_appended": result.workflow_event_appended(),
+                "report_artifact_written": result.report_artifact_written()
+            })
+        );
+    } else {
+        println!("status: validated");
+        println!("mode: fixture");
+        println!("outcome: {outcome}");
+        println!("actor_posture: exact_actor");
+        println!(
+            "approval_reference_count: {}",
+            result.approval_linkage().approval_reference_count()
+        );
+        println!(
+            "linked_approval_reference_count: {}",
+            result.approval_linkage().linked_approval_reference_count()
+        );
+        println!(
+            "provider_call_performed: {}",
+            result.provider_call_performed()
+        );
+        println!("side_effect_mutated: {}", result.side_effect_mutated());
+        println!(
+            "workflow_event_appended: {}",
+            result.workflow_event_appended()
+        );
+        println!(
+            "report_artifact_written: {}",
+            result.report_artifact_written()
+        );
+    }
+}
+
+fn continuation_json_field<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<&'a serde_json::Value, WorkflowOsError> {
+    object
+        .get(field)
+        .ok_or_else(|| continuation_cli_input_error(field))
+}
+
+fn continuation_cli_input_error(field: &str) -> WorkflowOsError {
+    WorkflowOsError::validation(
+        format!("github_pr_comment_fixture_continuation_cli.input.{field}_invalid"),
+        format!("fixture continuation {field} input was rejected"),
+    )
+}
+
+fn parse_github_pr_comment_continuation_fixture(
+    value: &serde_json::Value,
+) -> Result<GitHubPullRequestCommentFixture, WorkflowOsError> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| continuation_cli_input_error("fixture"))?;
+    let target = serde_json::from_value::<GitHubPullRequestCommentTarget>(
+        continuation_json_field(object, "target")?.clone(),
+    )
+    .map_err(|_| continuation_cli_input_error("fixture.target"))?;
+    let side_effect_id = serde_json::from_value::<SideEffectId>(
+        continuation_json_field(object, "side_effect_id")?.clone(),
+    )
+    .map_err(|_| continuation_cli_input_error("fixture.side_effect_id"))?;
+    let idempotency_key = serde_json::from_value::<IdempotencyKey>(
+        continuation_json_field(object, "idempotency_key")?.clone(),
+    )
+    .map_err(|_| continuation_cli_input_error("fixture.idempotency_key"))?;
+    let mode = serde_json::from_value::<GitHubPullRequestCommentWriteMode>(
+        continuation_json_field(object, "mode")?.clone(),
+    )
+    .map_err(|_| continuation_cli_input_error("fixture.mode"))?;
+    let fixture_reference = object
+        .get("fixture_reference")
+        .filter(|value| !value.is_null())
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let summary = continuation_json_field(object, "summary")?
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| continuation_cli_input_error("fixture.summary"))?;
+    let sensitivity = serde_json::from_value::<SideEffectSensitivity>(
+        continuation_json_field(object, "sensitivity")?.clone(),
+    )
+    .map_err(|_| continuation_cli_input_error("fixture.sensitivity"))?;
+    let redaction = serde_json::from_value::<RedactionMetadata>(
+        continuation_json_field(object, "redaction")?.clone(),
+    )
+    .map_err(|_| continuation_cli_input_error("fixture.redaction"))?;
+    GitHubPullRequestCommentFixture::new(GitHubPullRequestCommentFixtureDefinition {
+        target,
+        side_effect_id,
+        idempotency_key,
+        mode,
+        fixture_reference,
+        summary,
+        sensitivity,
+        redaction,
+    })
+}
+
+const fn github_pr_comment_write_outcome_label(
+    outcome: GitHubPullRequestCommentWriteOutcome,
+) -> &'static str {
+    match outcome {
+        GitHubPullRequestCommentWriteOutcome::FixtureValidated => "fixture_validated",
+        GitHubPullRequestCommentWriteOutcome::DryRunValidated => "dry_run_validated",
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded => "provider_succeeded",
+        GitHubPullRequestCommentWriteOutcome::ProviderFailed => "provider_failed",
     }
 }
 
@@ -12315,6 +12571,9 @@ enum Command {
     ProviderGitHubPrCommentRecoverySummary {
         summary: PathBuf,
     },
+    ProviderGitHubPrCommentContinueSandbox {
+        request: PathBuf,
+    },
     DogfoodApprovalPresentationPersist {
         run_id: String,
         approval_id: String,
@@ -12712,6 +12971,14 @@ fn parse_provider_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                     usage("provider github-pr-comment recovery-summary requires --summary <path>")
                 })?;
             Ok(Command::ProviderGitHubPrCommentRecoverySummary { summary })
+        }
+        (Some("github-pr-comment"), Some("continue-sandbox")) => {
+            let request = flag_value(args, "--request")
+                .map(PathBuf::from)
+                .ok_or_else(|| {
+                    usage("provider github-pr-comment continue-sandbox requires --request <path>")
+                })?;
+            Ok(Command::ProviderGitHubPrCommentContinueSandbox { request })
         }
         (Some(other), _) => Err(usage(format!("unknown provider subcommand {other}"))),
         (None, _) => Err(usage("provider requires <subcommand>")),
@@ -13123,6 +13390,7 @@ fn print_help() {
         "      explicitly promote one reviewed draft to workflows/; with --persist-catalog-record writes one local workflow catalog record"
     );
     println!("  provider github-pr-comment recovery-summary --summary <path>");
+    println!("  provider github-pr-comment continue-sandbox --request <path>");
     println!(
         "      render a bounded local provider lookup recovery summary; performs no provider calls, repair, event append, or artifact writes"
     );

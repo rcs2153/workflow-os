@@ -222,6 +222,23 @@ only after that bridge passes focused review; one explicitly authorized live
 disposable-sandbox run and independent rerun are the final slice. See the
 [preregistration review](docs/concepts/CROSS_HARNESS_AUTHORITATIVE_CONTINUATION_MILESTONE_PREREGISTRATION_REVIEW.md).
 
+The first fixture-only bridge implementation is complete and ready for focused
+review. `provider github-pr-comment continue-sandbox --request <path>` now
+loads the exact durable run, create-only immutable bundle, attempted GitHub
+PR-comment `SideEffect`, approval presentation proof, and store-backed approval
+linkage before validating one exact fixture request. The replacement executor
+must identify the same durable actor. Delegated actor substitution fails closed
+until a persisted delegation contract exists. The command accepts no auth,
+performs no provider call, changes no `SideEffect`, appends no workflow event,
+and writes no report artifact. This is a public continuity validation boundary,
+not an executable live continuation or packaged harness adapter. See the
+[implementation report](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_IMPLEMENTATION_REPORT.md).
+
+The next phase is focused maintainer/security review of this bridge. It must
+verify the exact identity and proof gates, stable non-leaking failures, explicit
+same-actor boundary, immutable-state behavior, and CLI disclosure before the
+independent Codex/LangGraph fixture corpus is implemented.
+
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
 recursive agents, nested-harness runtime, a new provider mutation family, or a
