@@ -1,6 +1,6 @@
 # Hosted Partial-Run Creation Recovery Plan
 
-Status: Core/PostgreSQL implementation complete; focused review and full acceptance pending
+Status: Core/PostgreSQL recovery, restore, and bounded contention fix review accepted; exact-head and independent acceptance pending
 
 ## 1. Decision
 
@@ -185,6 +185,16 @@ This plan does not add:
 
 ## 10. Next Phase
 
-The next phase is an independent reproduction and exact state-transition
-matrix over current code. Production implementation begins only after focused
-review accepts that matrix and names the single Core-owned recovery seam.
+The next phase is exact-head CI followed by an independent clean-environment
+rerun. Focused maintainer/security review accepted the bounded hosted admission
+retry contract after adding per-run replay assertions and stage-specific
+exhaustion tests. The restore gate is closed: an interrupted
+`RunCreated`-only prefix survived backup and restore, repaired once, and
+replayed without another append. The corrected contention fixture carries all
+25 simultaneous distinct requests to lawful queued posture, while a forced
+persistent serialization fault proves bounded exhaustion, stage-appropriate
+partial state, exact recovery, and idempotent replay.
+
+Cross-harness implementation remains unauthorized until the exact-head and
+independent rerun gates are terminal green. See the [acceptance rerun](../concepts/HOSTED_PARTIAL_RUN_CREATION_ACCEPTANCE_RERUN.md)
+and [focused review](../concepts/HOSTED_ADMISSION_CONTENTION_BLOCKER_FIX_REVIEW.md).
