@@ -781,12 +781,74 @@ impl fmt::Debug for DocsCheckGovernanceContributionOutcome {
 pub(crate) fn execute_docs_check_with_attestation(
     input: &DocsCheckAttestationExecutionInput<'_>,
 ) -> Result<DocsCheckAttestationExecutionOutcome, WorkflowOsError> {
-    execute_docs_check_with_attestation_inner(input)
+    execute_docs_check_with_attestation_inner(input, None)
+}
+
+pub(crate) struct NativeCheckAttestationExecutionInput<'a> {
+    pub profile: &'a crate::ResolvedExplicitLocalCheckProfile,
+    pub reviewed_execution_fingerprint: &'a SpecContentHash,
+    pub stored_bundle: &'a StoredImmutableRunBundle,
+    pub step_id: StepId,
+    pub invocation_id: SkillInvocationId,
+    pub idempotency_key: IdempotencyKey,
+    pub result_id: LocalCheckResultId,
+    pub attestation_id: LocalCheckAttestationId,
+}
+
+/// The caller must supply the fingerprint already bound by Core's admission,
+/// never a digest computed from the caller's request at dispatch time.
+pub(crate) fn execute_reviewed_native_check(
+    input: NativeCheckAttestationExecutionInput<'_>,
+) -> Result<DocsCheckAttestationExecutionOutcome, WorkflowOsError> {
+    let handler = input.profile.native_proof_handler().ok_or_else(|| {
+        runtime_error(
+            "native_runner_required",
+            "local check proof requires the native process runner",
+        )
+    })?;
+    let record = authoritative_record_for_step(input.stored_bundle, &input.step_id)?;
+    let [declaration] = record.declarations() else {
+        return Err(runtime_error(
+            "native_declaration_unsupported",
+            "local check proof requires one immutable declaration",
+        ));
+    };
+    if declaration.requirement_level() != crate::LocalCheckRequirementLevel::Required
+        || declaration.command_id() != handler.contract().command_id()
+        || declaration.command_contract_fingerprint()
+            != &compute_local_check_command_contract_fingerprint(handler.contract())
+        || declaration.freshness().maximum_age_seconds().is_none()
+    {
+        return Err(runtime_error(
+            "native_declaration_unsupported",
+            "local check proof requires an exact reusable immutable declaration",
+        ));
+    }
+    let requirement = declaration.attestation_requirement()?;
+    let manifest = input.stored_bundle.manifest();
+    let execution = DocsCheckAttestationExecutionInput {
+        stored_immutable_run_bundle: input.stored_bundle,
+        requirement: &requirement,
+        handler,
+        workflow_id: manifest.workflow_id().clone(),
+        run_id: manifest.run_id().clone(),
+        step_id: input.step_id,
+        invocation_id: input.invocation_id,
+        idempotency_key: input.idempotency_key,
+        result_id: input.result_id,
+        attestation_id: input.attestation_id,
+        clock: &SystemLocalCheckObservationClock,
+    };
+    execute_docs_check_with_attestation_inner(
+        &execution,
+        Some(input.reviewed_execution_fingerprint),
+    )
 }
 
 #[allow(clippy::too_many_lines)]
 fn execute_docs_check_with_attestation_inner(
     input: &DocsCheckAttestationExecutionInput<'_>,
+    reviewed_execution_fingerprint: Option<&SpecContentHash>,
 ) -> Result<DocsCheckAttestationExecutionOutcome, WorkflowOsError> {
     let manifest = input.stored_immutable_run_bundle.manifest();
     if &input.workflow_id != manifest.workflow_id() || &input.run_id != manifest.run_id() {
@@ -796,9 +858,18 @@ fn execute_docs_check_with_attestation_inner(
         ));
     }
 
-    resolve_stored_step_skill(input.stored_immutable_run_bundle, &input.step_id)?;
+    let (stored_skill_id, stored_skill_version) =
+        resolve_stored_step_skill(input.stored_immutable_run_bundle, &input.step_id)?;
     let resolved_skill_id = SkillId::new(input.handler.skill_id())?;
     let resolved_skill_version = SkillVersion::new(input.handler.skill_version())?;
+    if reviewed_execution_fingerprint.is_some()
+        && (stored_skill_id != resolved_skill_id || stored_skill_version != resolved_skill_version)
+    {
+        return Err(runtime_error(
+            "native_skill_mismatch",
+            "native local check does not match the immutable skill",
+        ));
+    }
 
     let contract = input.handler.contract();
     contract.validate()?;
@@ -831,21 +902,31 @@ fn execute_docs_check_with_attestation_inner(
     let request = input.handler.build_process_request()?;
     let resolved_execution_fingerprint =
         authoritative_local_check_resolved_execution_fingerprint(input.handler, &request);
+    if reviewed_execution_fingerprint
+        .is_some_and(|expected| expected != &resolved_execution_fingerprint)
+    {
+        return Err(runtime_error(
+            "native_execution_mismatch",
+            "native local check execution does not match reviewed scope",
+        ));
+    }
     let started_at = input.clock.now()?;
     ensure_clock_order(binding_created_at, started_at)?;
     let output = input.handler.run_process(&request)?;
     let completed_at = input.clock.now()?;
     ensure_clock_order(started_at, completed_at)?;
     let result = LocalCheckResult::from_process_output(contract, &output)?;
-    let assurance_projection = LocalCheckEvidenceAssuranceProjection::new(
-        LocalCheckEvidenceAssuranceProjectionDefinition {
-            execution_binding: &execution_binding,
-            resolved_execution_fingerprint,
-            result_id: input.result_id.clone(),
-            result: &result,
-            accepted_attestation: None,
-        },
-    )?;
+    let project_result = |accepted_attestation| {
+        LocalCheckEvidenceAssuranceProjection::new(
+            LocalCheckEvidenceAssuranceProjectionDefinition {
+                execution_binding: &execution_binding,
+                resolved_execution_fingerprint,
+                result_id: input.result_id.clone(),
+                result: &result,
+                accepted_attestation,
+            },
+        )
+    };
     let result_exit_posture = exit_posture(&result);
     let observation = KernelObservedLocalCheck::new(KernelObservedLocalCheckDefinition {
         workflow_id: input.workflow_id.clone(),
@@ -902,7 +983,10 @@ fn execute_docs_check_with_attestation_inner(
         .requirement
         .accepted_statuses()
         .contains(&result.status())
+        || (reviewed_execution_fingerprint.is_some()
+            && result.status() != crate::LocalCheckResultStatus::Passed)
     {
+        let assurance_projection = project_result(None)?;
         return Ok(DocsCheckAttestationExecutionOutcome {
             result,
             accepted_attestation: None,
@@ -924,6 +1008,12 @@ fn execute_docs_check_with_attestation_inner(
             evaluated_at,
         })?;
 
+    let assurance_projection = project_result(
+        reviewed_execution_fingerprint
+            .is_some()
+            .then_some(&accepted_attestation),
+    )?;
+
     Ok(DocsCheckAttestationExecutionOutcome {
         result,
         accepted_attestation: Some(accepted_attestation),
@@ -934,7 +1024,7 @@ fn execute_docs_check_with_attestation_inner(
 pub(crate) fn execute_docs_check_attestation_gate(
     input: &DocsCheckAttestationExecutionInput<'_>,
 ) -> Result<DocsCheckAttestationGateOutcome, WorkflowOsError> {
-    let execution = execute_docs_check_with_attestation_inner(input)?;
+    let execution = execute_docs_check_with_attestation_inner(input, None)?;
     let DocsCheckAttestationExecutionOutcome {
         result,
         accepted_attestation,
@@ -1541,11 +1631,20 @@ mod tests {
         clock_calls: Arc<AtomicUsize>,
         requirement_level: Option<&str>,
     ) -> Fixture {
+        fixture_with_freshness(output, clock_calls, requirement_level, "mode: no_reuse")
+    }
+
+    fn fixture_with_freshness(
+        output: Result<LocalCheckProcessOutput, WorkflowOsError>,
+        clock_calls: Arc<AtomicUsize>,
+        requirement_level: Option<&str>,
+        freshness: &str,
+    ) -> Fixture {
         let project = TestRoot::new("project");
         let storage = TestRoot::new("storage");
         let local_check_requirements = requirement_level.map_or_else(String::new, |level| {
             format!(
-                "    local_check_requirements:\n      - id: docs-required\n        command_id: local-check/docs\n        requirement_level: {level}\n        minimum_assurance: kernel_observed_local_process\n        accepted_statuses: [passed]\n        freshness:\n          mode: no_reuse\n        exact_immutable_run_binding_required: true\n        truncation_allowed: false\n        network_maximum: disabled\n        side_effect_maximum: no_source_writes\n"
+                "    local_check_requirements:\n      - id: docs-required\n        command_id: local-check/docs\n        requirement_level: {level}\n        minimum_assurance: kernel_observed_local_process\n        accepted_statuses: [passed]\n        freshness: {{{freshness}}}\n        exact_immutable_run_binding_required: true\n        truncation_allowed: false\n        network_maximum: disabled\n        side_effect_maximum: no_source_writes\n"
             )
         });
         project.write(
@@ -1679,6 +1778,118 @@ mod tests {
         .into_iter()
         .map(timestamp)
         .collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reviewed_native_proof_uses_real_process_and_rejects_runner_or_execution_substitution() {
+        use crate::ExplicitLocalCheckProfileSelection;
+        use std::os::unix::fs::PermissionsExt;
+
+        let (clock, calls) = ScriptedClock::new(four_samples());
+        let output = LocalCheckProcessOutput::completed(Some(0), true, 1, Vec::new(), Vec::new());
+        let fixture = fixture_with_freshness(
+            Ok(output.clone()),
+            calls.clone(),
+            Some("required"),
+            "mode: max_age_seconds, seconds: 60",
+        );
+        let root = fixture.project_root.path();
+        let executable = root.join("bin/npm");
+        let write_executable = |body| {
+            fs::write(&executable, body).expect("write disposable executable");
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
+                .expect("set executable permissions");
+        };
+        write_executable("#!/bin/sh\nprintf 'native fixture executed'\n");
+        let selection = ExplicitLocalCheckProfileSelection::docs_check();
+        let native = || {
+            selection
+                .resolve_docs_check(executable.clone(), root.to_path_buf(), None)
+                .expect("native profile")
+        };
+        let profile = native();
+        let fingerprint = |profile: &crate::ResolvedExplicitLocalCheckProfile| {
+            let handler = profile.handler();
+            authoritative_local_check_resolved_execution_fingerprint(
+                handler,
+                &handler.build_process_request().expect("resolved request"),
+            )
+        };
+        let reviewed = fingerprint(&profile);
+        let run = |profile: &crate::ResolvedExplicitLocalCheckProfile,
+                   reviewed_execution_fingerprint: &SpecContentHash| {
+            let base = input(&fixture, &clock);
+            execute_reviewed_native_check(NativeCheckAttestationExecutionInput {
+                profile,
+                reviewed_execution_fingerprint,
+                stored_bundle: &fixture.stored_bundle,
+                step_id: base.step_id,
+                invocation_id: base.invocation_id,
+                idempotency_key: base.idempotency_key,
+                result_id: base.result_id,
+                attestation_id: base.attestation_id,
+            })
+        };
+        let injected_calls = Arc::new(AtomicUsize::new(0));
+        let injected = selection
+            .resolve_docs_check_with_process_runner(
+                executable.clone(),
+                root.to_path_buf(),
+                None,
+                Arc::new(RecordingRunner {
+                    output: Ok(output),
+                    calls: injected_calls.clone(),
+                    clock_calls: calls,
+                }),
+            )
+            .expect("injected profile");
+        assert_eq!(fingerprint(&injected), reviewed);
+        assert_eq!(
+            run(&injected, &reviewed)
+                .expect_err("injected provenance denied")
+                .code(),
+            "local_check_attestation.runtime.native_runner_required"
+        );
+        assert_eq!(injected_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            run(
+                &profile,
+                &SpecContentHash::from_text("other reviewed request")
+            )
+            .expect_err("reviewed fingerprint mismatch")
+            .code(),
+            "local_check_attestation.runtime.native_execution_mismatch"
+        );
+
+        let outcome = run(&profile, &reviewed).expect("verified native execution");
+        assert_eq!(outcome.result().stdout_summary(), "native fixture executed");
+        assert_eq!(outcome.result().status(), LocalCheckResultStatus::Passed);
+        let projection = outcome.assurance_projection();
+        assert_eq!(projection.resolved_execution_fingerprint(), &reviewed);
+        assert_eq!(
+            projection.accepted_attestation_proof_fingerprint(),
+            outcome
+                .accepted_attestation()
+                .map(AcceptedLocalCheckAttestation::proof_fingerprint)
+        );
+        assert!(projection.verifier_proof().is_some());
+
+        write_executable("#!/bin/sh\nexit 7\n");
+        assert!(
+            run(&profile, &reviewed).is_err(),
+            "old profile rejects binary replacement"
+        );
+        let changed = native();
+        assert_eq!(
+            run(&changed, &reviewed)
+                .expect_err("new binary is not reviewed")
+                .code(),
+            "local_check_attestation.runtime.native_execution_mismatch"
+        );
+        let failed = run(&changed, &fingerprint(&changed)).expect("native failure result");
+        assert_eq!(failed.result().status(), LocalCheckResultStatus::Failed);
+        assert!(failed.assurance_projection().verifier_proof().is_none());
     }
 
     fn five_samples() -> Vec<Result<Timestamp, WorkflowOsError>> {

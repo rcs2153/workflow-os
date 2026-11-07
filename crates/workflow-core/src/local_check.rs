@@ -1965,6 +1965,7 @@ impl ExplicitLocalCheckProfileSelection {
             project_root,
             Arc::new(StdLocalCheckProcessRunner),
         )
+        .map(ResolvedExplicitLocalCheckProfile::with_native_process_runner)
     }
 
     /// Resolves this selection with an injected process runner.
@@ -1991,6 +1992,7 @@ impl ExplicitLocalCheckProfileSelection {
                 )?;
                 Ok(ResolvedExplicitLocalCheckProfile {
                     profile_id: self.profile_id,
+                    native_process_runner: false,
                     handler: ResolvedExplicitLocalCheckHandler::WorkflowOsProjectValidation(
                         handler,
                     ),
@@ -2024,6 +2026,7 @@ impl ExplicitLocalCheckProfileSelection {
             npm_cache_directory,
             Arc::new(StdLocalCheckProcessRunner),
         )
+        .map(ResolvedExplicitLocalCheckProfile::with_native_process_runner)
     }
 
     /// Resolves the docs-check profile with an injected process runner.
@@ -2054,6 +2057,7 @@ impl ExplicitLocalCheckProfileSelection {
         )?;
         Ok(ResolvedExplicitLocalCheckProfile {
             profile_id: self.profile_id,
+            native_process_runner: false,
             handler: ResolvedExplicitLocalCheckHandler::DocsCheck(handler),
         })
     }
@@ -2081,6 +2085,7 @@ impl ExplicitLocalCheckProfileSelection {
             repository_root,
             Arc::new(StdLocalCheckProcessRunner),
         )
+        .map(ResolvedExplicitLocalCheckProfile::with_native_process_runner)
     }
 
     /// Resolves the Cargo format-check profile with an injected process runner.
@@ -2116,6 +2121,7 @@ impl ExplicitLocalCheckProfileSelection {
         )?;
         Ok(ResolvedExplicitLocalCheckProfile {
             profile_id: self.profile_id,
+            native_process_runner: false,
             handler: ResolvedExplicitLocalCheckHandler::CargoFmtCheck(handler),
         })
     }
@@ -2279,6 +2285,7 @@ impl AuthoritativeLocalCheckHandler for WorkflowOsProjectValidationLocalHandler 
 pub struct ResolvedExplicitLocalCheckProfile {
     profile_id: ExplicitLocalCheckProfileId,
     handler: ResolvedExplicitLocalCheckHandler,
+    native_process_runner: bool,
 }
 
 #[allow(dead_code)]
@@ -2312,6 +2319,17 @@ impl ResolvedExplicitLocalCheckHandler {
 }
 
 impl ResolvedExplicitLocalCheckProfile {
+    fn with_native_process_runner(mut self) -> Self {
+        self.native_process_runner = true;
+        self
+    }
+
+    #[allow(dead_code)] // No production caller until native proof persistence is composed.
+    pub(crate) fn native_proof_handler(&self) -> Option<&dyn AuthoritativeLocalCheckHandler> {
+        self.native_process_runner
+            .then(|| self.handler.authoritative())
+    }
+
     /// Returns the selected profile ID.
     #[must_use]
     pub const fn profile_id(&self) -> ExplicitLocalCheckProfileId {
@@ -2567,6 +2585,7 @@ impl fmt::Debug for ResolvedExplicitLocalCheckProfile {
             .debug_struct("ResolvedExplicitLocalCheckProfile")
             .field("profile_id", &self.profile_id)
             .field("command_kind", &self.command_contract().command_kind())
+            .field("native_process_runner", &self.native_process_runner)
             .field("handler", &"[REDACTED]")
             .finish()
     }
