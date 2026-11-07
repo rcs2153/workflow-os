@@ -3168,6 +3168,195 @@ mod tests {
         );
     }
 
+    fn checked_reservation_request(
+        opened: &OperationalExecutionAttemptUseCapability,
+    ) -> crate::dispatch_reservation::DispatchReservationRequest {
+        use crate::authorized_execution_continuity_state::internal::AttemptUseCapability;
+        use crate::dispatch_reservation::{
+            request_commitment, DispatchReservationOperationId, DispatchReservationReceiptId,
+            DispatchReservationRequest,
+        };
+
+        let capability = clone_opened_capability(opened);
+        let mut input = DispatchReservationRequest {
+            operation_id: DispatchReservationOperationId::new("dispatch/checked-reservation")
+                .expect("operation"),
+            receipt_id: DispatchReservationReceiptId::new("receipt/checked-reservation")
+                .expect("receipt"),
+            request_commitment: SpecContentHash::from_text("pending reservation"),
+            capability: AttemptUseCapability {
+                attempt_id: capability.attempt_id,
+                subject_actor_id: capability.subject_actor_id,
+                window_id: capability.window_id,
+                window_revision: capability.window_revision,
+                cursor: capability.cursor,
+                authority_commitment: capability.authority_commitment,
+                window_binding_commitment: capability.window_binding_commitment,
+                consume_operation_id: capability.consume_operation_id,
+                dispatch_reservation: None,
+            },
+            expected_window_binding: capability.expected_window_binding,
+            operation_binding_commitment: capability.operation_binding_commitment,
+            invocation_commitment: SpecContentHash::from_text("synthetic request"),
+            executor_commitment: SpecContentHash::from_text("disposable executor"),
+            workflow_lifecycle_commitment: None,
+        };
+        input.request_commitment = request_commitment(&input);
+        input
+    }
+
+    #[test]
+    fn dispatch_admission_check_and_reservation_share_commit_and_rollback() {
+        use crate::dispatch_reservation::DispatchReservationOutcome;
+
+        let fixture = Fixture::new();
+        let opened = open_supervisor_attempt(&fixture, "opening/checked-reservation", 1);
+        let connection = fixture.backend.connection().expect("test connection");
+        connection
+            .execute_batch("CREATE TABLE test_grant_use (id INTEGER PRIMARY KEY)")
+            .expect("disposable transaction probe");
+        let original_events = fixture
+            .backend
+            .read_events(&fixture.run_id)
+            .expect("events");
+        let request = || checked_reservation_request(&opened);
+        let count_uses = || {
+            connection
+                .query_row("SELECT COUNT(*) FROM test_grant_use", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("count uses from separate connection")
+        };
+        let record_use = |tx: &rusqlite::Transaction<'_>, now, expires| {
+            assert!(now < expires);
+            tx.execute("INSERT INTO test_grant_use VALUES (1)", [])
+                .expect("test grant-use write");
+            Ok(())
+        };
+        let denied = fixture.backend.reserve_attempt_dispatch_checked(
+            request(),
+            None,
+            |tx, now, expires| {
+                record_use(tx, now, expires)?;
+                Err(WorkflowOsError::security(
+                    "test.admission_denied",
+                    "test authority denied",
+                ))
+            },
+        );
+        assert_eq!(
+            denied.err().expect("denied").code(),
+            "test.admission_denied"
+        );
+        assert_eq!(count_uses(), 0);
+        assert_eq!(
+            fixture
+                .backend
+                .read_events(&fixture.run_id)
+                .expect("events"),
+            original_events
+        );
+
+        inject_dispatch_commit_fault(InjectedDispatchCommitFault::Before);
+        let aborted = fixture
+            .backend
+            .reserve_attempt_dispatch_checked(request(), None, record_use);
+        assert_eq!(
+            aborted.err().expect("aborted").code(),
+            "dispatch_reservation.write_failed"
+        );
+        assert_eq!(count_uses(), 0);
+        assert_eq!(
+            fixture
+                .backend
+                .read_events(&fixture.run_id)
+                .expect("events"),
+            original_events
+        );
+
+        inject_dispatch_commit_fault(InjectedDispatchCommitFault::After);
+        let uncertain =
+            fixture
+                .backend
+                .reserve_attempt_dispatch_checked(request(), None, record_use);
+        assert!(matches!(
+            uncertain.expect("recover committed reservation"),
+            DispatchReservationOutcome::CommittedButCapabilityUnavailable { .. }
+        ));
+        assert_eq!(count_uses(), 1);
+        let committed = fixture
+            .backend
+            .read_events(&fixture.run_id)
+            .expect("committed events");
+        assert_eq!(committed.len(), original_events.len() + 1);
+
+        let replay =
+            fixture
+                .backend
+                .reserve_attempt_dispatch_checked(request(), None, |_, _, _| {
+                    Err(WorkflowOsError::security(
+                        "test.unexpected_check",
+                        "replay attempted a new admission",
+                    ))
+                });
+        assert!(matches!(
+            replay.expect("recovery-only replay"),
+            DispatchReservationOutcome::AlreadyAdmitted { .. }
+        ));
+        assert_eq!(count_uses(), 1);
+        assert_eq!(
+            fixture
+                .backend
+                .read_events(&fixture.run_id)
+                .expect("events"),
+            committed
+        );
+    }
+
+    #[test]
+    fn concurrent_checked_reservation_admits_one_attempt_and_checks_once() {
+        use crate::dispatch_reservation::DispatchReservationOutcome;
+
+        let fixture = Fixture::new();
+        let opened = open_supervisor_attempt(&fixture, "opening/concurrent-checked-reservation", 1);
+        let barrier = Barrier::new(2);
+        let checks = AtomicUsize::new(0);
+        let reserve = || {
+            let input = checked_reservation_request(&opened);
+            barrier.wait();
+            fixture
+                .backend
+                .reserve_attempt_dispatch_checked(input, None, |_, _, _| {
+                    checks.fetch_add(1, Ordering::Relaxed);
+                    Ok(())
+                })
+                .expect("checked reservation or replay")
+        };
+        let (first, second) = std::thread::scope(|scope| {
+            let competitor = scope.spawn(reserve);
+            (reserve(), competitor.join().expect("competing reservation"))
+        });
+        assert!(matches!(
+            (first, second),
+            (
+                DispatchReservationOutcome::Admitted { .. },
+                DispatchReservationOutcome::AlreadyAdmitted { .. }
+            ) | (
+                DispatchReservationOutcome::AlreadyAdmitted { .. },
+                DispatchReservationOutcome::Admitted { .. }
+            )
+        ));
+        assert_eq!(checks.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            fixture
+                .backend
+                .read_events(&fixture.run_id)
+                .expect("events")
+                .len(),
+            5
+        );
+    }
+
     #[test]
     fn snapshot_projection_tampering_blocks_downstream_persistence_and_replay() {
         let fixture = Fixture::new();

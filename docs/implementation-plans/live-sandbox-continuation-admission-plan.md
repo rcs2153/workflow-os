@@ -78,6 +78,14 @@ linearization point; it is not evidence the request was sent or accepted.
 If commit outcome is uncertain, reacquire only an observation of the durable
 reservation. Never issue another dispatch right from that observation.
 
+The first implementation adds the private in-transaction admission check to
+the existing reservation path. Trusted time is sampled after acquiring the
+write transaction. A test-only grant-use write proves denial and pre-commit
+failure roll back both sides, and post-commit ambiguity and exact replay
+return no dispatch right. Existing callers use their prior policy; this
+change does not implement live issuance, bind a real live grant use, or
+make recovery receipts available to an unverified caller.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes
