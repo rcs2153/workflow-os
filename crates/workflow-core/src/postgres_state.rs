@@ -63,6 +63,8 @@ const SCHEMA_V2_CHECKSUM: &str = "workflow-os-postgresql-v2";
 const SCHEMA_V1_VERSION: i32 = 1;
 const SCHEMA_V1_CHECKSUM: &str = "workflow-os-postgresql-v1";
 const MAX_TRANSACTION_ATTEMPTS: usize = 3;
+const HOSTED_ADMISSION_LOCK_SQL: &str =
+    "SELECT pg_advisory_xact_lock(hashtext('workflow_os'), hashtext('hosted_no_write_admission'))";
 const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(30);
 const MAX_PROJECT_APPROVAL_ROUTE_LIST_LIMIT: usize = 1_000;
 
@@ -723,6 +725,13 @@ impl PostgresStateBackend {
     #[must_use]
     pub fn new(connections: Arc<dyn PostgresConnectionFactory>) -> Self {
         Self { connections }
+    }
+
+    pub(crate) fn with_hosted_admission<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, WorkflowOsError>,
+    ) -> Result<T, WorkflowOsError> {
+        with_hosted_admission_lock(&mut self.connections.connect()?, "30s", operation)
     }
 
     /// Atomically verifies and completes one deterministic hosted creation prefix.
@@ -4080,6 +4089,39 @@ fn serializable<T>(
     }))
 }
 
+fn with_hosted_admission_lock<T>(
+    client: &mut Client,
+    lock_timeout: &str,
+    operation: impl FnOnce() -> Result<T, WorkflowOsError>,
+) -> Result<T, WorkflowOsError> {
+    // Coordinate only admission. Business transactions retain their existing isolation.
+    let mut guard = client
+        .transaction()
+        .map_err(|error| database_error("hosted_admission_begin", &error))?;
+    guard
+        .query_one(
+            "SELECT set_config('lock_timeout', $1, true)",
+            &[&lock_timeout],
+        )
+        .map_err(|error| database_error("hosted_admission_timeout", &error))?;
+    guard
+        .query_one(HOSTED_ADMISSION_LOCK_SQL, &[])
+        .map_err(|error| {
+            if error.code() == Some(&SqlState::LOCK_NOT_AVAILABLE) {
+                state_error(
+                "postgres_state.hosted_admission.busy",
+                "PostgreSQL hosted admission wait budget was exhausted; retry the exact request",
+            )
+            } else {
+                database_error("hosted_admission_lock", &error)
+            }
+        })?;
+    let result = operation();
+    // The transaction contains only the lock. Drop also releases it on unwind.
+    drop(guard);
+    result
+}
+
 fn with_collaborative_authority_lock<T>(
     client: &mut Client,
     organization_id: &OrganizationId,
@@ -7067,6 +7109,47 @@ CREATE TABLE workflow_os.collaborative_approval_authority_receipts (
     inserted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 ";
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod hosted_admission_lock_tests {
+    use super::*;
+
+    #[test]
+    fn postgresql_hosted_admission_lock_times_out_and_releases() {
+        let url = std::env::var("WORKFLOW_OS_TEST_POSTGRES_URL").ok();
+        assert!(
+            url.is_some() || std::env::var_os("WORKFLOW_OS_REQUIRE_POSTGRES_TESTS").is_none(),
+            "WORKFLOW_OS_TEST_POSTGRES_URL is required"
+        );
+        let Some(url) = url else { return };
+        let config: Config = url.parse().expect("PostgreSQL URL parses");
+        let factory = PostgresNoTlsConnectionFactory::new(config);
+        let mut holder = factory.connect().expect("lock holder connection");
+        let mut contender = factory.connect().expect("contender connection");
+        let mut entered = false;
+
+        let failure = with_hosted_admission_lock(&mut holder, "1s", || {
+            let blocked = with_hosted_admission_lock(&mut contender, "50ms", || {
+                entered = true;
+                Ok(())
+            })
+            .expect_err("contender cannot enter while lock is held");
+            assert_eq!(blocked.code(), "postgres_state.hosted_admission.busy");
+            Err::<(), _>(state_error(
+                "test.operation_failed",
+                "deliberate operation error",
+            ))
+        })
+        .expect_err("operation failure stays visible");
+        assert_eq!(failure.code(), "test.operation_failed");
+        assert!(!entered);
+        with_hosted_admission_lock(&mut contender, "1s", || Ok(()))
+            .expect("failed operation and timed-out contender released their transactions");
+        with_hosted_admission_lock(&mut holder, "1s", || Ok(()))
+            .expect("successful operation released the lock");
+    }
+}
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::too_many_lines)]
