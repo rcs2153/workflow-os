@@ -24,6 +24,7 @@ mod structural_coverage;
 
 pub(crate) use structural_coverage::authoritative_record_for_step;
 pub use verifier::AcceptedLocalCheckAttestation;
+pub(crate) use verifier::StoredAcceptedLocalCheckAttestation;
 
 const ATTESTATION_ID_MAX_BYTES: usize = 128;
 const MAX_FRESHNESS_SECONDS: u32 = 30 * 24 * 60 * 60;
