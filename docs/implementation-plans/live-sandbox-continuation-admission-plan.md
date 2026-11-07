@@ -153,6 +153,21 @@ registration binding; earlier experimental V11 stores remain unsupported.
 This is not a public authentication path. The durable attempted record,
 policy, and evidence resolver is still required.
 
+Implementation run `run-1794084480503610000-2` resolves the exact attempted
+SideEffect, linked latest adapter policy decision, and passing check events
+under the SQLite issuance and consumption transactions. The record must
+cite the exact opening and approval; the check IDs must match the grant
+requirements and resolve to unsuperseded results for the run's bundle with
+matching successful invocation events. Their commitments are derived from
+durable records, not accepted from the caller. Missing, changed, denied,
+failed, or unsupported referenced facts fail closed.
+
+The allowed write decision in the test is synthetic. The default V0 policy
+still denies external writes. Before any live route is connected, Core must
+verify immutable declarations and required check assurance and produce a
+separately scoped sandbox policy decision. This change does not enable
+provider execution or public commands.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes

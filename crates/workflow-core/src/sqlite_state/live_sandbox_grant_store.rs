@@ -1,4 +1,6 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use super::{
     decode_json, encode_json, schema_recovery_required, validate_live_authority_schema,
@@ -11,14 +13,17 @@ use crate::authorized_execution_continuity_state::internal::{
 };
 use crate::dispatch_reservation::DispatchReservationRequest;
 use crate::live_sandbox_continuation_authority::{
-    LiveSandboxContinuationFacts, LiveSandboxPrincipalVerifier, LIVE_CAPABILITY,
+    LiveSandboxContinuationFacts, LiveSandboxPrincipalVerifier, ResolvedLiveEffect, LIVE_CAPABILITY,
 };
 use crate::operational_execution_window_opening::{
     operation_binding_commitment, OperationalExecutionWindowOpeningRequest,
 };
 use crate::{
-    ActorId, ApprovalPresentationRecord, AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId,
-    CapabilityGrant, CapabilityGrantId, CapabilityGrantLifecycle, SpecContentHash, Timestamp,
+    Action, ActorId, ApprovalPresentationRecord, AuthorizedExecutionAttemptId,
+    AuthorizedExecutionWindowId, Capability, CapabilityGrant, CapabilityGrantId,
+    CapabilityGrantLifecycle, LocalCheckResultStatus, SideEffectAuthorityDecision,
+    SideEffectCapability, SideEffectLifecycleState, SideEffectRecord, SideEffectReferenceKind,
+    SideEffectSensitivity, SideEffectTargetKind, SpecContentHash, Timestamp, WorkReportSensitivity,
     WorkflowOsError, WorkflowRun, WorkflowRunEventKind, WorkflowRunStatus,
 };
 
@@ -143,9 +148,10 @@ impl SqliteStateBackend {
         {
             return Err(denied());
         }
-        verify_opening(&tx, facts, &facts.action.commitment()?)?;
+        let effect = verify_opening(&tx, facts, &facts.action.commitment()?)?;
         let registration = active_principal(&tx, grant)?.commitment()?;
-        let binding = facts.grant_commitment(grant, observation.observed_at(), &registration)?;
+        let binding =
+            facts.grant_commitment(grant, observation.observed_at(), &registration, &effect)?;
         let payload = encode_json(grant, "live sandbox grant")?;
         let count = tx
             .execute(
@@ -279,11 +285,12 @@ impl AuthenticatedLiveGrant<'_> {
         {
             return Err(denied());
         }
-        verify_opening(tx, facts, &action)?;
+        let effect = verify_opening(tx, facts, &action)?;
         facts.verify_bound_grant(
             &self.grant,
             now,
             &self.registration,
+            &effect,
             &request.executor_commitment,
         )?;
         tx.execute(
@@ -412,7 +419,7 @@ fn verify_opening(
     tx: &Connection,
     facts: LiveSandboxContinuationFacts<'_>,
     action: &SpecContentHash,
-) -> Result<(), WorkflowOsError> {
+) -> Result<ResolvedLiveEffect, WorkflowOsError> {
     let events = SqliteStateBackend::read_events_with_connection(tx, facts.action.run)?;
     let last = events.last().ok_or_else(denied)?;
     let expected = opening_binding(facts, action);
@@ -424,7 +431,175 @@ fn verify_opening(
         return Err(denied());
     }
     let run = WorkflowRun::rehydrate(&events)?;
-    verify_persisted_approval(tx, facts, &run)
+    verify_persisted_approval(tx, facts, &run)?;
+    resolve_live_effect(tx, facts, &run, &last.event_id)
+}
+
+fn resolve_live_effect(
+    tx: &Connection,
+    facts: LiveSandboxContinuationFacts<'_>,
+    run: &WorkflowRun,
+    opening_event: &crate::EventId,
+) -> Result<ResolvedLiveEffect, WorkflowOsError> {
+    let record: SideEffectRecord = super::read_optional_payload(
+        tx,
+        "side_effect_records",
+        "side_effect_id",
+        facts.action.side_effect.as_str(),
+        "live sandbox attempted effect",
+    )?
+    .ok_or_else(denied)?;
+    let identity = &run.snapshot.identity;
+    let bundle = identity.immutable_run_bundle.as_ref().ok_or_else(denied)?;
+    let [approval] = record.authority().approval_references.as_slice() else {
+        return Err(denied());
+    };
+    if record.side_effect_id() != facts.action.side_effect
+        || record.lifecycle_state() != SideEffectLifecycleState::Attempted
+        || record.outcome_reference().is_some()
+        || record.capability() != SideEffectCapability::GitHubWrite
+        || record.authority().decision != SideEffectAuthorityDecision::ApprovedByHuman
+        || record.run_id() != &identity.run_id
+        || record.workflow_id() != &identity.workflow_id
+        || record.workflow_version() != &identity.workflow_version
+        || record.schema_version() != &identity.schema_version
+        || record.spec_hash() != &identity.spec_content_hash
+        || bundle.root_hash() != facts.action.bundle_root
+        || record.step_id() != Some(facts.action.step)
+        || record.actor() != Some(facts.action.original_actor)
+        || record.target().kind() != SideEffectTargetKind::AdapterResource
+        || record.target().reference() != facts.action.target.reference()
+        || record.idempotency().key() != facts.action.idempotency_key
+        || approval.kind() != SideEffectReferenceKind::ApprovalDecision
+        || approval.reference() != facts.approval.as_str()
+        || facts.requirements.approval_ids() != [facts.approval.clone()]
+        || !facts.requirements.policy_ids().is_empty()
+        || !facts.requirements.evidence_ids().is_empty()
+        || !record.references().iter().any(|reference| {
+            reference.kind() == SideEffectReferenceKind::WorkflowEvent
+                && reference.reference() == opening_event.as_str()
+        })
+    {
+        return Err(denied());
+    }
+    let policy = resolve_effect_policy(run, &record)?;
+    let checks = resolve_effect_checks(run, &record, facts, bundle)?;
+    let sensitivity = match record.sensitivity() {
+        SideEffectSensitivity::Public => WorkReportSensitivity::Public,
+        SideEffectSensitivity::Internal => WorkReportSensitivity::Internal,
+        SideEffectSensitivity::Confidential => WorkReportSensitivity::Confidential,
+        SideEffectSensitivity::Regulated => WorkReportSensitivity::Regulated,
+        SideEffectSensitivity::Secret => WorkReportSensitivity::Secret,
+        SideEffectSensitivity::Unknown => return Err(denied()),
+    };
+    Ok(ResolvedLiveEffect {
+        evidence: proof_commitment(b"workflow-os/live-effect-evidence/v1\0", &(record, checks))?,
+        policy: proof_commitment(b"workflow-os/live-effect-policy/v1\0", &policy)?,
+        sensitivity,
+    })
+}
+
+fn resolve_effect_policy<'a>(
+    run: &'a WorkflowRun,
+    record: &SideEffectRecord,
+) -> Result<&'a crate::WorkflowRunEvent, WorkflowOsError> {
+    let [reference] = record.authority().policy_references.as_slice() else {
+        return Err(denied());
+    };
+    let correlation = record.correlation_id().ok_or_else(denied)?;
+    let latest = run
+        .events
+        .iter()
+        .rev()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::PolicyDecisionRecorded(decision)
+                if decision.action == Action::InvokeAdapter
+                    && decision.correlation_id.as_ref() == Some(correlation) =>
+            {
+                Some((event, decision))
+            }
+            _ => None,
+        })
+        .ok_or_else(denied)?;
+    if reference.kind() != SideEffectReferenceKind::PolicyDecision
+        || reference.reference() != latest.0.event_id.as_str()
+        || !latest.1.allowed
+        || !latest.1.requires_approval
+        || !latest.1.violations.is_empty()
+        || latest.1.actor.as_ref() != record.actor()
+        || latest.1.workflow_id.as_ref() != Some(record.workflow_id())
+        || latest.1.run_id.as_ref() != Some(record.run_id())
+        || !latest.1.capabilities.contains(&Capability::ExternalWrite)
+        || latest.1.capabilities.iter().any(|capability| {
+            !matches!(
+                capability,
+                Capability::ExternalWrite | Capability::AdapterInvoke
+            )
+        })
+    {
+        return Err(denied());
+    }
+    Ok(latest.0)
+}
+
+fn resolve_effect_checks<'a>(
+    run: &'a WorkflowRun,
+    record: &SideEffectRecord,
+    facts: LiveSandboxContinuationFacts<'_>,
+    bundle: &crate::ImmutableRunBundleBinding,
+) -> Result<Vec<(&'a crate::WorkflowRunEvent, &'a crate::WorkflowRunEvent)>, WorkflowOsError> {
+    let mut references = record
+        .references()
+        .iter()
+        .filter(|reference| reference.kind() == SideEffectReferenceKind::LocalCheckResult)
+        .map(crate::SideEffectReference::reference)
+        .collect::<Vec<_>>();
+    let mut required = facts
+        .requirements
+        .check_ids()
+        .iter()
+        .map(crate::LocalCheckResultId::as_str)
+        .collect::<Vec<_>>();
+    references.sort_unstable();
+    required.sort_unstable();
+    if references.is_empty() || references != required {
+        return Err(denied());
+    }
+    references.into_iter().map(|reference| {
+        let mut matching = run.events.iter().filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::LocalCheckResultRecorded(result) if result.result_id().as_str() == reference
+                => Some((event, result)),
+            _ => None,
+        });
+        let (event, result) = matching.next().ok_or_else(denied)?;
+        let terminal = run.events.iter().find(|terminal| {
+            terminal.event_id == *result.invocation_terminal_event_id()
+                && terminal.sequence_number > event.sequence_number
+                && matches!(&terminal.kind, WorkflowRunEventKind::SkillInvocationSucceeded {
+                    invocation_id, step_id, ..
+                } if invocation_id == result.invocation_id() && step_id == result.step_id())
+        }).ok_or_else(denied)?;
+        if matching.next().is_some()
+            || result.status() != LocalCheckResultStatus::Passed
+            || result.immutable_run_bundle() != bundle
+            || run.events.iter().any(|later| later.sequence_number > event.sequence_number
+                && matches!(&later.kind, WorkflowRunEventKind::LocalCheckResultRecorded(next)
+                    if next.step_id() == result.step_id() && next.command_id() == result.command_id()))
+        {
+            return Err(denied());
+        }
+        Ok((event, terminal))
+    }).collect()
+}
+
+fn proof_commitment(
+    domain: &[u8],
+    value: &impl Serialize,
+) -> Result<SpecContentHash, WorkflowOsError> {
+    let mut hash = Sha256::new();
+    hash.update(domain);
+    hash.update(serde_json::to_vec(value).map_err(|_| denied())?);
+    SpecContentHash::new(format!("{:x}", hash.finalize()))
 }
 
 fn verify_persisted_approval(

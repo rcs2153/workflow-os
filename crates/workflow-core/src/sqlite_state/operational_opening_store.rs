@@ -3221,11 +3221,18 @@ mod tests {
         input
     }
 
+    #[allow(clippy::too_many_lines)]
     fn persist_live_grant_test_approval(
         fixture: &Fixture,
         facts: crate::live_sandbox_continuation_authority::LiveSandboxContinuationFacts<'_>,
+        trial: LiveGrantTrial,
     ) -> ContinuityCursor {
-        use crate::{ApprovalPresentationRecordStore, ApprovalRequest};
+        use crate::{
+            Action, ApprovalPresentationRecordStore, ApprovalRequest, Capability,
+            ExplicitLocalCheckProfileId, LocalCheckCommandId, LocalCheckCommandKind,
+            LocalCheckResultRecordedEvent, LocalCheckResultRecordedEventDefinition,
+            LocalCheckResultStatus, PolicyDecision, SkillInvocationId,
+        };
         let mut event = fixture
             .backend
             .read_events(&fixture.run_id)
@@ -3253,7 +3260,55 @@ mod tests {
             expires_at: facts.approval_expires_at,
             decision: None,
         };
+        let invocation = SkillInvocationId::new("invocation/live-check").expect("invocation");
+        let terminal = EventId::new("event/live-check-succeeded").expect("terminal");
+        let check = LocalCheckResultRecordedEvent::new(LocalCheckResultRecordedEventDefinition {
+            result_id: facts.requirements.check_ids()[0].clone(),
+            command_id: LocalCheckCommandId::new("local-check/docs").expect("command"),
+            command_kind: LocalCheckCommandKind::DocsCheck,
+            status: if matches!(trial, LiveGrantTrial::FailedCheck) {
+                LocalCheckResultStatus::Failed
+            } else {
+                LocalCheckResultStatus::Passed
+            },
+            step_id: fixture.step_id.clone(),
+            invocation_id: invocation.clone(),
+            attempt_id: AuthorizedExecutionAttemptId::new("attempt/live-check").expect("attempt"),
+            profile_id: ExplicitLocalCheckProfileId::DocsCheck,
+            immutable_run_bundle: fixture.bundle.clone(),
+            invocation_terminal_event_id: terminal.clone(),
+        })
+        .expect("check");
         for (id, kind) in [
+            (
+                EventId::new("event/live-policy").expect("policy"),
+                WorkflowRunEventKind::PolicyDecisionRecorded(Box::new(PolicyDecision {
+                    allowed: !matches!(trial, LiveGrantTrial::DeniedPolicy),
+                    requires_approval: true,
+                    reason_codes: vec![],
+                    violations: vec![],
+                    action: Action::InvokeAdapter,
+                    capabilities: vec![Capability::ExternalWrite],
+                    actor: Some(facts.action.original_actor.clone()),
+                    workflow_id: Some(fixture.workflow_id.clone()),
+                    run_id: Some(fixture.run_id.clone()),
+                    correlation_id: Some(facts.decision.correlation_id.clone()),
+                })),
+            ),
+            (
+                EventId::new("event/live-check").expect("check event"),
+                WorkflowRunEventKind::LocalCheckResultRecorded(Box::new(check)),
+            ),
+            (
+                terminal,
+                WorkflowRunEventKind::SkillInvocationSucceeded {
+                    invocation_id: invocation,
+                    step_id: fixture.step_id.clone(),
+                    skill_id: SkillId::new("local/check").expect("skill"),
+                    skill_version: SkillVersion::new("v1").expect("version"),
+                    output_ref: None,
+                },
+            ),
             (
                 EventId::new("event/live-approval-requested").expect("request"),
                 WorkflowRunEventKind::ApprovalRequested(Box::new(request)),
@@ -3268,6 +3323,8 @@ mod tests {
             ),
         ] {
             event.event_id = id;
+            event.idempotency_key =
+                Some(IdempotencyKey::new(event.event_id.as_str()).expect("event idempotency"));
             event.sequence_number =
                 EventSequenceNumber::new(event.sequence_number.get() + 1).expect("sequence");
             event.kind = kind;
@@ -3285,6 +3342,85 @@ mod tests {
             sequence_number: event.sequence_number,
             event_id: event.event_id,
         }
+    }
+
+    fn live_test_effect(
+        fixture: &Fixture,
+        facts: LiveSandboxContinuationFacts<'_>,
+        opening_event: &EventId,
+    ) -> crate::SideEffectRecord {
+        use crate::{
+            RedactionMetadata, SideEffectAuthority, SideEffectAuthorityDecision,
+            SideEffectCapability, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
+            SideEffectLifecycleState, SideEffectRecord, SideEffectRecordDefinition,
+            SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity,
+            SideEffectTargetKind, SideEffectTargetReference,
+        };
+        let run = fixture.backend.rehydrate_run(&fixture.run_id).expect("run");
+        let identity = run.snapshot.identity;
+        let reference =
+            |kind, value: &str| SideEffectReference::new(kind, value).expect("reference");
+        SideEffectRecord::new(SideEffectRecordDefinition {
+            side_effect_id: facts.action.side_effect.clone(),
+            lifecycle_state: SideEffectLifecycleState::Attempted,
+            target: SideEffectTargetReference::new(
+                SideEffectTargetKind::AdapterResource,
+                facts.action.target.reference(),
+            )
+            .expect("target"),
+            capability: SideEffectCapability::GitHubWrite,
+            authority: SideEffectAuthority::new(
+                SideEffectAuthorityDecision::ApprovedByHuman,
+                vec![reference(
+                    SideEffectReferenceKind::PolicyDecision,
+                    "event/live-policy",
+                )],
+                vec![reference(
+                    SideEffectReferenceKind::ApprovalDecision,
+                    facts.approval.as_str(),
+                )],
+            )
+            .expect("authority"),
+            actor: Some(facts.action.original_actor.clone()),
+            system_actor: None,
+            workflow_id: identity.workflow_id,
+            workflow_version: identity.workflow_version,
+            schema_version: identity.schema_version,
+            spec_hash: identity.spec_content_hash,
+            run_id: identity.run_id,
+            step_id: Some(facts.action.step.clone()),
+            skill_id: None,
+            skill_version: None,
+            adapter_id: None,
+            adapter_kind: None,
+            integration_id: None,
+            idempotency: SideEffectIdempotencyBinding::new(
+                facts.action.idempotency_key.clone(),
+                SideEffectIdempotencyScope::Run,
+                None,
+                None,
+            )
+            .expect("idempotency"),
+            references: vec![
+                reference(
+                    SideEffectReferenceKind::WorkflowEvent,
+                    opening_event.as_str(),
+                ),
+                reference(
+                    SideEffectReferenceKind::LocalCheckResult,
+                    facts.requirements.check_ids()[0].as_str(),
+                ),
+            ],
+            outcome_reference: None,
+            created_at: facts.decision.decided_at,
+            updated_at: Some(facts.decision.decided_at),
+            correlation_id: Some(facts.decision.correlation_id.clone()),
+            summary: Some("exact synthetic attempted effect".to_owned()),
+            reason_codes: vec![],
+            sensitivity: SideEffectSensitivity::Internal,
+            redaction: RedactionMetadata::empty(),
+        })
+        .expect("attempted effect")
     }
 
     #[test]
@@ -3307,12 +3443,24 @@ mod tests {
         exercise_live_grant_reservation(LiveGrantTrial::PrincipalRevoked);
     }
 
+    #[test]
+    fn live_grant_rejects_persisted_policy_denial() {
+        exercise_live_grant_reservation(LiveGrantTrial::DeniedPolicy);
+    }
+
+    #[test]
+    fn live_grant_rejects_persisted_check_failure() {
+        exercise_live_grant_reservation(LiveGrantTrial::FailedCheck);
+    }
+
     #[derive(Clone, Copy)]
     enum LiveGrantTrial {
         AmbiguousCommit,
         Contended,
         Revoked,
         PrincipalRevoked,
+        DeniedPolicy,
+        FailedCheck,
     }
 
     #[allow(clippy::too_many_lines)]
@@ -3327,7 +3475,7 @@ mod tests {
         use crate::provider_write::GitHubCommentContinuationAction;
         use crate::{
             CapabilityGrantLifecycle, GitHubPullRequestCommentTarget,
-            GitHubPullRequestCommentWriteMode, SideEffectId,
+            GitHubPullRequestCommentWriteMode, SideEffectId, SideEffectRecordStore,
         };
 
         let fixture = Fixture::new();
@@ -3371,7 +3519,7 @@ mod tests {
                 window_expiry: expiry,
             },
             |facts, grant_for| {
-                let cursor = persist_live_grant_test_approval(&fixture, facts);
+                let cursor = persist_live_grant_test_approval(&fixture, facts, trial);
                 let observed = super::super::continuity_store::observe_continuity_trusted_time()
                     .expect("trusted time");
                 let opening = || {
@@ -3493,6 +3641,18 @@ mod tests {
                 assert!(backend
                     .issue_live_sandbox_grant(facts, &fixture_only)
                     .is_err());
+                assert!(backend.issue_live_sandbox_grant(facts, &grant).is_err());
+                let effect = live_test_effect(&fixture, facts, &capability.cursor.event_id);
+                backend
+                    .write_side_effect_record(&effect)
+                    .expect("persist attempted effect");
+                if matches!(
+                    trial,
+                    LiveGrantTrial::DeniedPolicy | LiveGrantTrial::FailedCheck
+                ) {
+                    assert!(backend.issue_live_sandbox_grant(facts, &grant).is_err());
+                    return;
+                }
                 let binding = backend
                     .issue_live_sandbox_grant(facts, &grant)
                     .expect("durable grant");
@@ -3532,17 +3692,23 @@ mod tests {
                     .reserve_live_sandbox_dispatch(request(), unauthenticated)
                     .is_err());
                 assert!(backend.reserve_attempt_dispatch(request()).is_err());
-                let stale = LiveGrantAdmission {
-                    facts:
-                        crate::live_sandbox_continuation_authority::LiveSandboxContinuationFacts {
-                            evidence_commitment: &SpecContentHash::from_text("changed evidence"),
-                            ..facts
-                        },
-                    ..admission
+                let mut altered = serde_json::to_value(&effect).expect("effect JSON");
+                altered["summary"] = serde_json::json!("substituted attempted effect");
+                let substitute_effect = |payload: &str| {
+                    connection
+                        .execute(
+                            "UPDATE side_effect_records SET payload=?1 WHERE side_effect_id=?2",
+                            params![payload, effect.side_effect_id().as_str()],
+                        )
+                        .expect("inject effect drift in disposable test");
                 };
+                substitute_effect(&altered.to_string());
                 assert!(backend
-                    .reserve_live_sandbox_dispatch(request(), stale)
+                    .reserve_live_sandbox_dispatch(request(), admission)
                     .is_err());
+                substitute_effect(
+                    &serde_json::to_string(&effect).expect("restore synthetic effect"),
+                );
                 assert_eq!(counts(), (0, 0));
                 assert_eq!(event_count(), before);
                 inject_dispatch_commit_fault(InjectedDispatchCommitFault::Before);
@@ -3552,6 +3718,9 @@ mod tests {
                 assert_eq!(counts(), (0, 0));
                 assert_eq!(event_count(), before);
                 match trial {
+                    LiveGrantTrial::DeniedPolicy | LiveGrantTrial::FailedCheck => {
+                        unreachable!("denied at issuance")
+                    }
                     LiveGrantTrial::AmbiguousCommit => {
                         inject_dispatch_commit_fault(InjectedDispatchCommitFault::After);
                         assert!(backend

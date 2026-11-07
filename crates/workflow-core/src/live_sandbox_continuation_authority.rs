@@ -93,8 +93,12 @@ pub(crate) struct LiveSandboxContinuationFacts<'a> {
     pub(crate) attempt: &'a AuthorizedExecutionAttemptId,
     pub(crate) window_expires_at: Timestamp,
     pub(crate) requirements: &'a CapabilityGrantRequirements,
-    pub(crate) evidence_commitment: &'a SpecContentHash,
-    pub(crate) policy_commitment: &'a SpecContentHash,
+    pub(crate) sensitivity: WorkReportSensitivity,
+}
+
+pub(crate) struct ResolvedLiveEffect {
+    pub(crate) evidence: SpecContentHash,
+    pub(crate) policy: SpecContentHash,
     pub(crate) sensitivity: WorkReportSensitivity,
 }
 
@@ -139,9 +143,11 @@ impl LiveSandboxContinuationFacts<'_> {
         grant: &CapabilityGrant,
         observed_at: Timestamp,
         registration: &SpecContentHash,
+        effect: &ResolvedLiveEffect,
     ) -> Result<SpecContentHash, WorkflowOsError> {
         self.verify_exact_approval(observed_at)?;
         let expires_at = grant.expires_at().ok_or_else(denied)?;
+        let sensitivity = self.sensitivity.max(effect.sensitivity);
         if self
             .approval_expires_at
             .is_some_and(|expiry| expires_at > expiry)
@@ -157,8 +163,8 @@ impl LiveSandboxContinuationFacts<'_> {
             || !self.requirements.approval_ids().contains(self.approval)
             || grant.lifecycle() != CapabilityGrantLifecycle::Active
             || grant.delegation() != CapabilityDelegationPosture::Disabled
-            || self.sensitivity == WorkReportSensitivity::Unknown
-            || self.sensitivity > grant.sensitivity_ceiling()
+            || sensitivity == WorkReportSensitivity::Unknown
+            || sensitivity > grant.sensitivity_ceiling()
             || grant.issued_at() < self.decision.decided_at
             || grant.issued_at() > observed_at
             || observed_at >= expires_at
@@ -169,14 +175,10 @@ impl LiveSandboxContinuationFacts<'_> {
 
         let action = self.action.commitment()?;
         let bytes = serde_json::to_vec(&(
-            (grant, action, self.sensitivity),
+            (grant, action, sensitivity),
             (self.approval_event, self.decision, self.approval_expires_at),
             (self.window, self.attempt, self.window_expires_at),
-            (
-                self.evidence_commitment,
-                self.policy_commitment,
-                registration,
-            ),
+            (&effect.evidence, &effect.policy, registration),
         ))
         .map_err(|_| denied())?;
         let mut hash = Sha256::new();
@@ -190,9 +192,10 @@ impl LiveSandboxContinuationFacts<'_> {
         grant: &CapabilityGrant,
         observed_at: Timestamp,
         registration: &SpecContentHash,
+        effect: &ResolvedLiveEffect,
         expected: &SpecContentHash,
     ) -> Result<(), WorkflowOsError> {
-        if self.grant_commitment(grant, observed_at, registration)? != *expected {
+        if self.grant_commitment(grant, observed_at, registration, effect)? != *expected {
             return Err(denied());
         }
         Ok(())
@@ -259,9 +262,13 @@ pub(crate) mod tests {
         let issuer = ActorId::new("user/operator").expect("issuer");
         let approval =
             ApprovalReferenceId::new(format!("approval/{}/comment", action.run)).expect("approval");
-        let requirements =
-            CapabilityGrantRequirements::new(vec![], vec![approval.clone()], vec![], vec![])
-                .expect("requirements");
+        let requirements = CapabilityGrantRequirements::new(
+            vec![],
+            vec![approval.clone()],
+            vec![],
+            vec![crate::LocalCheckResultId::new("check/live-sandbox").expect("check")],
+        )
+        .expect("requirements");
         let label = action.approval_label().expect("label");
         let sensitivity = ApprovalPresentationSensitivity::Internal;
         let content_hash = compute_approval_presentation_content_hash(
@@ -345,8 +352,6 @@ pub(crate) mod tests {
             attempt,
             window_expires_at: window_expiry,
             requirements: &requirements,
-            evidence_commitment: &SpecContentHash::from_text("passing evidence"),
-            policy_commitment: &SpecContentHash::from_text("exact policy"),
             sensitivity: WorkReportSensitivity::Internal,
         };
         let grant = |capability: &str, lifecycle: CapabilityGrantLifecycle| {
@@ -404,17 +409,23 @@ pub(crate) mod tests {
             |facts, grant| {
                 let active = grant(LIVE_CAPABILITY, CapabilityGrantLifecycle::Active);
                 let registration = SpecContentHash::from_text("registration one");
+                let effect = ResolvedLiveEffect {
+                    evidence: SpecContentHash::from_text("passing evidence"),
+                    policy: SpecContentHash::from_text("exact policy"),
+                    sensitivity: WorkReportSensitivity::Internal,
+                };
                 let binding = facts
-                    .grant_commitment(&active, now, &registration)
+                    .grant_commitment(&active, now, &registration, &effect)
                     .expect("binding");
                 facts
-                    .verify_bound_grant(&active, now, &registration, &binding)
+                    .verify_bound_grant(&active, now, &registration, &effect, &binding)
                     .expect("exact recheck");
                 assert!(facts
                     .verify_bound_grant(
                         &active,
                         now,
                         &SpecContentHash::from_text("changed registration"),
+                        &effect,
                         &binding,
                     )
                     .is_err());
@@ -424,14 +435,6 @@ pub(crate) mod tests {
                             body: "changed body",
                             ..action
                         },
-                        ..facts
-                    },
-                    LiveSandboxContinuationFacts {
-                        evidence_commitment: &SpecContentHash::from_text("changed evidence"),
-                        ..facts
-                    },
-                    LiveSandboxContinuationFacts {
-                        policy_commitment: &SpecContentHash::from_text("changed policy"),
                         ..facts
                     },
                     LiveSandboxContinuationFacts {
@@ -445,7 +448,7 @@ pub(crate) mod tests {
                     },
                 ] {
                     assert!(changed
-                        .verify_bound_grant(&active, now, &registration, &binding)
+                        .verify_bound_grant(&active, now, &registration, &effect, &binding)
                         .is_err());
                 }
                 let fixture = grant(
@@ -461,7 +464,7 @@ pub(crate) mod tests {
                     (&active, expiry),
                 ] {
                     assert!(facts
-                        .verify_bound_grant(invalid, at, &registration, &binding)
+                        .verify_bound_grant(invalid, at, &registration, &effect, &binding)
                         .is_err());
                 }
             },
