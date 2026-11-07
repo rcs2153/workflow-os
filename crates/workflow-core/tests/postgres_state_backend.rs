@@ -260,6 +260,10 @@ fn postgresql_backend_proves_shared_state_milestone() {
     let hosted_recovery_project = TestProject::new();
     hosted_recovery_project.write_valid_project();
     prove_hosted_creation_prefix_reconciliation(&backend, &config);
+    prove_hosted_distinct_job_contention(&backend, &hosted_recovery_project);
+    prove_hosted_admission_retry_exhaustion(&backend, &config, &hosted_recovery_project);
+    prove_hosted_prefix_retry_exhaustion(&backend, &config, &hosted_recovery_project);
+    prove_hosted_dispatch_retry_exhaustion(&backend, &config, &hosted_recovery_project);
     prove_hosted_dispatch_recovery(&backend, &config, &hosted_recovery_project);
     prove_hosted_approval_dispatch_recovery(&backend, &config);
 
@@ -1298,6 +1302,32 @@ fn prove_hosted_project_resource_binding(backend: &PostgresStateBackend, config:
 }
 
 #[test]
+fn postgresql_seeds_hosted_creation_prefix_for_backup_rehearsal() {
+    let Some(config) = test_config() else {
+        return;
+    };
+    let backend = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(config)));
+    backend.initialize_schema().expect("managed schema");
+    let expected = hosted_creation_backup_rehearsal_events();
+    let existing = backend
+        .read_events(&expected[0].run_id)
+        .expect("read backup rehearsal prefix");
+    if existing.is_empty() {
+        backend
+            .append_event(&expected[0])
+            .expect("seed interrupted hosted creation prefix");
+    } else {
+        assert_eq!(existing, expected[..1]);
+    }
+    assert_eq!(
+        backend
+            .read_events(&expected[0].run_id)
+            .expect("read seeded backup rehearsal prefix"),
+        expected[..1]
+    );
+}
+
+#[test]
 fn restored_postgresql_database_passes_integrity_rehearsal() {
     let value = std::env::var("WORKFLOW_OS_RECOVERY_POSTGRES_URL").ok();
     assert!(
@@ -1458,6 +1488,26 @@ fn restored_postgresql_database_passes_integrity_rehearsal() {
         .expect("recover restored receipt by approval decision")
         .expect("restored receipt decision binding exists");
     assert_eq!(recovered.receipt_id().as_str(), receipt_id);
+
+    let expected = hosted_creation_backup_rehearsal_events();
+    assert_eq!(
+        backend
+            .read_events(&expected[0].run_id)
+            .expect("read restored interrupted creation prefix"),
+        expected[..1]
+    );
+    let repaired = backend
+        .reconcile_hosted_creation_prefix(&expected)
+        .expect("repair restored hosted creation prefix");
+    assert_eq!(repaired.appended_events(), &expected[1..]);
+    assert_eq!(repaired.run().snapshot.status, WorkflowRunStatus::Running);
+    assert_eq!(
+        backend
+            .reconcile_hosted_creation_prefix(&expected)
+            .expect("replay restored hosted creation prefix")
+            .appended_events(),
+        []
+    );
 }
 
 fn test_config() -> Option<Config> {
@@ -3036,6 +3086,369 @@ fn prove_hosted_creation_prefix_reconciliation(backend: &PostgresStateBackend, c
             .expect("read conflicting prefix"),
         vec![conflicting]
     );
+}
+
+fn prove_hosted_distinct_job_contention(backend: &PostgresStateBackend, project: &TestProject) {
+    const JOB_COUNT: usize = 25;
+
+    let queued_before = backend
+        .hosted_queue_metrics_snapshot()
+        .expect("queue metrics before distinct-job contention")
+        .queued_work_items();
+    let barrier = Arc::new(Barrier::new(JOB_COUNT + 1));
+    let mut workers = Vec::with_capacity(JOB_COUNT);
+    let requests = (0..JOB_COUNT)
+        .map(|index| hosted_dispatch_request(project, &format!("distinct-contention-{index}")))
+        .collect::<Vec<_>>();
+
+    for request in &requests {
+        let request = request.clone();
+        let backend = backend.clone();
+        let barrier = Arc::clone(&barrier);
+        workers.push(thread::spawn(move || {
+            let registry = LocalSkillRegistry::new();
+            barrier.wait();
+            execute_with_hosted_no_write_dispatch(
+                &LocalExecutor::new(&backend, &registry),
+                &request,
+            )
+        }));
+    }
+
+    barrier.wait();
+    let results = workers
+        .into_iter()
+        .map(|worker| worker.join().expect("distinct hosted job worker"))
+        .collect::<Vec<_>>();
+    assert!(results.iter().all(Result::is_ok), "{results:?}");
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after distinct-job contention")
+            .queued_work_items(),
+        queued_before + JOB_COUNT as u64
+    );
+    for request in &requests {
+        let run_id = request
+            .execution
+            .execution
+            .run_id
+            .as_ref()
+            .expect("distinct contention run id");
+        let events = backend
+            .read_events(run_id)
+            .expect("read distinct contention events");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| {
+                    matches!(
+                        event.kind,
+                        WorkflowRunEventKind::SkillInvocationRequested(_)
+                    )
+                })
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| {
+                    matches!(event.kind, WorkflowRunEventKind::SkillInvocationStarted(_))
+                })
+                .count(),
+            1
+        );
+        let registry = LocalSkillRegistry::new();
+        execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), request)
+            .expect("distinct contention exact replay");
+    }
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after distinct-job replay")
+            .queued_work_items(),
+        queued_before + JOB_COUNT as u64
+    );
+}
+
+fn prove_hosted_admission_retry_exhaustion(
+    backend: &PostgresStateBackend,
+    config: &Config,
+    project: &TestProject,
+) {
+    let request = hosted_dispatch_request(project, "bounded-retry-exhaustion");
+    let run_id = request
+        .execution
+        .execution
+        .run_id
+        .as_ref()
+        .expect("bounded retry run id")
+        .clone();
+    let queued_before = backend
+        .hosted_queue_metrics_snapshot()
+        .expect("queue metrics before bounded retry exhaustion")
+        .queued_work_items();
+    let mut client = config.connect(NoTls).expect("connect bounded retry fault");
+    client
+        .batch_execute(&format!(
+            "CREATE OR REPLACE FUNCTION workflow_os.test_exhaust_hosted_admission_retry()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+               IF NEW.run_id = '{}' THEN
+                 RAISE EXCEPTION 'forced hosted admission serialization conflict'
+                   USING ERRCODE = '40001';
+               END IF;
+               RETURN NEW;
+             END;
+             $$;
+             CREATE TRIGGER test_exhaust_hosted_admission_retry_trigger
+             BEFORE INSERT ON workflow_os.immutable_manifests
+             FOR EACH ROW
+             EXECUTE FUNCTION workflow_os.test_exhaust_hosted_admission_retry();",
+            run_id.as_str()
+        ))
+        .expect("install bounded hosted admission retry fault");
+
+    let registry = LocalSkillRegistry::new();
+    let error =
+        execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+            .expect_err("persistent serialization conflict must exhaust bounded retries");
+    assert_eq!(
+        error.code(),
+        "executor.hosted_no_write.immutable_bundle_retry_exhausted"
+    );
+    assert_eq!(
+        backend
+            .read_events(&run_id)
+            .expect("read exhausted hosted admission events"),
+        Vec::<WorkflowRunEvent>::new()
+    );
+    assert!(backend
+        .read_immutable_run_bundle(&run_id)
+        .expect("read exhausted hosted admission bundle")
+        .is_none());
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after bounded retry exhaustion")
+            .queued_work_items(),
+        queued_before
+    );
+
+    client
+        .batch_execute(
+            "DROP TRIGGER test_exhaust_hosted_admission_retry_trigger
+               ON workflow_os.immutable_manifests;
+             DROP FUNCTION workflow_os.test_exhaust_hosted_admission_retry();",
+        )
+        .expect("remove bounded hosted admission retry fault");
+
+    execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+        .expect("exact retry after retry-budget exhaustion");
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after retry-budget recovery")
+            .queued_work_items(),
+        queued_before + 1
+    );
+    execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+        .expect("exact replay after retry-budget recovery");
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after retry-budget replay")
+            .queued_work_items(),
+        queued_before + 1
+    );
+}
+
+fn prove_hosted_prefix_retry_exhaustion(
+    backend: &PostgresStateBackend,
+    config: &Config,
+    project: &TestProject,
+) {
+    let request = hosted_dispatch_request(project, "prefix-retry-exhaustion");
+    let run_id = request
+        .execution
+        .execution
+        .run_id
+        .as_ref()
+        .expect("prefix retry run id")
+        .clone();
+    let queued_before = backend
+        .hosted_queue_metrics_snapshot()
+        .expect("queue metrics before prefix retry exhaustion")
+        .queued_work_items();
+    let mut client = config.connect(NoTls).expect("connect prefix retry fault");
+    client
+        .batch_execute(&format!(
+            "CREATE OR REPLACE FUNCTION workflow_os.test_exhaust_hosted_prefix_retry()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+               IF NEW.run_id = '{}' THEN
+                 RAISE EXCEPTION 'forced hosted prefix serialization conflict'
+                   USING ERRCODE = '40001';
+               END IF;
+               RETURN NEW;
+             END;
+             $$;
+             CREATE TRIGGER test_exhaust_hosted_prefix_retry_trigger
+             BEFORE INSERT ON workflow_os.events
+             FOR EACH ROW
+             EXECUTE FUNCTION workflow_os.test_exhaust_hosted_prefix_retry();",
+            run_id.as_str()
+        ))
+        .expect("install bounded hosted prefix retry fault");
+
+    let registry = LocalSkillRegistry::new();
+    let error =
+        execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+            .expect_err("persistent prefix conflict must exhaust bounded retries");
+    assert_eq!(
+        error.code(),
+        "executor.hosted_no_write.creation_prefix_retry_exhausted"
+    );
+    assert_eq!(
+        backend
+            .read_events(&run_id)
+            .expect("read exhausted prefix events"),
+        Vec::<WorkflowRunEvent>::new()
+    );
+    assert!(backend
+        .read_immutable_run_bundle(&run_id)
+        .expect("read exhausted prefix bundle")
+        .is_some());
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after prefix retry exhaustion")
+            .queued_work_items(),
+        queued_before
+    );
+
+    client
+        .batch_execute(
+            "DROP TRIGGER test_exhaust_hosted_prefix_retry_trigger
+               ON workflow_os.events;
+             DROP FUNCTION workflow_os.test_exhaust_hosted_prefix_retry();",
+        )
+        .expect("remove bounded hosted prefix retry fault");
+
+    execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+        .expect("exact retry after prefix retry exhaustion");
+    execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+        .expect("exact replay after prefix retry recovery");
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after prefix retry recovery")
+            .queued_work_items(),
+        queued_before + 1
+    );
+}
+
+fn prove_hosted_dispatch_retry_exhaustion(
+    backend: &PostgresStateBackend,
+    config: &Config,
+    project: &TestProject,
+) {
+    let request = hosted_dispatch_request(project, "dispatch-retry-exhaustion");
+    let run_id = request
+        .execution
+        .execution
+        .run_id
+        .as_ref()
+        .expect("dispatch retry run id")
+        .clone();
+    let queued_before = backend
+        .hosted_queue_metrics_snapshot()
+        .expect("queue metrics before dispatch retry exhaustion")
+        .queued_work_items();
+    let mut client = config.connect(NoTls).expect("connect dispatch retry fault");
+    client
+        .batch_execute(&format!(
+            "CREATE OR REPLACE FUNCTION workflow_os.test_exhaust_hosted_dispatch_retry()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+               IF NEW.run_id = '{}'
+                  AND NEW.payload::jsonb #>> '{{kind,kind}}' = 'SkillInvocationRequested' THEN
+                 RAISE EXCEPTION 'forced hosted dispatch serialization conflict'
+                   USING ERRCODE = '40001';
+               END IF;
+               RETURN NEW;
+             END;
+             $$;
+             CREATE TRIGGER test_exhaust_hosted_dispatch_retry_trigger
+             BEFORE INSERT ON workflow_os.events
+             FOR EACH ROW
+             EXECUTE FUNCTION workflow_os.test_exhaust_hosted_dispatch_retry();",
+            run_id.as_str()
+        ))
+        .expect("install bounded hosted dispatch retry fault");
+
+    let registry = LocalSkillRegistry::new();
+    let error =
+        execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+            .expect_err("persistent dispatch conflict must exhaust bounded retries");
+    assert_eq!(
+        error.code(),
+        "executor.hosted_no_write.dispatch_retry_exhausted"
+    );
+    let events = backend
+        .read_events(&run_id)
+        .expect("read exhausted dispatch events");
+    assert!(events.iter().all(|event| !matches!(
+        event.kind,
+        WorkflowRunEventKind::SkillInvocationRequested(_)
+            | WorkflowRunEventKind::SkillInvocationStarted(_)
+    )));
+    assert!(backend
+        .read_immutable_run_bundle(&run_id)
+        .expect("read exhausted dispatch bundle")
+        .is_some());
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after dispatch retry exhaustion")
+            .queued_work_items(),
+        queued_before
+    );
+
+    client
+        .batch_execute(
+            "DROP TRIGGER test_exhaust_hosted_dispatch_retry_trigger
+               ON workflow_os.events;
+             DROP FUNCTION workflow_os.test_exhaust_hosted_dispatch_retry();",
+        )
+        .expect("remove bounded hosted dispatch retry fault");
+
+    execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+        .expect("exact retry after dispatch retry exhaustion");
+    execute_with_hosted_no_write_dispatch(&LocalExecutor::new(backend, &registry), &request)
+        .expect("exact replay after dispatch retry recovery");
+    assert_eq!(
+        backend
+            .hosted_queue_metrics_snapshot()
+            .expect("queue metrics after dispatch retry recovery")
+            .queued_work_items(),
+        queued_before + 1
+    );
+}
+
+fn hosted_creation_backup_rehearsal_events() -> Vec<WorkflowRunEvent> {
+    let mut expected = event_sequence("hosted-creation-prefix-backup-rehearsal");
+    let base = expected[0].clone();
+    expected.push(event(
+        &base,
+        4,
+        "scheduled",
+        WorkflowRunEventKind::StepScheduled {
+            step_id: StepId::new("hosted-read").expect("step"),
+        },
+    ));
+    expected
 }
 
 fn prove_hosted_approval_dispatch_recovery(backend: &PostgresStateBackend, config: &Config) {

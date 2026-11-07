@@ -14533,14 +14533,24 @@ pub fn execute_with_hosted_no_write_dispatch(
         redaction_required: request.execution.bundle.redaction_required,
     })?;
     validate_immutable_run_bundle_matches_plan(bundle.manifest(), &plan)?;
-    persist_or_validate_immutable_run_bundle(executor.backend, &bundle)?;
+    retry_hosted_admission_transaction(
+        bundle.manifest().run_id(),
+        "executor.hosted_no_write.immutable_bundle_retry_exhausted",
+        || persist_or_validate_immutable_run_bundle(executor.backend, &bundle),
+    )?;
 
     let binding = bundle.manifest().run_binding();
     plan.immutable_run_bundle = Some(binding.clone());
     let expected_prefix = hosted_creation_prefix_events(&plan, *bundle.manifest().created_at())?;
-    let reconciliation = executor
-        .backend
-        .reconcile_hosted_creation_prefix(&expected_prefix)?;
+    let reconciliation = retry_hosted_admission_transaction(
+        bundle.manifest().run_id(),
+        "executor.hosted_no_write.creation_prefix_retry_exhausted",
+        || {
+            executor
+                .backend
+                .reconcile_hosted_creation_prefix(&expected_prefix)
+        },
+    )?;
     for event in reconciliation.appended_events() {
         executor.emit_runtime_signals(event)?;
     }
@@ -14570,6 +14580,42 @@ pub fn execute_with_hosted_no_write_dispatch(
         run,
         bundle_binding: binding,
     })
+}
+
+const HOSTED_ADMISSION_TRANSACTION_ATTEMPTS: usize = 8;
+
+fn retry_hosted_admission_transaction<T>(
+    run_id: &WorkflowRunId,
+    exhausted_code: &'static str,
+    mut operation: impl FnMut() -> Result<T, WorkflowOsError>,
+) -> Result<T, WorkflowOsError> {
+    for attempt in 0..HOSTED_ADMISSION_TRANSACTION_ATTEMPTS {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) if error.code() == "postgres_state.transaction.retryable" => {
+                if attempt + 1 == HOSTED_ADMISSION_TRANSACTION_ATTEMPTS {
+                    break;
+                }
+                std::thread::sleep(hosted_admission_retry_delay(run_id, attempt));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        exhausted_code,
+        "hosted admission exhausted its bounded PostgreSQL retry budget",
+    ))
+}
+
+fn hosted_admission_retry_delay(run_id: &WorkflowRunId, attempt: usize) -> Duration {
+    let run_salt = run_id
+        .as_str()
+        .bytes()
+        .fold(0_u64, |sum, byte| sum.wrapping_add(u64::from(byte)))
+        % 7;
+    let exponential = 1_u64 << attempt.min(6);
+    Duration::from_millis(exponential + run_salt)
 }
 
 fn hosted_creation_prefix_events(
@@ -15548,13 +15594,23 @@ fn dispatch_hosted_plan(
         SkillAttemptId::generate(),
         Timestamp::now_utc(),
     )?;
-    executor
-        .backend
-        .dispatch_hosted_skill(PostgresDispatchHostedSkillRequest {
-            dispatch: &projection,
-            project_scope: dispatch.project_scope.as_ref(),
-        })?;
-    executor.backend.rehydrate_run(&plan.event_builder.run_id)
+    retry_hosted_admission_transaction(
+        &plan.event_builder.run_id,
+        "executor.hosted_no_write.dispatch_retry_exhausted",
+        || {
+            executor
+                .backend
+                .dispatch_hosted_skill(PostgresDispatchHostedSkillRequest {
+                    dispatch: &projection,
+                    project_scope: dispatch.project_scope.as_ref(),
+                })
+        },
+    )?;
+    retry_hosted_admission_transaction(
+        &plan.event_builder.run_id,
+        "executor.hosted_no_write.rehydrate_retry_exhausted",
+        || executor.backend.rehydrate_run(&plan.event_builder.run_id),
+    )
 }
 
 fn ensure_hosted_invoke_policy(
@@ -22068,4 +22124,59 @@ fn executor_error(
     message: impl Into<String>,
 ) -> WorkflowOsError {
     WorkflowOsError::new(kind, code, message)
+}
+
+#[cfg(test)]
+mod hosted_admission_retry_tests {
+    use super::*;
+
+    #[test]
+    fn retries_retryable_postgres_conflicts_until_success() {
+        let run_id = WorkflowRunId::generate();
+        let mut attempts = 0;
+        let result = retry_hosted_admission_transaction(
+            &run_id,
+            "executor.hosted_no_write.rehydrate_retry_exhausted",
+            || {
+                attempts += 1;
+                if attempts < 3 {
+                    Err(executor_error(
+                        WorkflowOsErrorKind::InvalidState,
+                        "postgres_state.transaction.retryable",
+                        "retryable test conflict",
+                    ))
+                } else {
+                    Ok("rehydrated")
+                }
+            },
+        );
+
+        assert_eq!(result.as_deref(), Ok("rehydrated"));
+        assert_eq!(attempts, 3);
+    }
+
+    #[test]
+    fn maps_persistent_rehydrate_conflicts_to_stage_specific_exhaustion() {
+        let run_id = WorkflowRunId::generate();
+        let mut attempts = 0;
+        let result = retry_hosted_admission_transaction::<()>(
+            &run_id,
+            "executor.hosted_no_write.rehydrate_retry_exhausted",
+            || {
+                attempts += 1;
+                Err(executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "postgres_state.transaction.retryable",
+                    "retryable test conflict",
+                ))
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(error)
+                if error.code() == "executor.hosted_no_write.rehydrate_retry_exhausted"
+        ));
+        assert_eq!(attempts, HOSTED_ADMISSION_TRANSACTION_ATTEMPTS);
+    }
 }

@@ -27,6 +27,15 @@ WORKFLOW_OS_REQUIRE_POSTGRES_TESTS=1 \
   -- \
   --exact
 
+WORKFLOW_OS_TEST_POSTGRES_URL="${WORKFLOW_OS_POSTGRES_SOURCE_URL}" \
+WORKFLOW_OS_REQUIRE_POSTGRES_TESTS=1 \
+  cargo test \
+  -p workflow-core \
+  --test postgres_state_backend \
+  postgresql_seeds_hosted_creation_prefix_for_backup_rehearsal \
+  -- \
+  --exact
+
 pg_dump \
   --format=custom \
   --no-owner \
@@ -58,4 +67,4 @@ WORKFLOW_OS_RECOVERY_POSTGRES_URL="${WORKFLOW_OS_POSTGRES_RESTORE_URL}" \
   -- \
   --exact
 
-printf 'PostgreSQL state backup, restore, authority, approval-route, and collaborative approval receipt integrity rehearsal passed.\n'
+printf 'PostgreSQL state backup, restore, authority, approval-route, collaborative approval receipt, and interrupted hosted creation recovery rehearsal passed.\n'

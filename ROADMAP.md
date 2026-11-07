@@ -148,8 +148,8 @@ The ordered queue is:
    [Cross-Harness Authoritative Continuation Milestone
    Plan](docs/implementation-plans/cross-harness-authoritative-continuation-milestone-plan.md).
 
-The Core/PostgreSQL implementation for item 2 is complete on the current
-implementation branch and its focused maintainer/security review is accepted.
+The Core/PostgreSQL implementation for item 2 is merged and its focused
+maintainer/security review is accepted.
 Hosted creation now derives a deterministic semantic prefix from the exact
 immutable bundle, classifies and completes a missing suffix under one
 transaction-scoped run lock, and repairs the snapshot in the same transaction.
@@ -157,10 +157,23 @@ It accepts legacy
 random event headers only when every authoritative event field and typed
 payload still match; conflicting semantics fail closed. Permanent PostgreSQL
 coverage exercises the three reproduced cut points, transaction rollback,
-exact replay, backend restart, and concurrent repair. This does not close the
-P0: exact-head CI, independent rerun, broader hosted/API contention evidence,
-and restore rehearsal remain acceptance gates. See the [implementation
-report](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_RECOVERY_IMPLEMENTATION_REPORT.md).
+exact replay, backend restart, and concurrent repair. Exact-head CI is green,
+and an interrupted prefix now survives PostgreSQL backup and restore before
+repairing exactly once. The broader contention gate initially found 22 of 25
+simultaneous distinct hosted creates exhausting serialization retries. A
+bounded blocker fix assigns retry ownership to the Core hosted no-write
+admission seam around only immutable-bundle publication, prefix
+reconciliation, dispatch, and final durable-state rehydration. The first
+exact-head run completed 24 of 25 requests and exposed that previously
+unbounded final read; it was not dismissed as a flake. The corrected fixture
+carries all 25 requests to lawful queued posture, and forced exhaustion leaves
+bounded stage-specific partial state before exact recovery. Focused review is
+accepted after adding per-run replay and all-four-stage exhaustion proof. The
+P0 remains open through renewed exact-head CI and an independent
+clean-environment rerun. See the [implementation
+report](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_RECOVERY_IMPLEMENTATION_REPORT.md),
+the [acceptance rerun](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_ACCEPTANCE_RERUN.md),
+and the [contention-fix review](docs/concepts/HOSTED_ADMISSION_CONTENTION_BLOCKER_FIX_REVIEW.md).
 
 The cross-harness milestone tests a first-class platform property, not a demo
 integration: Workflow OS is a **shared governance kernel** whose authority and
