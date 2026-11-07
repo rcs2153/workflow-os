@@ -3493,6 +3493,61 @@ mod tests {
         exercise_live_grant_reservation(LiveGrantTrial::RequiredCheck);
     }
 
+    #[test]
+    fn live_grant_rechecks_exact_durable_check_proof_at_reservation() {
+        exercise_live_grant_reservation(LiveGrantTrial::RequiredProof);
+    }
+
+    #[test]
+    fn live_grant_rejects_stale_and_no_reuse_proofs() {
+        exercise_live_grant_reservation(LiveGrantTrial::StaleProof);
+        exercise_live_grant_reservation(LiveGrantTrial::NoReuseProof);
+    }
+
+    #[test]
+    fn live_grant_store_upgrades_existing_v11_without_rewriting_history() {
+        use super::super::{
+            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION, LIVE_AUTHORITY_PREVIOUS_SCHEMA_CHECKSUM,
+            LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION, LIVE_SANDBOX_AUTHORITY_SCHEMA_V11,
+        };
+        let fixture = Fixture::new();
+        let original = fixture
+            .backend
+            .read_events(&fixture.run_id)
+            .expect("history");
+        let connection = fixture.backend.connection().expect("test connection");
+        connection
+            .execute_batch(LIVE_SANDBOX_AUTHORITY_SCHEMA_V11)
+            .expect("V11 schema");
+        connection
+            .execute(
+                "UPDATE schema_metadata SET schema_version=?1, checksum=?2 WHERE singleton=1",
+                params![
+                    LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION,
+                    LIVE_AUTHORITY_PREVIOUS_SCHEMA_CHECKSUM
+                ],
+            )
+            .expect("V11 metadata");
+        connection
+            .pragma_update(None, "user_version", LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION)
+            .expect("V11 version");
+        let backend = SqliteStateBackend::open(&fixture.path).expect("read V11");
+        backend
+            .enable_live_sandbox_grant_store()
+            .expect("upgrade to V12");
+        backend
+            .enable_live_sandbox_grant_store()
+            .expect("repeat V12");
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("version");
+        assert_eq!(version, LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION);
+        assert_eq!(
+            backend.read_events(&fixture.run_id).expect("same history"),
+            original
+        );
+    }
+
     #[derive(Clone, Copy)]
     enum LiveGrantTrial {
         AmbiguousCommit,
@@ -3504,6 +3559,9 @@ mod tests {
         MissingBundle,
         LegacyBundle,
         RequiredCheck,
+        RequiredProof,
+        StaleProof,
+        NoReuseProof,
     }
 
     impl LiveGrantTrial {
@@ -3515,6 +3573,15 @@ mod tests {
                     | Self::MissingBundle
                     | Self::LegacyBundle
                     | Self::RequiredCheck
+                    | Self::StaleProof
+                    | Self::NoReuseProof
+            )
+        }
+
+        fn requires_check(self) -> bool {
+            matches!(
+                self,
+                Self::RequiredCheck | Self::RequiredProof | Self::StaleProof | Self::NoReuseProof
             )
         }
     }
@@ -3535,26 +3602,30 @@ mod tests {
             .join("../../dogfood/workflow-os-self-governance");
         let mut project = crate::load_project(root).bundle.expect("dogfood project");
         let workflow_id = WorkflowId::new("dg/trusted-host-docs-check").expect("workflow");
-        if matches!(trial, LiveGrantTrial::RequiredCheck) {
+        if trial.requires_check() {
             let workflow = project
                 .workflows
                 .iter_mut()
                 .find(|workflow| workflow.definition.id == workflow_id)
                 .expect("workflow");
-            workflow.definition.steps[0].local_check_requirements = serde_yaml::from_str(
+            let freshness = if matches!(trial, LiveGrantTrial::NoReuseProof) {
+                "mode: no_reuse"
+            } else {
+                "mode: max_age_seconds, seconds: 600"
+            };
+            workflow.definition.steps[0].local_check_requirements = serde_yaml::from_str(&format!(
                 "- id: docs-required
   command_id: local-check/docs
   requirement_level: required
   minimum_assurance: kernel_observed_local_process
   accepted_statuses: [passed]
-  freshness:
-    mode: no_reuse
+  freshness: {{{freshness}}}
   exact_immutable_run_binding_required: true
   truncation_allowed: false
   network_maximum: disabled
   side_effect_maximum: no_source_writes
-",
-            )
+"
+            ))
             .expect("required check");
             workflow.definition.spec_content_hash = None;
             let source = serde_yaml::to_string(&workflow.definition).expect("workflow");
@@ -3596,6 +3667,60 @@ mod tests {
             build_immutable_run_bundle_with_local_check_declarations(request, &inventory)
                 .expect("canonical live test bundle")
         }
+    }
+
+    fn seed_live_check_proof(
+        backend: &SqliteStateBackend,
+        fixture: &Fixture,
+        trial: LiveGrantTrial,
+    ) {
+        use crate::LocalCheckAttestationFreshnessPolicy as Freshness;
+        let events = backend.read_events(&fixture.run_id).expect("history");
+        let (event, check) = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                WorkflowRunEventKind::LocalCheckResultRecorded(check) => {
+                    Some((event, check.as_ref()))
+                }
+                _ => None,
+            })
+            .expect("recorded result");
+        let connection = backend.connection().expect("test connection");
+        let stored = SqliteStateBackend::read_exact_bundle_with_connection(
+            &connection,
+            &fixture.run_id,
+            fixture.bundle.bundle_id(),
+        )
+        .expect("stored bundle");
+        let freshness = if matches!(trial, LiveGrantTrial::NoReuseProof) {
+            Freshness::NoReuse
+        } else {
+            Freshness::max_age_seconds(600).expect("max age")
+        };
+        let evaluated = if matches!(trial, LiveGrantTrial::StaleProof) {
+            Timestamp::from_offset_date_time(
+                event.timestamp.as_offset_date_time() - time::Duration::seconds(600),
+            )
+        } else {
+            event.timestamp
+        };
+        let projection = |attested| {
+            crate::local_check_attestation::verified_docs_check_projection_for_test(
+                freshness,
+                stored.clone(),
+                check,
+                evaluated,
+                attested,
+            )
+        };
+        assert!(backend.store_live_check_proof(&projection(false)).is_err());
+        let accepted = projection(true);
+        backend
+            .store_live_check_proof(&accepted)
+            .expect("store exact verifier proof");
+        backend
+            .store_live_check_proof(&accepted)
+            .expect("exact storage retry");
     }
 
     #[allow(clippy::too_many_lines)]
@@ -3686,7 +3811,7 @@ mod tests {
                         "sha256:1dddc6985e2bb5cc014db4c86900a7591fbef63ef89ca10e759f85795f2eff9a",
                         "d73239544f08c79a64ce001bfea57a2adc8212809499dcf561f1ed2c03df0d51",
                     )
-                    .expect_err("older V11 writer must not accept the live opening protocol")
+                    .expect_err("older writer must not accept the current live opening protocol")
                     .code(),
                     "state.sqlite.schema.recovery_required",
                 );
@@ -3718,7 +3843,7 @@ mod tests {
                 let grant = grant_for(LIVE_CAPABILITY, CapabilityGrantLifecycle::Active);
                 let live_credential = [43; 32];
                 let fixture_credential = [17; 32];
-                let backend = SqliteStateBackend::open(&fixture.path).expect("reopen V11");
+                let backend = SqliteStateBackend::open(&fixture.path).expect("reopen V12");
                 assert!(matches!(
                     backend
                         .open_live_sandbox_attempt(replay_request, facts)
@@ -3746,8 +3871,8 @@ mod tests {
                     )
                     .is_err());
                 let reader =
-                    SqliteStateBackend::open_read_only(&fixture.path).expect("inspect V11");
-                assert!(reader.health_check().expect("V11 health").healthy);
+                    SqliteStateBackend::open_read_only(&fixture.path).expect("inspect V12");
+                assert!(reader.health_check().expect("V12 health").healthy);
                 backend
                     .enable_live_sandbox_grant_store()
                     .expect("exact repeat upgrade");
@@ -3781,11 +3906,19 @@ mod tests {
                 backend
                     .write_side_effect_record(&effect)
                     .expect("persist attempted effect");
+                if matches!(
+                    trial,
+                    LiveGrantTrial::RequiredProof
+                        | LiveGrantTrial::StaleProof
+                        | LiveGrantTrial::NoReuseProof
+                ) {
+                    seed_live_check_proof(&backend, &fixture, trial);
+                }
                 if trial.denies_issuance() {
                     let error = backend
                         .issue_live_sandbox_grant(facts, &grant)
                         .expect_err("issuance denied");
-                    let expected = if matches!(trial, LiveGrantTrial::RequiredCheck) {
+                    let expected = if trial.requires_check() {
                         "live_sandbox_continuation.required_check_unverified"
                     } else {
                         "live_sandbox_continuation.storage_denied"
@@ -3824,6 +3957,36 @@ mod tests {
                     facts,
                     credential: &live_credential,
                 };
+                if matches!(trial, LiveGrantTrial::RequiredProof) {
+                    let payload: String = connection
+                        .query_row(
+                            "SELECT payload FROM live_sandbox_check_proofs WHERE run_id=?1",
+                            [fixture.run_id.as_str()],
+                            |row| row.get(0),
+                        )
+                        .expect("read exact proof payload");
+                    let set_proof =
+                        |value: &str| {
+                            connection.execute(
+                        "UPDATE live_sandbox_check_proofs SET payload=?1 WHERE run_id=?2",
+                        params![value, fixture.run_id.as_str()],
+                    ).expect("inject proof drift in disposable fixture")
+                        };
+                    let mut tampered: serde_json::Value =
+                        serde_json::from_str(&payload).expect("proof JSON");
+                    tampered["verifier_proof"]["invocation_id"] = "invocation/substituted".into();
+                    set_proof(&tampered.to_string());
+                    let Err(error) = backend.reserve_live_sandbox_dispatch(request(), admission)
+                    else {
+                        panic!("tampered check proof must deny reservation");
+                    };
+                    assert_eq!(
+                        error.code(),
+                        "live_sandbox_continuation.required_check_unverified"
+                    );
+                    assert_eq!(counts(), (0, 0));
+                    set_proof(&payload);
+                }
                 let unauthenticated = LiveGrantAdmission {
                     credential: &fixture_credential,
                     ..admission
@@ -3875,7 +4038,9 @@ mod tests {
                     | LiveGrantTrial::FailedCheck
                     | LiveGrantTrial::MissingBundle
                     | LiveGrantTrial::LegacyBundle
-                    | LiveGrantTrial::RequiredCheck => {
+                    | LiveGrantTrial::RequiredCheck
+                    | LiveGrantTrial::StaleProof
+                    | LiveGrantTrial::NoReuseProof => {
                         unreachable!("denied at issuance")
                     }
                     LiveGrantTrial::AmbiguousCommit => {
@@ -3885,7 +4050,7 @@ mod tests {
                             .expect("uncertain")
                             .is_none());
                     }
-                    LiveGrantTrial::Contended => {
+                    LiveGrantTrial::Contended | LiveGrantTrial::RequiredProof => {
                         let winners = std::thread::scope(|scope| {
                             let invoke = || {
                                 backend

@@ -432,6 +432,10 @@ impl LocalCheckEvidenceAssuranceProjection {
             .map(|proof| &proof.proof_fingerprint)
     }
 
+    pub(crate) fn verifier_proof(&self) -> Option<&AcceptedLocalCheckAttestation> {
+        self.verifier_proof.as_deref()
+    }
+
     /// Returns the deterministic projection fingerprint.
     #[must_use]
     pub const fn projection_fingerprint(&self) -> &SpecContentHash {

@@ -4,9 +4,10 @@ use sha2::{Digest, Sha256};
 
 use super::{
     decode_json, encode_json, schema_recovery_required, validate_live_authority_schema,
-    validate_schema_metadata, SqliteStateBackend, ADAPTER_SCHEMA_VERSION,
-    LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION, LIVE_AUTHORITY_SCHEMA_CHECKSUM,
-    LIVE_SANDBOX_AUTHORITY_SCHEMA_V11,
+    validate_previous_live_authority_schema, validate_schema_metadata, SqliteStateBackend,
+    ADAPTER_SCHEMA_VERSION, LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
+    LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION, LIVE_AUTHORITY_SCHEMA_CHECKSUM,
+    LIVE_SANDBOX_AUTHORITY_SCHEMA_V11, LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12,
 };
 use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeAttemptState, AuthoritativeWindowState,
@@ -14,6 +15,9 @@ use crate::authorized_execution_continuity_state::internal::{
 use crate::dispatch_reservation::DispatchReservationRequest;
 use crate::live_sandbox_continuation_authority::{
     LiveSandboxContinuationFacts, LiveSandboxPrincipalVerifier, ResolvedLiveEffect, LIVE_CAPABILITY,
+};
+use crate::local_check_evidence_assurance::{
+    StoredLocalCheckAssurance, StoredLocalCheckAssuranceWrite,
 };
 use crate::operational_execution_window_opening::{
     operation_binding_commitment, OperationalExecutionWindowOpeningRequest,
@@ -28,6 +32,48 @@ use crate::{
 };
 
 impl SqliteStateBackend {
+    // Only a Core-owned producer may supply this projection. Do not import
+    // caller payloads or local filesystem assurance records into this lane.
+    pub(crate) fn store_live_check_proof(
+        &self,
+        projection: &crate::LocalCheckEvidenceAssuranceProjection,
+    ) -> Result<(), WorkflowOsError> {
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| required_check_unverified())?;
+        validate_live_store(&tx)?;
+        let events = Self::read_events_with_connection(&tx, projection.run_id())?;
+        let mut matching = events.iter().filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::LocalCheckResultRecorded(result)
+                if result.result_id() == projection.result_id() =>
+            {
+                Some((event, result))
+            }
+            _ => None,
+        });
+        let (event, result) = matching.next().ok_or_else(required_check_unverified)?;
+        if matching.next().is_some() {
+            return Err(required_check_unverified());
+        }
+        exact_check_proof(projection, event, result)?;
+        let payload = encode_json(
+            &StoredLocalCheckAssuranceWrite::new(projection)?,
+            "live check proof",
+        )?;
+        let event_hash = check_event_commitment(event)?;
+        let inserted = tx.execute(
+            "INSERT INTO live_sandbox_check_proofs (run_id, result_id, event_id, event_commitment, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(run_id, result_id) DO NOTHING",
+            params![event.run_id.as_str(), result.result_id().as_str(), event.event_id.as_str(),
+                event_hash.as_str(), payload],
+        ).map_err(|_| required_check_unverified())?;
+        if inserted == 0 && read_live_check_proof(&tx, event, result)? != payload {
+            return Err(required_check_unverified());
+        }
+        tx.commit().map_err(|_| required_check_unverified())
+    }
+
     pub(crate) fn register_live_sandbox_principal(
         &self,
         verifier: &LiveSandboxPrincipalVerifier,
@@ -79,29 +125,34 @@ impl SqliteStateBackend {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| schema_recovery_required())?;
-        match version(&tx)? {
+        let upgrading = match version(&tx)? {
             ADAPTER_SCHEMA_VERSION => {
                 validate_schema_metadata(&tx)?;
                 tx.execute_batch(LIVE_SANDBOX_AUTHORITY_SCHEMA_V11)
-                    .and_then(|()| {
-                        tx.execute(
-                            "UPDATE schema_metadata SET schema_version=?1, checksum=?2
-                             WHERE singleton=1",
-                            params![
-                                LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
-                                LIVE_AUTHORITY_SCHEMA_CHECKSUM
-                            ],
-                        )?;
-                        tx.pragma_update(
-                            None,
-                            "user_version",
-                            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
-                        )
-                    })
                     .map_err(|_| schema_recovery_required())?;
+                true
             }
-            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => {}
+            LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION => {
+                validate_previous_live_authority_schema(&tx)?;
+                true
+            }
+            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => false,
             _ => return Err(schema_recovery_required()),
+        };
+        if upgrading {
+            tx.execute_batch(LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12)
+                .and_then(|()| {
+                    tx.execute(
+                        "UPDATE schema_metadata SET schema_version=?1, checksum=?2
+                         WHERE singleton=1",
+                        params![
+                            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
+                            LIVE_AUTHORITY_SCHEMA_CHECKSUM
+                        ],
+                    )?;
+                    tx.pragma_update(None, "user_version", LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION)
+                })
+                .map_err(|_| schema_recovery_required())?;
         }
         validate_live_authority_schema(&tx)?;
         tx.commit().map_err(|_| schema_recovery_required())
@@ -148,7 +199,12 @@ impl SqliteStateBackend {
         {
             return Err(denied());
         }
-        let effect = verify_opening(&tx, facts, &facts.action.commitment()?)?;
+        let effect = verify_opening(
+            &tx,
+            facts,
+            &facts.action.commitment()?,
+            observation.observed_at(),
+        )?;
         let registration = active_principal(&tx, grant)?.commitment()?;
         let binding =
             facts.grant_commitment(grant, observation.observed_at(), &registration, &effect)?;
@@ -285,7 +341,7 @@ impl AuthenticatedLiveGrant<'_> {
         {
             return Err(denied());
         }
-        let effect = verify_opening(tx, facts, &action)?;
+        let effect = verify_opening(tx, facts, &action, now)?;
         facts.verify_bound_grant(
             &self.grant,
             now,
@@ -329,8 +385,16 @@ pub(super) fn check_dispatch_lane(
     let marked = window.as_str().starts_with(LIVE_WINDOW_PREFIX);
     match version(tx)? {
         ADAPTER_SCHEMA_VERSION if !live && !marked => Ok(()),
-        LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => {
-            validate_live_authority_schema(tx)?;
+        version @ (LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION
+        | LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION) => {
+            if version == LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION {
+                validate_previous_live_authority_schema(tx)?;
+                if live {
+                    return Err(denied());
+                }
+            } else {
+                validate_live_authority_schema(tx)?;
+            }
             let granted: bool = tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM live_sandbox_grants WHERE attempt_id=?1)",
@@ -419,6 +483,7 @@ fn verify_opening(
     tx: &Connection,
     facts: LiveSandboxContinuationFacts<'_>,
     action: &SpecContentHash,
+    now: Timestamp,
 ) -> Result<ResolvedLiveEffect, WorkflowOsError> {
     let events = SqliteStateBackend::read_events_with_connection(tx, facts.action.run)?;
     let last = events.last().ok_or_else(denied)?;
@@ -432,7 +497,7 @@ fn verify_opening(
     }
     let run = WorkflowRun::rehydrate(&events)?;
     verify_persisted_approval(tx, facts, &run)?;
-    resolve_live_effect(tx, facts, &run, &last.event_id)
+    resolve_live_effect(tx, facts, &run, &last.event_id, now)
 }
 
 fn resolve_live_effect(
@@ -440,6 +505,7 @@ fn resolve_live_effect(
     facts: LiveSandboxContinuationFacts<'_>,
     run: &WorkflowRun,
     opening_event: &crate::EventId,
+    now: Timestamp,
 ) -> Result<ResolvedLiveEffect, WorkflowOsError> {
     let record: SideEffectRecord = super::read_optional_payload(
         tx,
@@ -451,7 +517,7 @@ fn resolve_live_effect(
     .ok_or_else(denied)?;
     let identity = &run.snapshot.identity;
     let bundle = identity.immutable_run_bundle.as_ref().ok_or_else(denied)?;
-    let bundle_sensitivity = verify_live_bundle(tx, facts, run, bundle)?;
+    let stored = verify_live_bundle(tx, facts, run, bundle)?;
     let [approval] = record.authority().approval_references.as_slice() else {
         return Err(denied());
     };
@@ -485,6 +551,12 @@ fn resolve_live_effect(
     }
     let policy = resolve_effect_policy(run, &record)?;
     let checks = resolve_effect_checks(run, &record, facts, bundle)?;
+    let proofs = resolve_required_check_proofs(tx, &stored, facts.action.step, &checks, now)?;
+    let bundle_sensitivity = match stored.manifest().sensitivity() {
+        crate::ImmutableRunBundleSensitivity::Internal => WorkReportSensitivity::Internal,
+        crate::ImmutableRunBundleSensitivity::Confidential => WorkReportSensitivity::Confidential,
+        crate::ImmutableRunBundleSensitivity::Restricted => WorkReportSensitivity::Secret,
+    };
     let sensitivity = match record.sensitivity() {
         SideEffectSensitivity::Public => WorkReportSensitivity::Public,
         SideEffectSensitivity::Internal => WorkReportSensitivity::Internal,
@@ -494,7 +566,14 @@ fn resolve_live_effect(
         SideEffectSensitivity::Unknown => return Err(denied()),
     };
     Ok(ResolvedLiveEffect {
-        evidence: proof_commitment(b"workflow-os/live-effect-evidence/v1\0", &(record, checks))?,
+        evidence: if proofs.is_empty() {
+            proof_commitment(b"workflow-os/live-effect-evidence/v1\0", &(record, checks))?
+        } else {
+            proof_commitment(
+                b"workflow-os/live-effect-evidence/v2\0",
+                &(record, checks, proofs),
+            )?
+        },
         policy: proof_commitment(b"workflow-os/live-effect-policy/v1\0", &policy)?,
         sensitivity: sensitivity.max(bundle_sensitivity),
     })
@@ -505,7 +584,7 @@ fn verify_live_bundle(
     facts: LiveSandboxContinuationFacts<'_>,
     run: &WorkflowRun,
     binding: &crate::ImmutableRunBundleBinding,
-) -> Result<WorkReportSensitivity, WorkflowOsError> {
+) -> Result<crate::StoredImmutableRunBundle, WorkflowOsError> {
     let identity = &run.snapshot.identity;
     let stored = SqliteStateBackend::read_exact_bundle_with_connection(
         tx,
@@ -531,34 +610,176 @@ fn verify_live_bundle(
         return Err(denied());
     }
 
+    Ok(stored)
+}
+
+fn resolve_required_check_proofs(
+    tx: &Connection,
+    stored: &crate::StoredImmutableRunBundle,
+    selected_step: &crate::StepId,
+    checks: &[(&crate::WorkflowRunEvent, &crate::WorkflowRunEvent)],
+    now: Timestamp,
+) -> Result<Vec<SpecContentHash>, WorkflowOsError> {
     let workflow =
-        crate::executor::immutable_continuation_workflow(&stored).map_err(|_| denied())?;
+        crate::executor::immutable_continuation_workflow(stored).map_err(|_| denied())?;
     let selected = workflow
         .steps
         .iter()
-        .position(|step| &step.id == facts.action.step)
+        .position(|step| &step.id == selected_step)
         .ok_or_else(denied)?;
+    let mut commitments = Vec::new();
     for step in &workflow.steps[..=selected] {
         let record =
-            crate::local_check_attestation::authoritative_record_for_step(&stored, &step.id)
+            crate::local_check_attestation::authoritative_record_for_step(stored, &step.id)
                 .map_err(|_| denied())?;
         if step.local_check_requirements.iter().any(|requirement| {
             requirement.requirement_level() == crate::LocalCheckRequirementLevel::Required
-        }) || record.declarations().iter().any(|declaration| {
+                && !record
+                    .declarations()
+                    .iter()
+                    .any(|declaration| declaration_matches_requirement(declaration, requirement))
+        }) {
+            return Err(required_check_unverified());
+        }
+        for declaration in record.declarations().iter().filter(|declaration| {
             declaration.requirement_level() == crate::LocalCheckRequirementLevel::Required
         }) {
-            // A passing result event does not establish the declared attestation.
-            return Err(WorkflowOsError::security(
-                "live_sandbox_continuation.required_check_unverified",
-                "required immutable check assurance is unavailable for live admission",
-            ));
+            let mut matching = checks.iter().filter_map(|(event, _)| {
+                let WorkflowRunEventKind::LocalCheckResultRecorded(result) = &event.kind else {
+                    return None;
+                };
+                (result.step_id() == &step.id && result.command_id() == declaration.command_id())
+                    .then_some((*event, result))
+            });
+            let (event, result) = matching.next().ok_or_else(required_check_unverified)?;
+            if matching.next().is_some() {
+                return Err(required_check_unverified());
+            }
+            let payload = read_live_check_proof(tx, event, result)?;
+            let StoredLocalCheckAssurance(projection) = decode_json(&payload, "live check proof")
+                .map_err(|_| required_check_unverified())?;
+            validate_check_proof(&projection, event, result, declaration, now)?;
+            commitments.push(proof_commitment(
+                b"workflow-os/live-check-proof/v1\0",
+                &payload,
+            )?);
         }
     }
-    Ok(match manifest.sensitivity() {
-        crate::ImmutableRunBundleSensitivity::Internal => WorkReportSensitivity::Internal,
-        crate::ImmutableRunBundleSensitivity::Confidential => WorkReportSensitivity::Confidential,
-        crate::ImmutableRunBundleSensitivity::Restricted => WorkReportSensitivity::Secret,
-    })
+    Ok(commitments)
+}
+
+fn declaration_matches_requirement(
+    declaration: &crate::CanonicalLocalCheckDeclaration,
+    requirement: &crate::LocalCheckRequirementDeclaration,
+) -> bool {
+    declaration.requirement_level() == requirement.requirement_level()
+        && declaration.requirement_id() == requirement.id()
+        && declaration.command_id() == requirement.command_id()
+        && declaration.minimum_assurance() == requirement.minimum_assurance()
+        && declaration.evidence_assurance_minimum() == requirement.evidence_assurance_minimum()
+        && declaration.accepted_statuses() == requirement.accepted_statuses()
+        && declaration.freshness() == requirement.freshness()
+        && declaration.exact_immutable_run_binding_required()
+            == requirement.exact_immutable_run_binding_required()
+        && declaration.truncation_allowed() == requirement.truncation_allowed()
+        && declaration.network_maximum() == requirement.network_maximum()
+        && declaration.side_effect_maximum() == requirement.side_effect_maximum()
+}
+
+fn exact_check_proof<'a>(
+    projection: &'a crate::LocalCheckEvidenceAssuranceProjection,
+    event: &crate::WorkflowRunEvent,
+    result: &crate::LocalCheckResultRecordedEvent,
+) -> Result<&'a crate::AcceptedLocalCheckAttestation, WorkflowOsError> {
+    let proof = projection
+        .verifier_proof()
+        .ok_or_else(required_check_unverified)?;
+    if projection.run_id() != &event.run_id
+        || projection.workflow_id() != &event.workflow_id
+        || projection.immutable_run_bundle() != result.immutable_run_bundle()
+        || projection.step_id() != result.step_id()
+        || projection.command_id() != result.command_id()
+        || projection.command_kind() != result.command_kind()
+        || projection.result_id() != result.result_id()
+        || projection.result_status() != result.status()
+        || proof.invocation_id() != result.invocation_id()
+        || proof.verified_at() > &event.timestamp
+    {
+        return Err(required_check_unverified());
+    }
+    Ok(proof)
+}
+
+fn validate_check_proof(
+    projection: &crate::LocalCheckEvidenceAssuranceProjection,
+    event: &crate::WorkflowRunEvent,
+    result: &crate::LocalCheckResultRecordedEvent,
+    declaration: &crate::CanonicalLocalCheckDeclaration,
+    now: Timestamp,
+) -> Result<(), WorkflowOsError> {
+    let proof = exact_check_proof(projection, event, result)?;
+    let requirement = declaration
+        .attestation_requirement()
+        .map_err(|_| required_check_unverified())?;
+    let seconds = requirement
+        .freshness()
+        .maximum_age_seconds()
+        .ok_or_else(required_check_unverified)?;
+    if proof.requirement_fingerprint() != requirement.requirement_fingerprint()
+        || proof.command_contract_fingerprint() != Some(declaration.command_contract_fingerprint())
+        || proof.assurance() != requirement.minimum_assurance()
+        || proof.freshness() != requirement.freshness()
+        || proof.result_status() != LocalCheckResultStatus::Passed
+        || !requirement
+            .accepted_statuses()
+            .contains(&proof.result_status())
+        || (!requirement.truncation_allowed()
+            && (proof.stdout_truncated() || proof.stderr_truncated()))
+        || declaration
+            .evidence_assurance_minimum()
+            .is_some_and(|minimum| !projection.satisfies_minimum(minimum))
+        || now < event.timestamp
+        || now.as_offset_date_time() - proof.observed_completed_at().as_offset_date_time()
+            > time::Duration::seconds(i64::from(seconds))
+    {
+        return Err(required_check_unverified());
+    }
+    Ok(())
+}
+
+fn check_event_commitment(
+    event: &crate::WorkflowRunEvent,
+) -> Result<SpecContentHash, WorkflowOsError> {
+    proof_commitment(b"workflow-os/live-check-result-event/v1\0", event)
+}
+
+fn read_live_check_proof(
+    tx: &Connection,
+    event: &crate::WorkflowRunEvent,
+    result: &crate::LocalCheckResultRecordedEvent,
+) -> Result<String, WorkflowOsError> {
+    let event_hash = check_event_commitment(event)?;
+    tx.query_row(
+        "SELECT payload FROM live_sandbox_check_proofs
+         WHERE run_id=?1 AND result_id=?2 AND event_id=?3 AND event_commitment=?4",
+        params![
+            event.run_id.as_str(),
+            result.result_id().as_str(),
+            event.event_id.as_str(),
+            event_hash.as_str()
+        ],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|_| required_check_unverified())?
+    .ok_or_else(required_check_unverified)
+}
+
+fn required_check_unverified() -> WorkflowOsError {
+    WorkflowOsError::security(
+        "live_sandbox_continuation.required_check_unverified",
+        "required immutable check assurance is unavailable for live admission",
+    )
 }
 
 fn resolve_effect_policy<'a>(

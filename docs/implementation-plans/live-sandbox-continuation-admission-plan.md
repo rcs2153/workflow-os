@@ -191,6 +191,18 @@ SQLite live admission still denies required checks until it can resolve the
 same proof and evaluate its declared constraints at time of use in its own
 transaction.
 
+Implementation run `run-1794089581194127000-2` adds opt-in SQLite proof storage
+and resolves each required declaration against the exact referenced result
+event, successful invocation, and verifier record inside issuance and
+reservation. It commits that proof to the grant, checks the immutable command
+and requirement, and rechecks the bounded maximum age using trusted time.
+`NoReuse` remains ineligible for a persisted observation. Ordinary state
+keeps its current schema; existing opt-in live stores can upgrade in place
+without synthesizing proofs. The private writer has synthetic coverage but is
+not yet wired to a trusted production producer. This does not make the
+existing local runner authoritative, authorize a sandbox launch, or enable
+provider writes.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes
