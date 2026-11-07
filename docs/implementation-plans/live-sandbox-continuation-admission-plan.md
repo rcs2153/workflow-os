@@ -203,6 +203,18 @@ not yet wired to a trusted production producer. This does not make the
 existing local runner authoritative, authorize a sandbox launch, or enable
 provider writes.
 
+Implementation run `run-1794091942389997000-2` adds a private native proof
+producer for one exact required check with bounded freshness. Only Core's
+native process-runner constructors can enter this path. It compares the
+resolved process request with the reviewed execution fingerprint before launch
+and includes the verifier proof only after a passing result. The injected
+runner path remains unattested. A real disposable subprocess and substitution
+tests verify this boundary. The fingerprint identifies the resolved request
+and pinned executable content; it is not a process sandbox or proof that the
+host, interpreter, or workspace was immutable. The producer is not yet
+connected to the supervisor's transactional result projection or to any
+public or live dispatch route.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes
