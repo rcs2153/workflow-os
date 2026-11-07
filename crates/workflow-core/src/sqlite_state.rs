@@ -43,6 +43,11 @@ use crate::{
 };
 
 const ADAPTER_SCHEMA_VERSION: u32 = 10;
+const LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION: u32 = 11;
+const LIVE_AUTHORITY_SCHEMA_DIGEST: &str =
+    "d73239544f08c79a64ce001bfea57a2adc8212809499dcf561f1ed2c03df0d51";
+const LIVE_AUTHORITY_SCHEMA_CHECKSUM: &str =
+    "sha256:d73239544f08c79a64ce001bfea57a2adc8212809499dcf561f1ed2c03df0d51";
 const RUN_SCOPE_ADAPTER_SCHEMA_VERSION: u32 = 9;
 const CAPABILITY_SOURCE_CONTINUITY_ADAPTER_SCHEMA_VERSION: u32 = 8;
 const IMMUTABLE_RUN_BUNDLE_ADAPTER_SCHEMA_VERSION: u32 = 7;
@@ -199,6 +204,8 @@ const OPERATIONAL_OPENING_RUN_SCOPE_SCHEMA_V9: &str =
     include_str!("sqlite_operational_opening_run_scope_schema_v9.sql");
 const FIXTURE_REPLACEMENT_AUTHORITY_SCHEMA_V10: &str =
     include_str!("sqlite_fixture_replacement_authority_schema_v10.sql");
+const LIVE_SANDBOX_AUTHORITY_SCHEMA_V11: &str =
+    include_str!("sqlite_live_sandbox_authority_schema_v11.sql");
 pub(crate) const CONTINUITY_CLOCK_PROVENANCE: &str =
     "77efdb5ae4c8696d8573d816a52dce594793b1749471a98cc58a85fc8129e50f";
 pub(crate) const CONTINUITY_CLOCK_EPOCH: &str = "epoch/sqlite-local-live-state/1";
@@ -208,6 +215,8 @@ mod continuity_codec;
 mod continuity_store;
 mod dispatch_reservation_store;
 pub(crate) mod fixture_replacement_authority_store;
+#[allow(dead_code)] // Kept internal until the live opening path supplies authoritative facts.
+mod live_sandbox_grant_store;
 mod operational_opening_store;
 #[allow(dead_code)]
 mod trusted_host_explicit_local_operation;
@@ -1215,7 +1224,7 @@ impl SqliteStateBackend {
             read_only: true,
         };
         let connection = backend.existing_read_only_connection()?;
-        validate_schema_metadata(&connection)?;
+        validate_operational_schema(&connection)?;
         Ok(backend)
     }
 
@@ -1241,6 +1250,7 @@ impl SqliteStateBackend {
         match version {
             RUN_SCOPE_ADAPTER_SCHEMA_VERSION => validate_v9_upgrade_eligibility(&connection)?,
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(&connection)?,
+            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => validate_live_authority_schema(&connection)?,
             _ => return Err(schema_recovery_required()),
         }
         Ok(backend)
@@ -2325,6 +2335,7 @@ impl SqliteStateBackend {
                 ))
             }
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(connection),
+            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => validate_live_authority_schema(connection),
             _ => Err(sqlite_state_error(
                 "schema.incompatible",
                 "SQLite state schema version is not supported",
@@ -3724,7 +3735,7 @@ impl ImmutableRunBundleStore for SqliteStateBackend {
 impl StateBackend for SqliteStateBackend {
     fn health_check(&self) -> Result<BackendHealthCheck, WorkflowOsError> {
         let connection = self.connection()?;
-        validate_schema_metadata(&connection)?;
+        validate_operational_schema(&connection)?;
         let integrity: String = connection
             .pragma_query_value(None, "quick_check", |row| row.get(0))
             .map_err(|error| {
@@ -3754,6 +3765,7 @@ impl StateBackend for SqliteStateBackend {
 
 impl DurableStateContractProvider for SqliteStateBackend {
     fn durable_state_contract(&self) -> Result<DurableStateSemanticContract, WorkflowOsError> {
+        let schema_version = validate_operational_schema(&self.existing_connection()?)?;
         DurableStateSemanticContract::new(
             DurableStateContractVersion::V1,
             DurableStateBackendKind::EmbeddedSqlite,
@@ -3778,10 +3790,7 @@ impl DurableStateContractProvider for SqliteStateBackend {
                 })
                 .collect(),
             DurableLeaseSemantics::ProcessLocalUnfenced,
-            DurableStateSchemaMetadata::managed(
-                ADAPTER_SCHEMA_VERSION,
-                DurableStateSchemaPosture::Ready,
-            )?,
+            DurableStateSchemaMetadata::managed(schema_version, DurableStateSchemaPosture::Ready)?,
         )
     }
 }
@@ -4053,6 +4062,29 @@ fn validate_schema_metadata(connection: &Connection) -> Result<(), WorkflowOsErr
     )
 }
 
+fn validate_operational_schema(connection: &Connection) -> Result<u32, WorkflowOsError> {
+    let version = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|_| schema_recovery_required())?;
+    if version == LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION {
+        validate_live_authority_schema(connection)?;
+    } else if version == ADAPTER_SCHEMA_VERSION {
+        validate_schema_metadata(connection)?;
+    } else {
+        return Err(schema_recovery_required());
+    }
+    Ok(version)
+}
+
+fn validate_live_authority_schema(connection: &Connection) -> Result<(), WorkflowOsError> {
+    validate_schema_metadata_version(
+        connection,
+        LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
+        LIVE_AUTHORITY_SCHEMA_CHECKSUM,
+        LIVE_AUTHORITY_SCHEMA_DIGEST,
+    )
+}
+
 fn validate_v9_upgrade_eligibility(connection: &Connection) -> Result<(), WorkflowOsError> {
     validate_schema_metadata_version(
         connection,
@@ -4097,10 +4129,12 @@ fn validate_schema_metadata_version(
             validate_continuity_security_state(connection)?;
             validate_time_window_wait_binding_columns(connection)
         }
-        Some((version, _, _)) if version > ADAPTER_SCHEMA_VERSION => Err(sqlite_state_error(
-            "schema.incompatible",
-            "SQLite state schema version is not supported",
-        )),
+        Some((version, _, _)) if version > LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => {
+            Err(sqlite_state_error(
+                "schema.incompatible",
+                "SQLite state schema version is not supported",
+            ))
+        }
         _ => Err(sqlite_state_error(
             "schema.recovery_required",
             "SQLite state schema requires operator recovery",

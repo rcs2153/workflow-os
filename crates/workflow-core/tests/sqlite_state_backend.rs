@@ -265,7 +265,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
     let secret = "secret-schema-token-marker";
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 11)
+        .pragma_update(None, "user_version", 12)
         .expect("set newer schema");
     drop(connection);
 
@@ -275,6 +275,14 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
     assert!(!newer
         .to_string()
         .contains(fixture.path.to_string_lossy().as_ref()));
+
+    let connection = Connection::open(&fixture.path).expect("open fixture database");
+    connection
+        .pragma_update(None, "user_version", 11)
+        .expect("claim live schema without applying upgrade");
+    drop(connection);
+    let unverified = SqliteStateBackend::open(&fixture.path).expect_err("unverified V11 rejected");
+    assert_eq!(unverified.code(), "state.sqlite.schema.recovery_required");
 
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection

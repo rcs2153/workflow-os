@@ -12,7 +12,7 @@ use crate::{
     SpecContentHash, Timestamp, WorkReportSensitivity, WorkflowOsError,
 };
 
-const LIVE_CAPABILITY: &str = "live-sandbox/github-pr-comment-continuation";
+pub(crate) const LIVE_CAPABILITY: &str = "live-sandbox/github-pr-comment-continuation";
 
 #[derive(Clone, Copy)]
 pub(crate) struct LiveSandboxContinuationFacts<'a> {
@@ -129,7 +129,7 @@ fn denied() -> WorkflowOsError {
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::too_many_lines)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{
         compute_approval_presentation_content_hash, ApprovalDecisionProofEnforcementMode,
@@ -142,21 +142,35 @@ mod tests {
         WorkflowRunId,
     };
 
-    #[test]
-    fn live_grant_matches_exact_approval_window_evidence_and_principal_revision() {
-        let action = GitHubCommentContinuationAction {
-            run: &WorkflowRunId::new("run-live").expect("run"),
-            step: &StepId::new("comment").expect("step"),
-            bundle_root: &SpecContentHash::from_text("bundle"),
-            original_actor: &ActorId::new("agent/original").expect("original"),
-            side_effect: &SideEffectId::new("effect/comment").expect("effect"),
-            target: &GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target"),
-            body: "approved synthetic comment",
-            idempotency_key: &IdempotencyKey::new("comment/run-live").expect("key"),
-            mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
-        };
+    #[derive(Clone, Copy)]
+    pub(crate) struct LiveGrantTestContext<'a> {
+        pub(crate) action: GitHubCommentContinuationAction<'a>,
+        pub(crate) workflow: &'a WorkflowId,
+        pub(crate) window: &'a AuthorizedExecutionWindowId,
+        pub(crate) attempt: &'a AuthorizedExecutionAttemptId,
+        pub(crate) now: Timestamp,
+        pub(crate) expiry: Timestamp,
+        pub(crate) window_expiry: Timestamp,
+    }
+
+    pub(crate) fn with_live_grant_test_facts<T>(
+        context: LiveGrantTestContext<'_>,
+        test: impl FnOnce(
+            LiveSandboxContinuationFacts<'_>,
+            &dyn Fn(&str, CapabilityGrantLifecycle) -> CapabilityGrant,
+        ) -> T,
+    ) -> T {
+        let LiveGrantTestContext {
+            action,
+            workflow,
+            window,
+            attempt,
+            now,
+            expiry,
+            window_expiry,
+        } = context;
         let scope = CapabilityGrantScope::new(
-            WorkflowId::new("test/live").expect("workflow"),
+            workflow.clone(),
             Some(action.run.clone()),
             Some(action.step.clone()),
             Some(HarnessContractId::new("harness/replacement").expect("harness")),
@@ -164,9 +178,8 @@ mod tests {
         .expect("scope");
         let replacement = ActorId::new("agent/replacement").expect("replacement");
         let issuer = ActorId::new("user/operator").expect("issuer");
-        let now = Timestamp::parse_rfc3339("2026-11-07T07:00:00Z").expect("issued");
-        let expiry = Timestamp::parse_rfc3339("2026-11-07T07:04:00Z").expect("expiry");
-        let approval = ApprovalReferenceId::new("approval/run-live/comment").expect("approval");
+        let approval =
+            ApprovalReferenceId::new(format!("approval/{}/comment", action.run)).expect("approval");
         let requirements =
             CapabilityGrantRequirements::new(vec![], vec![approval.clone()], vec![], vec![])
                 .expect("requirements");
@@ -249,16 +262,16 @@ mod tests {
             decision: &decision,
             presentation: &presentation,
             approval_expires_at: Some(expiry),
-            window: &AuthorizedExecutionWindowId::new("window/live").expect("window"),
-            attempt: &AuthorizedExecutionAttemptId::new("attempt/live").expect("attempt"),
-            window_expires_at: expiry,
+            window,
+            attempt,
+            window_expires_at: window_expiry,
             requirements: &requirements,
             evidence_commitment: &SpecContentHash::from_text("passing evidence"),
             policy_commitment: &SpecContentHash::from_text("exact policy"),
             principal_registration_commitment: &SpecContentHash::from_text("registration one"),
             sensitivity: WorkReportSensitivity::Internal,
         };
-        let grant = |capability, lifecycle| {
+        let grant = |capability: &str, lifecycle: CapabilityGrantLifecycle| {
             CapabilityGrant::new(CapabilityGrantDefinition {
                 grant_id: CapabilityGrantId::new("grant/live").expect("grant"),
                 subject: replacement.clone(),
@@ -282,57 +295,89 @@ mod tests {
             })
             .expect("grant")
         };
-        let active = grant(LIVE_CAPABILITY, CapabilityGrantLifecycle::Active);
-        let binding = facts.grant_commitment(&active, now).expect("binding");
-        facts
-            .verify_bound_grant(&active, now, &binding)
-            .expect("exact recheck");
-        for changed in [
-            LiveSandboxContinuationFacts {
-                action: GitHubCommentContinuationAction {
-                    body: "changed body",
-                    ..action
-                },
-                ..facts
+        test(facts, &grant)
+    }
+
+    #[test]
+    fn live_grant_matches_exact_approval_window_evidence_and_principal_revision() {
+        let action = GitHubCommentContinuationAction {
+            run: &WorkflowRunId::new("run-live").expect("run"),
+            step: &StepId::new("comment").expect("step"),
+            bundle_root: &SpecContentHash::from_text("bundle"),
+            original_actor: &ActorId::new("agent/original").expect("original"),
+            side_effect: &SideEffectId::new("effect/comment").expect("effect"),
+            target: &GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target"),
+            body: "approved synthetic comment",
+            idempotency_key: &IdempotencyKey::new("comment/run-live").expect("key"),
+            mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
+        };
+        let now = Timestamp::parse_rfc3339("2026-11-07T07:00:00Z").expect("issued");
+        let expiry = Timestamp::parse_rfc3339("2026-11-07T07:04:00Z").expect("expiry");
+        with_live_grant_test_facts(
+            LiveGrantTestContext {
+                action,
+                workflow: &WorkflowId::new("test/live").expect("workflow"),
+                window: &AuthorizedExecutionWindowId::new("window/live").expect("window"),
+                attempt: &AuthorizedExecutionAttemptId::new("attempt/live").expect("attempt"),
+                now,
+                expiry,
+                window_expiry: expiry,
             },
-            LiveSandboxContinuationFacts {
-                evidence_commitment: &SpecContentHash::from_text("changed evidence"),
-                ..facts
+            |facts, grant| {
+                let active = grant(LIVE_CAPABILITY, CapabilityGrantLifecycle::Active);
+                let binding = facts.grant_commitment(&active, now).expect("binding");
+                facts
+                    .verify_bound_grant(&active, now, &binding)
+                    .expect("exact recheck");
+                for changed in [
+                    LiveSandboxContinuationFacts {
+                        action: GitHubCommentContinuationAction {
+                            body: "changed body",
+                            ..action
+                        },
+                        ..facts
+                    },
+                    LiveSandboxContinuationFacts {
+                        evidence_commitment: &SpecContentHash::from_text("changed evidence"),
+                        ..facts
+                    },
+                    LiveSandboxContinuationFacts {
+                        policy_commitment: &SpecContentHash::from_text("changed policy"),
+                        ..facts
+                    },
+                    LiveSandboxContinuationFacts {
+                        principal_registration_commitment: &SpecContentHash::from_text(
+                            "changed registration",
+                        ),
+                        ..facts
+                    },
+                    LiveSandboxContinuationFacts {
+                        replacement: action.original_actor,
+                        ..facts
+                    },
+                    LiveSandboxContinuationFacts {
+                        window: &AuthorizedExecutionWindowId::new("window/other")
+                            .expect("other window"),
+                        ..facts
+                    },
+                ] {
+                    assert!(changed.verify_bound_grant(&active, now, &binding).is_err());
+                }
+                let fixture = grant(
+                    "fixture/github-pr-comment-continuation",
+                    CapabilityGrantLifecycle::Active,
+                );
+                let revoked = grant(LIVE_CAPABILITY, CapabilityGrantLifecycle::Revoked);
+                let stale = Timestamp::parse_rfc3339("2026-11-07T07:01:01Z").expect("stale");
+                for (invalid, at) in [
+                    (&fixture, now),
+                    (&revoked, now),
+                    (&active, stale),
+                    (&active, expiry),
+                ] {
+                    assert!(facts.verify_bound_grant(invalid, at, &binding).is_err());
+                }
             },
-            LiveSandboxContinuationFacts {
-                policy_commitment: &SpecContentHash::from_text("changed policy"),
-                ..facts
-            },
-            LiveSandboxContinuationFacts {
-                principal_registration_commitment: &SpecContentHash::from_text(
-                    "changed registration",
-                ),
-                ..facts
-            },
-            LiveSandboxContinuationFacts {
-                replacement: action.original_actor,
-                ..facts
-            },
-            LiveSandboxContinuationFacts {
-                window: &AuthorizedExecutionWindowId::new("window/other").expect("other window"),
-                ..facts
-            },
-        ] {
-            assert!(changed.verify_bound_grant(&active, now, &binding).is_err());
-        }
-        let fixture = grant(
-            "fixture/github-pr-comment-continuation",
-            CapabilityGrantLifecycle::Active,
         );
-        let revoked = grant(LIVE_CAPABILITY, CapabilityGrantLifecycle::Revoked);
-        let stale = Timestamp::parse_rfc3339("2026-11-07T07:01:01Z").expect("stale");
-        for (invalid, at) in [
-            (&fixture, now),
-            (&revoked, now),
-            (&active, stale),
-            (&active, expiry),
-        ] {
-            assert!(facts.verify_bound_grant(invalid, at, &binding).is_err());
-        }
     }
 }
