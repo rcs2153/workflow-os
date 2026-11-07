@@ -1,6 +1,7 @@
 use std::fmt;
 
 use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::work_report::{
     classify_github_pr_comment_provider_event_proof_recovery,
@@ -54,6 +55,140 @@ pub enum GitHubPullRequestCommentWriteMode {
     DryRun,
     /// Future explicitly approved live sandbox mode.
     LiveSandbox,
+}
+
+/// Exact live continuation action, without transport credentials or readiness flags.
+/// The same action can be committed before approval and re-derived before dispatch.
+#[derive(Clone, Copy)]
+#[allow(dead_code)] // Private until the durable live admission entry point is wired.
+pub(crate) struct GitHubCommentContinuationAction<'a> {
+    pub(crate) run: &'a crate::WorkflowRunId,
+    pub(crate) step: &'a crate::StepId,
+    pub(crate) bundle_root: &'a SpecContentHash,
+    pub(crate) original_actor: &'a ActorId,
+    pub(crate) side_effect: &'a SideEffectId,
+    pub(crate) target: &'a GitHubPullRequestCommentTarget,
+    pub(crate) body: &'a str,
+    pub(crate) idempotency_key: &'a IdempotencyKey,
+    pub(crate) mode: GitHubPullRequestCommentWriteMode,
+}
+
+#[allow(dead_code)]
+impl GitHubCommentContinuationAction<'_> {
+    pub(crate) fn commitment(&self) -> Result<SpecContentHash, WorkflowOsError> {
+        if self.mode != GitHubPullRequestCommentWriteMode::LiveSandbox {
+            return Err(github_write_error(
+                "github_pr_comment_continuation.live_mode_required",
+                "live continuation action requires explicit live sandbox mode",
+            ));
+        }
+        self.target.validate()?;
+        validate_comment_body(self.body)?;
+        let action = serde_json::to_vec(&(
+            self.run,
+            self.step,
+            self.bundle_root,
+            self.original_actor,
+            self.side_effect,
+            self.target,
+            self.body,
+            self.idempotency_key,
+        ))
+        .map_err(|_| {
+            github_write_error(
+                "github_pr_comment_continuation.action_commitment_invalid",
+                "live continuation action commitment could not be derived",
+            )
+        })?;
+        let mut hash = Sha256::new();
+        hash.update(b"workflow-os/github-pr-comment-live-continuation-action/v1\0");
+        hash.update(action);
+        SpecContentHash::new(format!("{:x}", hash.finalize()))
+    }
+
+    pub(crate) fn approval_label(&self) -> Result<String, WorkflowOsError> {
+        Ok(format!(
+            "submit live sandbox GitHub PR comment {}",
+            self.commitment()?
+        ))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod continuation_action_tests {
+    use super::*;
+
+    #[test]
+    fn live_commitment_binds_effect_and_execution_identity_without_exposing_body() {
+        let action = GitHubCommentContinuationAction {
+            run: &WorkflowRunId::new("run-live").expect("run"),
+            step: &StepId::new("comment").expect("step"),
+            bundle_root: &SpecContentHash::from_text("immutable live bundle"),
+            original_actor: &ActorId::new("agent/original").expect("actor"),
+            side_effect: &SideEffectId::new("effect/comment").expect("effect"),
+            target: &GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target"),
+            body: "synthetic continuation body",
+            idempotency_key: &IdempotencyKey::new("comment/run-live").expect("key"),
+            mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
+        };
+        let expected = action.commitment().expect("live action");
+        let label = action.approval_label().expect("approval label");
+        assert!(label.ends_with(expected.as_str()));
+        assert!(!label.contains(action.body));
+        for changed in [
+            GitHubCommentContinuationAction {
+                body: "changed body",
+                ..action
+            },
+            GitHubCommentContinuationAction {
+                target: &GitHubPullRequestCommentTarget::new("example", "sandbox", 8)
+                    .expect("other target"),
+                ..action
+            },
+            GitHubCommentContinuationAction {
+                bundle_root: &SpecContentHash::from_text("different bundle"),
+                ..action
+            },
+            GitHubCommentContinuationAction {
+                idempotency_key: &IdempotencyKey::new("comment/other").expect("other key"),
+                ..action
+            },
+            GitHubCommentContinuationAction {
+                run: &WorkflowRunId::new("run-other").expect("other run"),
+                ..action
+            },
+            GitHubCommentContinuationAction {
+                step: &StepId::new("other").expect("other step"),
+                ..action
+            },
+            GitHubCommentContinuationAction {
+                original_actor: &ActorId::new("agent/replacement").expect("other actor"),
+                ..action
+            },
+            GitHubCommentContinuationAction {
+                side_effect: &SideEffectId::new("effect/other").expect("other effect"),
+                ..action
+            },
+        ] {
+            assert_ne!(
+                changed.commitment().expect("valid changed action"),
+                expected
+            );
+        }
+        for mode in [
+            GitHubPullRequestCommentWriteMode::Fixture,
+            GitHubPullRequestCommentWriteMode::DryRun,
+        ] {
+            assert_eq!(
+                GitHubCommentContinuationAction { mode, ..action }
+                    .commitment()
+                    .expect_err("not live")
+                    .code(),
+                "github_pr_comment_continuation.live_mode_required",
+            );
+        }
+    }
 }
 
 /// Outcome vocabulary for a future GitHub pull request comment write response.

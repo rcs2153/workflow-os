@@ -50,6 +50,17 @@ approved head predicate must hold at the effect, a separate read followed by
 an unconditional POST is not atomic head enforcement; require a provider
 guarantee for that predicate or do not dispatch under that condition.
 
+The private Core binding now separates the exact live action from the grant.
+The approval label commits to the run, step, immutable bundle, original actor,
+effect, target, body, and idempotency key. It contains neither the body nor
+provider credentials. The grant binder requires the live capability family,
+an exact distinct replacement and issuer, and a matching granted decision
+and fresh presentation for that action. It binds evidence, policy,
+registration, and attempt commitments so a later verification can reject
+changed facts. The binder does not resolve these facts from storage or
+authenticate a principal; the trusted issuance and reservation paths must
+do that before using it.
+
 ## Atomic Admission
 
 Keep the opening and attempted intent durable before handoff. Introduce an
@@ -85,6 +96,15 @@ failure roll back both sides, and post-commit ambiguity and exact replay
 return no dispatch right. Existing callers use their prior policy; this
 change does not implement live issuance, bind a real live grant use, or
 make recovery receipts available to an unverified caller.
+
+The implementation run `run-1794078982477702000-2` covers the live action
+and grant binder, including synthetic rejection of fixture grants, action
+drift, changed evidence, changed policy, changed registration, stale
+presentation, revocation, and expiry. It does not close delivery item 1.
+The next change must connect distinct durable live grant issuance and
+revocation to the atomic guard, consume the grant with the reservation, and
+prove replay cannot regain an invocation right. No provider call or CLI
+surface was added.
 
 ## Post-Admission Recovery
 

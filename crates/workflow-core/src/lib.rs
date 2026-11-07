@@ -80,6 +80,8 @@ mod immutable_run_bundle_builder;
 mod immutable_run_bundle_record;
 mod immutable_run_bundle_store;
 mod jira;
+#[allow(dead_code)] // Not reachable until live authority issuance is connected to durable state.
+mod live_sandbox_continuation_authority;
 mod loader;
 mod local_check;
 mod local_check_attestation;
