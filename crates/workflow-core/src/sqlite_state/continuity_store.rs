@@ -1555,6 +1555,8 @@ impl SqliteStateBackend {
             record.step_id(),
             opening,
             Some(record),
+            TransactionBehavior::Deferred,
+            |_, _, _| Ok(true),
         )
     }
 
@@ -1566,9 +1568,37 @@ impl SqliteStateBackend {
         step_id: Option<&crate::StepId>,
         opening: &crate::OperationalExecutionWindowOpeningProjectionSnapshot,
     ) -> Result<bool, WorkflowOsError> {
-        self.fixture_predispatch_snapshot_matches(run, actor, step_id, opening, None)
+        self.fixture_predispatch_snapshot_matches(
+            run,
+            actor,
+            step_id,
+            opening,
+            None,
+            TransactionBehavior::Deferred,
+            |_, _, _| Ok(true),
+        )
     }
 
+    pub(crate) fn with_current_fixture_snapshot(
+        &self,
+        run: &WorkflowRun,
+        record: &crate::SideEffectRecord,
+        opening: &crate::OperationalExecutionWindowOpeningProjectionSnapshot,
+        behavior: TransactionBehavior,
+        operation: impl FnOnce(&Transaction<'_>, Timestamp, Timestamp) -> Result<bool, WorkflowOsError>,
+    ) -> Result<bool, WorkflowOsError> {
+        self.fixture_predispatch_snapshot_matches(
+            run,
+            record.actor(),
+            record.step_id(),
+            opening,
+            Some(record),
+            behavior,
+            operation,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn fixture_predispatch_snapshot_matches(
         &self,
         run: &WorkflowRun,
@@ -1576,16 +1606,19 @@ impl SqliteStateBackend {
         step_id: Option<&crate::StepId>,
         opening: &crate::OperationalExecutionWindowOpeningProjectionSnapshot,
         record: Option<&crate::SideEffectRecord>,
+        behavior: TransactionBehavior,
+        operation: impl FnOnce(&Transaction<'_>, Timestamp, Timestamp) -> Result<bool, WorkflowOsError>,
     ) -> Result<bool, WorkflowOsError> {
-        let observation = observe_continuity_trusted_time()?;
-        let connection = self.connection()?;
-        let transaction = connection.unchecked_transaction().map_err(|error| {
-            map_sqlite_error(
-                error,
-                "fixture_continuation.read_failed",
-                "fixture continuation state could not be read",
-            )
-        })?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(behavior)
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "fixture_continuation.read_failed",
+                    "fixture continuation state could not be read",
+                )
+            })?;
         if Self::read_events_with_connection(&transaction, &run.snapshot.identity.run_id)?
             != run.events
         {
@@ -1604,6 +1637,7 @@ impl SqliteStateBackend {
             }
         }
         let state = super::continuity_codec::load_snapshot(&transaction)?;
+        let observation = observe_continuity_trusted_time()?;
         let Some(window) = state.windows.get(opening.window_id()) else {
             return Ok(false);
         };
@@ -1623,7 +1657,7 @@ impl SqliteStateBackend {
                     "fixture continuation dispatch posture could not be read",
                 )
             })?;
-        Ok(!dispatched
+        let current = !dispatched
             && state.trusted_time.eligibility == ContinuityInstanceEligibility::LiveStateEligible
             && state.trusted_time.posture != TrustedTimePosture::Quarantined
             && observation.source() == state.trusted_time.source
@@ -1647,7 +1681,18 @@ impl SqliteStateBackend {
             && attempt.window_id == window.window_id
             && attempt.subject_actor_id == window.subject_actor_id
             && attempt.authority_commitment == window.authority_commitment
-            && attempt.cursor == window.cursor)
+            && attempt.cursor == window.cursor;
+        if !current || !operation(&transaction, observation.observed_at(), window.expires_at)? {
+            return Ok(false);
+        }
+        transaction.commit().map_err(|error| {
+            map_sqlite_error(
+                error,
+                "fixture_continuation.commit_failed",
+                "fixture continuation snapshot could not be closed",
+            )
+        })?;
+        Ok(true)
     }
 }
 

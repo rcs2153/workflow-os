@@ -1,6 +1,8 @@
 #![deny(unsafe_code)]
 #![doc = "Command-line interface for Workflow OS v0."]
 
+mod fixture_authority_cli;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Write as _;
@@ -159,6 +161,9 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             destination,
             receipt,
         } => state_activate_sqlite_command(&invocation, destination, receipt),
+        Command::StateUpgradeSqlite { database } => {
+            state_upgrade_sqlite_command(&invocation, database)
+        }
         Command::InitAgentHarness {
             output_dir,
             agent,
@@ -209,9 +214,8 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         }
         Command::AuthorWorkflowPromote { .. } => author_workflow_promote_dispatch(&invocation),
         Command::ProviderGitHubPrCommentRecoverySummary { .. }
-        | Command::ProviderGitHubPrCommentContinueSandbox { .. } => {
-            provider_command_dispatch(&invocation)
-        }
+        | Command::ProviderGitHubPrCommentContinueSandbox { .. }
+        | Command::ProviderFixtureAuthority(_) => provider_command_dispatch(&invocation),
         Command::DogfoodApprovalPresentationPersist { .. } => {
             dogfood_approval_presentation_persist_command(&invocation)
         }
@@ -439,6 +443,9 @@ fn provider_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsEr
         Command::ProviderGitHubPrCommentContinueSandbox { request } => {
             provider_github_pr_comment_continue_sandbox_command(invocation, request)
         }
+        Command::ProviderFixtureAuthority(command) => {
+            fixture_authority_cli::execute(invocation, command)
+        }
         _ => unreachable!("provider dispatch only handles provider commands"),
     }
 }
@@ -447,13 +454,29 @@ fn provider_github_pr_comment_continue_sandbox_command(
     invocation: &Invocation,
     request_path: &Path,
 ) -> Result<(), WorkflowOsError> {
+    let parsed = load_github_pr_comment_fixture_continuation_input(invocation, request_path)?;
+    let backend = github_pr_comment_continuation_backend(invocation)?;
+    let result = with_fixture_continuation_request(&backend, parsed, |executor, request| {
+        workflow_core::validate_github_pr_comment_fixture_continuation(executor, &backend, request)
+    })?;
+    print_github_pr_comment_fixture_continuation_result(invocation, &result, "exact_actor");
+    Ok(())
+}
+
+fn with_fixture_continuation_request<T>(
+    backend: &SqliteStateBackend,
+    parsed: ParsedGitHubPrCommentFixtureContinuation,
+    execute: impl FnOnce(
+        &LocalExecutor<'_, SqliteStateBackend>,
+        GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+    ) -> Result<T, WorkflowOsError>,
+) -> Result<T, WorkflowOsError> {
     let ParsedGitHubPrCommentFixtureContinuation {
         write_request,
         fixture,
         replacement_actor,
         delegated_by,
-    } = load_github_pr_comment_fixture_continuation_input(invocation, request_path)?;
-    let backend = github_pr_comment_continuation_backend(invocation)?;
+    } = parsed;
     let durable_run = backend.rehydrate_run(write_request.run_id())?;
     let attempted_record = backend
         .read_side_effect_record(write_request.side_effect_id())?
@@ -477,15 +500,14 @@ fn provider_github_pr_comment_continue_sandbox_command(
             )
         })?;
     let immutable_bundle = ImmutableRunBundleStore::read_exact_bundle(
-        &backend,
+        backend,
         write_request.run_id(),
         binding.bundle_id(),
     )?;
     let registry = LocalSkillRegistry::new();
-    let executor = LocalExecutor::new(&backend, &registry);
-    let result = workflow_core::validate_github_pr_comment_fixture_continuation(
+    let executor = LocalExecutor::new(backend, &registry);
+    execute(
         &executor,
-        &backend,
         GitHubPrCommentFixtureContinuationValidationRequest {
             run: &durable_run,
             attempted_record: &attempted_record,
@@ -501,18 +523,21 @@ fn provider_github_pr_comment_continue_sandbox_command(
                 .with_max_presentation_age(AUTHORITATIVE_GOVERNANCE_PRESENTATION_MAX_AGE),
             immutable_run_bundle: &immutable_bundle,
         },
-    )?;
-    print_github_pr_comment_fixture_continuation_result(invocation, &result);
-    Ok(())
+    )
 }
 
 fn github_pr_comment_continuation_backend(
     invocation: &Invocation,
 ) -> Result<SqliteStateBackend, WorkflowOsError> {
-    let database = invocation
+    SqliteStateBackend::open_same_actor_fixture_read_only(github_pr_comment_continuation_database(
+        invocation,
+    ))
+}
+
+fn github_pr_comment_continuation_database(invocation: &Invocation) -> PathBuf {
+    invocation
         .state_dir()
-        .join("github-pr-comment-continuation.sqlite3");
-    SqliteStateBackend::open_read_only(database)
+        .join("github-pr-comment-continuation.sqlite3")
 }
 
 struct ParsedGitHubPrCommentFixtureContinuation {
@@ -543,6 +568,13 @@ fn load_github_pr_comment_fixture_continuation_input(
             "fixture continuation request JSON was rejected",
         )
     })?;
+    parse_github_pr_comment_fixture_continuation_input(&value, None)
+}
+
+fn parse_github_pr_comment_fixture_continuation_input(
+    value: &serde_json::Value,
+    authenticated_principal: Option<ActorId>,
+) -> Result<ParsedGitHubPrCommentFixtureContinuation, WorkflowOsError> {
     let object = value.as_object().ok_or_else(|| {
         WorkflowOsError::validation(
             "github_pr_comment_fixture_continuation_cli.input.invalid",
@@ -555,10 +587,20 @@ fn load_github_pr_comment_fixture_continuation_input(
         continuation_json_field(object, "request")?.clone(),
     )
     .map_err(|_| continuation_cli_input_error("request"))?;
-    let replacement_actor = serde_json::from_value::<ActorId>(
-        continuation_json_field(object, "replacement_actor")?.clone(),
-    )
-    .map_err(|_| continuation_cli_input_error("replacement_actor"))?;
+    let replacement_actor = match authenticated_principal {
+        Some(actor)
+            if object.len() == 2
+                && object.contains_key("request")
+                && object.contains_key("fixture") =>
+        {
+            actor
+        }
+        Some(_) => return Err(continuation_cli_input_error("delegated_request")),
+        None => serde_json::from_value::<ActorId>(
+            continuation_json_field(object, "replacement_actor")?.clone(),
+        )
+        .map_err(|_| continuation_cli_input_error("replacement_actor"))?,
+    };
     let delegated_by = object
         .get("delegated_by")
         .filter(|value| !value.is_null())
@@ -576,6 +618,7 @@ fn load_github_pr_comment_fixture_continuation_input(
 fn print_github_pr_comment_fixture_continuation_result(
     invocation: &Invocation,
     result: &workflow_core::GitHubPrCommentFixtureContinuationValidationResult,
+    actor_posture: &str,
 ) {
     let outcome = github_pr_comment_write_outcome_label(result.fixture_response().outcome());
     if invocation.json {
@@ -585,7 +628,7 @@ fn print_github_pr_comment_fixture_continuation_result(
                 "status": "validated",
                 "mode": "fixture",
                 "outcome": outcome,
-                "actor_posture": "exact_actor",
+                "actor_posture": actor_posture,
                 "approval_reference_count": result.approval_linkage().approval_reference_count(),
                 "linked_approval_reference_count": result.approval_linkage().linked_approval_reference_count(),
                 "provider_call_performed": result.provider_call_performed(),
@@ -598,7 +641,7 @@ fn print_github_pr_comment_fixture_continuation_result(
         println!("status: validated");
         println!("mode: fixture");
         println!("outcome: {outcome}");
-        println!("actor_posture: exact_actor");
+        println!("actor_posture: {actor_posture}");
         println!(
             "approval_reference_count: {}",
             result.approval_linkage().approval_reference_count()
@@ -1388,10 +1431,12 @@ fn github_repository_metadata_backend(
     invocation: &Invocation,
 ) -> Result<SqliteStateBackend, WorkflowOsError> {
     let database = github_repository_metadata_database_path(invocation);
-    if database.is_file() {
-        SqliteStateBackend::upgrade_operational_opening_run_scope_v8_to_v9(database)
-    } else {
-        SqliteStateBackend::open(database)
+    match SqliteStateBackend::open(&database) {
+        Err(error) if error.code() == "state.sqlite.schema.upgrade_required" => {
+            SqliteStateBackend::upgrade_operational_opening_run_scope_v8_to_v9(&database)?;
+            SqliteStateBackend::upgrade_fixture_replacement_authority_v9_to_v10(database)
+        }
+        result => result,
     }
 }
 
@@ -3383,6 +3428,20 @@ fn state_activate_sqlite_command(
         println!("healthy: {}", health.healthy);
         println!("source_preserved: true");
         println!("automatic_selection: false");
+    }
+    Ok(())
+}
+
+fn state_upgrade_sqlite_command(
+    invocation: &Invocation,
+    database: &Path,
+) -> Result<(), WorkflowOsError> {
+    SqliteStateBackend::upgrade_fixture_replacement_authority_v9_to_v10(database)?;
+    let version = SqliteStateBackend::adapter_schema_version();
+    if invocation.json {
+        println!("{{\"status\":\"ready\",\"adapter_schema_version\":{version},\"authority_issued\":false}}");
+    } else {
+        println!("state_schema: ready\nadapter_schema_version: {version}\nauthority_issued: false");
     }
     Ok(())
 }
@@ -12509,6 +12568,9 @@ enum Command {
         destination: PathBuf,
         receipt: PathBuf,
     },
+    StateUpgradeSqlite {
+        database: PathBuf,
+    },
     InitAgentHarness {
         output_dir: Option<PathBuf>,
         agent: AgentHarnessFlavor,
@@ -12591,6 +12653,7 @@ enum Command {
     ProviderGitHubPrCommentContinueSandbox {
         request: PathBuf,
     },
+    ProviderFixtureAuthority(fixture_authority_cli::FixtureAuthorityCommand),
     DogfoodApprovalPresentationPersist {
         run_id: String,
         approval_id: String,
@@ -12816,6 +12879,12 @@ fn parse_state_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 receipt: PathBuf::from(required_flag_value(args, "--receipt")?),
             })
         }
+        Some("upgrade-sqlite") => {
+            validate_command_options(args, 2, &["--database"], &[])?;
+            Ok(Command::StateUpgradeSqlite {
+                database: PathBuf::from(required_flag_value(args, "--database")?),
+            })
+        }
         Some(other) => Err(usage(format!("unknown state subcommand {other}"))),
         None => Err(usage("state requires a subcommand")),
     }
@@ -12996,6 +13065,9 @@ fn parse_provider_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                     usage("provider github-pr-comment continue-sandbox requires --request <path>")
                 })?;
             Ok(Command::ProviderGitHubPrCommentContinueSandbox { request })
+        }
+        (Some("github-pr-comment"), Some(_)) => {
+            fixture_authority_cli::parse(&args[2..]).map(Command::ProviderFixtureAuthority)
         }
         (Some(other), _) => Err(usage(format!("unknown provider subcommand {other}"))),
         (None, _) => Err(usage("provider requires <subcommand>")),
@@ -13343,6 +13415,7 @@ fn print_help() {
         "      guarded one-transaction import into verified inactive staging; preserves filesystem source"
     );
     println!("  state activate-sqlite --destination <path> --receipt <path>");
+    println!("  state upgrade-sqlite --database <path>");
     println!(
         "      explicitly marks exact verified staging ready; does not select it automatically"
     );
@@ -13408,6 +13481,7 @@ fn print_help() {
     );
     println!("  provider github-pr-comment recovery-summary --summary <path>");
     println!("  provider github-pr-comment continue-sandbox --request <path>");
+    fixture_authority_cli::print_help();
     println!(
         "      render a bounded local provider lookup recovery summary; performs no provider calls, repair, event append, or artifact writes"
     );

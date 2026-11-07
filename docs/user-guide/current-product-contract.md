@@ -243,7 +243,12 @@ workflow-os inspect <run-id>
 workflow-os doctor state
 workflow-os state migrate-sqlite ...
 workflow-os state activate-sqlite ...
+workflow-os state upgrade-sqlite --database <path>
 ```
+
+Use `state upgrade-sqlite` for an existing ready V9 SQLite database. A verified
+inactive V9 migration still requires `state activate-sqlite` with its original
+receipt; activation upgrades it atomically without rewriting the receipt.
 
 Advanced Core compositions, hosted operations, and provider-write proof paths
 are not all exposed as stable CLI commands.
