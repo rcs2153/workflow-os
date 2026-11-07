@@ -230,8 +230,10 @@ or authority channel.
 
 The merged CLI/JSON continuation bridge is fixture-only and same-actor. The next
 implementation slice must establish a public, fixture-only distinct-principal
-handoff with durable delegation verification, then exercise the preregistered
-corpus in Claude Desktop. If the app cannot consume the approved public surface
+handoff with durable delegation verification. The
+[local fixture authority contract](docs/implementation-plans/local-fixture-replacement-authority-contract.md)
+defines the Core, SQLite and public-interface delivery gate before exercising
+the preregistered corpus in Claude Desktop. If the app cannot consume the approved public surface
 without private state access, record the integration blocker; do not substitute
 a same-actor CLI script or another harness. A separately authorized live
 disposable-sandbox run and independent rerun are the final slice. See the

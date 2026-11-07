@@ -301,7 +301,9 @@ Implement the milestone in three separately governed slices:
    reuse the existing GitHub PR-comment sandbox composition, and prove fail-closed
    behavior without a live credential or provider mutation.
 2. **Independent harness corpus.** First implement and review the public
-   fixture-only distinct-principal authority boundary. Then exercise it with
+   fixture-only distinct-principal authority boundary using the
+   [local fixture authority contract](local-fixture-replacement-authority-contract.md).
+   Then exercise it with
    independent Codex and Claude Desktop integrations, adversarial fixtures,
    measurement capture, and reviewer tooling. No provider credentials or
    effects enter this slice.
