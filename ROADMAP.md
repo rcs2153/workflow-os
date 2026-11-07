@@ -136,8 +136,12 @@ The ordered queue is:
    or explicitly rejects each valid immutable prefix without duplicate events,
    work items, invocation, SideEffects, or reports;
 3. complete focused maintainer/security review, fault-by-fault PostgreSQL and
-   hosted API tests, exact-head CI, and an independent rerun; then
-4. execute one **cross-harness authoritative continuation milestone** in which
+   hosted API tests, exact-head CI, and an independent rerun;
+4. reconcile the already-queued P0 public positioning so the README,
+   current-product contract, package description, and GitHub repository
+   summary describe continuity of authority and its current evidence boundary
+   consistently; then
+5. execute one **cross-harness authoritative continuation milestone** in which
    one supported harness starts a consequential governed workflow, a separately
    implemented harness resumes it after interruption using only the same
    kernel-owned record and public integration boundary, and an independent
@@ -169,11 +173,14 @@ unbounded final read; it was not dismissed as a flake. The corrected fixture
 carries all 25 requests to lawful queued posture, and forced exhaustion leaves
 bounded stage-specific partial state before exact recovery. Focused review is
 accepted after adding per-run replay and all-four-stage exhaustion proof. The
-P0 remains open through renewed exact-head CI and an independent
-clean-environment rerun. See the [implementation
+P0 is closed. Renewed exact-head CI passed all nine required jobs, and a
+disposable exact-commit checkout passed the contention/exhaustion milestone,
+backup/restore repair, and a real PostgreSQL process restart followed by a
+second milestone. See the [implementation
 report](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_RECOVERY_IMPLEMENTATION_REPORT.md),
 the [acceptance rerun](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_ACCEPTANCE_RERUN.md),
-and the [contention-fix review](docs/concepts/HOSTED_ADMISSION_CONTENTION_BLOCKER_FIX_REVIEW.md).
+the [contention-fix review](docs/concepts/HOSTED_ADMISSION_CONTENTION_BLOCKER_FIX_REVIEW.md),
+and the [final acceptance](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_FINAL_ACCEPTANCE.md).
 
 The cross-harness milestone tests a first-class platform property, not a demo
 integration: Workflow OS is a **shared governance kernel** whose authority and

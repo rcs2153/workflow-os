@@ -1,6 +1,6 @@
 # Hosted Partial-Run Creation Recovery Plan
 
-Status: Core/PostgreSQL recovery, restore, and bounded contention fix review accepted; exact-head and independent acceptance pending
+Status: Complete; exact-head CI and clean-environment acceptance passed
 
 ## 1. Decision
 
@@ -183,10 +183,10 @@ This plan does not add:
 - exactly-once claims beyond the explicitly tested Core-owned identity and
   idempotency boundary.
 
-## 10. Next Phase
+## 10. Final Acceptance
 
-The next phase is renewed exact-head CI followed by an independent
-clean-environment rerun. The first exact-head run completed 24 of 25 concurrent
+Renewed exact-head CI and an independent clean-environment rerun are complete.
+The first exact-head run completed 24 of 25 concurrent
 creates and exposed a raw retryable conflict from the final post-dispatch
 rehydration read. The blocker correction extends the bounded hosted-admission
 contract to that idempotent read and adds stage-specific exhaustion coverage.
@@ -199,6 +199,9 @@ replayed without another append. The corrected contention fixture carries all
 persistent serialization fault proves bounded exhaustion, stage-appropriate
 partial state, exact recovery, and idempotent replay.
 
-Cross-harness implementation remains unauthorized until the exact-head and
-independent rerun gates are terminal green. See the [acceptance rerun](../concepts/HOSTED_PARTIAL_RUN_CREATION_ACCEPTANCE_RERUN.md)
-and [focused review](../concepts/HOSTED_ADMISSION_CONTENTION_BLOCKER_FIX_REVIEW.md).
+The amended exact head passed all nine required CI jobs. A disposable clone of
+the merged commit then passed the 25-job and exhaustion milestone, backup and
+restore rehearsal, and a real PostgreSQL process restart followed by another
+full milestone. See the [acceptance rerun](../concepts/HOSTED_PARTIAL_RUN_CREATION_ACCEPTANCE_RERUN.md),
+[focused review](../concepts/HOSTED_ADMISSION_CONTENTION_BLOCKER_FIX_REVIEW.md),
+and [final acceptance](../concepts/HOSTED_PARTIAL_RUN_CREATION_FINAL_ACCEPTANCE.md).
