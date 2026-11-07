@@ -35,12 +35,10 @@ pub(crate) struct LiveSandboxContinuationFacts<'a> {
 }
 
 impl LiveSandboxContinuationFacts<'_> {
-    pub(crate) fn grant_commitment(
+    pub(crate) fn verify_exact_approval(
         &self,
-        grant: &CapabilityGrant,
         observed_at: Timestamp,
-    ) -> Result<SpecContentHash, WorkflowOsError> {
-        let expires_at = grant.expires_at().ok_or_else(denied)?;
+    ) -> Result<(), WorkflowOsError> {
         let proof = self.decision.proof_marker.as_ref().ok_or_else(denied)?;
         let freshness_ms = proof.proof_freshness_limit_ms().ok_or_else(denied)?;
         let presentation_age = observed_at.as_offset_date_time()
@@ -63,7 +61,25 @@ impl LiveSandboxContinuationFacts<'_> {
             || presentation_age.unsigned_abs() > std::time::Duration::from_millis(freshness_ms)
             || self
                 .approval_expires_at
-                .is_some_and(|expiry| expires_at > expiry)
+                .is_some_and(|expiry| observed_at >= expiry)
+            || self.decision.decided_at > observed_at
+            || self.presentation.requested_action() != self.action.approval_label()?
+        {
+            return Err(denied());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn grant_commitment(
+        &self,
+        grant: &CapabilityGrant,
+        observed_at: Timestamp,
+    ) -> Result<SpecContentHash, WorkflowOsError> {
+        self.verify_exact_approval(observed_at)?;
+        let expires_at = grant.expires_at().ok_or_else(denied)?;
+        if self
+            .approval_expires_at
+            .is_some_and(|expiry| expires_at > expiry)
             || self.replacement == self.action.original_actor
             || self.replacement == &self.decision.actor
             || grant.subject() != self.replacement
@@ -87,9 +103,6 @@ impl LiveSandboxContinuationFacts<'_> {
         }
 
         let action = self.action.commitment()?;
-        if self.presentation.requested_action() != self.action.approval_label()? {
-            return Err(denied());
-        }
         let bytes = serde_json::to_vec(&(
             (grant, action, self.sensitivity),
             (self.approval_event, self.decision, self.approval_expires_at),

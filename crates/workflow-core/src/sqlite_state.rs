@@ -46,8 +46,10 @@ const ADAPTER_SCHEMA_VERSION: u32 = 10;
 const LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION: u32 = 11;
 const LIVE_AUTHORITY_SCHEMA_DIGEST: &str =
     "d73239544f08c79a64ce001bfea57a2adc8212809499dcf561f1ed2c03df0d51";
+// Commit to the V11 manifest and live opening protocol so an earlier V11
+// writer rejects a store whose reserved opening namespace it cannot enforce.
 const LIVE_AUTHORITY_SCHEMA_CHECKSUM: &str =
-    "sha256:d73239544f08c79a64ce001bfea57a2adc8212809499dcf561f1ed2c03df0d51";
+    "sha256:1dddc6985e2bb5cc014db4c86900a7591fbef63ef89ca10e759f85795f2eff9a";
 const RUN_SCOPE_ADAPTER_SCHEMA_VERSION: u32 = 9;
 const CAPABILITY_SOURCE_CONTINUITY_ADAPTER_SCHEMA_VERSION: u32 = 8;
 const IMMUTABLE_RUN_BUNDLE_ADAPTER_SCHEMA_VERSION: u32 = 7;

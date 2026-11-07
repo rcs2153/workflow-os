@@ -125,6 +125,21 @@ facts and the attempted SideEffect from durable sources, and prevent
 ordinary reservation before issuance. Do not expose this private path to
 the harness until those boundaries are implemented.
 
+Implementation run `run-1794082035335242000-2` reserves an action-derived
+live opening and window identity in the existing V11 store. Ordinary opening
+rejects that identity. The private live path checks the exact persisted
+approval and presentation under the opening transaction, uses a bounded
+single-attempt window, and reserves the window identity for live grant
+admission before any grant is issued. Ordinary dispatch rejects this window
+after restart, including before grant issuance. Grant issuance and use
+require the matching live opening projection. No schema version, public
+entry point, or provider call was added. Authentication and durable
+reconstruction of evidence, policy, and the attempted record remain open.
+The V11 readiness checksum now commits to the opening protocol as well as
+the unchanged physical schema. Earlier V11 dispatch writers reject this
+checksum in their transaction; the new writer also rejects earlier
+experimental V11 stores. There is no implicit upgrade or change to V10.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes
