@@ -29,10 +29,12 @@ use crate::{
     WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunStatus,
 };
 
+use super::live_sandbox_grant_store::{check_opening_lane, verify_live_opening_approval};
 use super::{
     append_event_and_project_snapshot, encode_json, map_sqlite_error, snapshot_commitment,
 };
 use super::{continuity_codec, continuity_store, SqliteStateBackend};
+use crate::live_sandbox_continuation_authority::LiveSandboxContinuationFacts;
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 struct OpeningAttemptRecord {
@@ -74,7 +76,7 @@ impl OperationalExecutionWindowOpeningStoreV1 for SqliteStateBackend {
         &self,
         request: OperationalExecutionWindowOpeningRequest<'_>,
     ) -> Result<ProjectedOperationalExecutionWindowOpeningResult, WorkflowOsError> {
-        self.open_window_and_start_attempt_inner(request, None)
+        self.open_window_and_start_attempt_inner(request, None, None)
     }
 
     fn reconcile_operational_opening(
@@ -114,7 +116,16 @@ impl SqliteStateBackend {
         request: OperationalExecutionWindowOpeningRequest<'_>,
         lifecycle: &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
     ) -> Result<ProjectedOperationalExecutionWindowOpeningResult, WorkflowOsError> {
-        self.open_window_and_start_attempt_inner(request, Some(lifecycle))
+        self.open_window_and_start_attempt_inner(request, Some(lifecycle), None)
+    }
+
+    #[allow(dead_code)] // The trusted live resolver is not connected to a public handler.
+    pub(crate) fn open_live_sandbox_attempt(
+        &self,
+        request: OperationalExecutionWindowOpeningRequest<'_>,
+        facts: LiveSandboxContinuationFacts<'_>,
+    ) -> Result<ProjectedOperationalExecutionWindowOpeningResult, WorkflowOsError> {
+        self.open_window_and_start_attempt_inner(request, None, Some(facts))
     }
 
     // Keeping this transaction contiguous makes the all-or-nothing security
@@ -126,6 +137,7 @@ impl SqliteStateBackend {
         lifecycle: Option<
             &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
         >,
+        live: Option<LiveSandboxContinuationFacts<'_>>,
     ) -> Result<ProjectedOperationalExecutionWindowOpeningResult, WorkflowOsError> {
         validate_request(&request)?;
         if request.workflow_lifecycle_commitment
@@ -148,6 +160,7 @@ impl SqliteStateBackend {
                 )
             })?;
 
+        check_opening_lane(&transaction, &request, live)?;
         if let Some(replay) = read_existing(&transaction, &request.operation_id)? {
             if replay.0.request_commitment != request.request_commitment
                 || replay.0.receipt_id != request.receipt_id
@@ -176,6 +189,9 @@ impl SqliteStateBackend {
             SqliteStateBackend::read_events_with_connection(&transaction, &request.run_id)?;
         let run = crate::WorkflowRun::rehydrate(&history)?;
         validate_runtime_binding(&request, &run)?;
+        if let Some(facts) = live {
+            verify_live_opening_approval(&transaction, facts, &run)?;
+        }
 
         let active_count: i64 = transaction
             .query_row(
@@ -3295,7 +3311,7 @@ mod tests {
 
     #[allow(clippy::too_many_lines)]
     fn exercise_live_grant_reservation(trial: LiveGrantTrial) {
-        use super::super::live_sandbox_grant_store::LiveGrantAdmission;
+        use super::super::live_sandbox_grant_store::{live_opening_operation, LiveGrantAdmission};
         use crate::dispatch_reservation::{request_commitment, DispatchReservationStore};
         use crate::live_sandbox_continuation_authority::{
             tests::{with_live_grant_test_facts, LiveGrantTestContext},
@@ -3331,7 +3347,8 @@ mod tests {
                 &invocation,
             ),
         );
-        let opening_identity = fixture.request(&authorization, "opening/live-grant");
+        let operation = live_opening_operation(&invocation);
+        let opening_identity = fixture.request(&authorization, &operation);
         let now = Timestamp::now_utc();
         let expiry = Timestamp::from_offset_date_time(
             now.as_offset_date_time() + time::Duration::minutes(4),
@@ -3344,36 +3361,97 @@ mod tests {
                 attempt: &opening_identity.attempt_id,
                 now,
                 expiry,
-                window_expiry: opening_identity.expires_at,
+                window_expiry: expiry,
             },
             |facts, grant_for| {
                 let cursor = persist_live_grant_test_approval(&fixture, facts);
-                let mut opening = fixture.request(&authorization, "opening/live-grant");
-                opening.expected_cursor = cursor;
-                opening.invocation_binding_commitment = invocation.clone();
-                opening.trusted_time =
-                    super::super::continuity_store::observe_continuity_trusted_time()
-                        .expect("trusted time");
-                opening.request_commitment = opening_request_commitment(&opening);
+                let observed = super::super::continuity_store::observe_continuity_trusted_time()
+                    .expect("trusted time");
+                let opening = || {
+                    let mut request = fixture.request(&authorization, &operation);
+                    request.expected_cursor = cursor.clone();
+                    request.invocation_binding_commitment = invocation.clone();
+                    request.expires_at = expiry;
+                    request.trusted_time = observed.clone();
+                    request.request_commitment = opening_request_commitment(&request);
+                    request
+                };
+                assert!(fixture
+                    .backend
+                    .open_live_sandbox_attempt(opening(), facts)
+                    .is_err());
+                assert!(fixture
+                    .backend
+                    .open_window_and_start_attempt_projected(opening())
+                    .is_err());
+                fixture
+                    .backend
+                    .enable_live_sandbox_grant_store()
+                    .expect("explicit upgrade");
+                let connection = fixture.backend.connection().expect("test connection");
+                assert_eq!(
+                    super::super::validate_schema_metadata_version(
+                        &connection,
+                        super::super::LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
+                        "sha256:d73239544f08c79a64ce001bfea57a2adc8212809499dcf561f1ed2c03df0d51",
+                        super::super::LIVE_AUTHORITY_SCHEMA_DIGEST,
+                    )
+                    .expect_err("older V11 writer must not accept the live opening protocol")
+                    .code(),
+                    "state.sqlite.schema.recovery_required",
+                );
+                assert!(fixture
+                    .backend
+                    .open_window_and_start_attempt_projected(opening())
+                    .is_err());
+                let substituted = LiveSandboxContinuationFacts {
+                    action: GitHubCommentContinuationAction {
+                        body: "different body",
+                        ..action
+                    },
+                    ..facts
+                };
+                assert!(fixture
+                    .backend
+                    .open_live_sandbox_attempt(opening(), substituted)
+                    .is_err());
+                let replay_request = opening();
                 let opened = fixture
                     .backend
-                    .open_window_and_start_attempt_projected(opening)
-                    .expect("open");
+                    .open_live_sandbox_attempt(opening(), facts)
+                    .expect("open live-only");
                 let OperationalExecutionWindowOpeningResult::Opened { capability, .. } =
                     opened.result
                 else {
                     panic!("fresh opening");
                 };
                 let grant = grant_for(LIVE_CAPABILITY, CapabilityGrantLifecycle::Active);
-                assert!(fixture
-                    .backend
-                    .issue_live_sandbox_grant(facts, &grant)
-                    .is_err());
-                fixture
-                    .backend
-                    .enable_live_sandbox_grant_store()
-                    .expect("explicit upgrade");
                 let backend = SqliteStateBackend::open(&fixture.path).expect("reopen V11");
+                assert!(matches!(
+                    backend
+                        .open_live_sandbox_attempt(replay_request, facts)
+                        .expect("opening replay")
+                        .result,
+                    OperationalExecutionWindowOpeningResult::ExactReplay(_)
+                ));
+                let before_grant = checked_reservation_request(&capability);
+                assert_eq!(
+                    backend
+                        .reserve_attempt_dispatch(before_grant)
+                        .err()
+                        .expect("denied")
+                        .code(),
+                    "live_sandbox_continuation.storage_denied",
+                );
+                assert!(backend
+                    .reserve_live_sandbox_dispatch(
+                        checked_reservation_request(&capability),
+                        LiveGrantAdmission {
+                            grant_id: grant.grant_id(),
+                            facts
+                        }
+                    )
+                    .is_err());
                 let reader =
                     SqliteStateBackend::open_read_only(&fixture.path).expect("inspect V11");
                 assert!(reader.health_check().expect("V11 health").healthy);

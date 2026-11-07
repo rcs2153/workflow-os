@@ -134,7 +134,12 @@ impl SqliteStateBackend {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| storage_error("begin_failed"))?;
-        check_dispatch_lane(&transaction, &request.capability.attempt_id, live.is_some())?;
+        check_dispatch_lane(
+            &transaction,
+            &request.capability.window_id,
+            &request.capability.attempt_id,
+            live.is_some(),
+        )?;
         let observation = continuity_store::observe_continuity_trusted_time()?;
 
         if let Some((record, binding)) = read_existing(&transaction, request.operation_id.as_str())?

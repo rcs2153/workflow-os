@@ -11,11 +11,13 @@ use crate::authorized_execution_continuity_state::internal::{
 };
 use crate::dispatch_reservation::DispatchReservationRequest;
 use crate::live_sandbox_continuation_authority::LiveSandboxContinuationFacts;
-use crate::operational_execution_window_opening::operation_binding_commitment;
+use crate::operational_execution_window_opening::{
+    operation_binding_commitment, OperationalExecutionWindowOpeningRequest,
+};
 use crate::{
-    ApprovalPresentationRecord, AuthorizedExecutionAttemptId, CapabilityGrant, CapabilityGrantId,
-    SpecContentHash, Timestamp, WorkflowOsError, WorkflowRun, WorkflowRunEventKind,
-    WorkflowRunStatus,
+    ApprovalPresentationRecord, AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId,
+    CapabilityGrant, CapabilityGrantId, SpecContentHash, Timestamp, WorkflowOsError, WorkflowRun,
+    WorkflowRunEventKind, WorkflowRunStatus,
 };
 
 impl SqliteStateBackend {
@@ -199,11 +201,13 @@ impl LiveGrantAdmission<'_> {
 
 pub(super) fn check_dispatch_lane(
     tx: &Transaction<'_>,
+    window: &AuthorizedExecutionWindowId,
     attempt: &AuthorizedExecutionAttemptId,
     live: bool,
 ) -> Result<(), WorkflowOsError> {
+    let marked = window.as_str().starts_with(LIVE_WINDOW_PREFIX);
     match version(tx)? {
-        ADAPTER_SCHEMA_VERSION if !live => Ok(()),
+        ADAPTER_SCHEMA_VERSION if !live && !marked => Ok(()),
         LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => {
             validate_live_authority_schema(tx)?;
             let granted: bool = tx
@@ -213,7 +217,7 @@ pub(super) fn check_dispatch_lane(
                     |row| row.get(0),
                 )
                 .map_err(|_| denied())?;
-            if granted == live {
+            if (live && marked && granted) || (!live && !marked && !granted) {
                 Ok(())
             } else {
                 Err(denied())
@@ -221,6 +225,73 @@ pub(super) fn check_dispatch_lane(
         }
         _ => Err(denied()),
     }
+}
+
+const LIVE_OPERATION_PREFIX: &str = "opening/live-comment/";
+const LIVE_WINDOW_PREFIX: &str = "window/opening/live-comment/";
+
+pub(super) fn live_opening_operation(action: &SpecContentHash) -> String {
+    format!("{LIVE_OPERATION_PREFIX}{action}")
+}
+
+pub(super) fn check_opening_lane(
+    tx: &Transaction<'_>,
+    request: &OperationalExecutionWindowOpeningRequest<'_>,
+    live: Option<LiveSandboxContinuationFacts<'_>>,
+) -> Result<(), WorkflowOsError> {
+    let Some(facts) = live else {
+        if request
+            .operation_id
+            .as_str()
+            .starts_with(LIVE_OPERATION_PREFIX)
+            || request.window_id.as_str().starts_with(LIVE_WINDOW_PREFIX)
+        {
+            return Err(denied());
+        }
+        return Ok(());
+    };
+    validate_live_store(tx)?;
+    let action = facts.action.commitment()?;
+    let operation = live_opening_operation(&action);
+    if request.operation_id.as_str() != operation
+        || request.window_id.as_str() != format!("window/{operation}")
+        || request.attempt_id.as_str() != format!("attempt/{operation}")
+        || request.receipt_id.as_str() != format!("receipt/{operation}")
+        || request.maximum_attempts != 1
+        || request.workflow_lifecycle_commitment.is_some()
+        || request.run_id != *facts.action.run
+        || request.step_id != *facts.action.step
+        || request.workflow_id != *facts.scope.workflow_id()
+        || request.subject_actor_id != *facts.action.original_actor
+        || request.immutable_run_bundle.root_hash() != facts.action.bundle_root
+        || request.invocation_binding_commitment != action
+        || request.window_id != *facts.window
+        || request.attempt_id != *facts.attempt
+        || request.expires_at != facts.window_expires_at
+    {
+        return Err(denied());
+    }
+    Ok(())
+}
+
+pub(super) fn verify_live_opening_approval(
+    tx: &Transaction<'_>,
+    facts: LiveSandboxContinuationFacts<'_>,
+    run: &WorkflowRun,
+) -> Result<(), WorkflowOsError> {
+    let observation = super::continuity_store::observe_continuity_trusted_time()?;
+    let now = observation.observed_at();
+    facts.verify_exact_approval(now)?;
+    if now >= facts.window_expires_at
+        || facts.window_expires_at.as_offset_date_time() - now.as_offset_date_time()
+            > time::Duration::minutes(5)
+        || facts
+            .approval_expires_at
+            .is_some_and(|expiry| facts.window_expires_at > expiry)
+    {
+        return Err(denied());
+    }
+    verify_persisted_approval(tx, facts, run)
 }
 
 fn verify_opening(
@@ -233,11 +304,20 @@ fn verify_opening(
     let expected = opening_binding(facts, action);
     if !matches!(&last.kind, WorkflowRunEventKind::OperationalExecutionWindowOpened(open)
         if open.attempt_id() == facts.attempt && open.window_id() == facts.window
+            && open.operation_id().as_str() == live_opening_operation(action)
             && open.operation_binding_commitment() == &expected)
     {
         return Err(denied());
     }
     let run = WorkflowRun::rehydrate(&events)?;
+    verify_persisted_approval(tx, facts, &run)
+}
+
+fn verify_persisted_approval(
+    tx: &Connection,
+    facts: LiveSandboxContinuationFacts<'_>,
+    run: &WorkflowRun,
+) -> Result<(), WorkflowOsError> {
     let Some(approval) = run
         .snapshot
         .approval_requests
@@ -258,7 +338,7 @@ fn verify_opening(
         || approval.expires_at != facts.approval_expires_at
         || approval.decision.as_ref() != Some(facts.decision)
         || presentation.as_ref() != Some(facts.presentation)
-        || !events.iter().any(|event| {
+        || !run.events.iter().any(|event| {
             &event.event_id == facts.approval_event
                 && matches!(&event.kind, WorkflowRunEventKind::ApprovalGranted(decision)
                 if decision == facts.decision)
