@@ -2,7 +2,7 @@
   "name": "workflow-os",
   "version": "0.4.0-preview.1",
   "private": true,
-  "description": "Local-first governance for AI agent work with explicit authority, evidence posture, approvals, side-effect records, and WorkReports.",
+  "description": "Open-source continuity-of-authority kernel for governed agentic work across people, agents, processes, and execution frameworks.",
   "license": "Apache-2.0",
   "workspaces": [
     "packages/*"

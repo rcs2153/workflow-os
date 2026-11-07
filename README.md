@@ -4,27 +4,33 @@
 [![Release](https://img.shields.io/github/v/release/rcs2153/workflow-os?include_prereleases)](https://github.com/rcs2153/workflow-os/releases)
 [![License](https://img.shields.io/github/license/rcs2153/workflow-os)](LICENSE)
 
-Workflow OS is a local-first continuity-of-authority kernel for agentic work.
+Workflow OS is an open-source, local-first continuity-of-authority kernel for
+agentic work. It provides shared governance across people, agents, processes,
+and execution frameworks without replacing the systems that execute the work.
 It converts ephemeral conversation and execution context into a durable,
-policy-governed run whose intent, authority, execution state, evidence, and
-next permissible action can be recovered by another person, process, or agent.
-It does this without replacing the agent runtime.
+policy-governed run whose authority, execution state, evidence, and next
+permissible action can be recovered by another authorized executor.
 
 ```text
 Agent executes. Workflow OS governs.
 ```
 
 Agents can already write code, call tools, and change external systems. Most
-systems preserve context, traces, or task state. Workflow OS is designed to
-preserve whether the work is still legitimate to continue. It maintains four
-connected truths:
+systems preserve context, traces, or task state. Workflow OS preserves whether
+the work is still legitimate to continue by keeping three operational layers
+connected:
 
-- **Intent:** what exact work was declared.
-- **Authority:** which exact action was permitted, under which policy and
-  restrictions.
-- **Execution:** what actually ran, completed, failed, or remains blocked.
-- **Continuity:** what the next authorized executor may safely do without
-  recreating permission from chat history.
+- **Procedure authority:** who may define, revise, activate, or retire the
+  workflow and its policy and check requirements.
+- **Invocation authority:** who authorized this exact run, action, resource,
+  execution window, and replacement executor.
+- **Execution truth:** what was accepted, attempted, completed, failed, denied,
+  or externally observed, and what reconciliation remains required.
+
+Continuity of authority is the property that keeps those layers bound across
+retries, interruptions, compaction, restore, and executor replacement. It
+determines what the next authorized executor may safely do without recreating
+permission from chat history.
 
 That produces durable, bounded, and fail-closed answers to:
 
@@ -37,9 +43,17 @@ That produces durable, bounded, and fail-closed answers to:
 
 Workflow OS puts those facts in a deterministic, fail-closed kernel instead of
 leaving them inside prompts, chat history, model traces, or agent memory.
-Evidence references, events, audit records, SideEffects, and WorkReports make
-the governed state inspectable; they are outputs of the control function, not
-the product category by themselves.
+Evidence references, events, audit records, SideEffects, and WorkReports verify
+and expose those bindings; they are proof surfaces of the control function,
+not the product category by themselves.
+
+An evaluator-authored Codex-to-LangGraph integration has demonstrated the
+intended cross-harness shape: one harness started governed work, another
+resumed it without transcript authority, and a fresh reviewer reconstructed
+the decision from the shared kernel record. That evidence used synthetic
+identities, evaluator-written wiring, and a simulated ambiguous target. It is
+not packaged interoperability, authenticated cross-harness delegation, or a
+production execution-framework integration.
 
 The current source tree is preparing **Workflow OS `0.4.0-preview.1` - Governed
 Authority and Repository Adoption Preview**. It is useful today for local
