@@ -19,7 +19,31 @@ The milestone is not a nested-agent or agent-team feature. It tests whether
 independent execution hosts can consume the same public governance boundary
 without recreating authority from transcript memory or custom hidden state.
 
-## 2. Preconditions
+Cross-harness governance and composition are first-class platform properties.
+They are not optional presentation glue around a single preferred harness.
+Workflow OS must remain the shared kernel that carries lawful continuation
+between independently implemented execution hosts.
+
+## 2. Three-Layer Authority Contract
+
+The milestone must preserve and test three distinct layers:
+
+1. **Procedure authority** governs who may define, revise, activate, or retire
+   the workflow procedure and its policy, evidence, check, approval, and
+   effect requirements.
+2. **Invocation authority** governs who authorized this exact run and action,
+   for which resource and execution window, and whether the replacement actor
+   or harness may lawfully continue it.
+3. **Execution truth** records what was attempted or observed at the effect
+   boundary, whether the outcome is accepted, denied, ambiguous, or awaiting
+   reconciliation, and whether repetition is lawful.
+
+These layers may refer to one another, but they must not collapse into one
+generic approval or audit record. Procedure stewardship does not authorize a
+run. Run approval does not prove an effect. Provider or host observation does
+not retroactively grant authority.
+
+## 3. Preconditions
 
 Execution is blocked until:
 
@@ -32,7 +56,7 @@ Execution is blocked until:
 - the benchmark protocol, expected decisions, interruption point, and review
   rubric are preregistered.
 
-## 3. Harness Boundary
+## 4. Harness Boundary
 
 Use two independently implemented thin harness integrations. Each integration
 may translate its host's invocation and display conventions, but both must use
@@ -56,7 +80,22 @@ Preserve and publish the integration code, dependency versions, configuration,
 and line count. Distinguish framework-native behavior from evaluator-authored
 wiring.
 
-## 4. Milestone Scenario
+## 5. Prior Evaluation Evidence And Claim Boundary
+
+An evaluator-authored integration has already demonstrated the intended
+shape: Codex started a governed run, LangGraph resumed it without conversation
+history, one approved disposable Git commit occurred exactly once, denial and
+authority drift produced no commit, and a fresh reviewer reconstructed the
+approval and next action from the shared kernel record. A post-effect/pre-ack
+fault remained `Running` instead of manufacturing success, and a dedicated
+provider path recorded ambiguity.
+
+That evidence is useful but bounded. The integrations were evaluator-written,
+identities were synthetic, and the ambiguous target was simulated. It does
+not establish packaged cross-harness support, authenticated enterprise
+delegation, or a production provider-write contract.
+
+## 6. Milestone Scenario
 
 The selected workflow must include:
 
@@ -75,7 +114,7 @@ Prefer an isolated existing write sandbox or another already-reviewed effect
 that can be proven exactly once. Do not add a mutation family merely to make
 the demonstration more impressive.
 
-## 5. Required Assertions
+## 7. Required Assertions
 
 The evaluation must prove:
 
@@ -94,10 +133,14 @@ The evaluation must prove:
   the kernel record; and
 - no host claims authority that the kernel record does not provide.
 
+The assertions must separately identify which layer failed or succeeded:
+procedure authority, invocation authority, or execution truth. A correct final
+effect cannot cure invalid procedure or invocation authority.
+
 Run adversarial variants for changed action, changed resource, stale approval,
 missing evidence, terminal replay, and a second replacement attempt.
 
-## 6. Measurements
+## 8. Measurements
 
 Record per condition:
 
@@ -120,7 +163,21 @@ generalization, or a moat by itself. Cache hits narrowed the uncached-token
 difference. This milestone should test the stronger claim: Workflow OS supplies
 one reusable authoritative record across execution hosts.
 
-## 7. Independent Review
+## 9. Productization Gates
+
+The cross-harness property is not productized until all of these gates pass:
+
+- authenticated actor and delegation binding rather than synthetic identity;
+- packaged, versioned, stable public harness contracts;
+- one real sandboxed provider write resumed across harnesses;
+- post-effect/pre-ack reconciliation with no false success;
+- duplicate prevention across retry, interruption, and replacement; and
+- independent reconstruction from public kernel records alone.
+
+Passing only the evaluator-authored fixture remains integration evidence, not
+a general product capability.
+
+## 10. Independent Review
 
 An independent reviewer receives:
 
@@ -135,7 +192,7 @@ answer key before recording the verdict. The review must distinguish what
 Workflow OS proved, what the execution host asserted, and what the external
 provider or storage owner controls.
 
-## 8. Acceptance
+## 11. Acceptance
 
 The milestone passes only when:
 
@@ -152,7 +209,7 @@ The milestone passes only when:
 A successful demonstration is adoption evidence, not proof of production
 multi-harness orchestration, hosted SaaS readiness, or general agent autonomy.
 
-## 9. Non-Goals
+## 12. Non-Goals
 
 This milestone does not implement:
 
@@ -167,7 +224,7 @@ This milestone does not implement:
 - a UI requirement; or
 - a general comparative superiority claim.
 
-## 10. Next Phase
+## 13. Next Phase
 
 After hosted partial-run recovery closes, perform a planning/review phase that
 selects the two harnesses, one existing effect path, exact interruption point,

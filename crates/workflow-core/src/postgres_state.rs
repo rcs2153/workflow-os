@@ -671,6 +671,27 @@ pub struct PostgresStateHealthReport {
     recovery_required: bool,
 }
 
+/// Result of atomically reconciling one hosted run-creation event prefix.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PostgresHostedCreationPrefixReconciliation {
+    run: WorkflowRun,
+    appended_events: Vec<WorkflowRunEvent>,
+}
+
+impl PostgresHostedCreationPrefixReconciliation {
+    /// Returns the authoritative run after prefix reconciliation.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns only events committed by this reconciliation attempt.
+    #[must_use]
+    pub fn appended_events(&self) -> &[WorkflowRunEvent] {
+        &self.appended_events
+    }
+}
+
 impl PostgresStateHealthReport {
     /// Returns the adapter schema version.
     #[must_use]
@@ -702,6 +723,91 @@ impl PostgresStateBackend {
     #[must_use]
     pub fn new(connections: Arc<dyn PostgresConnectionFactory>) -> Self {
         Self { connections }
+    }
+
+    /// Atomically verifies and completes one deterministic hosted creation prefix.
+    ///
+    /// Existing events must semantically match the beginning of
+    /// `expected_events`; legacy generated event IDs and timestamps are the
+    /// only ignored header fields. Missing suffix events and the derived
+    /// snapshot are committed under one transaction-scoped run lock. Complete
+    /// prefixes replay without event writes.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed for an empty expectation, identity mismatch, divergent
+    /// history, invalid event grammar, or unavailable durable state.
+    pub fn reconcile_hosted_creation_prefix(
+        &self,
+        expected_events: &[WorkflowRunEvent],
+    ) -> Result<PostgresHostedCreationPrefixReconciliation, WorkflowOsError> {
+        let Some(first) = expected_events.first() else {
+            return Err(state_error(
+                "postgres_state.hosted_creation.expected_prefix_empty",
+                "hosted creation prefix expectation is empty",
+            ));
+        };
+        let run_id = &first.run_id;
+        if expected_events.iter().any(|event| &event.run_id != run_id) {
+            return Err(state_error(
+                "postgres_state.hosted_creation.expected_prefix_invalid",
+                "hosted creation prefix expectation is invalid",
+            ));
+        }
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let lock_key = format!("workflow_os_hosted_creation/{}", run_id.as_str());
+            tx.execute("SELECT pg_advisory_xact_lock(hashtext($1))", &[&lock_key])
+                .map_err(|error| database_error("hosted_creation_lock", &error))?;
+            let existing = read_events_tx(tx, run_id)?;
+            if existing
+                .iter()
+                .take(expected_events.len())
+                .zip(expected_events)
+                .any(|(durable, expected)| {
+                    !hosted_creation_event_semantically_matches(durable, expected)
+                })
+            {
+                return Err(state_error(
+                    "postgres_state.hosted_creation.prefix_conflict",
+                    "hosted creation event prefix conflicts with durable state",
+                ));
+            }
+            let appended_events = if existing.len() < expected_events.len() {
+                expected_events[existing.len()..].to_vec()
+            } else {
+                Vec::new()
+            };
+            for event in &appended_events {
+                append_event_tx(tx, event)?;
+            }
+            let durable_events = if appended_events.is_empty() {
+                existing
+            } else {
+                read_events_tx(tx, run_id)?
+            };
+            let run = WorkflowRun::rehydrate(&durable_events)?;
+            let prior =
+                read_record_tx::<WorkflowRunSnapshot>(tx, "snapshot", run_id.as_str(), "", true)?;
+            if prior
+                .as_ref()
+                .map_or(true, |record| record.value() != &run.snapshot)
+            {
+                put_record(
+                    tx,
+                    "snapshot",
+                    run_id.as_str(),
+                    "",
+                    &run.snapshot,
+                    prior.as_ref().map(PostgresRevisionedRecord::revision),
+                    prior.is_none(),
+                )?;
+            }
+            Ok(PostgresHostedCreationPrefixReconciliation {
+                run,
+                appended_events,
+            })
+        })
     }
 
     /// Initializes or verifies the managed schema under a migration advisory lock.
@@ -2676,6 +2782,16 @@ impl PostgresStateBackend {
             recovery_required,
         })
     }
+}
+
+fn hosted_creation_event_semantically_matches(
+    durable: &WorkflowRunEvent,
+    expected: &WorkflowRunEvent,
+) -> bool {
+    let mut normalized = durable.clone();
+    normalized.event_id = expected.event_id.clone();
+    normalized.timestamp = expected.timestamp;
+    normalized == *expected
 }
 
 impl fmt::Debug for PostgresStateBackend {
