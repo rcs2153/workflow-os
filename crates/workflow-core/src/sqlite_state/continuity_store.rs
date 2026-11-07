@@ -1546,7 +1546,8 @@ impl SqliteStateBackend {
     pub(crate) fn fixture_predispatch_attempt_is_current(
         &self,
         run: &WorkflowRun,
-        record: &crate::SideEffectRecord,
+        actor: Option<&crate::ActorId>,
+        step_id: Option<&crate::StepId>,
         opening: &crate::OperationalExecutionWindowOpeningProjectionSnapshot,
     ) -> Result<bool, WorkflowOsError> {
         let observation = observe_continuity_trusted_time()?;
@@ -1594,8 +1595,8 @@ impl SqliteStateBackend {
             && window.state == AuthoritativeWindowState::Executing
             && window.workflow_id == run.snapshot.identity.workflow_id
             && window.run_id == run.snapshot.identity.run_id
-            && Some(&window.step_id) == record.step_id()
-            && Some(&window.subject_actor_id) == record.actor()
+            && Some(&window.step_id) == step_id
+            && Some(&window.subject_actor_id) == actor
             && Some(&window.immutable_run_bundle)
                 == run.snapshot.identity.immutable_run_bundle.as_ref()
             && attempt.state == AuthoritativeAttemptState::Started

@@ -251,6 +251,7 @@ pub(crate) use trusted_host_operational_entry::TrustedHostOperationalEntryLocato
 pub struct SqliteStateBackend {
     database_path: PathBuf,
     busy_timeout: Duration,
+    read_only: bool,
 }
 
 /// Explicit inputs for one guarded filesystem-to-SQLite staging migration.
@@ -387,6 +388,7 @@ impl SqliteStateBackend {
         let backend = Self {
             database_path: database_path.into(),
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
         };
         let mut connection = backend.existing_connection()?;
         let transaction = connection
@@ -477,6 +479,7 @@ impl SqliteStateBackend {
         let backend = Self {
             database_path: database_path.into(),
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
         };
         let mut connection = backend.existing_connection()?;
         let transaction = connection
@@ -578,6 +581,7 @@ impl SqliteStateBackend {
         let backend = Self {
             database_path: database_path.into(),
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
         };
         let mut connection = backend.existing_connection()?;
         let transaction = connection
@@ -672,6 +676,7 @@ impl SqliteStateBackend {
         let backend = Self {
             database_path: database_path.into(),
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
         };
         let mut connection = backend.existing_connection()?;
         let transaction = connection
@@ -733,6 +738,7 @@ impl SqliteStateBackend {
         let backend = Self {
             database_path: database_path.into(),
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
         };
         let mut connection = backend.existing_connection()?;
         let transaction = connection
@@ -794,6 +800,7 @@ impl SqliteStateBackend {
         let backend = Self {
             database_path: database_path.into(),
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
         };
         let mut connection = backend.existing_connection()?;
         let transaction = connection
@@ -855,6 +862,7 @@ impl SqliteStateBackend {
         let backend = Self {
             database_path: database_path.into(),
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
         };
         let mut connection = backend.existing_connection()?;
         let transaction = connection
@@ -918,6 +926,7 @@ impl SqliteStateBackend {
         let backend = Self {
             database_path: database_path.into(),
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
         };
         let mut connection = backend.existing_connection()?;
         let transaction = connection
@@ -1010,6 +1019,7 @@ impl SqliteStateBackend {
         let backend = Self {
             database_path: input.destination_path,
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
         };
         let mut connection = backend.migration_connection()?;
         let state = Self::prepare_or_resume_staging(&mut connection, input.plan, &attempt)?;
@@ -1064,6 +1074,7 @@ impl SqliteStateBackend {
         let backend = Self {
             database_path: database_path.into(),
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
         };
         let mut connection = backend.migration_connection()?;
         let persisted = Self::read_receipt_payload(&connection)?;
@@ -1147,6 +1158,22 @@ impl SqliteStateBackend {
         Self::open_with_busy_timeout(database_path, DEFAULT_BUSY_TIMEOUT)
     }
 
+    /// Opens an existing current-schema database for inspection only.
+    ///
+    /// # Errors
+    ///
+    /// Returns a bounded error if the database is absent, incompatible, or unreadable.
+    pub fn open_read_only(database_path: impl Into<PathBuf>) -> Result<Self, WorkflowOsError> {
+        let backend = Self {
+            database_path: database_path.into(),
+            busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: true,
+        };
+        let connection = backend.existing_read_only_connection()?;
+        validate_schema_metadata(&connection)?;
+        Ok(backend)
+    }
+
     /// Opens an adapter with an explicit bounded busy timeout.
     ///
     /// This constructor exists for deterministic contention tests and local
@@ -1175,6 +1202,7 @@ impl SqliteStateBackend {
         let backend = Self {
             database_path,
             busy_timeout,
+            read_only: false,
         };
         let mut connection = backend.connection()?;
         Self::prepare_schema(&mut connection)?;
@@ -1897,6 +1925,9 @@ impl SqliteStateBackend {
     }
 
     fn connection(&self) -> Result<Connection, WorkflowOsError> {
+        if self.read_only {
+            return self.existing_read_only_connection();
+        }
         let connection = Connection::open(&self.database_path).map_err(|error| {
             map_sqlite_error(
                 error,
@@ -1908,6 +1939,9 @@ impl SqliteStateBackend {
     }
 
     fn existing_connection(&self) -> Result<Connection, WorkflowOsError> {
+        if self.read_only {
+            return self.existing_read_only_connection();
+        }
         let connection = Connection::open_with_flags(
             &self.database_path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI,
@@ -4764,6 +4798,7 @@ mod migration_transaction_tests {
         let backend = SqliteStateBackend {
             database_path: database_path.clone(),
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
         };
         let mut connection = backend.migration_connection().expect("connection");
         SqliteStateBackend::prepare_or_resume_staging(&mut connection, &plan, &attempt)
@@ -4826,6 +4861,7 @@ mod migration_transaction_tests {
         let backend = SqliteStateBackend {
             database_path: database_path.clone(),
             busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            read_only: false,
         };
         let mut connection = backend.migration_connection().expect("connection");
         SqliteStateBackend::prepare_or_resume_staging(&mut connection, &plan, &attempt)

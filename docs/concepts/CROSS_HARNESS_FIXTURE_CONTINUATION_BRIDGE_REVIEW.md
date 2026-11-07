@@ -46,6 +46,14 @@ preparation path must establish the corresponding binding through existing
 current-authority admission before the positive test can pass; that path is
 not implemented by this checkpoint.
 
+The SQLite operational-opening suite now exercises the pre-dispatch reader
+against a window opened through Core's existing admission transaction. It
+accepts the exact active attempt, rejects expired and mismatched actor, step,
+run, workflow, and bundle identities, and leaves the run unchanged. The CLI
+opens only an existing current-schema database in SQLite read-only mode;
+inspection cannot initialize, migrate, or write the database. These tests do
+not establish the comment-specific authority or public positive path.
+
 ## Verdict
 
 The first public continuation bridge establishes useful durable identity,

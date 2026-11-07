@@ -11630,7 +11630,12 @@ fn validate_fixture_continuation_authoritative_state(
                 "fixture continuation requires a durable operational execution window",
             )
         })?;
-    if !backend.fixture_predispatch_attempt_is_current(run, attempted_record, opening)? {
+    if !backend.fixture_predispatch_attempt_is_current(
+        run,
+        attempted_record.actor(),
+        attempted_record.step_id(),
+        opening,
+    )? {
         return Err(executor_error(
             WorkflowOsErrorKind::InvalidState,
             "github_pr_comment_fixture_continuation.execution_window_not_resumable",

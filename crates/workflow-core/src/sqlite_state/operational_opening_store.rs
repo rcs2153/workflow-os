@@ -1217,6 +1217,173 @@ mod tests {
     }
 
     #[test]
+    fn fixture_predispatch_inspection_accepts_exact_active_attempt_without_mutation() {
+        let fixture = Fixture::new();
+        let authorization = fixture.authorization();
+        let request = fixture.request(&authorization, "opening/fixture-inspection");
+        let actor = request.subject_actor_id.clone();
+        fixture
+            .backend
+            .open_window_and_start_attempt_projected(request)
+            .expect("opening succeeds");
+        let reader = SqliteStateBackend::open_read_only(&fixture.path).expect("read-only backend");
+        let run = reader.rehydrate_run(&fixture.run_id).expect("run");
+        let opening = run
+            .snapshot
+            .last_operational_opening_projection
+            .as_ref()
+            .expect("opening");
+        let counts = fixture.counts();
+        assert!(reader
+            .fixture_predispatch_attempt_is_current(
+                &run,
+                Some(&actor),
+                Some(&fixture.step_id),
+                opening,
+            )
+            .expect("inspection"));
+        assert!(reader
+            .connection()
+            .expect("connection")
+            .execute_batch("CREATE TABLE unexpected_write (value INTEGER)")
+            .is_err());
+        assert_eq!(counts, fixture.counts());
+        assert_eq!(
+            run,
+            fixture
+                .backend
+                .rehydrate_run(&fixture.run_id)
+                .expect("unchanged run")
+        );
+    }
+
+    #[test]
+    fn read_only_open_rejects_absent_database_without_creating_it() {
+        let fixture = Fixture::new();
+        let absent = fixture.path.with_extension("absent.sqlite3");
+        assert!(!absent.exists());
+        assert!(SqliteStateBackend::open_read_only(&absent).is_err());
+        assert!(!absent.exists());
+    }
+
+    #[test]
+    fn fixture_predispatch_inspection_rejects_actor_step_and_run_drift() {
+        let fixture = Fixture::new();
+        let authorization = fixture.authorization();
+        let request = fixture.request(&authorization, "opening/fixture-drift");
+        let actor = request.subject_actor_id.clone();
+        fixture
+            .backend
+            .open_window_and_start_attempt_projected(request)
+            .expect("opening succeeds");
+        let run = fixture.backend.rehydrate_run(&fixture.run_id).expect("run");
+        let opening = run
+            .snapshot
+            .last_operational_opening_projection
+            .as_ref()
+            .expect("opening");
+        for (actor, step) in [
+            (None, Some(fixture.step_id.clone())),
+            (
+                Some(ActorId::new("agent/other").expect("actor")),
+                Some(fixture.step_id.clone()),
+            ),
+            (Some(actor.clone()), None),
+            (
+                Some(actor.clone()),
+                Some(StepId::new("other").expect("step")),
+            ),
+        ] {
+            assert!(!fixture
+                .backend
+                .fixture_predispatch_attempt_is_current(
+                    &run,
+                    actor.as_ref(),
+                    step.as_ref(),
+                    opening,
+                )
+                .expect("drift inspection"));
+        }
+        let mut changed = run.clone();
+        changed.snapshot.identity.run_id = WorkflowRunId::new("other-run").expect("run id");
+        assert!(!fixture
+            .backend
+            .fixture_predispatch_attempt_is_current(
+                &changed,
+                Some(&actor),
+                Some(&fixture.step_id),
+                opening,
+            )
+            .expect("run drift inspection"));
+        let mut changed = run.clone();
+        changed.snapshot.identity.workflow_id =
+            WorkflowId::new("workflow/other").expect("workflow");
+        assert!(!fixture
+            .backend
+            .fixture_predispatch_attempt_is_current(
+                &changed,
+                Some(&actor),
+                Some(&fixture.step_id),
+                opening,
+            )
+            .expect("workflow drift inspection"));
+        let mut changed = run.clone();
+        changed.snapshot.identity.immutable_run_bundle = None;
+        assert!(!fixture
+            .backend
+            .fixture_predispatch_attempt_is_current(
+                &changed,
+                Some(&actor),
+                Some(&fixture.step_id),
+                opening,
+            )
+            .expect("bundle drift inspection"));
+        assert_eq!(
+            run,
+            fixture
+                .backend
+                .rehydrate_run(&fixture.run_id)
+                .expect("unchanged run")
+        );
+    }
+
+    #[test]
+    fn fixture_predispatch_inspection_rejects_expired_attempt_without_mutation() {
+        let fixture = Fixture::new();
+        let authorization = fixture.authorization();
+        let mut request = fixture.request(&authorization, "opening/fixture-expired");
+        request.expires_at = Timestamp::parse_rfc3339("2026-09-30T10:10:00Z").expect("expiry");
+        request.request_commitment = opening_request_commitment(&request);
+        let actor = request.subject_actor_id.clone();
+        fixture
+            .backend
+            .open_window_and_start_attempt_projected(request)
+            .expect("opening at historical trusted time");
+        let run = fixture.backend.rehydrate_run(&fixture.run_id).expect("run");
+        let opening = run
+            .snapshot
+            .last_operational_opening_projection
+            .as_ref()
+            .expect("opening");
+        assert!(!fixture
+            .backend
+            .fixture_predispatch_attempt_is_current(
+                &run,
+                Some(&actor),
+                Some(&fixture.step_id),
+                opening,
+            )
+            .expect("expiry inspection"));
+        assert_eq!(
+            run,
+            fixture
+                .backend
+                .rehydrate_run(&fixture.run_id)
+                .expect("unchanged run")
+        );
+    }
+
+    #[test]
     fn same_operation_id_with_different_receipt_fails_closed() {
         let fixture = Fixture::new();
         let authorization = fixture.authorization();

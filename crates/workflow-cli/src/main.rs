@@ -512,11 +512,7 @@ fn github_pr_comment_continuation_backend(
     let database = invocation
         .state_dir()
         .join("github-pr-comment-continuation.sqlite3");
-    if database.is_file() {
-        SqliteStateBackend::upgrade_operational_opening_run_scope_v8_to_v9(database)
-    } else {
-        SqliteStateBackend::open(database)
-    }
+    SqliteStateBackend::open_read_only(database)
 }
 
 struct ParsedGitHubPrCommentFixtureContinuation {
