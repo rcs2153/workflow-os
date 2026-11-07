@@ -6,9 +6,10 @@ roadmap and not only the last packaged preview release.
 
 ## Product In One Sentence
 
-Workflow OS is a governance kernel that binds autonomous or human execution to
-durable identity, policy, authority, evidence, side-effect, approval, event, and
-reporting contracts.
+Workflow OS is a continuity-of-authority kernel for agentic work. It converts
+ephemeral conversation and execution context into a durable, policy-governed
+run whose intent, authority, execution state, evidence, and next permissible
+action can be recovered by another person, process, or agent.
 
 ```text
 Agent executes. Workflow OS governs.
@@ -18,6 +19,19 @@ The executor may be a coding agent, person, deterministic handler, adapter, or
 sandbox. Workflow OS does not replace it. The kernel decides whether a material
 action is valid and authorized, records the decision and outcome, and derives
 what may happen next from durable state.
+
+The kernel maintains four connected truths:
+
+1. **Intent:** the exact declared unit of work.
+2. **Authority:** the action, policy, approval, capability, scope, restrictions,
+   and execution window that permit work.
+3. **Execution:** the accepted, attempted, completed, failed, blocked, denied,
+   or externally observed action and outcome.
+4. **Continuity:** the next action a current authorized executor may lawfully
+   take without reconstructing permission from conversation history.
+
+Evidence and reports make these truths inspectable. They do not replace them,
+and Workflow OS is not primarily an audit logger or report generator.
 
 ## Core Product Value: Continuity Of Authority
 
@@ -39,6 +53,12 @@ claim. See the [Continuity Of Authority P0 Release Gates
 Plan](../implementation-plans/continuity-of-authority-p0-release-gates-plan.md)
 and [Product And Release Reconciliation
 Plan](../implementation-plans/continuity-of-authority-product-release-reconciliation-plan.md).
+
+The product must therefore be evaluated first on authority integrity,
+execution admission, identity binding, interruption continuity, adversarial
+recovery, and the operational cost of safe recovery. Audit completeness and
+report quality remain necessary evidence for those contracts, not substitutes
+for them. See the [V1 Readiness Criteria](../release/V1_READINESS_CRITERIA.md).
 
 ## Maturity
 

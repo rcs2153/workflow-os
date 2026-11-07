@@ -86,6 +86,35 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
+Every item in this queue is evaluated against the primary product invariant:
+Workflow OS is a **continuity-of-authority kernel for agentic work**. The kernel
+must preserve the exact relationship among declared intent, scoped authority,
+actual execution, and the next lawful action across people, agents, processes,
+retries, recovery, compaction, and interruption. Evidence references, events,
+audit records, SideEffects, and WorkReports make that relationship inspectable;
+they are not the product category by themselves.
+
+The six governing evaluation contracts are:
+
+1. **Authority integrity:** authority cannot be reused, widened, or applied
+   after its scope or required facts change.
+2. **Execution admission:** accepted work reaches one lawful executable posture
+   at the declared idempotency and reconciliation boundary.
+3. **Identity binding:** evidence, outcomes, reports, and authority belong to
+   the exact requested run and operation.
+4. **Interruption continuity:** a replacement authorized executor can recover
+   the correct next action without conversational authority inference.
+5. **Adversarial recovery:** stale, misplaced, contradictory, corrupted, or
+   restored state fails closed or reconciles through an explicit lawful path.
+6. **Operational cost:** evaluations measure the time, interactions, evidence
+   lookups, latency, and model work required for correct recovery.
+
+This framing explains the current P0 sequence. Early hosted partial-run
+recovery is an execution-admission and adversarial-recovery defect; the
+cross-harness milestone is an interruption-continuity and authority-integrity
+proof. The approximately `49.9%` and `50.1%` gross recovery-token observations
+remain secondary operational evidence, not the primary product claim.
+
 A new P0 **hosted partial-run recovery** preemption is active before further
 private Governed Obligation Plan composition, provider-mutation broadening,
 nested-harness work, or broader hosted claims. Independent fault injection

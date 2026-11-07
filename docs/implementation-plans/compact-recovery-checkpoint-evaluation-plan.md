@@ -33,6 +33,29 @@ a larger evidence-reconstruction turn when conversational memory is stale,
 while preserving the correct recovery decision and governance boundaries.
 ```
 
+This benchmark is subordinate to the continuity-of-authority product contract.
+Its primary success condition is correct recovery of what was authorized,
+denied, completed, blocked, and still lawful. Token, latency, and interaction
+reductions are operational dividends only after correctness is preserved.
+
+Every checkpoint evaluation must report six contract dimensions:
+
+1. **Authority integrity:** did any condition reuse, widen, or stale authority?
+2. **Execution admission:** did accepted work reach the correct executable or
+   terminal posture without duplicate admission?
+3. **Identity binding:** did every cited approval, event, outcome, and report
+   belong to the exact run and operation?
+4. **Interruption continuity:** did the replacement executor choose the lawful
+   next action without reconstructing authority from conversation history?
+5. **Adversarial recovery:** did stale, conflicting, misplaced, or corrupted
+   state fail closed?
+6. **Operational cost:** how many turns, lookups, tokens, elapsed time, and
+   human interactions were required for the correct result?
+
+An efficiency result is invalid when either comparison arm violates any of the
+first five contracts. A checkpoint that saves tokens while applying stale
+authority or repeating an effect is a product failure, not an optimization.
+
 ## 2. Controlled Evidence Already Observed
 
 A controlled evaluation at repository revision `000a31a` reported:
@@ -73,6 +96,13 @@ raw prompts, cut points, model settings, outcomes, token records, or rerun
 package, and three paired scenarios do not establish cross-model or cross-task
 generalization.
 
+A later rerun reported six actual Codex compactions and again produced all nine
+correct decisions in both conditions. The checkpoint condition used 83,744
+gross recovery tokens versus 167,751 for evidence reconstruction, a reported
+50.1% reduction. Cache hits reduced the difference in uncached input plus
+output to 9,935 tokens. The replication supports the recovery-turn hypothesis,
+but the same artifact, billing, generalization, and causal limits remain.
+
 ## 3. Current Claim Boundary
 
 Allowed internal claim:
@@ -83,7 +113,8 @@ Allowed internal claim:
 
 Disallowed claims until the full evaluation passes:
 
-- Workflow OS cuts token cost by 33.43%, 49.93%, or any fixed percentage;
+- Workflow OS cuts token cost by 33.43%, 49.93%, 50.1%, or any fixed
+  percentage;
 - Workflow OS reduces production cost by a fixed percentage;
 - checkpoint injection always reduces tokens or latency;
 - the result generalizes across models, task families, hosts, or compaction
