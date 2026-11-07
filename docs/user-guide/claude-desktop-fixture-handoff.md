@@ -58,6 +58,32 @@ govern the experiment.
 
 ## Corpus And Evidence
 
+For a repeatable synthetic starting fixture, the opt-in Unix evaluator export
+uses the existing Core integration test and a locally built CLI:
+
+```sh
+cargo build -p workflow-cli --bin workflow-os
+WORKFLOW_OS_CLAUDE_FIXTURE_KERNEL="$PWD/target/debug/workflow-os" \
+  cargo test -p workflow-core --test local_executor \
+  fixture_continuation_validates_prepared_window_and_rejects_drift -- --exact --nocapture
+```
+
+It creates a fresh mode-0700 directory under the system temporary directory
+and prints the manifest path and exact grant expiry only after verifying the
+fixture through the real delegated CLI. The files containing the manifest and
+principal inputs are mode 0600. The exact grant lasts 210 seconds from issue;
+prepare the app session before exporting and regenerate a fresh fixture if it
+expires. An expired run is not made current by reusing its manifest.
+
+This exporter uses Core execution, a replayed event prefix, and synthetic
+check evidence to prepare the pre-dispatch state. It is not proof that a live
+run can be suspended at that boundary. The manifest covers `exact` (run it
+twice), `action-drift`, `target-drift`, `wrong-principal`, `missing-grant`,
+`revoked-grant`, and `expired-grant`. The exporter additionally probes actor
+override rejection at the CLI; the bridge does not accept that field.
+The operator must prepare the remaining
+cases separately; a missing case is not a pass.
+
 Prepare cases for exact allow and repeat, denial, target and action drift,
 missing/expired/revoked grants, wrong principal, stale window, changed
 evidence, terminal replay, and blocked duplicate dispatch. In an isolated

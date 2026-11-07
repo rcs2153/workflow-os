@@ -13,6 +13,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
+#[cfg(unix)]
+#[path = "support/claude_fixture_export.rs"]
+mod claude_fixture_export;
+
 use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
     compose_github_pr_comment_live_sandbox_event_proof,
@@ -17654,9 +17658,15 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
         SqliteStateBackend::open(project.path().join("state.sqlite3")).expect("state backend");
     let executor = LocalExecutor::new(&backend, &registry);
     let run_id = WorkflowRunId::new("run/fixture-continuation-success").expect("run id");
-    let active_path = project
-        .path()
-        .join("github-pr-comment-continuation.sqlite3");
+    #[cfg(unix)]
+    let export = claude_fixture_export::Export::from_environment();
+    #[cfg(unix)]
+    let active_root = export
+        .as_ref()
+        .map_or(project.path(), |export| export.root());
+    #[cfg(not(unix))]
+    let active_root = project.path();
+    let active_path = active_root.join("github-pr-comment-continuation.sqlite3");
     let active_backend = SqliteStateBackend::open(&active_path).expect("active state backend");
     let paused = execute_with_immutable_run_bundle(
         &executor,
@@ -17914,6 +17924,16 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
         result.fixture_response().outcome(),
         GitHubPullRequestCommentWriteOutcome::FixtureValidated
     );
+    #[cfg(unix)]
+    if let Some(export) = export {
+        export.write(
+            &active_backend,
+            &active_executor,
+            &active_path,
+            request_for_run(&interrupted),
+        );
+        return;
+    }
     verify_distinct_fixture_authority(
         &active_backend,
         &registry,
@@ -18032,7 +18052,7 @@ fn verify_distinct_fixture_authority(
     assert!(backend.register_local_fixture_principal(&verifier).is_err());
     let executor = LocalExecutor::new(backend, registry);
     let wrong_issuer = ActorId::new("user/not-issuer").expect("wrong issuer");
-    let first = exact_fixture_grant("grant/fixture-first", &request, decision);
+    let first = exact_fixture_grant("grant/fixture-first", &request, decision, 30);
     assert!(workflow_core::issue_local_fixture_replacement_grant(
         &executor,
         &request,
@@ -18054,7 +18074,7 @@ fn verify_distinct_fixture_authority(
         &first
     )
     .is_err());
-    let second = exact_fixture_grant("grant/fixture-second", &request, decision);
+    let second = exact_fixture_grant("grant/fixture-second", &request, decision, 30);
     workflow_core::issue_local_fixture_replacement_grant(
         &executor,
         &request,
@@ -18081,7 +18101,7 @@ fn verify_distinct_fixture_authority(
             &binary,
             path,
             &request.write_request,
-            &exact_fixture_grant("grant/fixture-cli", &request, decision),
+            &exact_fixture_grant("grant/fixture-cli", &request, decision, 30),
         );
     }
     request.replacement_actor = &actor;
@@ -18103,6 +18123,7 @@ fn exact_fixture_grant(
     id: &str,
     request: &GitHubPrCommentFixtureContinuationValidationRequest<'_>,
     decision: &workflow_core::ApprovalDecision,
+    lifetime_seconds: i64,
 ) -> workflow_core::CapabilityGrant {
     use workflow_core::{
         CapabilityDelegationPosture, CapabilityGrant, CapabilityGrantDefinition, CapabilityGrantId,
@@ -18131,7 +18152,7 @@ fn exact_fixture_grant(
         issuer: decision.actor.clone(),
         issued_at: issued,
         expires_at: Some(Timestamp::from_offset_date_time(
-            issued.as_offset_date_time() + time::Duration::seconds(30),
+            issued.as_offset_date_time() + time::Duration::seconds(lifetime_seconds),
         )),
         lifecycle: CapabilityGrantLifecycle::Active,
         revocation_reference: None,
