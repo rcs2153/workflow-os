@@ -288,6 +288,16 @@ accepts this fixture-only boundary. Governed delivery and local sync are complet
 at `eb92306e`. This implementation does not authorize live dispatch,
 unverifiable check declarations, or cross-principal delegation.
 
+The distinct-principal synthetic cases now have
+[native Claude Desktop evidence](docs/concepts/CLAUDE_DESKTOP_FIXTURE_HANDOFF_TRIAL.md).
+The readiness review found that the current public path is still fixture-only
+and the existing approval-backed sandbox composition requires a terminal run.
+The next implementation follows the
+[live admission and recovery plan](docs/implementation-plans/live-sandbox-continuation-admission-plan.md):
+exact live authority and atomic reservation first, then injected dispatch and
+loss recovery, then a reviewed public tool. A live disposable target remains
+separately gated.
+
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
 recursive agents, nested-harness runtime, a new provider mutation family, or a
