@@ -3669,6 +3669,16 @@ impl ImmutableRunBundleStore for SqliteStateBackend {
         bundle_id: &ImmutableRunBundleId,
     ) -> Result<StoredImmutableRunBundle, WorkflowOsError> {
         let connection = self.connection()?;
+        Self::read_exact_bundle_with_connection(&connection, run_id, bundle_id)
+    }
+}
+
+impl SqliteStateBackend {
+    fn read_exact_bundle_with_connection(
+        connection: &Connection,
+        run_id: &WorkflowRunId,
+        bundle_id: &ImmutableRunBundleId,
+    ) -> Result<StoredImmutableRunBundle, WorkflowOsError> {
         let row = connection
             .query_row(
                 "SELECT bundle_id, root_hash, manifest_payload,

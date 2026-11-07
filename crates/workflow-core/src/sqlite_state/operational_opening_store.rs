@@ -810,6 +810,11 @@ mod tests {
 
     impl Fixture {
         fn new() -> Self {
+            Self::new_with_live_bundle(None)
+        }
+
+        fn new_with_live_bundle(trial: Option<LiveGrantTrial>) -> Self {
+            use crate::ImmutableRunBundleStore;
             let id = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
                 "workflow-os-operational-opening-{}-{id}.sqlite3",
@@ -817,18 +822,38 @@ mod tests {
             ));
             cleanup_database(&path);
             let backend = SqliteStateBackend::open(&path).expect("SQLite backend");
-            let workflow_id = WorkflowId::new(format!("workflow/opening-{id}")).expect("workflow");
             let run_id = WorkflowRunId::new(format!("run-opening-{id}")).expect("run");
-            let step_id = StepId::new("invoke").expect("step");
-            let bundle: ImmutableRunBundleBinding = serde_json::from_value(serde_json::json!({
-                "bundle_id": format!("bundle/opening-{id}"),
-                "bundle_version": "v1",
-                "root_hash": SpecContentHash::from_text("opening bundle").as_str(),
-            }))
-            .expect("bundle binding");
+            let (workflow_id, step_id, bundle, workflow_version, spec_hash) =
+                if let Some(trial) = trial {
+                    let built = build_live_test_bundle(&run_id, trial);
+                    if !matches!(trial, LiveGrantTrial::MissingBundle) {
+                        backend
+                            .publish_bundle_create_only(&built)
+                            .expect("publish bundle");
+                    }
+                    let manifest = built.manifest();
+                    (
+                        manifest.workflow_id().clone(),
+                        StepId::new("docs-check").expect("step"),
+                        manifest.run_binding(),
+                        manifest.workflow_version().clone(),
+                        manifest.workflow_content_hash().clone(),
+                    )
+                } else {
+                    (
+                        WorkflowId::new(format!("workflow/opening-{id}")).expect("workflow"),
+                        StepId::new("invoke").expect("step"),
+                        serde_json::from_value(serde_json::json!({
+                            "bundle_id": format!("bundle/opening-{id}"),
+                            "bundle_version": "v1",
+                            "root_hash": SpecContentHash::from_text("opening bundle").as_str(),
+                        }))
+                        .expect("bundle binding"),
+                        WorkflowVersion::new("v1").expect("workflow version"),
+                        SpecContentHash::from_text("opening fixture"),
+                    )
+                };
             let schema_version = SchemaVersion::new("workflowos.dev/v0").expect("schema");
-            let workflow_version = WorkflowVersion::new("v1").expect("workflow version");
-            let spec_hash = SpecContentHash::from_text("opening fixture");
             let timestamp = Timestamp::parse_rfc3339("2026-09-30T10:00:00Z").expect("timestamp");
             for (sequence, suffix, kind) in [
                 (
@@ -3453,6 +3478,21 @@ mod tests {
         exercise_live_grant_reservation(LiveGrantTrial::FailedCheck);
     }
 
+    #[test]
+    fn live_grant_rejects_missing_immutable_bundle() {
+        exercise_live_grant_reservation(LiveGrantTrial::MissingBundle);
+    }
+
+    #[test]
+    fn live_grant_rejects_legacy_bundle_without_authoritative_declarations() {
+        exercise_live_grant_reservation(LiveGrantTrial::LegacyBundle);
+    }
+
+    #[test]
+    fn live_grant_rejects_required_assurance_with_only_a_passing_event() {
+        exercise_live_grant_reservation(LiveGrantTrial::RequiredCheck);
+    }
+
     #[derive(Clone, Copy)]
     enum LiveGrantTrial {
         AmbiguousCommit,
@@ -3461,6 +3501,101 @@ mod tests {
         PrincipalRevoked,
         DeniedPolicy,
         FailedCheck,
+        MissingBundle,
+        LegacyBundle,
+        RequiredCheck,
+    }
+
+    impl LiveGrantTrial {
+        fn denies_issuance(self) -> bool {
+            matches!(
+                self,
+                Self::DeniedPolicy
+                    | Self::FailedCheck
+                    | Self::MissingBundle
+                    | Self::LegacyBundle
+                    | Self::RequiredCheck
+            )
+        }
+    }
+
+    fn build_live_test_bundle(
+        run_id: &WorkflowRunId,
+        trial: LiveGrantTrial,
+    ) -> crate::ImmutableRunBundleBuildResult {
+        use crate::{
+            build_immutable_run_bundle, build_immutable_run_bundle_with_local_check_declarations,
+            ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
+            ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference,
+            ImmutableRunBundleId, ImmutableRunBundleReferencePosture,
+            ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, LocalCheckCommandContract,
+            LocalCheckCommandContractInventory,
+        };
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../dogfood/workflow-os-self-governance");
+        let mut project = crate::load_project(root).bundle.expect("dogfood project");
+        let workflow_id = WorkflowId::new("dg/trusted-host-docs-check").expect("workflow");
+        if matches!(trial, LiveGrantTrial::RequiredCheck) {
+            let workflow = project
+                .workflows
+                .iter_mut()
+                .find(|workflow| workflow.definition.id == workflow_id)
+                .expect("workflow");
+            workflow.definition.steps[0].local_check_requirements = serde_yaml::from_str(
+                "- id: docs-required
+  command_id: local-check/docs
+  requirement_level: required
+  minimum_assurance: kernel_observed_local_process
+  accepted_statuses: [passed]
+  freshness:
+    mode: no_reuse
+  exact_immutable_run_binding_required: true
+  truncation_allowed: false
+  network_maximum: disabled
+  side_effect_maximum: no_source_writes
+",
+            )
+            .expect("required check");
+            workflow.definition.spec_content_hash = None;
+            let source = serde_yaml::to_string(&workflow.definition).expect("workflow");
+            workflow.definition = crate::parse_workflow_spec_yaml(&source).expect("parse workflow");
+            workflow.content_hash =
+                crate::canonical_yaml_content_hash(&source).expect("source hash");
+        }
+        let request = ImmutableRunBundleBuildRequest {
+            project: &project,
+            workflow_id: &workflow_id,
+            bundle_id: ImmutableRunBundleId::new(format!("bundle/{run_id}")).expect("bundle"),
+            bundle_version: ImmutableRunBundleVersion::new("v1").expect("version"),
+            run_id: run_id.clone(),
+            resolved_execution_context_hash: SpecContentHash::from_text("live context"),
+            execution_posture: ImmutableRunBundleExecutionPosture::new(
+                Vec::new(),
+                ImmutableRunBundleReferencePosture::NotSupplied,
+                ImmutableRunBundleReferencePosture::NotSupplied,
+                ImmutableRunBundleReferencePosture::CommittedReference,
+            )
+            .expect("posture"),
+            handlers: vec![ImmutableRunBundleHandlerReference {
+                skill_id: SkillId::new("local/check-docs").expect("skill"),
+                skill_version: SkillVersion::new("v0").expect("version"),
+                posture: ImmutableRunBundleHandlerPosture::RegisteredUnattested,
+            }],
+            created_at: Timestamp::parse_rfc3339("2026-09-30T09:00:00Z").expect("created"),
+            created_by: ActorId::new("system/kernel").expect("actor"),
+            sensitivity: ImmutableRunBundleSensitivity::Internal,
+            redaction_required: true,
+        };
+        if matches!(trial, LiveGrantTrial::LegacyBundle) {
+            build_immutable_run_bundle(request).expect("legacy bundle")
+        } else {
+            let inventory = LocalCheckCommandContractInventory::new(vec![
+                LocalCheckCommandContract::docs_check_model_only().expect("docs command"),
+            ])
+            .expect("inventory");
+            build_immutable_run_bundle_with_local_check_declarations(request, &inventory)
+                .expect("canonical live test bundle")
+        }
     }
 
     #[allow(clippy::too_many_lines)]
@@ -3478,7 +3613,7 @@ mod tests {
             GitHubPullRequestCommentWriteMode, SideEffectId, SideEffectRecordStore,
         };
 
-        let fixture = Fixture::new();
+        let fixture = Fixture::new_with_live_bundle(Some(trial));
         let actor = ActorId::new("agent/opening-test").expect("actor");
         let action = GitHubCommentContinuationAction {
             run: &fixture.run_id,
@@ -3646,11 +3781,16 @@ mod tests {
                 backend
                     .write_side_effect_record(&effect)
                     .expect("persist attempted effect");
-                if matches!(
-                    trial,
-                    LiveGrantTrial::DeniedPolicy | LiveGrantTrial::FailedCheck
-                ) {
-                    assert!(backend.issue_live_sandbox_grant(facts, &grant).is_err());
+                if trial.denies_issuance() {
+                    let error = backend
+                        .issue_live_sandbox_grant(facts, &grant)
+                        .expect_err("issuance denied");
+                    let expected = if matches!(trial, LiveGrantTrial::RequiredCheck) {
+                        "live_sandbox_continuation.required_check_unverified"
+                    } else {
+                        "live_sandbox_continuation.storage_denied"
+                    };
+                    assert_eq!(error.code(), expected);
                     return;
                 }
                 let binding = backend
@@ -3692,6 +3832,19 @@ mod tests {
                     .reserve_live_sandbox_dispatch(request(), unauthenticated)
                     .is_err());
                 assert!(backend.reserve_attempt_dispatch(request()).is_err());
+                let set_bundle_root = |root: &SpecContentHash| {
+                    connection
+                        .execute(
+                            "UPDATE immutable_run_bundles SET root_hash=?1 WHERE run_id=?2",
+                            params![root.as_str(), fixture.run_id.as_str()],
+                        )
+                        .expect("inject bundle drift in disposable test");
+                };
+                set_bundle_root(&SpecContentHash::from_text("substituted stored bundle"));
+                assert!(backend
+                    .reserve_live_sandbox_dispatch(request(), admission)
+                    .is_err());
+                set_bundle_root(fixture.bundle.root_hash());
                 let mut altered = serde_json::to_value(&effect).expect("effect JSON");
                 altered["summary"] = serde_json::json!("substituted attempted effect");
                 let substitute_effect = |payload: &str| {
@@ -3718,7 +3871,11 @@ mod tests {
                 assert_eq!(counts(), (0, 0));
                 assert_eq!(event_count(), before);
                 match trial {
-                    LiveGrantTrial::DeniedPolicy | LiveGrantTrial::FailedCheck => {
+                    LiveGrantTrial::DeniedPolicy
+                    | LiveGrantTrial::FailedCheck
+                    | LiveGrantTrial::MissingBundle
+                    | LiveGrantTrial::LegacyBundle
+                    | LiveGrantTrial::RequiredCheck => {
                         unreachable!("denied at issuance")
                     }
                     LiveGrantTrial::AmbiguousCommit => {

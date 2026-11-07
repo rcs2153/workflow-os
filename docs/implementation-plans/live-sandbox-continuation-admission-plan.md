@@ -168,6 +168,16 @@ verify immutable declarations and required check assurance and produce a
 separately scoped sandbox policy decision. This change does not enable
 provider execution or public commands.
 
+Implementation run `run-1794085918903339000-2` reads the exact validated
+bundle under both SQLite admission transactions. It matches the run
+identity, bundle root, workflow content, and approval's resolved execution
+context, then resolves the canonical declaration sets through the selected
+step. Missing, legacy, or changed bundles are denied. A required declaration
+is denied until the store can prove its attestation; a passing result and
+invocation event alone cannot satisfy required assurance. The bundle's
+sensitivity also contributes to the grant ceiling. No checks run in the
+transaction and no route, schema, or policy default changed.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes

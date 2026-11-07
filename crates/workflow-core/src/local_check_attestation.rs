@@ -22,6 +22,7 @@ pub(crate) mod runtime;
 #[allow(dead_code)]
 mod structural_coverage;
 
+pub(crate) use structural_coverage::authoritative_record_for_step;
 pub use verifier::AcceptedLocalCheckAttestation;
 
 const ATTESTATION_ID_MAX_BYTES: usize = 128;
