@@ -17680,6 +17680,17 @@ fn fixture_continuation_rejects_terminal_run_without_mutation() {
     );
     let write_request =
         github_pr_comment_fixture_continuation_request(&project, run_id.clone(), &attempted);
+    let approved_action = workflow_core::github_pr_comment_fixture_approval_action(&write_request)
+        .expect("fixture action label");
+    let mut changed = serde_json::to_value(&write_request).expect("request serializes");
+    changed["comment_body"] = serde_json::json!("Changed fixture comment body.");
+    let changed = serde_json::from_value(changed).expect("changed request deserializes");
+    assert_ne!(
+        approved_action,
+        workflow_core::github_pr_comment_fixture_approval_action(&changed)
+            .expect("changed fixture action label"),
+    );
+    assert!(!approved_action.contains(write_request.comment_body()));
     let fixture = github_pr_comment_fixture_continuation_fixture(&attempted);
     let stored = backend
         .read_exact_bundle(

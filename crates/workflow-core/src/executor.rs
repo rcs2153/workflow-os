@@ -11529,13 +11529,14 @@ pub fn validate_github_pr_comment_fixture_continuation(
         request.attempted_record,
         request.immutable_run_bundle,
     )?;
-    validate_fixture_continuation_action_binding(&durable_run, &request.write_request)?;
-
-    provider_write_approval_presentation_gate_for_record(
+    let action = fixture_continuation_action_commitment(&request.write_request)?;
+    validate_fixture_continuation_action_binding(&durable_run, &request.write_request, &action)?;
+    validate_fixture_continuation_approved_action(
         executor,
         &durable_run,
         request.attempted_record,
         &request.presentation_policy,
+        &action,
     )?;
     let side_effect_ids = [request.attempted_record.side_effect_id().clone()];
     let approval_linkage = crate::validate_side_effect_approval_linkage_from_store(
@@ -11559,10 +11560,35 @@ pub fn validate_github_pr_comment_fixture_continuation(
     })
 }
 
-fn validate_fixture_continuation_action_binding(
-    run: &WorkflowRun,
+/// Derives the payload-free action label for an exact fixture approval presentation.
+///
+/// The label supplements the human-readable scope; it does not authorize work.
+///
+/// # Errors
+///
+/// Rejects non-fixture requests or requests that cannot be committed.
+pub fn github_pr_comment_fixture_approval_action(
     request: &GitHubPullRequestCommentWriteRequest,
-) -> Result<(), WorkflowOsError> {
+) -> Result<String, WorkflowOsError> {
+    Ok(fixture_continuation_action_label(
+        &fixture_continuation_action_commitment(request)?,
+    ))
+}
+
+fn fixture_continuation_action_label(action: &SpecContentHash) -> String {
+    format!("validate fixture GitHub PR comment {action}")
+}
+
+fn fixture_continuation_action_commitment(
+    request: &GitHubPullRequestCommentWriteRequest,
+) -> Result<SpecContentHash, WorkflowOsError> {
+    if request.mode() != crate::GitHubPullRequestCommentWriteMode::Fixture {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.fixture_mode_required",
+            "fixture continuation accepts only fixture-mode request inputs",
+        ));
+    }
     let payload = serde_json::to_vec(request).map_err(|_| {
         executor_error(
             WorkflowOsErrorKind::Validation,
@@ -11573,7 +11599,14 @@ fn validate_fixture_continuation_action_binding(
     let mut hasher = Sha256::new();
     hasher.update(b"workflow-os/github-pr-comment-fixture-continuation-action/v1\0");
     hasher.update(payload);
-    let invocation = SpecContentHash::new(hex_digest(hasher.finalize()))?;
+    SpecContentHash::new(hex_digest(hasher.finalize()))
+}
+
+fn validate_fixture_continuation_action_binding(
+    run: &WorkflowRun,
+    request: &GitHubPullRequestCommentWriteRequest,
+    invocation: &SpecContentHash,
+) -> Result<(), WorkflowOsError> {
     let Some(step_id) = request.step_id() else {
         return Err(executor_error(
             WorkflowOsErrorKind::Validation,
@@ -11585,7 +11618,7 @@ fn validate_fixture_continuation_action_binding(
         &run.snapshot.identity.workflow_id,
         &run.snapshot.identity.run_id,
         step_id,
-        &invocation,
+        invocation,
     );
     let matches = run.events.iter().rev().find_map(|event| match &event.kind {
         WorkflowRunEventKind::OperationalExecutionWindowOpened(opening) => {
@@ -11599,6 +11632,72 @@ fn validate_fixture_continuation_action_binding(
             "github_pr_comment_fixture_continuation.action_binding_mismatch",
             "fixture continuation action does not match the durable execution window",
         ));
+    }
+    Ok(())
+}
+
+fn validate_fixture_continuation_approved_action(
+    executor: &LocalExecutor<'_, crate::SqliteStateBackend>,
+    run: &WorkflowRun,
+    record: &SideEffectRecord,
+    policy: &ApprovalPresentationDefaultEnforcementPolicy,
+    action: &SpecContentHash,
+) -> Result<(), WorkflowOsError> {
+    let invalid = || {
+        executor_error(
+            WorkflowOsErrorKind::Security,
+            "github_pr_comment_fixture_continuation.approved_action_mismatch",
+            "fixture continuation requires current proof of approval for the exact action",
+        )
+    };
+    let approval_id = provider_write_approval_reference(record)?;
+    let approval = run
+        .snapshot
+        .approval_requests
+        .iter()
+        .find(|approval| approval.approval_id == approval_id)
+        .ok_or_else(invalid)?;
+    let decision = provider_write_approval_decision(run, approval_id)?;
+    let marker = decision.proof_marker.as_ref().ok_or_else(invalid)?;
+    if decision.decision != ApprovalDecisionKind::Granted
+        || approval.step_id.as_ref() != record.step_id()
+        || approval
+            .expires_at
+            .is_some_and(|expiry| Timestamp::now_utc() >= expiry)
+    {
+        return Err(invalid());
+    }
+    let opening = run
+        .snapshot
+        .last_operational_opening_projection
+        .as_ref()
+        .ok_or_else(invalid)?;
+    if !run.events.iter().any(|event| {
+        event.sequence_number < opening.committed_result_cursor().sequence_number()
+            && matches!(&event.kind, WorkflowRunEventKind::ApprovalGranted(grant) if grant == &decision)
+    }) {
+        return Err(invalid());
+    }
+    let presentation = executor.resolve_approval_presentation_proof(
+        approval,
+        &LocalApprovalPresentationProof::PresentationId(marker.presentation_id().clone()),
+    )?;
+    if presentation.content_hash() != marker.presentation_content_hash()
+        || presentation.requested_action() != fixture_continuation_action_label(action)
+    {
+        return Err(invalid());
+    }
+    let verified = executor.approval_decision_with_presentation_policy(
+        approval,
+        decision.clone(),
+        policy,
+        Some(ApprovalPresentationSensitiveActionPosture::WriteAdjacent),
+    )?;
+    if !verified.proof_marker.as_ref().is_some_and(|verified| {
+        verified.presentation_id() == marker.presentation_id()
+            && verified.presentation_content_hash() == marker.presentation_content_hash()
+    }) {
+        return Err(invalid());
     }
     Ok(())
 }

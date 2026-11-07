@@ -54,6 +54,16 @@ opens only an existing current-schema database in SQLite read-only mode;
 inspection cannot initialize, migrate, or write the database. These tests do
 not establish the comment-specific authority or public positive path.
 
+Exact-action binding now extends to the original approval. The fixture
+request's payload-free action label must be the action on the presentation
+referenced by the persisted grant proof marker; the grant must precede the
+window opening, match its SideEffect step, and remain unexpired. Revalidating
+a different presentation is not a substitute for that marker. The public
+label derivation helper is non-authorizing and supplements, rather than
+replaces, the human-readable scope. The positive preparation path must use
+that label before approval and carry the same action commitment into window
+admission. Live provider approval behavior is unchanged.
+
 ## Verdict
 
 The first public continuation bridge establishes useful durable identity,

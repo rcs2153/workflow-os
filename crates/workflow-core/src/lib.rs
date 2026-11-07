@@ -328,7 +328,7 @@ pub use executor::{
     execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_projected_proof_markers,
     execute_with_report_artifact_and_proof_marker_gates,
-    execute_with_report_artifact_and_side_effect_gates,
+    execute_with_report_artifact_and_side_effect_gates, github_pr_comment_fixture_approval_action,
     load_github_pr_comment_proposed_side_effect_event_input,
     persist_authoritative_governance_report_artifact,
     persist_governance_authority_receipt_report_artifact, preview_governed_continuation,
