@@ -11487,6 +11487,15 @@ where
             "fixture continuation does not yet support delegated actor substitution",
         ));
     }
+    if request.write_request.mode() != crate::GitHubPullRequestCommentWriteMode::Fixture
+        || request.fixture.mode() != crate::GitHubPullRequestCommentWriteMode::Fixture
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_fixture_continuation.fixture_mode_required",
+            "fixture continuation accepts only fixture-mode request and response inputs",
+        ));
+    }
 
     let durable_run = executor
         .backend

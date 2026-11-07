@@ -869,6 +869,38 @@ fn provider_fixture_continuation_missing_input_is_non_leaking() {
 }
 
 #[test]
+fn provider_fixture_continuation_rejects_malformed_fixture_reference() {
+    let project = TestProject::new("provider-fixture-continuation-reference-invalid");
+    let request = project.path().join("continuation.json");
+    fs::write(
+        &request,
+        r#"{
+          "request": {},
+          "replacement_actor": "operator/reviewer",
+          "fixture": {"fixture_reference": 42}
+        }"#,
+    )
+    .expect("write continuation request");
+
+    let output = workflow_os(
+        &project,
+        &[
+            "provider",
+            "github-pr-comment",
+            "continue-sandbox",
+            "--request",
+            request.to_str().expect("request path"),
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains(
+        "github_pr_comment_fixture_continuation_cli.input.fixture.fixture_reference_invalid"
+    ));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn init_agent_harness_creates_scaffold_files() {
     let project = TestProject::new("agent-harness-create");
 

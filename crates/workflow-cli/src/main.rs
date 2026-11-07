@@ -537,6 +537,8 @@ fn load_github_pr_comment_fixture_continuation_input(
             "fixture continuation request must be a JSON object",
         )
     })?;
+    let fixture =
+        parse_github_pr_comment_continuation_fixture(continuation_json_field(object, "fixture")?)?;
     let write_request = serde_json::from_value::<GitHubPullRequestCommentWriteRequest>(
         continuation_json_field(object, "request")?.clone(),
     )
@@ -551,8 +553,6 @@ fn load_github_pr_comment_fixture_continuation_input(
         .map(|value| serde_json::from_value::<ActorId>(value.clone()))
         .transpose()
         .map_err(|_| continuation_cli_input_error("delegated_by"))?;
-    let fixture =
-        parse_github_pr_comment_continuation_fixture(continuation_json_field(object, "fixture")?)?;
     Ok(ParsedGitHubPrCommentFixtureContinuation {
         write_request,
         fixture,
@@ -633,6 +633,16 @@ fn parse_github_pr_comment_continuation_fixture(
     let object = value
         .as_object()
         .ok_or_else(|| continuation_cli_input_error("fixture"))?;
+    let fixture_reference = object
+        .get("fixture_reference")
+        .filter(|value| !value.is_null())
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| continuation_cli_input_error("fixture.fixture_reference"))
+        })
+        .transpose()?;
     let target = serde_json::from_value::<GitHubPullRequestCommentTarget>(
         continuation_json_field(object, "target")?.clone(),
     )
@@ -649,11 +659,6 @@ fn parse_github_pr_comment_continuation_fixture(
         continuation_json_field(object, "mode")?.clone(),
     )
     .map_err(|_| continuation_cli_input_error("fixture.mode"))?;
-    let fixture_reference = object
-        .get("fixture_reference")
-        .filter(|value| !value.is_null())
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned);
     let summary = continuation_json_field(object, "summary")?
         .as_str()
         .map(str::to_owned)
