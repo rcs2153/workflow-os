@@ -144,9 +144,20 @@ projections; a replacement harness must prove its actor and delegation posture;
 and exactly-once evidence is scoped to the selected existing idempotency and
 provider-reconciliation boundary rather than generalized globally. See the
 [focused review](docs/concepts/HOSTED_RECOVERY_AND_CROSS_HARNESS_QUEUE_RECONCILIATION_REVIEW.md).
-The next authorized phase is independent reproduction and an exact durable-
-prefix transition matrix for hosted partial-run recovery. Production code
-remains unauthorized until that matrix receives focused review.
+Independent exact-main reproduction now confirms the three reported early
+creation failures. Blocking `RunValidated` leaves a `Created` run, blocking
+`RunStarted` leaves a `Validated` run, and blocking `StepScheduled` leaves a
+`Running` run without a scheduled invocation. After fault removal, two exact
+retries still produce no queued work and no WorkReport: the first two prefixes
+fail with `executor.hosted_no_write.retry_posture.invalid`, while the third
+fails with `hosted.dispatch.scheduled_invocation.invalid`. See the
+[reproduction and transition
+matrix](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_REPRODUCTION_AND_TRANSITION_MATRIX.md).
+
+The next authorized phase is focused maintainer/security review of the exact
+durable-prefix classification, the proposed Core-owned reconciliation seam,
+and the permanent fault/concurrency/restart/restore test obligations.
+Production code remains unauthorized until that review accepts the boundary.
 
 The earlier P0 **continuity of authority release-gate** preemption established
 the three closed gates summarized below. Continuity of authority means that the
