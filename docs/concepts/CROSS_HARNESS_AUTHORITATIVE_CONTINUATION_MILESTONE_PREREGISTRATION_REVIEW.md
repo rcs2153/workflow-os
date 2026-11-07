@@ -1,6 +1,7 @@
 # Cross-Harness Authoritative Continuation Milestone Preregistration Review
 
-Status: accepted planning and architecture review; implementation not started
+Status: amended local Claude Desktop preregistration; same-actor fixture bridge
+merged; distinct-principal corpus and live proof pending
 
 ## Review Verdict
 
@@ -11,24 +12,35 @@ lawful action from kernel-owned state, prove that its actor and delegation remai
 authorized, execute one already-reviewed bounded effect, and leave enough durable
 truth for an independent reviewer to distinguish authority from execution.
 
-The review therefore accepts a Codex-to-LangGraph handoff around the existing
-GitHub PR-comment sandbox family. It rejects a generic provider-write command,
-conversation-based handoff, benchmark-only hidden state, and live execution in
-the first implementation slice.
+The amended primary trial is Codex to Claude Desktop on the same Mac around the
+existing GitHub PR-comment sandbox family. The original Codex-to-LangGraph
+selection remains historical evidence and an optional comparator. It cannot
+satisfy the primary trial. This is a test of independent harnesses, not
+cross-machine transport. The review rejects a generic provider-write command,
+conversation-based handoff, benchmark-only hidden state, and live execution
+before the fixture corpus is accepted.
 
 ## Selected Harnesses
 
 - Codex starts the governed run and reaches the preregistered interruption point.
-- A pinned LangGraph Python adapter acts as the replacement harness.
-- The LangGraph adapter must be independently implemented against documented
-  public Workflow OS CLI/JSON contracts.
-- Both adapters, dependency versions, configuration, and integration source line
-  counts must be preserved with the evaluation evidence.
+- Claude Desktop in a fresh session acts as the replacement harness. Verify
+  the actual app version, model, supported public tool surface, and how its
+  isolated identity and credentials are provisioned before the corpus.
+- The integrations must be independently implemented against the same
+  documented public Workflow OS contract. If the app cannot use it within
+  scope, report an integration blocker rather than substitute another harness.
+- Preserve setup steps, versions, redacted configuration, dependencies, and
+  integration source line counts with the evaluation evidence.
 
-The replacement receives no chat transcript, private Core storage, private Codex
-state, copied approval assertion, or evaluator answer key. It receives only the
-public identifiers and inputs needed to call Workflow OS. It must declare its
-actor and delegation instead of inheriting the first harness's identity.
+The replacement receives only documented public identifiers and inputs. No
+chat transcript, workspace-file side channel, copied private Core or Codex
+state, inherited approval assertion, or evaluator answer key may cross. Claude
+must authenticate a principal distinct from Codex and present a kernel-verified
+delegation for the exact run, approval proof, action, request/target, and window.
+The kernel re-resolves expiry, revocation, consumption and current evidence at
+use. An actor label or shared OS account does not prove identity. Only a later,
+separately approved live phase may provide a scoped provider credential through
+the approved transport.
 
 ## Selected Effect And Target
 
@@ -60,9 +72,10 @@ artificially easy to recover.
 
 ## Public Continuation Contract
 
-The existing library composition is not a sufficient adoption surface. Add a
-narrow CLI/JSON bridge for the GitHub PR-comment sandbox family. A candidate shape
-is:
+The merged public fixture bridge is a no-transport, same-actor baseline. Keep
+its fail-closed behavior. Before using it for a distinct-principal claim,
+implement and review the public delegation verification boundary. A candidate
+live invocation, not available on the merged fixture path, is:
 
 ```text
 workflow-os --json provider github-pr-comment continue-sandbox \
@@ -73,7 +86,8 @@ The implementation review may refine naming and request encoding. It may not
 weaken these requirements:
 
 1. Load the exact durable run and immutable bundle.
-2. Resolve the supplied actor and delegation in the same call.
+2. Authenticate the distinct replacement actor and re-resolve its exact
+   delegation in the same call, not from a claimed actor label or checkpoint.
 3. Reassess approval-presentation proof, evidence, checks, execution window,
    target commitment, attempted SideEffect, and idempotency posture.
 4. Reuse the reviewed GitHub PR-comment sandbox composition.
@@ -92,7 +106,8 @@ provider effect.
 
 ## Preregistered Conditions
 
-The fixture corpus and eventual live run must include:
+The fixture corpus must exercise the following in Claude Desktop without live
+credentials or provider calls:
 
 - exact approved continuation;
 - denied continuation;
@@ -101,10 +116,15 @@ The fixture corpus and eventual live run must include:
 - missing, expired, or revoked delegation;
 - stale approval or execution window;
 - missing or changed required evidence;
-- post-effect/pre-ack interruption;
 - replay after terminal completion;
 - a second replacement-harness attempt; and
-- conflicting idempotency or provider observation.
+- conflicting idempotency or fixture provider observation.
+
+For the live slice, use the same Claude Desktop integration for one separately
+approved disposable target. Interrupt after provider acceptance and before
+local acknowledgement, reconcile without dispatching again, and have an
+independent reviewer reconstruct the single effect and authority chain. A
+fixture result is not evidence of a real provider outcome.
 
 Each result must identify whether procedure authority, invocation authority, or
 execution truth passed or failed. A correct provider outcome does not cure invalid
@@ -118,7 +138,8 @@ before recording the assessment.
 
 Preserve per condition:
 
-- integration source and configuration;
+- setup steps, app/model and dependency versions, integration source and
+  redacted configuration;
 - custom state or glue outside Workflow OS;
 - recovery turns and evidence lookups;
 - gross, cached, uncached, and output tokens where available;
@@ -136,9 +157,10 @@ across independently implemented execution hosts.
 
 ## Delivery Sequence
 
-1. Implement and review the fixture-only public continuation bridge.
-2. Implement the two thin harness adapters, adversarial corpus, measurement
-   capture, and reviewer tooling without live mutation.
+1. Fixture-only, same-actor public continuation bridge: merged at `eb92306e`.
+2. Implement and review the distinct-principal public authority boundary, then
+   run the Codex-to-Claude Desktop fixture corpus with measurements and
+   independent reviewer tooling. No live mutation.
 3. Govern and execute one exact disposable live-sandbox proof, then obtain an
    independent rerun and review.
 
@@ -152,7 +174,16 @@ nested harness runtime, recursive agents, agent teams, shared memory, enterprise
 identity administration, hosted orchestration, broad autonomy defaults, or a
 production interoperability claim.
 
-## Governance Record
+## Amendment Governance Record
+
+- workflow: `dg/d`
+- run: `run-1794034836480821000-2`
+- approval: `approval/run-1794034836480821000-2/planning-approved`
+- approval presentation: `presentation/b02e81daefff05c3`
+- approval outcome: granted under delegated maintainer authority after full
+  scope presentation; documentation only, no app or provider execution
+
+## Original Governance Record
 
 - workflow: `dg/review`
 - run: `run-1794022978943775000-2`

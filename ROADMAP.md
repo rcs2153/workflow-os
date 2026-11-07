@@ -131,10 +131,12 @@ Plan](docs/implementation-plans/hosted-partial-run-creation-recovery-plan.md).
 
 The hosted admission contention gate reopened during fixture-bridge delivery.
 The same 25-job assertion failed on both the exact base and fixture head in
-isolated PostgreSQL trials. Deliver the separate bounded admission coordination
-repair with exact-head CI before resuming fixture delivery. Do not weaken the
-conformance assertion or use a passing rerun as the repair. See the
-[contention recurrence report](docs/concepts/HOSTED_ADMISSION_CONTENTION_RECURRENCE_REPORT.md).
+isolated PostgreSQL trials. The bounded coordination repair (`e4df5494`) and
+refreshed fixture bridge (`eb92306e`) both passed all nine exact-head CI jobs,
+including PostgreSQL 17.5. This closes the fixture delivery blocker, not hosted
+pilot admission. Public HTTP contention, supervised worker replacement and
+reconciliation of conflicting legacy histories remain separate pilot gates.
+See the [contention recurrence report](docs/concepts/HOSTED_ADMISSION_CONTENTION_RECURRENCE_REPORT.md).
 
 The ordered queue is:
 
@@ -212,20 +214,26 @@ authenticated delegation, packaged stable harness contracts, one real
 sandboxed provider write, post-effect/pre-ack reconciliation, duplicate
 prevention, and independent reconstruction through public surfaces.
 
-The focused preregistration review now selects Codex as the starting harness, a
-pinned independently implemented LangGraph Python adapter as the replacement,
-and the existing GitHub PR-comment live-sandbox family as the bounded
-consequential effect. The handoff interrupts after immutable input, approval
+The current preregistration selects Codex as the starting harness and Claude
+Desktop on the same Mac as the independent replacement. This tests harness
+portability, not cross-machine transport. LangGraph remains historical evidence
+and an optional comparator, not a substitute for Claude Desktop. The existing
+GitHub PR-comment live-sandbox family remains the bounded consequential effect.
+The handoff interrupts after immutable input, approval
 presentation and grant, actor/delegation posture, evidence/checks, execution
 window, exact target/request commitment, and attempted SideEffect intent are
-durable, but before provider HTTP dispatch. The replacement receives no
-transcript or copied authority and must re-resolve lawful continuation through
-public Workflow OS surfaces.
+durable, but before provider HTTP dispatch. Claude must present a distinct,
+verified principal with an exact scoped delegation and re-resolve current
+authority through public Workflow OS surfaces. Neither harness gets direct
+access to the kernel store for the handoff; a shared Mac is not a shared state
+or authority channel.
 
-The next implementation phase is a narrow, fixture-first CLI/JSON continuation
-bridge for that existing provider family. It is not a generic provider-write
-surface. Two thin harness adapters and the adversarial measurement corpus follow
-only after that bridge passes focused review; one explicitly authorized live
+The merged CLI/JSON continuation bridge is fixture-only and same-actor. The next
+implementation slice must establish a public, fixture-only distinct-principal
+handoff with durable delegation verification, then exercise the preregistered
+corpus in Claude Desktop. If the app cannot consume the approved public surface
+without private state access, record the integration blocker; do not substitute
+a same-actor CLI script or another harness. A separately authorized live
 disposable-sandbox run and independent rerun are the final slice. See the
 [preregistration review](docs/concepts/CROSS_HARNESS_AUTHORITATIVE_CONTINUATION_MILESTONE_PREREGISTRATION_REVIEW.md).
 
@@ -255,7 +263,7 @@ The next phase is a narrow blocker correction. It must model the exact
 non-terminal interruption posture, bind current execution-window and
 evidence/check facts from kernel-owned durable state, enforce fixture-only and
 strict input behavior, and prove the public CLI success and adversarial paths.
-No Codex/LangGraph adapter, live provider call, generic write surface, or
+No replacement-harness adapter, live provider call, generic write surface, or
 cross-harness product claim may proceed until the corrected bridge passes a
 second focused review.
 
@@ -274,9 +282,9 @@ The snapshot correction now rechecks the event history, SideEffect,
 window, and dispatch reservation in one final SQLite read transaction, and
 rejects required check declarations that the fixture cannot attest. The
 [exact-head maintainer recheck](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_CORRECTED_REVIEW.md#final-maintainer-recheck)
-accepts this fixture-only boundary. The next increment is governed PR delivery
-and local sync before the independent fixture corpus. This does not authorize
-live dispatch, unverifiable check declarations, or cross-principal delegation.
+accepts this fixture-only boundary. Governed delivery and local sync are complete
+at `eb92306e`. This implementation does not authorize live dispatch,
+unverifiable check declarations, or cross-principal delegation.
 
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,

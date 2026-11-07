@@ -1,7 +1,7 @@
 # Cross-Harness Authoritative Continuation Milestone Plan
 
-Status: preregistration selections accepted for focused review; runtime and live
-provider execution not started
+Status: fixture-only same-actor bridge merged; local Claude Desktop
+preregistration amended; distinct-principal runtime and live proof pending
 
 ## 1. Product Question
 
@@ -76,6 +76,24 @@ The second harness must identify the acting principal and any delegation used
 for continuation. Same-human, delegated-agent, service-actor, and unauthorized
 actor substitution are distinct cases. The checkpoint or continuation record
 is non-authorizing and must not upgrade the replacement harness's authority.
+For the primary trial, Codex and Claude Desktop run on the same Mac but use
+separate sessions and distinct verified principals. The public adapter must
+bind Claude's authenticated identity to a current kernel-issued delegation;
+an actor string, the same OS user, or access to a local file is not identity
+proof. The delegation binds the exact run, approval and presentation proof,
+action, target/request, execution window, expiry, revocation and consumption
+posture. Re-resolve it at use together with current evidence and checks. The
+original approval stays bound to the immutable intent; it is not a credential
+for the replacement actor.
+
+Start Claude in a fresh session with access only to the documented integration
+surface. Pass bounded public run/action identifiers and documented inputs, not
+Codex's transcript, workspace files as an answer channel, private Core state,
+or provider credentials for the fixture. The kernel may retain the same local
+store; Claude and its integration may not read it directly. Verify the public
+tool surface and how credentials are isolated before running the corpus. If
+Claude Desktop cannot use that surface, record the blocker without replacing
+it with Claude Code, LangGraph, or a same-actor script.
 
 Preserve and publish the integration code, dependency versions, configuration,
 and line count. Distinguish framework-native behavior from evaluator-authored
@@ -145,7 +163,8 @@ missing evidence, terminal replay, and a second replacement attempt.
 
 Record per condition:
 
-- harness-specific integration source lines and configuration;
+- harness/app and model versions, tool and dependency versions, setup steps,
+  harness-specific integration source lines and redacted configuration;
 - custom state or glue code outside Workflow OS;
 - recovery turns and evidence lookups;
 - gross input, cached input, output, and total tokens;
@@ -185,11 +204,11 @@ An independent reviewer receives:
 - the public integration code;
 - the immutable run/checkpoint identifiers;
 - bounded inspect, event, evidence, SideEffect, and WorkReport surfaces;
-- the preregistered expected decisions; and
+- condition identifiers and the review rubric; and
 - the effect provider's bounded reconciliation evidence.
 
-The reviewer must not receive the agents' hidden reasoning or an evaluator
-answer key before recording the verdict. The review must distinguish what
+Reveal expected decisions only after the reviewer records an independent
+verdict. Do not supply the agents' hidden reasoning. The review distinguishes what
 Workflow OS proved, what the execution host asserted, and what the external
 provider or storage owner controls.
 
@@ -197,7 +216,8 @@ provider or storage owner controls.
 
 The milestone passes only when:
 
-- both harness integrations use the documented public boundary;
+- Codex and the actual Claude Desktop app on the same Mac independently use
+  the documented public boundary with distinct verified principals;
 - replacement continuation is correct without conversational handoff;
 - every adversarial authority case fails closed;
 - the selected bounded effect has one accepted, reconciled outcome at the
@@ -227,11 +247,12 @@ This milestone does not implement:
 
 ## 13. Accepted Preregistration Selections
 
-The focused planning review selected:
+The amended focused planning review selects:
 
 - **starting harness:** Codex;
-- **replacement harness:** a pinned, independently implemented LangGraph Python
-  adapter;
+- **replacement harness:** Claude Desktop on the same Mac, through its own
+  documented public Workflow OS integration; record the app/model and tool
+  versions used. LangGraph is an optional comparator only;
 - **consequential effect:** the existing bounded GitHub PR-comment live-sandbox
   provider-write family;
 - **target:** one maintainer-owned disposable pull request in a non-production
@@ -255,7 +276,10 @@ workflow-os --json provider github-pr-comment continue-sandbox \
   --request <bounded-request.json> --auth-stdin
 ```
 
-The exact spelling may change during implementation review, but the contract must:
+The merged fixture command accepts no auth or dispatch. Its same-actor
+verification is a baseline, not evidence that distinct-principal continuation
+is supported. The exact live invocation may change during implementation
+review, but the contract must:
 
 - load the exact durable run and immutable run bundle;
 - resolve actor and delegation in the same invocation;
@@ -276,18 +300,29 @@ Implement the milestone in three separately governed slices:
 1. **Public continuation bridge, fixture first.** Add the narrow CLI/JSON bridge,
    reuse the existing GitHub PR-comment sandbox composition, and prove fail-closed
    behavior without a live credential or provider mutation.
-2. **Independent harness corpus.** Add the pinned Codex and LangGraph adapters,
-   adversarial fixtures, measurement capture, and reviewer tooling. Keep this
-   slice fixture-only.
+2. **Independent harness corpus.** First implement and review the public
+   fixture-only distinct-principal authority boundary. Then exercise it with
+   independent Codex and Claude Desktop integrations, adversarial fixtures,
+   measurement capture, and reviewer tooling. No provider credentials or
+   effects enter this slice.
 3. **Live disposable-sandbox proof.** After the first two slices and their
    focused reviews pass, authorize one exact live target, perform the interrupted
    handoff, reconcile the effect, and obtain an independent rerun and review.
 
-The fixture and live evaluation must cover approved exact continuation, denial,
+Across the fixture and live slices, cover approved exact continuation, denial,
 changed target or action, unauthorized actor, missing/expired/revoked delegation,
 stale approval or execution window, missing evidence, post-effect/pre-ack
 ambiguity, terminal replay, a second replacement attempt, and conflicting
 idempotency or provider observation.
+
+The fixture corpus must run exact allow, denial, target or action drift, stale
+authority, missing/expired/revoked delegation, unauthorized actor, evidence
+changes, terminal replay, and duplicate prevention with zero provider calls.
+Verify fail-closed cases leave no newly authorized effect; fixture acceptance
+does not prove a provider outcome. The live proof must separately authorize one
+disposable target, stop after provider acceptance but before local acknowledgement,
+reconcile through provider observation without resending, and let an independent
+reviewer reconstruct one accepted outcome from the public record.
 
 No slice may claim fixed token savings, production interoperability, general
 provider writes, nested harness runtime, or production multi-agent orchestration.
