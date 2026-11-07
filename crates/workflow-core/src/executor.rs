@@ -15606,7 +15606,11 @@ fn dispatch_hosted_plan(
                 })
         },
     )?;
-    executor.backend.rehydrate_run(&plan.event_builder.run_id)
+    retry_hosted_admission_transaction(
+        &plan.event_builder.run_id,
+        "executor.hosted_no_write.rehydrate_retry_exhausted",
+        || executor.backend.rehydrate_run(&plan.event_builder.run_id),
+    )
 }
 
 fn ensure_hosted_invoke_policy(
@@ -22120,4 +22124,59 @@ fn executor_error(
     message: impl Into<String>,
 ) -> WorkflowOsError {
     WorkflowOsError::new(kind, code, message)
+}
+
+#[cfg(test)]
+mod hosted_admission_retry_tests {
+    use super::*;
+
+    #[test]
+    fn retries_retryable_postgres_conflicts_until_success() {
+        let run_id = WorkflowRunId::generate();
+        let mut attempts = 0;
+        let result = retry_hosted_admission_transaction(
+            &run_id,
+            "executor.hosted_no_write.rehydrate_retry_exhausted",
+            || {
+                attempts += 1;
+                if attempts < 3 {
+                    Err(executor_error(
+                        WorkflowOsErrorKind::InvalidState,
+                        "postgres_state.transaction.retryable",
+                        "retryable test conflict",
+                    ))
+                } else {
+                    Ok("rehydrated")
+                }
+            },
+        );
+
+        assert_eq!(result.as_deref(), Ok("rehydrated"));
+        assert_eq!(attempts, 3);
+    }
+
+    #[test]
+    fn maps_persistent_rehydrate_conflicts_to_stage_specific_exhaustion() {
+        let run_id = WorkflowRunId::generate();
+        let mut attempts = 0;
+        let result = retry_hosted_admission_transaction::<()>(
+            &run_id,
+            "executor.hosted_no_write.rehydrate_retry_exhausted",
+            || {
+                attempts += 1;
+                Err(executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "postgres_state.transaction.retryable",
+                    "retryable test conflict",
+                ))
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(error)
+                if error.code() == "executor.hosted_no_write.rehydrate_retry_exhausted"
+        ));
+        assert_eq!(attempts, HOSTED_ADMISSION_TRANSACTION_ATTEMPTS);
+    }
 }

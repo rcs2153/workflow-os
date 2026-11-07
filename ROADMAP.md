@@ -163,11 +163,14 @@ repairing exactly once. The broader contention gate initially found 22 of 25
 simultaneous distinct hosted creates exhausting serialization retries. A
 bounded blocker fix assigns retry ownership to the Core hosted no-write
 admission seam around only immutable-bundle publication, prefix
-reconciliation, and dispatch. The corrected fixture carries all 25 requests
-to lawful queued posture, and forced exhaustion leaves bounded stage-specific
-partial state before exact recovery. Focused review is accepted after adding
-per-run replay and all-three-stage exhaustion proof. The P0 remains open
-through exact-head CI and an independent clean-environment rerun. See the [implementation
+reconciliation, dispatch, and final durable-state rehydration. The first
+exact-head run completed 24 of 25 requests and exposed that previously
+unbounded final read; it was not dismissed as a flake. The corrected fixture
+carries all 25 requests to lawful queued posture, and forced exhaustion leaves
+bounded stage-specific partial state before exact recovery. Focused review is
+accepted after adding per-run replay and all-four-stage exhaustion proof. The
+P0 remains open through renewed exact-head CI and an independent
+clean-environment rerun. See the [implementation
 report](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_RECOVERY_IMPLEMENTATION_REPORT.md),
 the [acceptance rerun](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_ACCEPTANCE_RERUN.md),
 and the [contention-fix review](docs/concepts/HOSTED_ADMISSION_CONTENTION_BLOCKER_FIX_REVIEW.md).

@@ -185,10 +185,14 @@ This plan does not add:
 
 ## 10. Next Phase
 
-The next phase is exact-head CI followed by an independent clean-environment
-rerun. Focused maintainer/security review accepted the bounded hosted admission
-retry contract after adding per-run replay assertions and stage-specific
-exhaustion tests. The restore gate is closed: an interrupted
+The next phase is renewed exact-head CI followed by an independent
+clean-environment rerun. The first exact-head run completed 24 of 25 concurrent
+creates and exposed a raw retryable conflict from the final post-dispatch
+rehydration read. The blocker correction extends the bounded hosted-admission
+contract to that idempotent read and adds stage-specific exhaustion coverage.
+Focused maintainer/security review otherwise accepted the retry contract after
+adding per-run replay assertions and stage-specific exhaustion tests. The
+restore gate is closed: an interrupted
 `RunCreated`-only prefix survived backup and restore, repaired once, and
 replayed without another append. The corrected contention fixture carries all
 25 simultaneous distinct requests to lawful queued posture, while a forced

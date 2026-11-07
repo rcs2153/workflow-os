@@ -88,9 +88,10 @@ Temporary stage diagnostics classified the 22 exhausted requests:
 - hosted dispatch: 1.
 
 The evidence ruled out a single-table fix. The hosted no-write admission seam
-now owns a bounded retry contract around exactly those three idempotent
-storage operations. It does not rerun policy evaluation, provider execution,
-or arbitrary PostgreSQL closures. Each operation retains the existing
+now owns a bounded retry contract around those three idempotent storage
+operations and the final post-dispatch durable-state rehydration. It does not
+rerun policy evaluation, provider execution, or arbitrary PostgreSQL closures.
+Each operation retains the existing
 serializable transaction and exact replay contract.
 
 The hosted admission wrapper:
@@ -116,6 +117,7 @@ corresponding stage-specific code:
 executor.hosted_no_write.immutable_bundle_retry_exhausted
 executor.hosted_no_write.creation_prefix_retry_exhausted
 executor.hosted_no_write.dispatch_retry_exhausted
+executor.hosted_no_write.rehydrate_retry_exhausted
 ```
 
 Immutable-bundle exhaustion left zero events, no immutable manifest, and no
@@ -148,7 +150,7 @@ boundary.
 ## Validation
 
 - 25-distinct-job PostgreSQL shared-state milestone: passed.
-- all three stage-specific forced retry exhaustion, bounded-state assertion,
+- all four stage-specific retry exhaustion contracts, bounded-state assertion,
   recovery, and replay cases: passed.
 - interrupted-prefix backup and restore rehearsal: passed.
 - `cargo clippy -p workflow-core --all-targets -- -D warnings`: passed.
