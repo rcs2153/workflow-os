@@ -11523,21 +11523,32 @@ pub fn validate_github_pr_comment_fixture_continuation(
             "fixture continuation requires the exact durable attempted side effect",
         ));
     }
-    validate_fixture_continuation_authoritative_state(
-        executor.backend,
-        &durable_run,
-        request.attempted_record,
-        request.immutable_run_bundle,
-    )?;
+    if !matches!(
+        durable_run.snapshot.status,
+        WorkflowRunStatus::Running | WorkflowRunStatus::Retrying
+    ) {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "github_pr_comment_fixture_continuation.run_not_active",
+            "fixture continuation requires an active resumable workflow run",
+        ));
+    }
     let action = fixture_continuation_action_commitment(&request.write_request)?;
-    validate_fixture_continuation_action_binding(&durable_run, &request.write_request, &action)?;
-    validate_fixture_continuation_approved_action(
+    let grant_sequence = validate_fixture_continuation_approved_action(
         executor,
         &durable_run,
         request.attempted_record,
         &request.presentation_policy,
         &action,
     )?;
+    validate_fixture_continuation_authoritative_state(
+        executor.backend,
+        &durable_run,
+        request.attempted_record,
+        request.immutable_run_bundle,
+        grant_sequence,
+    )?;
+    validate_fixture_continuation_action_binding(&durable_run, &request.write_request, &action)?;
     let side_effect_ids = [request.attempted_record.side_effect_id().clone()];
     let approval_linkage = crate::validate_side_effect_approval_linkage_from_store(
         store,
@@ -11642,7 +11653,7 @@ fn validate_fixture_continuation_approved_action(
     record: &SideEffectRecord,
     policy: &ApprovalPresentationDefaultEnforcementPolicy,
     action: &SpecContentHash,
-) -> Result<(), WorkflowOsError> {
+) -> Result<EventSequenceNumber, WorkflowOsError> {
     let invalid = || {
         executor_error(
             WorkflowOsErrorKind::Security,
@@ -11667,17 +11678,10 @@ fn validate_fixture_continuation_approved_action(
     {
         return Err(invalid());
     }
-    let opening = run
-        .snapshot
-        .last_operational_opening_projection
-        .as_ref()
-        .ok_or_else(invalid)?;
-    if !run.events.iter().any(|event| {
-        event.sequence_number < opening.committed_result_cursor().sequence_number()
-            && matches!(&event.kind, WorkflowRunEventKind::ApprovalGranted(grant) if grant == &decision)
-    }) {
-        return Err(invalid());
-    }
+    let grant_sequence = run.events.iter().rev().find_map(|event| {
+        matches!(&event.kind, WorkflowRunEventKind::ApprovalGranted(grant) if grant == &decision)
+            .then_some(event.sequence_number)
+    }).ok_or_else(invalid)?;
     let presentation = executor.resolve_approval_presentation_proof(
         approval,
         &LocalApprovalPresentationProof::PresentationId(marker.presentation_id().clone()),
@@ -11699,7 +11703,7 @@ fn validate_fixture_continuation_approved_action(
     }) {
         return Err(invalid());
     }
-    Ok(())
+    Ok(grant_sequence)
 }
 
 fn validate_fixture_continuation_authoritative_state(
@@ -11707,17 +11711,8 @@ fn validate_fixture_continuation_authoritative_state(
     run: &WorkflowRun,
     attempted_record: &SideEffectRecord,
     stored: &crate::StoredImmutableRunBundle,
+    grant_sequence: EventSequenceNumber,
 ) -> Result<(), WorkflowOsError> {
-    if !matches!(
-        run.snapshot.status,
-        WorkflowRunStatus::Running | WorkflowRunStatus::Retrying
-    ) {
-        return Err(executor_error(
-            WorkflowOsErrorKind::InvalidState,
-            "github_pr_comment_fixture_continuation.run_not_active",
-            "fixture continuation requires an active resumable workflow run",
-        ));
-    }
     let opening = run
         .snapshot
         .last_operational_opening_projection
@@ -11729,6 +11724,13 @@ fn validate_fixture_continuation_authoritative_state(
                 "fixture continuation requires a durable operational execution window",
             )
         })?;
+    if grant_sequence >= opening.committed_result_cursor().sequence_number() {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Security,
+            "github_pr_comment_fixture_continuation.approval_after_opening",
+            "fixture continuation window must be opened after the exact action was approved",
+        ));
+    }
     if !backend.fixture_predispatch_attempt_is_current(
         run,
         attempted_record.actor(),

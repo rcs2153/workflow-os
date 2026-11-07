@@ -64,6 +64,13 @@ replaces, the human-readable scope. The positive preparation path must use
 that label before approval and carry the same action commitment into window
 admission. Live provider approval behavior is unchanged.
 
+The focused regression now persists the exact-action presentation before the
+approval decision. With that durable grant, the original request reaches the
+missing-window gate while a changed body is rejected at the approval gate;
+neither path mutates events or the SideEffect. Grant validation is independent
+of opening, so preparation can reuse it as a precondition rather than relying
+on a window to establish the grant.
+
 ## Verdict
 
 The first public continuation bridge establishes useful durable identity,

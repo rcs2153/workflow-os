@@ -1822,6 +1822,20 @@ fn approval_presentation_record(
     presentation_id: &str,
     presented_at: Timestamp,
 ) -> ApprovalPresentationRecord {
+    approval_presentation_record_for_action(
+        approval,
+        presentation_id,
+        presented_at,
+        "approve gated workflow step",
+    )
+}
+
+fn approval_presentation_record_for_action(
+    approval: &ApprovalRequest,
+    presentation_id: &str,
+    presented_at: Timestamp,
+    requested_action: &str,
+) -> ApprovalPresentationRecord {
     let strict_non_goals = vec![
         "No hidden approvals.".to_owned(),
         "No runtime semantic changes.".to_owned(),
@@ -1837,7 +1851,7 @@ fn approval_presentation_record(
         Some(&approval.workflow_version),
         Some(&approval.schema_version),
         approval.step_id.as_ref(),
-        "approve gated workflow step",
+        requested_action,
         "validate approval presentation proof before approval decision",
         "approval-presentation opt-in enforcement only",
         &strict_non_goals,
@@ -1857,7 +1871,7 @@ fn approval_presentation_record(
         workflow_version: Some(approval.workflow_version.clone()),
         schema_version: Some(approval.schema_version.clone()),
         step_id: approval.step_id.clone(),
-        requested_action: "approve gated workflow step".to_owned(),
+        requested_action: requested_action.to_owned(),
         work_summary: "validate approval presentation proof before approval decision".to_owned(),
         approved_scope: "approval-presentation opt-in enforcement only".to_owned(),
         strict_non_goals,
@@ -17647,10 +17661,25 @@ fn fixture_continuation_rejects_terminal_run_without_mutation() {
     )
     .expect("bundle-backed run pauses");
     let approval = paused.run().snapshot.approval_requests[0].clone();
-    let presentation = approval_presentation_record(
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id.clone(),
+        )
+        .expect("approval reference"),
+    );
+    let write_request =
+        github_pr_comment_fixture_continuation_request(&project, run_id.clone(), &attempted);
+    let approved_action = workflow_core::github_pr_comment_fixture_approval_action(&write_request)
+        .expect("fixture action label");
+    let presentation = approval_presentation_record_for_action(
         &approval,
         "presentation/fixture-continuation-success",
         Timestamp::now_utc(),
+        &approved_action,
     );
     backend
         .write_approval_presentation_record(&presentation)
@@ -17659,7 +17688,7 @@ fn fixture_continuation_rejects_terminal_run_without_mutation() {
         .decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
             approval: project.approval_request(
                 run_id.clone(),
-                approval.approval_id.clone(),
+                approval.approval_id,
                 ApprovalDecisionKind::Granted,
             ),
             proof: LocalApprovalPresentationProof::PresentationId(
@@ -17668,20 +17697,6 @@ fn fixture_continuation_rejects_terminal_run_without_mutation() {
             max_presentation_age: None,
         })
         .expect("proof-backed approval completes");
-    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
-        &backend,
-        &project,
-        run_id.clone(),
-        SideEffectReference::new(
-            SideEffectReferenceKind::ApprovalDecision,
-            approval.approval_id,
-        )
-        .expect("approval reference"),
-    );
-    let write_request =
-        github_pr_comment_fixture_continuation_request(&project, run_id.clone(), &attempted);
-    let approved_action = workflow_core::github_pr_comment_fixture_approval_action(&write_request)
-        .expect("fixture action label");
     let mut changed = serde_json::to_value(&write_request).expect("request serializes");
     changed["comment_body"] = serde_json::json!("Changed fixture comment body.");
     let changed = serde_json::from_value(changed).expect("changed request deserializes");
@@ -17736,6 +17751,9 @@ fn fixture_continuation_rejects_terminal_run_without_mutation() {
     );
     let active_backend = SqliteStateBackend::open(project.path().join("active.sqlite3"))
         .expect("active state backend");
+    active_backend
+        .write_approval_presentation_record(&presentation)
+        .expect("original presentation persists in active fixture");
     for event in &events_before {
         active_backend
             .append_event(event)
@@ -17748,28 +17766,37 @@ fn fixture_continuation_rejects_terminal_run_without_mutation() {
     assert_eq!(active_run.snapshot.status, WorkflowRunStatus::Running);
     let active_events = active_backend.read_events(&run_id).expect("active events");
     let active_executor = LocalExecutor::new(&active_backend, &registry);
-    let error = validate_github_pr_comment_fixture_continuation(
-        &active_executor,
-        &backend,
-        GitHubPrCommentFixtureContinuationValidationRequest {
-            run: &active_run,
-            attempted_record: &attempted,
-            write_request,
-            fixture: &fixture,
-            replacement_actor: &replacement_actor,
-            delegated_by: None,
-            presentation_policy:
-                ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
-                    LocalApprovalPresentationProof::ResolveByRunAndApproval,
-                    ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
-                ),
-            immutable_run_bundle: &stored,
-        },
-    )
-    .expect_err("active run without durable window fails closed");
+    let validate = |write_request| {
+        validate_github_pr_comment_fixture_continuation(
+            &active_executor,
+            &backend,
+            GitHubPrCommentFixtureContinuationValidationRequest {
+                run: &active_run,
+                attempted_record: &attempted,
+                write_request,
+                fixture: &fixture,
+                replacement_actor: &replacement_actor,
+                delegated_by: None,
+                presentation_policy:
+                    ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                        LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                        ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+                    ),
+                immutable_run_bundle: &stored,
+            },
+        )
+    };
+    let error =
+        validate(write_request).expect_err("active run without durable window fails closed");
     assert_eq!(
         error.code(),
         "github_pr_comment_fixture_continuation.execution_window_missing"
+    );
+    assert_eq!(
+        validate(changed)
+            .expect_err("changed body fails at original grant")
+            .code(),
+        "github_pr_comment_fixture_continuation.approved_action_mismatch"
     );
     assert_eq!(
         active_events,
