@@ -3426,9 +3426,26 @@ fn github_pr_comment_attempted_record_for_provider_write_target(
     approval_reference: SideEffectReference,
     target: &GitHubPullRequestCommentTarget,
 ) -> SideEffectRecord {
+    github_pr_comment_attempted_record_with_id(
+        backend,
+        project,
+        run_id,
+        approval_reference,
+        target,
+        SideEffectId::new("side-effect/github-pr-comment-provider-write").expect("side-effect id"),
+    )
+}
+
+fn github_pr_comment_attempted_record_with_id(
+    backend: &impl SideEffectRecordStore,
+    project: &TestProject,
+    run_id: WorkflowRunId,
+    approval_reference: SideEffectReference,
+    target: &GitHubPullRequestCommentTarget,
+    side_effect_id: SideEffectId,
+) -> SideEffectRecord {
     let proposed = SideEffectRecord::new(SideEffectRecordDefinition {
-        side_effect_id: SideEffectId::new("side-effect/github-pr-comment-provider-write")
-            .expect("side-effect id"),
+        side_effect_id,
         lifecycle_state: SideEffectLifecycleState::Proposed,
         target: SideEffectTargetReference::new(
             SideEffectTargetKind::AdapterResource,
@@ -17913,6 +17930,16 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
     assert_eq!(opened, opening_id);
     let reader = SqliteStateBackend::open_read_only(&active_path).expect("replacement opens state");
     let interrupted = reader.rehydrate_run(&run_id).expect("interrupted run");
+    changed_result["result_id"] = serde_json::json!("result/fixture-continuation-failed");
+    changed_result["status"] =
+        serde_json::to_value(workflow_core::LocalCheckResultStatus::Failed).expect("status JSON");
+    event.kind = WorkflowRunEventKind::LocalCheckResultRecorded(
+        serde_json::from_value(changed_result).expect("later check fact"),
+    );
+    event.sequence_number =
+        EventSequenceNumber::new(interrupted.snapshot.last_sequence_number.get() + 1)
+            .expect("later sequence");
+    event.event_id = EventId::new("event/fixture-check-later-failure").expect("event");
     let replacement = LocalExecutor::new(&reader, &registry);
     let result = validate_github_pr_comment_fixture_continuation(
         &replacement,
@@ -17931,6 +17958,8 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
             &active_executor,
             &active_path,
             request_for_run(&interrupted),
+            &project,
+            &event,
         );
         return;
     }
@@ -17971,16 +18000,6 @@ fn fixture_continuation_validates_prepared_window_and_rejects_drift() {
         reader.rehydrate_run(&run_id).expect("single window"),
         interrupted
     );
-    changed_result["result_id"] = serde_json::json!("result/fixture-continuation-failed");
-    changed_result["status"] =
-        serde_json::to_value(workflow_core::LocalCheckResultStatus::Failed).expect("status JSON");
-    event.kind = WorkflowRunEventKind::LocalCheckResultRecorded(
-        serde_json::from_value(changed_result).expect("later check fact"),
-    );
-    event.sequence_number =
-        EventSequenceNumber::new(interrupted.snapshot.last_sequence_number.get() + 1)
-            .expect("later sequence");
-    event.event_id = EventId::new("event/fixture-check-later-failure").expect("event");
     let interleaving_store = FixtureEvidenceDriftStore {
         backend: &active_backend,
         event: &event,
