@@ -11883,6 +11883,13 @@ pub fn prepare_github_pr_comment_fixture_continuation_window(
     executor: &LocalExecutor<'_, crate::SqliteStateBackend>,
     request: GitHubPrCommentFixtureContinuationValidationRequest<'_>,
 ) -> Result<EventId, WorkflowOsError> {
+    prepare_fixture_window(executor, request).map(|(event, _opening)| event)
+}
+
+fn prepare_fixture_window(
+    executor: &LocalExecutor<'_, crate::SqliteStateBackend>,
+    request: GitHubPrCommentFixtureContinuationValidationRequest<'_>,
+) -> Result<(EventId, crate::operational_execution_window_opening::ProjectedOperationalExecutionWindowOpeningResult), WorkflowOsError>{
     let backend = executor.backend;
     let run = backend.rehydrate_run(request.write_request.run_id())?;
     let invalid = || {
@@ -11943,7 +11950,7 @@ pub fn prepare_github_pr_comment_fixture_continuation_window(
     }
     let preflighted = GitHubPullRequestCommentPreflightedWrite::new(request.write_request)?;
     crate::validate_github_pr_comment_fixture_write(&preflighted, request.fixture)?;
-    open_exact_comment_fixture_window(
+    let opening = open_exact_comment_fixture_window(
         backend,
         &bundle,
         &run,
@@ -11952,7 +11959,7 @@ pub fn prepare_github_pr_comment_fixture_continuation_window(
         operation_id,
         &action,
     )?;
-    Ok(event_id)
+    Ok((event_id, opening))
 }
 
 fn open_exact_comment_fixture_window(
@@ -11963,7 +11970,10 @@ fn open_exact_comment_fixture_window(
     step_id: StepId,
     operation_id: crate::OperationalExecutionWindowOpeningOperationId,
     action: &SpecContentHash,
-) -> Result<(), WorkflowOsError> {
+) -> Result<
+    crate::operational_execution_window_opening::ProjectedOperationalExecutionWindowOpeningResult,
+    WorkflowOsError,
+> {
     use crate::authorized_execution_continuity_state::internal::{
         trusted_time_observation, ContinuityTrustedTimeEpochId, TrustedTimeSourceKind,
     };
@@ -12029,9 +12039,12 @@ fn open_exact_comment_fixture_window(
             workflow_lifecycle: None,
         },
         Some(run),
-    )?;
-    Ok(())
+    )
 }
+
+#[cfg(all(test, unix))]
+#[path = "fixture_reservation_trial.rs"]
+mod fixture_reservation_trial;
 
 /// Derives the payload-free action label for an exact fixture approval presentation.
 ///

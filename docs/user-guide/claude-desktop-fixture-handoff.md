@@ -98,11 +98,25 @@ Core's same-actor validator, then verifies the delegated denial. The stale
 grant also expires; the delegated result does not distinguish the two clocks.
 Neither variant edits the database directly or changes the trusted clock.
 
-The dispatch-reservation conflict remains a separate case. The fixture
-opening discards its dispatch capability; the evaluator must use a test-only
-Core path to reserve that exact attempt without dispatching. Do not insert a
-reservation row or grant fixture tools dispatch authority to fabricate this
-case. A missing case is not a pass.
+For the dispatch-reservation conflict, run the export command with
+`WORKFLOW_OS_CLAUDE_FIXTURE_VARIANT=reservation-input`. This prints a path
+to a fresh pre-opening fixture, not a Desktop manifest. Pass that path to
+the ignored Core unit test:
+
+```sh
+WORKFLOW_OS_CLAUDE_RESERVATION_INPUT="/absolute/path/to/reservation-input.json" \
+  cargo test -p workflow-core --lib \
+  executor::fixture_reservation_trial::export_reserved_attempt_for_native_fixture_trial \
+  -- --ignored --exact --nocapture
+```
+
+The test verifies an exact delegated validation before reserving the exact
+attempt through Core. It then drops the admitted capability without
+dispatching, checks the reservation projection and unchanged attempted
+SideEffect, and verifies that the same delegated call rejects without a state
+write. Use the emitted manifest's `reserved-attempt` case in the native app.
+The reservation setup exists only in the test build; the fixture tool remains
+read-only. Use a fresh pre-opening fixture for each run.
 
 Prepare cases for exact allow and repeat, denial, target and action drift,
 missing/expired/revoked grants, wrong principal, stale window, changed

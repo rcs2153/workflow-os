@@ -29,6 +29,7 @@ enum Variant {
     Baseline,
     ChangedEvidence,
     StaleWindow,
+    ReservationInput,
 }
 
 pub(super) struct Export {
@@ -53,6 +54,7 @@ impl Export {
             Err(std::env::VarError::NotPresent) => Some(Variant::Baseline),
             Ok("changed-evidence") => Some(Variant::ChangedEvidence),
             Ok("stale-window") => Some(Variant::StaleWindow),
+            Ok("reservation-input") => Some(Variant::ReservationInput),
             _ => None,
         }
         .expect("known evaluator fixture variant");
@@ -79,6 +81,24 @@ impl Export {
 
     pub(super) fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub(super) fn reservation_input(&self) -> bool {
+        matches!(self.variant, Variant::ReservationInput)
+    }
+
+    pub(super) fn stage_reservation(
+        mut self,
+        request: &workflow_core::GitHubPullRequestCommentWriteRequest,
+    ) {
+        let path = self.root.join("reservation-input.json");
+        let payload = json!({"kernel": self.kernel, "input": fixture_cli_input(request)});
+        private_write(
+            &path,
+            &serde_json::to_vec(&payload).expect("reservation input JSON"),
+        );
+        self.published = true;
+        println!("claude_fixture_reservation_input: {}", path.display());
     }
 
     pub(super) fn write(
@@ -239,7 +259,9 @@ impl Export {
                 );
                 ("stale-window", "local_fixture_replacement_authority.denied")
             }
-            Variant::Baseline => unreachable!("baseline has no state change"),
+            Variant::Baseline | Variant::ReservationInput => {
+                unreachable!("variant has no state change")
+            }
         }
     }
 
