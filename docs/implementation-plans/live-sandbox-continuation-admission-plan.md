@@ -215,6 +215,18 @@ host, interpreter, or workspace was immutable. The producer is not yet
 connected to the supervisor's transactional result projection or to any
 public or live dispatch route.
 
+Implementation run `run-1794092896536764000-2` connects the native producer
+to the existing supervised local-check attempt in opt-in V12 stores. A
+required bounded check must use the native runner. The producer reuses the
+execution fingerprint bound to the attempt and derives its result ID from
+that attempt. SQLite writes the accepted proof with the exact result event
+and outcome in one transaction. The outcome request binds the proof and
+exact operation replay verifies the persisted row. A failure after proof
+insertion rolls back the proof and result together, but not the earlier
+dispatch reservation. Ordinary stores and checks without required proof
+keep their existing behavior. No sandbox dispatch, external action, or
+public schema changes are enabled here.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes

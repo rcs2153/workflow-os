@@ -144,7 +144,7 @@ impl SqliteContinuityStore {
         workflow_lifecycle: Option<(
             &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
             &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
-            Option<&crate::LocalCheckResultRecordedEvent>,
+            Option<crate::trusted_host_workflow_lifecycle::TrustedHostCheckProjection<'_>>,
         )>,
         mutation: F,
     ) -> Result<(CommittedOperationDisposition, bool), WorkflowOsError>
@@ -187,6 +187,34 @@ impl SqliteContinuityStore {
                 ));
             }
             validate_operation(&state, existing)?;
+            if let (
+                CommittedOperationDisposition::CommittedSuccess(_),
+                Some((lifecycle, _, Some(check))),
+            ) = (&existing.disposition, workflow_lifecycle)
+            {
+                if let Some(proof) = check.proof {
+                    let window = state.windows.get(window_id).ok_or_else(corrupt)?;
+                    let id = lifecycle.event_id("local-check-result", operation_id.as_str())?;
+                    let event = SqliteStateBackend::read_events_with_connection(
+                        &transaction,
+                        &window.run_id,
+                    )?
+                    .into_iter()
+                    .find(|event| event.event_id == id)
+                    .ok_or_else(corrupt)?;
+                    if !matches!(&event.kind, WorkflowRunEventKind::LocalCheckResultRecorded(result)
+                        if result.as_ref() == check.event)
+                    {
+                        return Err(corrupt());
+                    }
+                    super::live_sandbox_grant_store::verify_live_check_proof_replay(
+                        &transaction,
+                        &event,
+                        check.event,
+                        proof,
+                    )?;
+                }
+            }
             if self.project_runtime {
                 let binding = load_projection_binding(&transaction, operation_id)?;
                 *self.last_projection.lock().map_err(|_| corrupt())? = Some(binding);
@@ -1277,7 +1305,7 @@ fn record_attempt_outcome_inner(
     workflow_lifecycle: Option<(
         &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
         &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
-        Option<&crate::LocalCheckResultRecordedEvent>,
+        Option<crate::trusted_host_workflow_lifecycle::TrustedHostCheckProjection<'_>>,
     )>,
 ) -> Result<MutationResult, WorkflowOsError> {
     let expected_commitment = workflow_lifecycle.map_or_else(
@@ -1507,7 +1535,9 @@ impl SqliteStateBackend {
         request: &RecordAttemptOutcomeRequest<'_>,
         lifecycle: &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
         outcome: &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
-        local_check_event: Option<&crate::LocalCheckResultRecordedEvent>,
+        local_check_event: Option<
+            crate::trusted_host_workflow_lifecycle::TrustedHostCheckProjection<'_>,
+        >,
     ) -> Result<ProjectedContinuityResult<MutationResult>, WorkflowOsError> {
         if request.outcome != outcome.continuity_outcome() {
             return Err(input_invalid());
@@ -1874,6 +1904,11 @@ struct RuntimeProjectionCursors<'a> {
     committed: &'a ContinuityCursor,
 }
 
+#[cfg(all(test, feature = "trusted-host-application-spi", unix))]
+thread_local! {
+    pub(super) static FAIL_AFTER_NATIVE_PROOF_WRITE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 #[allow(clippy::too_many_lines)]
 fn persist_runtime_projection(
     transaction: &Transaction<'_>,
@@ -1884,7 +1919,7 @@ fn persist_runtime_projection(
     workflow_lifecycle: Option<(
         &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
         &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome,
-        Option<&crate::LocalCheckResultRecordedEvent>,
+        Option<crate::trusted_host_workflow_lifecycle::TrustedHostCheckProjection<'_>>,
     )>,
 ) -> Result<ContinuityProjectionBinding, WorkflowOsError> {
     let RuntimeProjectionCursors {
@@ -2046,33 +2081,43 @@ fn persist_runtime_projection(
     let mut snapshot = append_event_and_project_snapshot(transaction, &event)?;
     if let Some((lifecycle, outcome, local_check_event)) = workflow_lifecycle {
         let [invocation_terminal, completion_event] = lifecycle.completion_events(outcome);
-        let invocation_offset = if let Some(local_check_event) = local_check_event {
-            append_event_and_project_snapshot(
-                transaction,
-                &WorkflowRunEvent {
-                    sequence_number: crate::EventSequenceNumber::new(
-                        projection_cursor
-                            .sequence_number
-                            .get()
-                            .checked_add(1)
-                            .ok_or_else(corrupt)?,
-                    )?,
-                    event_id: lifecycle
-                        .event_id("local-check-result", record.operation_id.as_str())?,
-                    timestamp: record.receipt.committed_at,
-                    run_id: window.run_id.clone(),
-                    workflow_id: window.workflow_id.clone(),
-                    schema_version: first.schema_version.clone(),
-                    workflow_version: first.workflow_version.clone(),
-                    spec_content_hash: first.spec_content_hash.clone(),
-                    correlation_id: None,
-                    actor: None,
-                    idempotency_key: Some(lifecycle.idempotency_key("local-check-result")?),
-                    kind: WorkflowRunEventKind::LocalCheckResultRecorded(Box::new(
-                        local_check_event.clone(),
-                    )),
-                },
-            )?;
+        let invocation_offset = if let Some(check) = local_check_event {
+            let event = WorkflowRunEvent {
+                sequence_number: crate::EventSequenceNumber::new(
+                    projection_cursor
+                        .sequence_number
+                        .get()
+                        .checked_add(1)
+                        .ok_or_else(corrupt)?,
+                )?,
+                event_id: lifecycle.event_id("local-check-result", record.operation_id.as_str())?,
+                timestamp: record.receipt.committed_at,
+                run_id: window.run_id.clone(),
+                workflow_id: window.workflow_id.clone(),
+                schema_version: first.schema_version.clone(),
+                workflow_version: first.workflow_version.clone(),
+                spec_content_hash: first.spec_content_hash.clone(),
+                correlation_id: None,
+                actor: None,
+                idempotency_key: Some(lifecycle.idempotency_key("local-check-result")?),
+                kind: WorkflowRunEventKind::LocalCheckResultRecorded(Box::new(check.event.clone())),
+            };
+            append_event_and_project_snapshot(transaction, &event)?;
+            if let Some(proof) = check.proof {
+                if !matches!(outcome, crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowTerminalOutcome::Succeeded { .. }) {
+                    return Err(corrupt());
+                }
+                super::live_sandbox_grant_store::persist_live_check_proof(
+                    transaction,
+                    &event,
+                    check.event,
+                    proof,
+                )?;
+                #[cfg(all(test, feature = "trusted-host-application-spi", unix))]
+                if FAIL_AFTER_NATIVE_PROOF_WRITE.with(|fault| fault.replace(false)) {
+                    return Err(corrupt());
+                }
+            }
             2
         } else {
             1

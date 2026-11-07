@@ -11,6 +11,12 @@ use crate::{
 #[cfg(feature = "trusted-host-application-spi")]
 use crate::SkillDefinition;
 
+#[derive(Clone, Copy)]
+pub(crate) struct TrustedHostCheckProjection<'a> {
+    pub event: &'a crate::LocalCheckResultRecordedEvent,
+    pub proof: Option<&'a crate::LocalCheckEvidenceAssuranceProjection>,
+}
+
 #[derive(Clone)]
 pub(crate) struct TrustedHostWorkflowLifecycleContext {
     invocation_id: SkillInvocationId,
@@ -117,17 +123,21 @@ impl TrustedHostWorkflowLifecycleContext {
         &self,
         base: &SpecContentHash,
         outcome: &TrustedHostWorkflowTerminalOutcome,
-        local_check_event: Option<&crate::LocalCheckResultRecordedEvent>,
+        local_check: Option<TrustedHostCheckProjection<'_>>,
     ) -> SpecContentHash {
         let base = self.outcome_request_commitment(base, outcome);
-        let Some(local_check_event) = local_check_event else {
+        let Some(local_check) = local_check else {
             return base;
         };
         let mut hasher = Sha256::new();
         hasher.update(b"workflow-os/trusted-host-workflow-lifecycle/result-projection/v1\0");
         hasher.update(base.as_str().as_bytes());
         hasher.update(b"\0");
-        hasher.update(local_check_event.commitment().as_str().as_bytes());
+        hasher.update(local_check.event.commitment().as_str().as_bytes());
+        if let Some(proof) = local_check.proof {
+            hasher.update(b"\0native-check-proof\0");
+            hasher.update(proof.projection_fingerprint().as_str().as_bytes());
+        }
         SpecContentHash::from_bytes(hasher.finalize())
     }
 
@@ -229,6 +239,11 @@ impl TrustedHostWorkflowLifecycleContext {
 
     pub(crate) const fn invocation_id(&self) -> &SkillInvocationId {
         &self.invocation_id
+    }
+
+    #[cfg(feature = "trusted-host-application-spi")]
+    pub(crate) const fn invocation_idempotency_key(&self) -> &IdempotencyKey {
+        &self.invocation_idempotency_key
     }
 
     pub(crate) const fn step_id(&self) -> &StepId {

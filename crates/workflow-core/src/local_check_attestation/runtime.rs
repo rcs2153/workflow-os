@@ -800,31 +800,8 @@ pub(crate) struct NativeCheckAttestationExecutionInput<'a> {
 pub(crate) fn execute_reviewed_native_check(
     input: NativeCheckAttestationExecutionInput<'_>,
 ) -> Result<DocsCheckAttestationExecutionOutcome, WorkflowOsError> {
-    let handler = input.profile.native_proof_handler().ok_or_else(|| {
-        runtime_error(
-            "native_runner_required",
-            "local check proof requires the native process runner",
-        )
-    })?;
-    let record = authoritative_record_for_step(input.stored_bundle, &input.step_id)?;
-    let [declaration] = record.declarations() else {
-        return Err(runtime_error(
-            "native_declaration_unsupported",
-            "local check proof requires one immutable declaration",
-        ));
-    };
-    if declaration.requirement_level() != crate::LocalCheckRequirementLevel::Required
-        || declaration.command_id() != handler.contract().command_id()
-        || declaration.command_contract_fingerprint()
-            != &compute_local_check_command_contract_fingerprint(handler.contract())
-        || declaration.freshness().maximum_age_seconds().is_none()
-    {
-        return Err(runtime_error(
-            "native_declaration_unsupported",
-            "local check proof requires an exact reusable immutable declaration",
-        ));
-    }
-    let requirement = declaration.attestation_requirement()?;
+    let (handler, requirement, minimum) =
+        reviewed_native_check_requirement(input.profile, input.stored_bundle, &input.step_id)?;
     let manifest = input.stored_bundle.manifest();
     let execution = DocsCheckAttestationExecutionInput {
         stored_immutable_run_bundle: input.stored_bundle,
@@ -839,10 +816,67 @@ pub(crate) fn execute_reviewed_native_check(
         attestation_id: input.attestation_id,
         clock: &SystemLocalCheckObservationClock,
     };
-    execute_docs_check_with_attestation_inner(
+    let outcome = execute_docs_check_with_attestation_inner(
         &execution,
         Some(input.reviewed_execution_fingerprint),
-    )
+    )?;
+    if outcome.result().status() == crate::LocalCheckResultStatus::Passed
+        && (outcome.assurance_projection().verifier_proof().is_none()
+            || minimum
+                .is_some_and(|minimum| !outcome.assurance_projection().satisfies_minimum(minimum)))
+    {
+        return Err(runtime_error(
+            "native_proof_unavailable",
+            "native result cannot satisfy required proof",
+        ));
+    }
+    Ok(outcome)
+}
+
+pub(crate) fn reviewed_native_check_requirement<'a>(
+    profile: &'a crate::ResolvedExplicitLocalCheckProfile,
+    stored_bundle: &StoredImmutableRunBundle,
+    step_id: &StepId,
+) -> Result<
+    (
+        &'a dyn AuthoritativeLocalCheckHandler,
+        LocalCheckAttestationRequirement,
+        Option<crate::LocalCheckEvidenceAssuranceMinimum>,
+    ),
+    WorkflowOsError,
+> {
+    let handler = profile.native_proof_handler().ok_or_else(|| {
+        runtime_error(
+            "native_runner_required",
+            "local check proof requires the native process runner",
+        )
+    })?;
+    let record = authoritative_record_for_step(stored_bundle, step_id)?;
+    let [declaration] = record.declarations() else {
+        return Err(runtime_error(
+            "native_declaration_unsupported",
+            "local check proof requires one immutable declaration",
+        ));
+    };
+    if declaration.requirement_level() != crate::LocalCheckRequirementLevel::Required
+        || declaration.command_id() != handler.contract().command_id()
+        || !declaration
+            .accepted_statuses()
+            .contains(&crate::LocalCheckResultStatus::Passed)
+        || declaration.command_contract_fingerprint()
+            != &compute_local_check_command_contract_fingerprint(handler.contract())
+        || declaration.freshness().maximum_age_seconds().is_none()
+    {
+        return Err(runtime_error(
+            "native_declaration_unsupported",
+            "local check proof requires an exact reusable immutable declaration",
+        ));
+    }
+    Ok((
+        handler,
+        declaration.attestation_requirement()?,
+        declaration.evidence_assurance_minimum(),
+    ))
 }
 
 #[allow(clippy::too_many_lines)]

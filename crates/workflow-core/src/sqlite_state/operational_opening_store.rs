@@ -3493,6 +3493,218 @@ mod tests {
         exercise_live_grant_reservation(LiveGrantTrial::RequiredCheck);
     }
 
+    #[cfg(all(feature = "trusted-host-application-spi", unix))]
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn supervised_native_proof_and_check_result_commit_or_roll_back_together() {
+        use crate::{
+            admit_trusted_host_local_application_operation, ExplicitLocalCheckProfileSelection,
+            ImmutableRunBundleId, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
+            LocalExecutionBeforeSkillInvocationCheckpointInputs,
+            LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
+            LocalExecutionWithImmutableRunBundleRequest,
+            TrustedHostLocalApplicationAdmissionOutcome,
+            TrustedHostLocalApplicationAdmissionRequest,
+        };
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        struct ProjectRoot(PathBuf);
+        impl Drop for ProjectRoot {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        #[derive(Debug)]
+        struct UnattestedRunner;
+        impl crate::LocalCheckProcessRunner for UnattestedRunner {
+            fn run(
+                &self,
+                _: &crate::LocalCheckProcessRequest,
+            ) -> Result<crate::LocalCheckProcessOutput, WorkflowOsError> {
+                Ok(crate::LocalCheckProcessOutput::completed(
+                    Some(0),
+                    true,
+                    1,
+                    Vec::new(),
+                    Vec::new(),
+                ))
+            }
+        }
+        for rollback in [false, true] {
+            let fixture = Fixture::new();
+            let root = ProjectRoot(fixture.path.with_extension("project"));
+            let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../dogfood/workflow-os-self-governance");
+            for directory in ["workflows", "skills", "policies", "scripts", "bin"] {
+                fs::create_dir_all(root.0.join(directory)).expect("directory");
+            }
+            for path in [
+                "workflow-os.yml",
+                "skills/check-docs.skill.yml",
+                "policies/self-governance-local.policy.yml",
+            ] {
+                fs::copy(source.join(path), root.0.join(path)).expect("copy fixture definition");
+            }
+            let workflow =
+                fs::read_to_string(source.join("workflows/trusted-host-docs-check.workflow.yml"))
+                    .expect("workflow");
+            let workflow = workflow.replace(
+                "    terminal_behavior:",
+                "
+    local_check_requirements:
+      - id: docs-required
+        command_id: local-check/docs
+        requirement_level: required
+        minimum_assurance: kernel_observed_local_process
+        accepted_statuses: [passed]
+        freshness: {mode: max_age_seconds, seconds: 60}
+        exact_immutable_run_binding_required: true
+        truncation_allowed: false
+        network_maximum: disabled
+        side_effect_maximum: no_source_writes
+    terminal_behavior:",
+            );
+            fs::write(root.0.join("workflows/check.workflow.yml"), workflow).expect("workflow");
+            fs::write(root.0.join("package.json"), "{}").expect("package");
+            fs::write(root.0.join("scripts/check-docs.mjs"), "// fixture").expect("script");
+            let executable = root.0.join("bin/npm");
+            fs::write(
+                &executable,
+                "#!/bin/sh\nprintf 'supervised native fixture'\n",
+            )
+            .expect("executable");
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
+                .expect("permissions");
+            let profile = ExplicitLocalCheckProfileSelection::docs_check()
+                .resolve_docs_check(executable.clone(), root.0.clone(), None)
+                .expect("native profile");
+            fixture
+                .backend
+                .enable_live_sandbox_grant_store()
+                .expect("opt-in store");
+            let run_id = WorkflowRunId::new("run-supervised-native-proof").expect("run");
+            let observed_at = Timestamp::now_utc();
+            let request = TrustedHostLocalApplicationAdmissionRequest {
+                execution: LocalExecutionWithImmutableRunBundleRequest {
+                    execution: LocalExecutionRequest {
+                        project_root: root.0.clone(),
+                        workflow_id: WorkflowId::new("dg/trusted-host-docs-check")
+                            .expect("workflow"),
+                        run_id: Some(run_id.clone()),
+                        correlation_id: CorrelationId::new("correlation/native-proof")
+                            .expect("correlation"),
+                        actor: ActorId::new("user/native-proof-test").expect("actor"),
+                        before_skill_invocation_checkpoints:
+                            LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+                        before_skill_invocation_hook: None,
+                        side_effect_events: Vec::new(),
+                        side_effect_lifecycle_events: Vec::new(),
+                    },
+                    bundle: LocalExecutionImmutableRunBundleInputs {
+                        bundle_id: ImmutableRunBundleId::new("bundle/native-proof")
+                            .expect("bundle"),
+                        bundle_version: ImmutableRunBundleVersion::new("v1").expect("version"),
+                        created_at: observed_at,
+                        sensitivity: ImmutableRunBundleSensitivity::Internal,
+                        redaction_required: true,
+                    },
+                },
+                selected_step_id: StepId::new("docs-check").expect("step"),
+                observed_at,
+                expires_at: Timestamp::from_offset_date_time(
+                    observed_at.as_offset_date_time() + time::Duration::minutes(2),
+                ),
+            };
+            if !rollback {
+                let injected = ExplicitLocalCheckProfileSelection::docs_check()
+                    .resolve_docs_check_with_process_runner(
+                        executable,
+                        root.0.clone(),
+                        None,
+                        Arc::new(UnattestedRunner),
+                    )
+                    .expect("injected profile");
+                let mut rejected = request.clone();
+                let rejected_id = WorkflowRunId::new("run-injected-native-proof").expect("run");
+                rejected.execution.execution.run_id = Some(rejected_id.clone());
+                rejected.execution.bundle.bundle_id =
+                    ImmutableRunBundleId::new("bundle/injected-native-proof").expect("bundle");
+                assert!(admit_trusted_host_local_application_operation(
+                    &fixture.backend,
+                    &injected,
+                    &rejected
+                )
+                .is_err());
+                assert!(fixture
+                    .backend
+                    .read_events(&rejected_id)
+                    .expect("rejected history")
+                    .iter()
+                    .all(|event| !matches!(
+                        event.kind,
+                        WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(_)
+                    )));
+            }
+            let TrustedHostLocalApplicationAdmissionOutcome::Prepared(prepared) =
+                admit_trusted_host_local_application_operation(
+                    &fixture.backend,
+                    &profile,
+                    &request,
+                )
+                .expect("native admission")
+            else {
+                panic!("native check must be prepared");
+            };
+            super::super::continuity_store::FAIL_AFTER_NATIVE_PROOF_WRITE
+                .with(|flag| flag.set(rollback));
+            let result = prepared.into_parts().0.run();
+            assert_eq!(result.is_err(), rollback);
+            assert!(
+                !super::super::continuity_store::FAIL_AFTER_NATIVE_PROOF_WRITE
+                    .with(std::cell::Cell::get)
+            );
+
+            let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen");
+            let events = reopened.read_events(&run_id).expect("events");
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(
+                        event.kind,
+                        WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(_)
+                    ))
+                    .count(),
+                1
+            );
+            let check_event = events.iter().find(|event| {
+                matches!(
+                    event.kind,
+                    WorkflowRunEventKind::LocalCheckResultRecorded(_)
+                )
+            });
+            assert_eq!(check_event.is_none(), rollback);
+            assert_eq!(
+                events
+                    .iter()
+                    .any(|event| matches!(event.kind, WorkflowRunEventKind::RunCompleted)),
+                !rollback
+            );
+            let connection = reopened.connection().expect("connection");
+            let stored_event: Option<String> = connection
+                .query_row(
+                    "SELECT event_id FROM live_sandbox_check_proofs WHERE run_id=?1",
+                    [run_id.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .expect("proof row");
+            assert_eq!(
+                stored_event.as_deref(),
+                check_event.map(|event| event.event_id.as_str())
+            );
+        }
+    }
+
     #[test]
     fn live_grant_rechecks_exact_durable_check_proof_at_reservation() {
         exercise_live_grant_reservation(LiveGrantTrial::RequiredProof);
