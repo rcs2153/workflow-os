@@ -14653,9 +14653,7 @@ fn prepare_fresh_trusted_host_local_application_operation<'a>(
         ContinuityTrustedTimeEpochId, TrustedTimeSourceKind,
     };
     use crate::current_authority_source::RegisteredExplicitZeroLocalCheckSourceInput;
-    use crate::trusted_host_supervisor::{
-        TrustedHostLocalCheckAttemptExecutor, TrustedHostSupervisorPersistenceInput,
-    };
+    use crate::trusted_host_supervisor::TrustedHostSupervisorPersistenceInput;
 
     let (contract_id, source_id) = trusted_host_profile_authority_identities(profile)?;
     let contract = profile.explicit_zero_required_context_contract(
@@ -14699,11 +14697,14 @@ fn prepare_fresh_trusted_host_local_application_operation<'a>(
     if let Some(next_step_id) = next_step_id {
         workflow_lifecycle = workflow_lifecycle.with_next_step(next_step_id);
     }
-    let executor = Box::new(
-        TrustedHostLocalCheckAttemptExecutor::new(profile, executor_commitment)
-            .with_immutable_run_bundle(stored.manifest().run_binding())
-            .with_workflow_lifecycle(workflow_lifecycle),
-    );
+    let executor = Box::new(prepare_trusted_host_check_executor(
+        backend,
+        profile,
+        stored,
+        &plan.step,
+        executor_commitment,
+        workflow_lifecycle,
+    )?);
     let fresh = crate::sqlite_state::TrustedHostLocalApplicationOwnedFreshPreparation {
         source,
         execution_binding,
@@ -14763,8 +14764,6 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
     run_id: &WorkflowRunId,
     workflow_step_count: u8,
 ) -> Result<TrustedHostLocalApplicationAdmissionOutcome<'a>, WorkflowOsError> {
-    use crate::trusted_host_supervisor::TrustedHostLocalCheckAttemptExecutor;
-
     let run = backend.rehydrate_run(run_id)?;
     let terminal_replay = run.snapshot.status.is_terminal();
     if !terminal_replay {
@@ -15011,11 +15010,14 @@ fn admit_existing_trusted_host_local_application_operation<'a>(
             step.id.clone(),
             skill,
         );
-    let executor = Box::new(
-        TrustedHostLocalCheckAttemptExecutor::new(profile, executor_commitment)
-            .with_immutable_run_bundle(binding.clone())
-            .with_workflow_lifecycle(workflow_lifecycle),
-    );
+    let executor = Box::new(prepare_trusted_host_check_executor(
+        backend,
+        profile,
+        &stored,
+        step,
+        executor_commitment,
+        workflow_lifecycle,
+    )?);
     let prepared = crate::sqlite_state::prepare_owned_trusted_host_local_application_session(
         crate::sqlite_state::TrustedHostLocalApplicationOwnedPreparationInput {
             backend,
@@ -15071,9 +15073,24 @@ fn trusted_host_executor_commitment_from_identity(
     skill_id: &SkillId,
     skill_version: &SkillVersion,
 ) -> Result<SpecContentHash, WorkflowOsError> {
+    let resolved_execution_fingerprint = profile.resolved_execution_fingerprint()?;
+    Ok(trusted_host_executor_commitment_for_resolution(
+        profile,
+        skill_id,
+        skill_version,
+        &resolved_execution_fingerprint,
+    ))
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn trusted_host_executor_commitment_for_resolution(
+    profile: &ResolvedExplicitLocalCheckProfile,
+    skill_id: &SkillId,
+    skill_version: &SkillVersion,
+    resolved_execution_fingerprint: &SpecContentHash,
+) -> SpecContentHash {
     let fingerprint =
         crate::compute_local_check_command_contract_fingerprint(profile.command_contract());
-    let resolved_execution_fingerprint = profile.resolved_execution_fingerprint()?;
     let material = format!(
         "workflow-os/trusted-host-local-executor/v2\n{}\n{}\n{}\n{}",
         skill_id.as_str(),
@@ -15081,7 +15098,55 @@ fn trusted_host_executor_commitment_from_identity(
         fingerprint.as_str(),
         resolved_execution_fingerprint.as_str()
     );
-    Ok(SpecContentHash::from_text(&material))
+    SpecContentHash::from_text(&material)
+}
+
+#[cfg(feature = "trusted-host-application-spi")]
+fn prepare_trusted_host_check_executor<'a>(
+    backend: &crate::SqliteStateBackend,
+    profile: &'a ResolvedExplicitLocalCheckProfile,
+    stored: &crate::StoredImmutableRunBundle,
+    step: &StepDefinition,
+    executor_commitment: SpecContentHash,
+    lifecycle: crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
+) -> Result<crate::trusted_host_supervisor::TrustedHostLocalCheckAttemptExecutor<'a>, WorkflowOsError>
+{
+    let proof_resolution = if step.local_check_requirements.iter().any(|requirement| {
+        requirement.requirement_level() == crate::LocalCheckRequirementLevel::Required
+    }) && backend.live_check_proof_store_enabled()?
+    {
+        crate::local_check_attestation::runtime::reviewed_native_check_requirement(
+            profile, stored, &step.id,
+        )?;
+        let resolved = profile.resolved_execution_fingerprint()?;
+        let skill = immutable_continuation_skill(stored, step)?;
+        if trusted_host_executor_commitment_for_resolution(
+            profile,
+            &skill.id,
+            &skill.version,
+            &resolved,
+        ) != executor_commitment
+        {
+            return Err(executor_error(
+                WorkflowOsErrorKind::Security,
+                "trusted_host_local_application.admission.native_check_resolution_changed",
+                "native check resolution changed during admission",
+            ));
+        }
+        Some(resolved)
+    } else {
+        None
+    };
+    let executor = crate::trusted_host_supervisor::TrustedHostLocalCheckAttemptExecutor::new(
+        profile,
+        executor_commitment,
+    )
+    .with_immutable_run_bundle(stored.manifest().run_binding())
+    .with_workflow_lifecycle(lifecycle);
+    Ok(match proof_resolution {
+        Some(resolved) => executor.with_native_proof(stored.clone(), resolved),
+        None => executor,
+    })
 }
 
 #[cfg(feature = "trusted-host-application-spi")]

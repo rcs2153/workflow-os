@@ -32,8 +32,17 @@ use crate::{
 };
 
 impl SqliteStateBackend {
+    #[cfg(feature = "trusted-host-application-spi")]
+    pub(crate) fn live_check_proof_store_enabled(&self) -> Result<bool, WorkflowOsError> {
+        Ok(
+            super::validate_operational_schema(&self.existing_connection()?)?
+                == LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
+        )
+    }
+
     // Only a Core-owned producer may supply this projection. Do not import
     // caller payloads or local filesystem assurance records into this lane.
+    #[cfg(test)]
     pub(crate) fn store_live_check_proof(
         &self,
         projection: &crate::LocalCheckEvidenceAssuranceProjection,
@@ -56,21 +65,7 @@ impl SqliteStateBackend {
         if matching.next().is_some() {
             return Err(required_check_unverified());
         }
-        exact_check_proof(projection, event, result)?;
-        let payload = encode_json(
-            &StoredLocalCheckAssuranceWrite::new(projection)?,
-            "live check proof",
-        )?;
-        let event_hash = check_event_commitment(event)?;
-        let inserted = tx.execute(
-            "INSERT INTO live_sandbox_check_proofs (run_id, result_id, event_id, event_commitment, payload)
-             VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(run_id, result_id) DO NOTHING",
-            params![event.run_id.as_str(), result.result_id().as_str(), event.event_id.as_str(),
-                event_hash.as_str(), payload],
-        ).map_err(|_| required_check_unverified())?;
-        if inserted == 0 && read_live_check_proof(&tx, event, result)? != payload {
-            return Err(required_check_unverified());
-        }
+        persist_live_check_proof(&tx, event, result, projection)?;
         tx.commit().map_err(|_| required_check_unverified())
     }
 
@@ -252,6 +247,51 @@ impl SqliteStateBackend {
         }
         tx.commit().map_err(|_| denied())
     }
+}
+
+pub(super) fn persist_live_check_proof(
+    tx: &Connection,
+    event: &crate::WorkflowRunEvent,
+    result: &crate::LocalCheckResultRecordedEvent,
+    projection: &crate::LocalCheckEvidenceAssuranceProjection,
+) -> Result<(), WorkflowOsError> {
+    validate_live_store(tx)?;
+    exact_check_proof(projection, event, result)?;
+    let payload = encode_check_proof(projection)?;
+    let event_hash = check_event_commitment(event)?;
+    let inserted = tx.execute(
+        "INSERT INTO live_sandbox_check_proofs (run_id, result_id, event_id, event_commitment, payload)
+         VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(run_id, result_id) DO NOTHING",
+        params![event.run_id.as_str(), result.result_id().as_str(), event.event_id.as_str(),
+            event_hash.as_str(), payload],
+    ).map_err(|_| required_check_unverified())?;
+    if inserted == 0 && read_live_check_proof(tx, event, result)? != payload {
+        return Err(required_check_unverified());
+    }
+    Ok(())
+}
+
+pub(super) fn verify_live_check_proof_replay(
+    tx: &Connection,
+    event: &crate::WorkflowRunEvent,
+    result: &crate::LocalCheckResultRecordedEvent,
+    projection: &crate::LocalCheckEvidenceAssuranceProjection,
+) -> Result<(), WorkflowOsError> {
+    validate_live_store(tx)?;
+    exact_check_proof(projection, event, result)?;
+    if read_live_check_proof(tx, event, result)? != encode_check_proof(projection)? {
+        return Err(required_check_unverified());
+    }
+    Ok(())
+}
+
+fn encode_check_proof(
+    projection: &crate::LocalCheckEvidenceAssuranceProjection,
+) -> Result<String, WorkflowOsError> {
+    encode_json(
+        &StoredLocalCheckAssuranceWrite::new(projection)?,
+        "live check proof",
+    )
 }
 
 #[derive(Clone, Copy)]
