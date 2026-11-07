@@ -6,10 +6,11 @@ roadmap and not only the last packaged preview release.
 
 ## Product In One Sentence
 
-Workflow OS is a continuity-of-authority kernel for agentic work. It converts
-ephemeral conversation and execution context into a durable, policy-governed
-run whose intent, authority, execution state, evidence, and next permissible
-action can be recovered by another person, process, or agent.
+Workflow OS is an open-source continuity-of-authority kernel for agentic work.
+It provides shared governance across people, agents, processes, and execution
+frameworks. It converts ephemeral conversation and execution context into a
+durable, policy-governed run whose authority, execution state, evidence, and
+next permissible action can be recovered by another authorized executor.
 
 ```text
 Agent executes. Workflow OS governs.
@@ -20,18 +21,21 @@ sandbox. Workflow OS does not replace it. The kernel decides whether a material
 action is valid and authorized, records the decision and outcome, and derives
 what may happen next from durable state.
 
-The kernel maintains four connected truths:
+The kernel keeps three operational layers connected:
 
-1. **Intent:** the exact declared unit of work.
-2. **Authority:** the action, policy, approval, capability, scope, restrictions,
-   and execution window that permit work.
-3. **Execution:** the accepted, attempted, completed, failed, blocked, denied,
-   or externally observed action and outcome.
-4. **Continuity:** the next action a current authorized executor may lawfully
-   take without reconstructing permission from conversation history.
+1. **Procedure authority:** who may define, revise, activate, or retire the
+   workflow and its policy and check requirements.
+2. **Invocation authority:** who authorized this exact run, action, resource,
+   execution window, and replacement executor.
+3. **Execution truth:** what was accepted, attempted, completed, failed,
+   blocked, denied, or externally observed, and what reconciliation remains.
 
-Evidence and reports make these truths inspectable. They do not replace them,
-and Workflow OS is not primarily an audit logger or report generator.
+Continuity of authority is the property that preserves those bindings across
+retries, interruptions, compaction, restore, and executor replacement. It
+determines the next action a current authorized executor may lawfully take
+without reconstructing permission from conversation history. Evidence and
+reports verify and expose these bindings. They do not replace them, and
+Workflow OS is not primarily an audit logger or report generator.
 
 ## Core Product Value: Continuity Of Authority
 
@@ -59,6 +63,15 @@ execution admission, identity binding, interruption continuity, adversarial
 recovery, and the operational cost of safe recovery. Audit completeness and
 report quality remain necessary evidence for those contracts, not substitutes
 for them. See the [V1 Readiness Criteria](../release/V1_READINESS_CRITERIA.md).
+
+An evaluator-authored Codex-to-LangGraph integration has demonstrated the
+intended cross-harness shape: one harness started governed work, another
+resumed it without transcript authority, denial and authority drift prevented
+the bounded effect, and a fresh reviewer reconstructed the decision from the
+shared kernel record. The integrations and identities were evaluator-owned and
+the ambiguous target was simulated. Current `main` therefore does not claim
+packaged plug-and-play interoperability, authenticated cross-harness
+delegation, or a production execution-framework integration.
 
 ## Maturity
 

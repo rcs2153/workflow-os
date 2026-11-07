@@ -1,11 +1,13 @@
 # Workflow OS User Guide
 
 These guides cover the current Workflow OS `0.4.0-preview.1` preparation
-identity on `main`. Workflow OS is a continuity-of-authority kernel for agentic
-work: it preserves the relationship among declared intent, scoped authority,
-actual execution, and the next lawful action across interruptions and executor
-replacement. It is an advanced local governance preview, not a production
-enterprise control plane.
+identity on `main`. Workflow OS is an open-source continuity-of-authority
+kernel for agentic work. It provides shared governance across people, agents,
+processes, and execution frameworks by preserving procedure authority,
+invocation authority, execution truth, and the next lawful action across
+interruptions and executor replacement. It is an advanced local governance
+preview, not a production enterprise control plane or packaged cross-harness
+runtime.
 
 Start with the [Current Product Contract](current-product-contract.md) when a
 guide, implementation report, or older release document appears to disagree
