@@ -178,6 +178,19 @@ invocation event alone cannot satisfy required assurance. The bundle's
 sensitivity also contributes to the grant ceiling. No checks run in the
 transaction and no route, schema, or policy default changed.
 
+Implementation run `run-1794087216226519000-2` adds storage for an explicitly
+verifier-backed projection in the existing local create-only assurance store.
+It does not upgrade the current selected validation route, whose injected
+runner can supply process results and whose durable posture stays unattested.
+Reopening the store validates the proof's integrity and exact projection
+binding. Ordinary deserialization still rejects accepted-proof assertions.
+Existing unattested records retain their format; legacy accepted references
+without verifier proof fail closed. The local record trusts the storage owner
+and is not external attestation or permission to reuse a prior check.
+SQLite live admission still denies required checks until it can resolve the
+same proof and evaluate its declared constraints at time of use in its own
+transaction.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes

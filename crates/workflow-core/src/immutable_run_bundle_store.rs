@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use crate::local_check_evidence_assurance::{
+    StoredLocalCheckAssurance, StoredLocalCheckAssuranceWrite,
+};
 use crate::{
     CanonicalLocalCheckDeclarationSetRecord, CanonicalLocalCheckDeclarationSetReference,
     GovernanceAssessmentBinding, ImmutableRunBundleBuildResult, ImmutableRunBundleDefinitionRecord,
@@ -549,7 +552,7 @@ impl LocalImmutableRunBundleStore {
         projection: &LocalCheckEvidenceAssuranceProjection,
     ) -> Result<(), WorkflowOsError> {
         self.with_shared_state_writer_guard(|| {
-            projection.validate()?;
+            let record = StoredLocalCheckAssuranceWrite::new(projection)?;
             let stored = self.read_bundle(
                 projection.run_id(),
                 projection.immutable_run_bundle().bundle_id(),
@@ -570,7 +573,7 @@ impl LocalImmutableRunBundleStore {
                     "local check assurance projection already exists for the result",
                 ));
             }
-            write_json_create_new(&path, projection).map_err(|error| {
+            write_json_create_new(&path, &record).map_err(|error| {
                 if error.code() == "immutable_run_bundle_store.record_exists" {
                     store_error(
                         "immutable_run_bundle_store.local_check_assurance.exists",
@@ -594,7 +597,7 @@ impl LocalImmutableRunBundleStore {
         run_id: &WorkflowRunId,
         result_id: &LocalCheckResultId,
     ) -> Result<LocalCheckEvidenceAssuranceProjection, WorkflowOsError> {
-        let projection: LocalCheckEvidenceAssuranceProjection =
+        let StoredLocalCheckAssurance(projection) =
             read_json(&self.local_check_evidence_assurance_projection_path(run_id, result_id))?;
         if projection.run_id() != run_id || projection.result_id() != result_id {
             return Err(store_error(
@@ -647,7 +650,7 @@ impl LocalImmutableRunBundleStore {
             if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
                 continue;
             }
-            let projection: LocalCheckEvidenceAssuranceProjection = read_json(&path)?;
+            let StoredLocalCheckAssurance(projection) = read_json(&path)?;
             let expected_name = encoded_id_file_name(projection.result_id().as_str());
             if projection.run_id() != run_id
                 || path.file_name().and_then(|name| name.to_str()) != Some(expected_name.as_str())

@@ -1,5 +1,6 @@
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
@@ -153,6 +154,54 @@ pub struct AcceptedLocalCheckAttestation {
     stdout_truncated: bool,
     stderr_truncated: bool,
     proof_fingerprint: SpecContentHash,
+}
+
+// Storage-only codec. The accepted type itself deliberately has no Deserialize
+// implementation, so ordinary input cannot manufacture verifier-owned proof.
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AcceptedLocalCheckAttestation", deny_unknown_fields)]
+struct AcceptedLocalCheckAttestationWire {
+    assurance: LocalCheckAttestationAssurance,
+    requirement_fingerprint: SpecContentHash,
+    candidate_binding_fingerprint: SpecContentHash,
+    execution_binding_fingerprint: SpecContentHash,
+    immutable_run_bundle: ImmutableRunBundleBinding,
+    workflow_id: WorkflowId,
+    run_id: WorkflowRunId,
+    step_id: StepId,
+    invocation_id: SkillInvocationId,
+    result_id: LocalCheckResultId,
+    handler_selection_fingerprint: SpecContentHash,
+    result_status: LocalCheckResultStatus,
+    exit_code_posture: LocalCheckAttestationExitCodePosture,
+    observed_completed_at: Timestamp,
+    verified_at: Timestamp,
+    freshness: LocalCheckAttestationFreshnessPolicy,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+    proof_fingerprint: SpecContentHash,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(transparent)]
+pub(crate) struct StoredAcceptedLocalCheckAttestation(
+    #[serde(with = "AcceptedLocalCheckAttestationWire")] pub(crate) AcceptedLocalCheckAttestation,
+);
+
+impl StoredAcceptedLocalCheckAttestation {
+    pub(crate) fn into_validated(self) -> Result<AcceptedLocalCheckAttestation, WorkflowOsError> {
+        let proof = self.0;
+        if proof.assurance != LocalCheckAttestationAssurance::KernelObservedLocalProcess
+            || proof.verified_at < proof.observed_completed_at
+            || proof.proof_fingerprint != compute_accepted_proof_fingerprint(&proof)
+        {
+            return Err(verification_error(
+                "stored_proof_invalid",
+                "stored local check verifier proof is invalid",
+            ));
+        }
+        Ok(proof)
+    }
 }
 
 impl AcceptedLocalCheckAttestation {
@@ -644,8 +693,12 @@ mod tests {
     }
 
     fn stored_bundle(workflow_name: &str) -> StoredImmutableRunBundle {
-        let project = TestRoot::new("project");
         let storage = TestRoot::new("storage");
+        stored_bundle_in(workflow_name, storage.path())
+    }
+
+    fn stored_bundle_in(workflow_name: &str, storage: &Path) -> StoredImmutableRunBundle {
+        let project = TestRoot::new("project");
         project.write(
             "workflow-os.yml",
             &format!(
@@ -699,7 +752,7 @@ mod tests {
             redaction_required: true,
         })
         .expect("bundle built");
-        let store = LocalImmutableRunBundleStore::new(storage.path());
+        let store = LocalImmutableRunBundleStore::new(storage);
         store.write_bundle(&built).expect("bundle written");
         store
             .read_bundle(built.manifest().run_id(), built.manifest().bundle_id())
@@ -733,7 +786,13 @@ mod tests {
     }
 
     fn make_fixture(freshness: LocalCheckAttestationFreshnessPolicy) -> Fixture {
-        let stored_bundle = stored_bundle("Check Workflow");
+        fixture_with_bundle(freshness, stored_bundle("Check Workflow"))
+    }
+
+    fn fixture_with_bundle(
+        freshness: LocalCheckAttestationFreshnessPolicy,
+        stored_bundle: StoredImmutableRunBundle,
+    ) -> Fixture {
         let bundle = stored_bundle.manifest().run_binding();
         let workflow_id = WorkflowId::new("workflow/test").expect("workflow id");
         let run_id = WorkflowRunId::new("run-test").expect("run id");
@@ -922,6 +981,110 @@ mod tests {
         assert_eq!(
             error.code(),
             "local_check_evidence_assurance.attestation.commitment_mismatch"
+        );
+    }
+
+    #[test]
+    fn stored_attestation_reopens_without_promoting_generic_input() {
+        let storage = TestRoot::new("proof-round-trip");
+        let mut fixture = fixture_with_bundle(
+            LocalCheckAttestationFreshnessPolicy::NoReuse,
+            stored_bundle_in("Check Workflow", storage.path()),
+        );
+        let accepted = verify_local_check_attestation(&fixture.input()).expect("accepted proof");
+        let project = |fixture: &Fixture, proof| {
+            crate::LocalCheckEvidenceAssuranceProjection::new(
+                crate::LocalCheckEvidenceAssuranceProjectionDefinition {
+                    execution_binding: &fixture.execution_binding,
+                    resolved_execution_fingerprint: SpecContentHash::from_text("resolved"),
+                    result_id: accepted.result_id().clone(),
+                    result: &fixture.result,
+                    accepted_attestation: proof,
+                },
+            )
+            .expect("projection")
+        };
+        let projection = project(&fixture, Some(&accepted));
+        let run_id = projection.run_id();
+        let result_id = projection.result_id();
+        let reopened = LocalImmutableRunBundleStore::new(storage.path());
+        LocalImmutableRunBundleStore::new(storage.path())
+            .write_local_check_evidence_assurance_projection_create_only(&projection)
+            .expect("persist proof");
+        assert_eq!(
+            reopened
+                .read_local_check_evidence_assurance_projection(run_id, result_id)
+                .expect("reopened proof"),
+            projection
+        );
+        assert_eq!(
+            reopened
+                .list_local_check_evidence_assurance_projections(run_id)
+                .expect("listed proof"),
+            std::slice::from_ref(&projection)
+        );
+
+        let directory = storage
+            .path()
+            .join("local-check-evidence-assurance-projections");
+        let run_dir = fs::read_dir(directory)
+            .expect("assurance directory")
+            .next()
+            .expect("run directory")
+            .expect("entry")
+            .path();
+        let path = fs::read_dir(run_dir)
+            .expect("run directory")
+            .next()
+            .expect("proof record")
+            .expect("entry")
+            .path();
+        let serialized = fs::read_to_string(&path).expect("stored proof");
+        assert!(
+            serde_json::from_str::<crate::LocalCheckEvidenceAssuranceProjection>(&serialized)
+                .is_err()
+        );
+        let record: serde_json::Value = serde_json::from_str(&serialized).expect("proof envelope");
+
+        fixture.evaluated_at = Timestamp::parse_rfc3339("2026-07-19T12:00:04Z").expect("new time");
+        let other_proof = verify_local_check_attestation(&fixture.input()).expect("other proof");
+        assert_ne!(
+            other_proof.proof_fingerprint(),
+            accepted.proof_fingerprint()
+        );
+        let other_projection = project(&fixture, Some(&other_proof));
+        let other_record =
+            crate::local_check_evidence_assurance::StoredLocalCheckAssuranceWrite::new(
+                &other_projection,
+            )
+            .expect("other record");
+        let other = serde_json::to_value(other_record).expect("other envelope");
+        let mut substituted = record.clone();
+        substituted["verifier_proof"] = other["verifier_proof"].clone();
+        substituted["proof_content_hash"] = other["proof_content_hash"].clone();
+        let mut tampered = record.clone();
+        tampered["verifier_proof"]["stdout_truncated"] = true.into();
+        for invalid in [substituted, tampered, record["projection"].clone()] {
+            fs::write(&path, invalid.to_string()).expect("replace test record");
+            assert_eq!(
+                reopened
+                    .read_local_check_evidence_assurance_projection(run_id, result_id)
+                    .expect_err("bad proof rejected")
+                    .code(),
+                "immutable_run_bundle_store.invalid_record"
+            );
+            assert!(reopened
+                .list_local_check_evidence_assurance_projections(run_id)
+                .is_err());
+        }
+        let unattested = project(&fixture, None);
+        fs::write(&path, serde_json::to_vec(&unattested).expect("legacy JSON"))
+            .expect("write legacy unattested record");
+        assert_eq!(
+            reopened
+                .read_local_check_evidence_assurance_projection(run_id, result_id)
+                .expect("legacy unattested record"),
+            unattested
         );
     }
 

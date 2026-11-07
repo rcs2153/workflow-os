@@ -185,6 +185,8 @@ pub struct LocalCheckEvidenceAssuranceProjection {
     execution_posture: LocalCheckEvidenceExecutionPosture,
     attestation_posture: LocalCheckEvidenceAttestationPosture,
     accepted_attestation: Option<AcceptedAttestationReference>,
+    #[serde(skip)]
+    verifier_proof: Option<Box<AcceptedLocalCheckAttestation>>,
     external_verifiability: LocalCheckEvidenceExternalVerifiabilityPosture,
     projection_fingerprint: SpecContentHash,
 }
@@ -262,6 +264,7 @@ impl LocalCheckEvidenceAssuranceProjection {
             execution_posture: LocalCheckEvidenceExecutionPosture::TrustedHostObserved,
             attestation_posture,
             accepted_attestation,
+            verifier_proof: definition.accepted_attestation.cloned().map(Box::new),
             external_verifiability: LocalCheckEvidenceExternalVerifiabilityPosture::Unavailable,
             projection_fingerprint: SpecContentHash::from_text("pending"),
         };
@@ -288,9 +291,17 @@ impl LocalCheckEvidenceAssuranceProjection {
     }
 
     fn validate_commitments(&self) -> Result<(), WorkflowOsError> {
-        match (self.attestation_posture, &self.accepted_attestation) {
-            (LocalCheckEvidenceAttestationPosture::Unattested, None) => {}
-            (LocalCheckEvidenceAttestationPosture::KernelAcceptedLocalProcess, Some(proof)) => {
+        match (
+            self.attestation_posture,
+            &self.accepted_attestation,
+            &self.verifier_proof,
+        ) {
+            (LocalCheckEvidenceAttestationPosture::Unattested, None, None) => {}
+            (
+                LocalCheckEvidenceAttestationPosture::KernelAcceptedLocalProcess,
+                Some(proof),
+                Some(verified),
+            ) => {
                 if proof.execution_binding_fingerprint != self.execution_binding_fingerprint
                     || proof.immutable_run_bundle != self.immutable_run_bundle
                     || proof.workflow_id != self.workflow_id
@@ -299,6 +310,7 @@ impl LocalCheckEvidenceAssuranceProjection {
                     || proof.result_id != self.result_id
                     || proof.result_status != self.result_status
                     || proof.handler_selection_fingerprint != self.handler_selection_fingerprint
+                    || *proof != AcceptedAttestationReference::from_accepted(verified)
                 {
                     return Err(assurance_error(
                         "attestation.commitment_mismatch",
@@ -516,7 +528,19 @@ impl<'de> Deserialize<'de> for LocalCheckEvidenceAssuranceProjection {
                 "accepted local check evidence assurance requires verifier-owned proof",
             ));
         }
-        let projection = Self {
+        wire.into_projection(None).map_err(|_| {
+            serde::de::Error::custom("invalid local check evidence assurance projection")
+        })
+    }
+}
+
+impl LocalCheckEvidenceAssuranceProjectionWire {
+    fn into_projection(
+        self,
+        verifier_proof: Option<AcceptedLocalCheckAttestation>,
+    ) -> Result<LocalCheckEvidenceAssuranceProjection, WorkflowOsError> {
+        let wire = self;
+        let projection = LocalCheckEvidenceAssuranceProjection {
             algorithm: wire.algorithm,
             immutable_run_bundle: wire.immutable_run_bundle,
             workflow_id: wire.workflow_id,
@@ -533,14 +557,102 @@ impl<'de> Deserialize<'de> for LocalCheckEvidenceAssuranceProjection {
             execution_posture: wire.execution_posture,
             attestation_posture: wire.attestation_posture,
             accepted_attestation: wire.accepted_attestation,
+            verifier_proof: verifier_proof.map(Box::new),
             external_verifiability: wire.external_verifiability,
             projection_fingerprint: wire.projection_fingerprint,
         };
-        projection.validate().map_err(|_| {
-            serde::de::Error::custom("invalid local check evidence assurance projection")
-        })?;
+        projection.validate()?;
         Ok(projection)
     }
+}
+
+// Only the Core-owned store uses this envelope. The digest detects corruption;
+// it does not authenticate an untrusted storage owner.
+#[derive(Serialize)]
+#[serde(untagged)]
+pub(crate) enum StoredLocalCheckAssuranceWrite<'a> {
+    Unattested(&'a LocalCheckEvidenceAssuranceProjection),
+    Accepted {
+        projection: &'a LocalCheckEvidenceAssuranceProjection,
+        verifier_proof: Box<crate::local_check_attestation::StoredAcceptedLocalCheckAttestation>,
+        proof_content_hash: SpecContentHash,
+    },
+}
+
+impl<'a> StoredLocalCheckAssuranceWrite<'a> {
+    pub(crate) fn new(
+        projection: &'a LocalCheckEvidenceAssuranceProjection,
+    ) -> Result<Self, WorkflowOsError> {
+        projection.validate()?;
+        let Some(proof) = &projection.verifier_proof else {
+            return Ok(Self::Unattested(projection));
+        };
+        let verifier_proof = Box::new(
+            crate::local_check_attestation::StoredAcceptedLocalCheckAttestation(
+                proof.as_ref().clone(),
+            ),
+        );
+        let proof_content_hash = stored_proof_content_hash(&verifier_proof)?;
+        Ok(Self::Accepted {
+            projection,
+            verifier_proof,
+            proof_content_hash,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredLocalCheckAssuranceWire {
+    Accepted(Box<StoredLocalCheckAssuranceAcceptedWire>),
+    Unattested(Box<LocalCheckEvidenceAssuranceProjection>),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredLocalCheckAssuranceAcceptedWire {
+    projection: LocalCheckEvidenceAssuranceProjectionWire,
+    verifier_proof: crate::local_check_attestation::StoredAcceptedLocalCheckAttestation,
+    proof_content_hash: SpecContentHash,
+}
+
+pub(crate) struct StoredLocalCheckAssurance(pub(crate) LocalCheckEvidenceAssuranceProjection);
+
+impl<'de> Deserialize<'de> for StoredLocalCheckAssurance {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let projection = match StoredLocalCheckAssuranceWire::deserialize(deserializer)? {
+            StoredLocalCheckAssuranceWire::Unattested(projection) => Ok(*projection),
+            StoredLocalCheckAssuranceWire::Accepted(record) => (|| {
+                if stored_proof_content_hash(&record.verifier_proof)? != record.proof_content_hash {
+                    return Err(stored_proof_error());
+                }
+                let proof = record.verifier_proof.into_validated()?;
+                record.projection.into_projection(Some(proof))
+            })(),
+        };
+        projection
+            .map(Self)
+            .map_err(|_| serde::de::Error::custom("invalid stored local check evidence assurance"))
+    }
+}
+
+fn stored_proof_content_hash(
+    proof: &crate::local_check_attestation::StoredAcceptedLocalCheckAttestation,
+) -> Result<SpecContentHash, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"workflow-os/stored-local-check-verifier-proof/v1\0");
+    hasher.update(serde_json::to_vec(proof).map_err(|_| stored_proof_error())?);
+    Ok(SpecContentHash::from_bytes(hasher.finalize()))
+}
+
+fn stored_proof_error() -> WorkflowOsError {
+    assurance_error(
+        "stored_proof_invalid",
+        "stored local check verifier proof is invalid",
+    )
 }
 
 /// Dimension-specific minimum assurance required by a later narrow gate.
