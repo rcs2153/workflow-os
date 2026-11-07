@@ -129,6 +129,13 @@ repair, reconcile, or classify into an explicit resumable wait. See the
 [Hosted Partial-Run Creation Recovery
 Plan](docs/implementation-plans/hosted-partial-run-creation-recovery-plan.md).
 
+The hosted admission contention gate reopened during fixture-bridge delivery.
+The same 25-job assertion failed on both the exact base and fixture head in
+isolated PostgreSQL trials. Deliver the separate bounded admission coordination
+repair with exact-head CI before resuming fixture delivery. Do not weaken the
+conformance assertion or use a passing rerun as the repair. See the
+[contention recurrence report](docs/concepts/HOSTED_ADMISSION_CONTENTION_RECURRENCE_REPORT.md).
+
 The ordered queue is:
 
 1. independently reproduce and classify every early hosted creation boundary;

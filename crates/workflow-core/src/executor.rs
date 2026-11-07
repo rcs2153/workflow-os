@@ -15269,9 +15269,19 @@ fn governed_continuation_preview_error(suffix: &str) -> WorkflowOsError {
 ///
 /// # Errors
 ///
-/// Fails closed when the workflow is not a supported single-step no-write
-/// shape, immutable preparation fails, or atomic dispatch cannot be committed.
+/// Fails closed when the bounded admission lock wait expires, the workflow is
+/// not a supported single-step no-write shape, immutable preparation fails, or
+/// atomic dispatch cannot be committed.
 pub fn execute_with_hosted_no_write_dispatch(
+    executor: &LocalExecutor<'_, PostgresStateBackend>,
+    request: &LocalExecutionWithHostedDispatchRequest,
+) -> Result<LocalExecutionWithImmutableRunBundleResult, WorkflowOsError> {
+    executor
+        .backend
+        .with_hosted_admission(|| execute_coordinated_hosted_no_write_dispatch(executor, request))
+}
+
+fn execute_coordinated_hosted_no_write_dispatch(
     executor: &LocalExecutor<'_, PostgresStateBackend>,
     request: &LocalExecutionWithHostedDispatchRequest,
 ) -> Result<LocalExecutionWithImmutableRunBundleResult, WorkflowOsError> {
