@@ -45,15 +45,38 @@ app configuration bytes, and verified Claude reopened without the trial
 configuration. The synthetic chat was left intact; no private transcript or
 configuration is published here.
 
+## Native Follow-Up
+
+On November 7, 2026, the operator ran the remaining five state-dependent cases
+and one positive control in a fresh native Claude Desktop chat on the same Mac,
+using repository commit `3da6cbcde9f20f49edadf26be0a7930f6eb1c6c4`. The operator
+verified that only the four temporary fixture connectors were enabled and that
+Memory, Research, and Claude in Chrome were off. The app received only
+synthetic case identifiers and allowed each call once. The native activity
+record showed six fixture calls: one successful and five rejected.
+
+| Case | Native result and verified context |
+| --- | --- |
+| Exact control | Validated with verified delegation; all side-effect flags were false. |
+| Reserved attempt | Rejected. The same request passed before Core reserved the exact attempt; the operator verified the window-specific same-actor refusal after reservation. The native delegated result was generic. |
+| Denied approval | Rejected at the missing-attempted-effect boundary after a durable proof-backed denial. |
+| Terminal replay | Rejected because the completed run was not active. |
+| Changed evidence | Rejected after a later failed check superseded the passing evidence. |
+| Stale window | Rejected after the real window expired. The same-actor preflight distinguished the stale window; the delegated result was generic and the grant also expired. |
+
+The four SQLite databases matched their pre-trial hashes before cleanup.
+The operator then revoked the grants and principals, removed the disposable
+principal files, and verified that Claude reopened with its exact original
+configuration. No provider call was made.
+
 ## Remaining Acceptance
 
-This is partial fixture acceptance, not the full milestone. An explicit denied
-approval, stale execution window, changed durable evidence, terminal replay,
-and a dispatch-reservation conflict were not exercised through Claude Desktop.
-Exact repeat demonstrates non-mutation, not provider-side duplicate prevention.
-No live call, accepted provider effect, post-effect recovery, independent
-reviewer reconstruction, or controlled token/latency comparison was performed.
-The live slice remains gated on completion and review of the fixture corpus.
+The named synthetic cases now have native observations. Exact repeat and the
+reservation conflict demonstrate local refusal and non-mutation, not
+provider-side duplicate prevention. No live call, accepted provider effect,
+post-effect recovery, independent reviewer reconstruction, or controlled
+token/latency comparison was performed. The separately governed live slice
+still requires review and its own explicit authorization.
 
 ## Governance
 
@@ -63,3 +86,7 @@ The live slice remains gated on completion and review of the fixture corpus.
   `presentation/d2b26fa78538a279`.
 - App configuration, observation, evidence comparison, cleanup, and this
   report were operator actions outside the kernel. No WorkReport was emitted.
+- Follow-up: `dg/review`, `run-1794047809252867000-2`; approval
+  `approval/run-1794047809252867000-2/review-scope-approved`, granted with
+  persisted presentation `presentation/e997d606ef7d91ac`. The operator obtained
+  separate desktop launch consent before configuring the app.
