@@ -84,7 +84,9 @@ report that limitation rather than claiming a secure handoff.
 
 First deliver Core, SQLite and the public fixture boundary with real reopen and
 revocation tests in one implementation slice. Then configure the app and run the
-fixture corpus in a separate governed phase. No live provider calls, provider
+fixture corpus in a separate governed phase. See the
+[Claude Desktop fixture handoff runbook](../user-guide/claude-desktop-fixture-handoff.md)
+for the evaluator tool and its operator boundaries. No live provider calls, provider
 credentials, generalized identity service, cross-machine or enterprise isolation
 claims, or new capability family are authorized by this contract.
 
