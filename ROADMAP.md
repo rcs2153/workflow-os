@@ -256,8 +256,12 @@ The correction candidate can now open an exact fixture window and validate it
 from the public CLI after reopening SQLite read-only. Its negative tests cover
 request and actor drift, missing or superseded check evidence, terminal runs,
 and expired, revoked, or consumed windows at their respective boundaries.
-The candidate requires a second focused maintainer/security review before
-the independent harness corpus. See the [prepared-fixture evidence](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_REVIEW.md#prepared-fixture-and-public-cli-proof).
+The [second focused maintainer/security review](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_CORRECTED_REVIEW.md)
+did not accept the candidate. The next increment must establish a consistent
+read of current authority and enforce declared check assurance and freshness
+or fail closed when those facts cannot be verified. Keep the independent
+harness corpus gated. The [prepared-fixture evidence](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_REVIEW.md#prepared-fixture-and-public-cli-proof)
+remains valid for its tested boundary.
 
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
