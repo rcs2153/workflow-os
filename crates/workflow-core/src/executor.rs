@@ -15426,7 +15426,7 @@ fn current_scheduled_continuation_step(run: &WorkflowRun) -> Result<StepId, Work
     Ok(step_id)
 }
 
-fn immutable_continuation_workflow(
+pub(crate) fn immutable_continuation_workflow(
     bundle: &crate::StoredImmutableRunBundle,
 ) -> Result<&WorkflowDefinition, WorkflowOsError> {
     let records = bundle

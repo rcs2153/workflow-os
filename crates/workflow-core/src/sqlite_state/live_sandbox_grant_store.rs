@@ -451,6 +451,7 @@ fn resolve_live_effect(
     .ok_or_else(denied)?;
     let identity = &run.snapshot.identity;
     let bundle = identity.immutable_run_bundle.as_ref().ok_or_else(denied)?;
+    let bundle_sensitivity = verify_live_bundle(tx, facts, run, bundle)?;
     let [approval] = record.authority().approval_references.as_slice() else {
         return Err(denied());
     };
@@ -495,7 +496,68 @@ fn resolve_live_effect(
     Ok(ResolvedLiveEffect {
         evidence: proof_commitment(b"workflow-os/live-effect-evidence/v1\0", &(record, checks))?,
         policy: proof_commitment(b"workflow-os/live-effect-policy/v1\0", &policy)?,
-        sensitivity,
+        sensitivity: sensitivity.max(bundle_sensitivity),
+    })
+}
+
+fn verify_live_bundle(
+    tx: &Connection,
+    facts: LiveSandboxContinuationFacts<'_>,
+    run: &WorkflowRun,
+    binding: &crate::ImmutableRunBundleBinding,
+) -> Result<WorkReportSensitivity, WorkflowOsError> {
+    let identity = &run.snapshot.identity;
+    let stored = SqliteStateBackend::read_exact_bundle_with_connection(
+        tx,
+        &identity.run_id,
+        binding.bundle_id(),
+    )
+    .map_err(|_| denied())?;
+    let manifest = stored.manifest();
+    let approval = run
+        .snapshot
+        .approval_requests
+        .iter()
+        .find(|approval| approval.approval_id == facts.approval.as_str())
+        .ok_or_else(denied)?;
+    if manifest.run_binding() != *binding
+        || manifest.workflow_id() != &identity.workflow_id
+        || manifest.workflow_version() != &identity.workflow_version
+        || manifest.schema_version() != &identity.schema_version
+        || manifest.workflow_content_hash() != &identity.spec_content_hash
+        || approval.resolved_execution_context_hash.as_ref()
+            != Some(manifest.resolved_execution_context_hash())
+    {
+        return Err(denied());
+    }
+
+    let workflow =
+        crate::executor::immutable_continuation_workflow(&stored).map_err(|_| denied())?;
+    let selected = workflow
+        .steps
+        .iter()
+        .position(|step| &step.id == facts.action.step)
+        .ok_or_else(denied)?;
+    for step in &workflow.steps[..=selected] {
+        let record =
+            crate::local_check_attestation::authoritative_record_for_step(&stored, &step.id)
+                .map_err(|_| denied())?;
+        if step.local_check_requirements.iter().any(|requirement| {
+            requirement.requirement_level() == crate::LocalCheckRequirementLevel::Required
+        }) || record.declarations().iter().any(|declaration| {
+            declaration.requirement_level() == crate::LocalCheckRequirementLevel::Required
+        }) {
+            // A passing result event does not establish the declared attestation.
+            return Err(WorkflowOsError::security(
+                "live_sandbox_continuation.required_check_unverified",
+                "required immutable check assurance is unavailable for live admission",
+            ));
+        }
+    }
+    Ok(match manifest.sensitivity() {
+        crate::ImmutableRunBundleSensitivity::Internal => WorkReportSensitivity::Internal,
+        crate::ImmutableRunBundleSensitivity::Confidential => WorkReportSensitivity::Confidential,
+        crate::ImmutableRunBundleSensitivity::Restricted => WorkReportSensitivity::Secret,
     })
 }
 
