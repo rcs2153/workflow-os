@@ -274,6 +274,21 @@ impl RequiredContextContractBinding {
         Ok(binding)
     }
 
+    pub(crate) fn explicit_none_for_github_comment_fixture() -> Result<Self, WorkflowOsError> {
+        let contract_id = HarnessContractId::new("harness/github-comment-fixture")?;
+        let contract_version = HarnessContractVersion::new("v1")?;
+        let content_hash = compute_explicit_none_contract_hash(&contract_id, &contract_version);
+        let binding = Self {
+            contract_id,
+            contract_version,
+            content_hash,
+            requirements: Vec::new(),
+            requirement_posture: RequiredContextRequirementPosture::ExplicitNone,
+        };
+        binding.validate()?;
+        Ok(binding)
+    }
+
     fn validate(&self) -> Result<(), WorkflowOsError> {
         let expected = match self.requirement_posture {
             RequiredContextRequirementPosture::DeclaredRequirements => {

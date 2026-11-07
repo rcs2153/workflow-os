@@ -229,6 +229,55 @@ only after that bridge passes focused review; one explicitly authorized live
 disposable-sandbox run and independent rerun are the final slice. See the
 [preregistration review](docs/concepts/CROSS_HARNESS_AUTHORITATIVE_CONTINUATION_MILESTONE_PREREGISTRATION_REVIEW.md).
 
+The first fixture-only bridge implementation is complete and ready for focused
+review. `provider github-pr-comment continue-sandbox --request <path>` now
+loads the exact durable run, create-only immutable bundle, attempted GitHub
+PR-comment `SideEffect`, approval presentation proof, and store-backed approval
+linkage before validating one exact fixture request. The replacement executor
+must identify the same durable actor. Delegated actor substitution fails closed
+until a persisted delegation contract exists. The command accepts no auth,
+performs no provider call, changes no `SideEffect`, appends no workflow event,
+and writes no report artifact. This is a public continuity validation boundary,
+not an executable live continuation or packaged harness adapter. See the
+[implementation report](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_IMPLEMENTATION_REPORT.md).
+
+Focused maintainer/security review did not accept the first bridge. The
+identity, immutable-bundle, same-actor, approval-presentation, approval-linkage,
+SideEffect, target, and idempotency foundations are useful, but the public
+boundary currently requires a terminal run rather than the preregistered active
+interruption posture. It also does not reassess durable evidence/check or
+current execution-window facts. The CLI accepts dry-run input while reporting
+fixture mode, silently treats a malformed optional fixture reference as absent,
+and lacks a successful end-to-end public-boundary test. See the [focused bridge
+review](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_REVIEW.md).
+
+The next phase is a narrow blocker correction. It must model the exact
+non-terminal interruption posture, bind current execution-window and
+evidence/check facts from kernel-owned durable state, enforce fixture-only and
+strict input behavior, and prove the public CLI success and adversarial paths.
+No Codex/LangGraph adapter, live provider call, generic write surface, or
+cross-harness product claim may proceed until the corrected bridge passes a
+second focused review.
+
+The correction candidate can now open an exact fixture window and validate it
+from the public CLI after reopening SQLite read-only. Its negative tests cover
+request and actor drift, missing or superseded check evidence, terminal runs,
+and expired, revoked, or consumed windows at their respective boundaries.
+The [second focused maintainer/security review](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_CORRECTED_REVIEW.md)
+did not accept the candidate. The next increment must establish a consistent
+read of current authority and enforce declared check assurance and freshness
+or fail closed when those facts cannot be verified. Keep the independent
+harness corpus gated. The [prepared-fixture evidence](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_BRIDGE_REVIEW.md#prepared-fixture-and-public-cli-proof)
+remains valid for its tested boundary.
+
+The snapshot correction now rechecks the event history, SideEffect,
+window, and dispatch reservation in one final SQLite read transaction, and
+rejects required check declarations that the fixture cannot attest. The
+[exact-head maintainer recheck](docs/concepts/CROSS_HARNESS_FIXTURE_CONTINUATION_CORRECTED_REVIEW.md#final-maintainer-recheck)
+accepts this fixture-only boundary. The next increment is governed PR delivery
+and local sync before the independent fixture corpus. This does not authorize
+live dispatch, unverifiable check declarations, or cross-principal delegation.
+
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
 recursive agents, nested-harness runtime, a new provider mutation family, or a

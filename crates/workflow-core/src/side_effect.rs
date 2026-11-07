@@ -1307,6 +1307,12 @@ impl SideEffectRecord {
         &self.authority
     }
 
+    /// Returns the optional actor that requested the side effect.
+    #[must_use]
+    pub const fn actor(&self) -> Option<&ActorId> {
+        self.actor.as_ref()
+    }
+
     /// Returns the creation timestamp.
     #[must_use]
     pub const fn created_at(&self) -> Timestamp {
