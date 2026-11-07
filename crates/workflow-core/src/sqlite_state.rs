@@ -48,6 +48,8 @@ const LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION: u32 = 12;
 const LIVE_AUTHORITY_SCHEMA_DIGEST: &str =
     "25cf61a4ee86b8b9c52d7f9183316eac648ce9c38e501f11be84008c2028eaac";
 const LIVE_AUTHORITY_SCHEMA_CHECKSUM: &str =
+    "sha256:ab58c025af006d66886fa5c9f80f664e55420dfa8b55943274fd6e49a734042c";
+const LIVE_AUTHORITY_UNSCOPED_V12_CHECKSUM: &str =
     "sha256:e4538d7416eaf603d866b98ffe0907bd6735cbb3087e53d955cb8339cdde10c8";
 const LIVE_AUTHORITY_PREVIOUS_SCHEMA_DIGEST: &str =
     "7315dc4257a066e01e1f90398b0c5dc79510ce9ac67e55e88e13f65e5555ef68";
@@ -1258,7 +1260,7 @@ impl SqliteStateBackend {
         match version {
             RUN_SCOPE_ADAPTER_SCHEMA_VERSION => validate_v9_upgrade_eligibility(&connection)?,
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(&connection)?,
-            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => validate_live_authority_schema(&connection)?,
+            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => validate_recognized_v12_schema(&connection)?,
             LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION => {
                 validate_previous_live_authority_schema(&connection)?;
             }
@@ -2346,7 +2348,7 @@ impl SqliteStateBackend {
                 ))
             }
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(connection),
-            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => validate_live_authority_schema(connection),
+            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => validate_recognized_v12_schema(connection),
             LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION => {
                 validate_previous_live_authority_schema(connection)
             }
@@ -4109,6 +4111,19 @@ fn validate_live_authority_schema(connection: &Connection) -> Result<(), Workflo
         LIVE_AUTHORITY_SCHEMA_CHECKSUM,
         LIVE_AUTHORITY_SCHEMA_DIGEST,
     )
+}
+
+fn validate_unscoped_v12_schema(connection: &Connection) -> Result<(), WorkflowOsError> {
+    validate_schema_metadata_version(
+        connection,
+        LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
+        LIVE_AUTHORITY_UNSCOPED_V12_CHECKSUM,
+        LIVE_AUTHORITY_SCHEMA_DIGEST,
+    )
+}
+
+fn validate_recognized_v12_schema(connection: &Connection) -> Result<(), WorkflowOsError> {
+    validate_live_authority_schema(connection).or_else(|_| validate_unscoped_v12_schema(connection))
 }
 
 fn validate_previous_live_authority_schema(connection: &Connection) -> Result<(), WorkflowOsError> {

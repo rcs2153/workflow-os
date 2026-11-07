@@ -3253,10 +3253,9 @@ mod tests {
         trial: LiveGrantTrial,
     ) -> ContinuityCursor {
         use crate::{
-            Action, ApprovalPresentationRecordStore, ApprovalRequest, Capability,
-            ExplicitLocalCheckProfileId, LocalCheckCommandId, LocalCheckCommandKind,
-            LocalCheckResultRecordedEvent, LocalCheckResultRecordedEventDefinition,
-            LocalCheckResultStatus, PolicyDecision, SkillInvocationId,
+            ApprovalPresentationRecordStore, ApprovalRequest, ExplicitLocalCheckProfileId,
+            LocalCheckCommandId, LocalCheckCommandKind, LocalCheckResultRecordedEvent,
+            LocalCheckResultRecordedEventDefinition, LocalCheckResultStatus, SkillInvocationId,
         };
         let mut event = fixture
             .backend
@@ -3304,22 +3303,15 @@ mod tests {
             invocation_terminal_event_id: terminal.clone(),
         })
         .expect("check");
-        for (id, kind) in [
-            (
-                EventId::new("event/live-policy").expect("policy"),
-                WorkflowRunEventKind::PolicyDecisionRecorded(Box::new(PolicyDecision {
-                    allowed: !matches!(trial, LiveGrantTrial::DeniedPolicy),
-                    requires_approval: true,
-                    reason_codes: vec![],
-                    violations: vec![],
-                    action: Action::InvokeAdapter,
-                    capabilities: vec![Capability::ExternalWrite],
-                    actor: Some(facts.action.original_actor.clone()),
-                    workflow_id: Some(fixture.workflow_id.clone()),
-                    run_id: Some(fixture.run_id.clone()),
-                    correlation_id: Some(facts.decision.correlation_id.clone()),
-                })),
-            ),
+        let mut policy = facts
+            .scoped_policy_decision(facts.decision.decided_at)
+            .expect("exact sandbox policy");
+        if matches!(trial, LiveGrantTrial::GenericPolicy) {
+            policy.reason_codes.clear();
+        }
+        let mut later_denial = policy.clone();
+        later_denial.allowed = false;
+        let mut history = vec![
             (
                 EventId::new("event/live-check").expect("check event"),
                 WorkflowRunEventKind::LocalCheckResultRecorded(Box::new(check)),
@@ -3346,7 +3338,18 @@ mod tests {
                 EventId::new("event/live-run-resumed").expect("resume"),
                 WorkflowRunEventKind::RunResumed,
             ),
-        ] {
+            (
+                EventId::new("event/live-policy").expect("policy"),
+                WorkflowRunEventKind::PolicyDecisionRecorded(Box::new(policy)),
+            ),
+        ];
+        if matches!(trial, LiveGrantTrial::DeniedPolicy) {
+            history.push((
+                EventId::new("event/live-policy-denied").expect("later denial"),
+                WorkflowRunEventKind::PolicyDecisionRecorded(Box::new(later_denial)),
+            ));
+        }
+        for (id, kind) in history {
             event.event_id = id;
             event.idempotency_key =
                 Some(IdempotencyKey::new(event.event_id.as_str()).expect("event idempotency"));
@@ -3471,6 +3474,11 @@ mod tests {
     #[test]
     fn live_grant_rejects_persisted_policy_denial() {
         exercise_live_grant_reservation(LiveGrantTrial::DeniedPolicy);
+    }
+
+    #[test]
+    fn live_grant_rejects_generic_adapter_policy_allow() {
+        exercise_live_grant_reservation(LiveGrantTrial::GenericPolicy);
     }
 
     #[test]
@@ -3760,6 +3768,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn live_grant_store_requires_explicit_scoped_policy_protocol_upgrade() {
+        use super::super::{
+            validate_operational_schema, LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
+            LIVE_AUTHORITY_UNSCOPED_V12_CHECKSUM,
+        };
+        let fixture = Fixture::new();
+        fixture
+            .backend
+            .enable_live_sandbox_grant_store()
+            .expect("opt in");
+        let connection = fixture.backend.connection().expect("connection");
+        connection
+            .execute(
+                "UPDATE schema_metadata SET checksum=?1 WHERE singleton=1",
+                [LIVE_AUTHORITY_UNSCOPED_V12_CHECKSUM],
+            )
+            .expect("previous protocol");
+        let reopened = SqliteStateBackend::open(&fixture.path).expect("recognize previous V12");
+        assert!(validate_operational_schema(&connection).is_err());
+        let original = reopened.read_events(&fixture.run_id).expect("history");
+        reopened
+            .enable_live_sandbox_grant_store()
+            .expect("explicit policy protocol upgrade");
+        assert_eq!(
+            validate_operational_schema(&connection).expect("active protocol"),
+            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION
+        );
+        assert_eq!(
+            reopened
+                .read_events(&fixture.run_id)
+                .expect("unchanged history"),
+            original
+        );
+    }
+
     #[derive(Clone, Copy)]
     enum LiveGrantTrial {
         AmbiguousCommit,
@@ -3767,6 +3811,7 @@ mod tests {
         Revoked,
         PrincipalRevoked,
         DeniedPolicy,
+        GenericPolicy,
         FailedCheck,
         MissingBundle,
         LegacyBundle,
@@ -3781,6 +3826,7 @@ mod tests {
             matches!(
                 self,
                 Self::DeniedPolicy
+                    | Self::GenericPolicy
                     | Self::FailedCheck
                     | Self::MissingBundle
                     | Self::LegacyBundle
@@ -4169,6 +4215,25 @@ mod tests {
                     facts,
                     credential: &live_credential,
                 };
+                let revised_policy =
+                    crate::live_sandbox_continuation_authority::LiveSandboxPolicyTarget::provision(
+                        facts.action.target.clone(),
+                        facts.decision.actor.clone(),
+                        SpecContentHash::from_text("changed policy revision"),
+                        facts.window_expires_at,
+                    )
+                    .expect("revised policy");
+                let changed_policy = LiveGrantAdmission {
+                    facts: LiveSandboxContinuationFacts {
+                        policy_target: &revised_policy,
+                        ..facts
+                    },
+                    ..admission
+                };
+                assert!(backend
+                    .reserve_live_sandbox_dispatch(request(), changed_policy)
+                    .is_err());
+                assert_eq!(counts(), (0, 0));
                 if matches!(trial, LiveGrantTrial::RequiredProof) {
                     let payload: String = connection
                         .query_row(
@@ -4247,6 +4312,7 @@ mod tests {
                 assert_eq!(event_count(), before);
                 match trial {
                     LiveGrantTrial::DeniedPolicy
+                    | LiveGrantTrial::GenericPolicy
                     | LiveGrantTrial::FailedCheck
                     | LiveGrantTrial::MissingBundle
                     | LiveGrantTrial::LegacyBundle
