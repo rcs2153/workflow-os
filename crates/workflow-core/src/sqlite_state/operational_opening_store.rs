@@ -4211,7 +4211,8 @@ mod tests {
                         checked_reservation_request(&capability),
                         LiveGrantAdmission {
                             grant_id: grant.grant_id(),
-                            facts,
+                            side_effect: action.side_effect,
+                            body: action.body,
                             credential: &live_credential,
                         }
                     )
@@ -4301,9 +4302,26 @@ mod tests {
                 };
                 let admission = LiveGrantAdmission {
                     grant_id: grant.grant_id(),
-                    facts,
+                    side_effect: action.side_effect,
+                    body: action.body,
                     credential: &live_credential,
                 };
+                let absent_effect = SideEffectId::new("effect/wrong").expect("effect locator");
+                for wrong in [
+                    LiveGrantAdmission {
+                        body: "different body",
+                        ..admission
+                    },
+                    LiveGrantAdmission {
+                        side_effect: &absent_effect,
+                        ..admission
+                    },
+                ] {
+                    assert!(backend
+                        .reserve_live_sandbox_dispatch(request(), wrong)
+                        .is_err());
+                    assert_eq!(counts(), (0, 0));
+                }
                 let revised_policy =
                     crate::live_sandbox_continuation_authority::LiveSandboxPolicyTarget::provision(
                         facts.action.target.clone(),

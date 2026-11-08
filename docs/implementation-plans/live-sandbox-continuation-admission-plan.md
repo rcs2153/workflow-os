@@ -251,6 +251,15 @@ cannot be overwritten. Upgrade preserves history and does not infer target
 registrations from earlier policy events. Tests use disposable local stores
 and synthetic targets; no real target or provider route is enabled.
 
+At reservation, the replacement supplies a grant ID, attempted-effect
+locator, exact proposed comment bytes, and principal proof. Core resolves the
+grant scope, approval decision and presentation, immutable run identity,
+attempted effect, and registered target in the reservation transaction.
+Proposed bytes must reproduce the original action commitment; a missing
+effect or changed body leaves the grant and reservation untouched. Sensitivity
+comes from the persisted presentation, bundle, and effect, not the caller.
+This admission path does not perform a dispatch.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes
