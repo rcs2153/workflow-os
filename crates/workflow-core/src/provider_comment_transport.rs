@@ -37,6 +37,17 @@ struct GitHubUserIdentity {
     id: NonZeroU64,
 }
 
+#[derive(Deserialize)]
+struct GitHubPullRequestIdentity {
+    number: NonZeroU64,
+    base: GitHubPullRequestBase,
+}
+
+#[derive(Deserialize)]
+struct GitHubPullRequestBase {
+    repo: GitHubRepositoryIdentity,
+}
+
 impl<'a> GitHubCommentCreationTransport<'a> {
     pub(crate) fn new(auth: &'a GitHubPullRequestCommentProviderAuth) -> Self {
         Self {
@@ -70,9 +81,19 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         if author.id != expected.author_id {
             return None;
         }
+        // Issue-comment creation also accepts ordinary issues.
+        let number = target.pull_request_number();
+        let pull_request: GitHubPullRequestIdentity =
+            self.read_identity(&format!("{repo}/pulls/{number}"))?;
+        if pull_request.number.get() != number
+            || pull_request.base.repo.id != repository.id
+            || pull_request.base.repo.full_name != full_name
+        {
+            return None;
+        }
         Some(PreparedGitHubCommentCreation {
             transport: self,
-            path: format!("{repo}/issues/{}/comments", target.pull_request_number()),
+            path: format!("{repo}/issues/{number}/comments"),
             repository_id: repository.id,
         })
     }
@@ -145,6 +166,7 @@ mod tests {
 
     const REPO: &[u8] = br#"{"id":11,"full_name":"example/sandbox"}"#;
     const USER: &[u8] = br#"{"id":22}"#;
+    const PR: &[u8] = br#"{"number":7,"base":{"repo":{"id":11,"full_name":"example/sandbox"}}}"#;
     const TARGET: &str = "POST /repos/example/sandbox/issues/7/comments HTTP/1.1";
     const MARKED_BODY: &str = "exact\r\nbody";
 
@@ -270,12 +292,22 @@ mod tests {
         }
     }
 
+    fn pull_request<'a>(status: &'a str, body: &'a [u8]) -> Reply<'a> {
+        Reply {
+            line: "GET /repos/example/sandbox/pulls/7 HTTP/1.1",
+            status,
+            headers: "",
+            body,
+        }
+    }
+
     #[test]
     fn verified_identity_allows_one_exact_exchange() {
         let body = br#"{"id":33}"#;
         let result = exchange(&[
             repo(REPO),
             user(USER),
+            pull_request("200 OK", PR),
             Reply {
                 line: TARGET,
                 status: "201 Created",
@@ -294,6 +326,30 @@ mod tests {
         assert!(exchange(&[repo(br#"{"id":12,"full_name":"example/sandbox"}"#)]).is_none());
         assert!(exchange(&[repo(br#"{"id":11,"full_name":"example/other"}"#)]).is_none());
         assert!(exchange(&[repo(REPO), user(br#"{"id":23}"#)]).is_none());
+    }
+
+    #[test]
+    fn missing_unverified_or_oversized_pull_request_never_posts() {
+        let large = vec![b' '; MAX_IDENTITY_RESPONSE_BYTES + 1];
+        for response in [
+            pull_request("404 Not Found", br#"{"message":"Not Found"}"#),
+            pull_request("200 OK", br#"{"number":7}"#),
+            pull_request(
+                "200 OK",
+                br#"{"number":8,"base":{"repo":{"id":11,"full_name":"example/sandbox"}}}"#,
+            ),
+            pull_request(
+                "200 OK",
+                br#"{"number":7,"base":{"repo":{"id":12,"full_name":"example/sandbox"}}}"#,
+            ),
+            pull_request(
+                "200 OK",
+                br#"{"number":7,"base":{"repo":{"id":11,"full_name":"example/other"}}}"#,
+            ),
+            pull_request("200 OK", &large),
+        ] {
+            assert!(exchange(&[repo(REPO), user(USER), response]).is_none());
+        }
     }
 
     #[test]
@@ -319,7 +375,9 @@ mod tests {
                 body: &large,
             },
         ] {
-            assert!(exchange(&[repo(REPO), user(USER), reply]).is_none());
+            assert!(
+                exchange(&[repo(REPO), user(USER), pull_request("200 OK", PR), reply]).is_none()
+            );
         }
     }
 }

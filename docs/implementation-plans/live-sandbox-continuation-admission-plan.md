@@ -556,6 +556,42 @@ same outcome but cannot replace it, create a second proof, or authorize a
 resend. Missing responses and interrupted persistence still need recovery;
 this does not establish acceptance when an HTTP response never arrived.
 
+### Focused Maintainer Review Of The Private Exchange
+
+Reviewed merged commit `18b35f5b`. Accept the isolated transport as a tested
+building block; do not connect it to live dispatch yet. This is an owner review,
+not independent security assurance. Three requirements block live composition:
+
+1. **Prove the target is the approved pull request before POST.** GitHub's
+   [issue-comment endpoint](https://docs.github.com/en/rest/issues/comments#create-an-issue-comment)
+   accepts both issues and pull requests. Matching the repository and author
+   does not prove that the number identifies a pull request. Require bounded
+   [pull request metadata](https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request)
+   matching the approved target and stable repository identity. Test that an
+   issue-only number, a missing PR, or mismatched metadata produces no POST.
+2. **Bind the send to the durable reservation and current execution window.**
+   The prepared client is single-use but accepts caller-supplied body text; it
+   does not prove the adapter commitment or carry the dispatch capability.
+   Compose it so only the freshly committed reservation supplies the exact
+   adapter binding, target, and marked body. Do preflight before the final
+   authority check, and check the trusted deadline before dispatch rather than
+   treating a prior reservation as permission to send after a slow preflight
+   or process pause. The local check is not atomic with remote acceptance;
+   retain repository-scoped provider authorization and the bounded target.
+3. **Keep uncertainty recoverable, never retryable as a write.** An invalid or
+   missing acknowledgement, expiry after reservation, or interruption after
+   POST must not release another send right. Test the composed path with
+   delayed preflight, exact retry, and acceptance followed by response loss.
+   Only the exact response or independently bound observation can establish
+   an effect; never infer that no comment exists from a transport failure.
+
+The private preflight now addresses item 1: it requires a bounded successful
+pull-request response with the exact number and matching base repository ID and
+canonical name before returning a prepared client. A missing pull request
+(including an issue-only number), incomplete or mismatched metadata, and an
+oversized response all stop before POST. Items 2 and 3 still block live
+composition; none of these preflight reads is atomic with remote acceptance.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
