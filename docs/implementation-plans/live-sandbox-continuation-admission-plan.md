@@ -665,6 +665,18 @@ Page traversal is not a snapshot, a live acceptance proof, or permission
 to retry. Loopback exercises the HTTP boundary; no production caller, writer,
 or provider request is enabled.
 
+### Final Local Revocation Check
+
+After reservation, the injected dispatch path samples trusted time and reads
+the historical admission and current grant use, principal registration, and
+exact target and provider binding in one SQLite snapshot. A grant, principal,
+or target revocation visible at that boundary prevents adapter entry and
+leaves the consumed reservation intact for recovery. Tests commit each
+revocation after reservation and verify that restarting cannot send, add
+another admission event, or turn uncertainty into completion. The transaction
+ends before the sender is called; a later local change cannot be made atomic
+with provider acceptance. Live wiring and evidence provenance remain gated.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
