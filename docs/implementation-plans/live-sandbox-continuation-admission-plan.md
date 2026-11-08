@@ -886,6 +886,23 @@ provenance. The fixture module is excluded from production and cannot
 admit live reservations. Issuer integration, authenticated enumeration,
 bot-author mapping, and provider-backed creation proof remain gated.
 
+### Bind Issuance To Repository Enumeration
+
+The private fixed-origin exchange uses a signed App assertion supplied by
+the future trusted issuer. It checks the authenticated App and selected,
+unsuspended user or organization installation before requesting one
+numeric repository and the exact permission set. It requires affirmative
+scope and expiry in the issuance response, then verifies a complete
+singleton repository list using the same bearer it just received. Missing,
+broader, redirected, incomplete, mismatched, or expired responses fail
+closed. The opaque in-memory result cannot be serialized or passed to the
+comment sender. Loopback tests exercise the HTTP boundary with synthetic
+assertions and bearer values; no GitHub App has been provisioned or used.
+
+This does not implement the trusted issuer, verify the bot author, bind the
+result to an immutable run, or connect it to live reservation and response
+proof. Those remain admission gates.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
