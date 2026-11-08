@@ -3578,6 +3578,22 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires the isolated Linux signer rehearsal launcher"]
+    fn linux_rehearsal_core_process() {
+        use crate::provider_comment_transport::installation_signer_channel::linux_rehearsal::{
+            assert_file_inaccessible, assert_isolated, fixture_root, POLICY,
+        };
+        assert_isolated(POLICY.exchange_uid);
+        let root = fixture_root();
+        assert_eq!(std::env::temp_dir(), root.join("core-private"));
+        assert_file_inaccessible(&root.join("signer-private/custody"));
+        exercise_live_grant_reservation(LiveGrantTrial::InstallationClaim(
+            InstallationClaimTrial::LinuxSignerProcesses,
+        ));
+    }
+
     #[test]
     fn live_comment_observation_reopens_without_completing_or_reauthorizing() {
         exercise_live_grant_reservation(LiveGrantTrial::DurableObservation);
@@ -4600,6 +4616,8 @@ mod tests {
         SignerReplyWithoutAdmission,
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         SignerAdmitted,
+        #[cfg(target_os = "linux")]
+        LinuxSignerProcesses,
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         SignerAdmissionCommitLoss,
         #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -4771,6 +4789,17 @@ mod tests {
         };
         assert_eq!(claim_count(), 0);
         match trial {
+            #[cfg(target_os = "linux")]
+            InstallationClaimTrial::LinuxSignerProcesses => {
+                exercise_installation_signer_admission(
+                    backend,
+                    path,
+                    &request(),
+                    admission,
+                    reviewed,
+                    trial,
+                );
+            }
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             InstallationClaimTrial::RevokedDuringSigner
             | InstallationClaimTrial::SignerReplyWithoutAdmission => {
@@ -5090,7 +5119,96 @@ mod tests {
         ).expect("admission count")
         };
         assert_eq!(count(), 0);
+        let expected_admissions = 1;
+        #[cfg(target_os = "linux")]
+        let expected_admissions = if matches!(trial, InstallationClaimTrial::LinuxSignerProcesses)
+            && crate::provider_comment_transport::installation_signer_channel::linux_rehearsal::trial()
+                == crate::provider_comment_transport::installation_signer_channel::linux_rehearsal::Trial::BeforeCommit
+        {
+            0
+        } else {
+            expected_admissions
+        };
         match trial {
+            #[cfg(target_os = "linux")]
+            InstallationClaimTrial::LinuxSignerProcesses => {
+                use crate::provider_comment_transport::installation_signer_channel::linux_rehearsal::{
+                    accept_socket, bind_socket, connect_socket, fixture_root, trial, Trial, POLICY,
+                };
+                let trial = trial();
+                let root = fixture_root();
+                let probe_path = root.join("core-socket/probe");
+                let probe = bind_socket(&probe_path);
+                let wrong_peer = connect_socket(&probe_path);
+                assert!(InstallationSignerDecisionReceiver::authenticate(
+                    accept_socket(&probe),
+                    &POLICY,
+                )
+                .is_err());
+                drop(wrong_peer);
+                drop(probe);
+                let listener = bind_socket(&root.join("core-socket/decision"));
+                let channel = InstallationSignerChannel::authenticate(
+                    connect_socket(&root.join("signer-socket/assertion")),
+                    &POLICY,
+                )
+                .expect("signer assertion peer");
+                std::thread::scope(|threads| {
+                    let authority = threads.spawn(|| {
+                        let mut interrupted = false;
+                        let decision = InstallationSignerDecisionReceiver::authenticate(
+                            accept_socket(&listener),
+                            &POLICY,
+                        )
+                        .expect("signer decision peer")
+                        .serve_once(|wire| {
+                            backend.admit_installation_signer_request_with_fault(
+                                request,
+                                admission,
+                                reviewed,
+                                wire,
+                                |committed| {
+                                    if (!committed && trial == Trial::BeforeCommit)
+                                        || (committed && trial == Trial::AfterCommit)
+                                    {
+                                        interrupted = true;
+                                        Err(WorkflowOsError::security(
+                                            "test.signer_interrupted",
+                                            "decision delivery interrupted",
+                                        ))
+                                    } else {
+                                        Ok(())
+                                    }
+                                },
+                            )
+                        });
+                        (decision, interrupted)
+                    });
+                    let mut exchanges = 0;
+                    let exchange = backend.exchange_with_installation_signer_using(
+                        request,
+                        admission,
+                        reviewed,
+                        claim,
+                        channel,
+                        |_, _| {
+                            exchanges += 1;
+                            None
+                        },
+                    );
+                    assert_eq!(exchange.is_ok(), trial == Trial::Success);
+                    let (decision, interrupted) = authority.join().expect("Core worker");
+                    assert_eq!(
+                        decision.is_ok(),
+                        matches!(trial, Trial::Success | Trial::AfterCallback)
+                    );
+                    assert_eq!(
+                        interrupted,
+                        matches!(trial, Trial::BeforeCommit | Trial::AfterCommit)
+                    );
+                    assert_eq!(exchanges, u8::from(trial == Trial::Success));
+                });
+            }
             InstallationClaimTrial::SignerAdmitted => {
                 let (client, peer) = UnixStream::pair().expect("fixture pair");
                 let (decision_client, decision_core) = UnixStream::pair().expect("decision pair");
@@ -5190,7 +5308,10 @@ mod tests {
             }
             _ => unreachable!("only signer admission trials use this helper"),
         }
-        assert_eq!(count(), 1);
+        assert_eq!(count(), expected_admissions);
+        if expected_admissions == 0 {
+            return;
+        }
         let reopened = SqliteStateBackend::open(path).expect("reopen admission");
         assert!(reopened
             .admit_installation_signer_request(request, admission, reviewed, &received)

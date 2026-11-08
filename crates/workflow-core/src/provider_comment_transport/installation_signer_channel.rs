@@ -12,6 +12,8 @@ use super::installation_exchange::valid_app_assertion;
 use crate::{SpecContentHash, Timestamp, WorkflowOsError};
 
 pub(crate) mod decision;
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) mod linux_rehearsal;
 use decision::{InstallationSignerDecisionChannel, SignerDecisionPermit};
 
 const VERSION: u8 = 1;

@@ -1246,6 +1246,28 @@ network restrictions, provider scope, exact target and window, and independent
 review are still required. Do not use the rehearsal to authorize provider
 mutation, broaden the action family, or claim live exactly-once behavior.
 
+### Linux Signer Isolation Rehearsal
+
+The Rust CI job runs the private rehearsal on disposable GitHub-hosted Linux.
+The launcher uses unused numeric UIDs without creating accounts, stages the
+test binary read-only, and drops credentials, supplementary groups, inherited
+capabilities and host networking before executing the Core, signer, and
+untrusted probe. The service UIDs share only a fixture socket group; Core's
+SQLite directory and the signer's synthetic custody directory are private.
+Each service binds its own filesystem Unix listener after dropping privileges.
+The untrusted probe checks that it cannot open private files or connect to or
+remove the socket paths. Both receivers reject a wrong-role peer through the
+production authentication constructors.
+
+The suite runs a success, a rollback before admission commit, a committed
+admission with the decision reply withheld, and a signer process exit after the
+synthetic callback but before assertion delivery. Core checks durable claim and
+admission counts, exchange calls, and exact replay after reopening SQLite. The
+two commit-boundary faults are injected errors that close the decision channel,
+not OS kills of the Core process. The signer callback exit is a process exit.
+The rehearsal uses no live key or provider request and cannot admit a live
+trial or substitute for native macOS verification or independent review.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
