@@ -1,6 +1,8 @@
 //! Payload-free binding for a live sandbox continuation grant. Verification
 //! must use facts resolved under the admission transaction, not a tool's claims.
 
+use std::num::NonZeroU64;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -17,6 +19,15 @@ use crate::{
 
 pub(crate) const LIVE_CAPABILITY: &str = "live-sandbox/github-pr-comment-continuation";
 
+/// Trusted operator expectations for the provider, not a transport attestation.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LiveSandboxProviderBinding {
+    pub(crate) repository_id: NonZeroU64,
+    pub(crate) author_id: NonZeroU64,
+    pub(crate) adapter_commitment: SpecContentHash,
+}
+
 /// Exact target selected by the trusted operator, not by a replacement harness.
 /// No public decoder, provider credentials, or repository-wide authorization.
 #[derive(Serialize, Deserialize)]
@@ -26,6 +37,7 @@ pub(crate) struct LiveSandboxPolicyTarget {
     operator: ActorId,
     revision: SpecContentHash,
     valid_until: Timestamp,
+    provider: LiveSandboxProviderBinding,
 }
 
 impl LiveSandboxPolicyTarget {
@@ -42,6 +54,7 @@ impl LiveSandboxPolicyTarget {
         operator: ActorId,
         revision: SpecContentHash,
         valid_until: Timestamp,
+        provider: LiveSandboxProviderBinding,
     ) -> Result<Self, WorkflowOsError> {
         target.validate()?;
         Ok(Self {
@@ -49,6 +62,7 @@ impl LiveSandboxPolicyTarget {
             operator,
             revision,
             valid_until,
+            provider,
         })
     }
 }
@@ -162,6 +176,7 @@ impl LiveSandboxContinuationFacts<'_> {
                 &target.operator,
                 &target.revision,
                 target.valid_until,
+                &target.provider,
             ),
             (
                 self.approval,
@@ -181,7 +196,7 @@ impl LiveSandboxContinuationFacts<'_> {
         ))
         .map_err(|_| denied())?;
         let mut hash = Sha256::new();
-        hash.update(b"workflow-os/live-sandbox-comment-policy/v1\0");
+        hash.update(b"workflow-os/live-sandbox-comment-policy/v2\0");
         hash.update(material);
         Ok(PolicyDecision {
             allowed: true,

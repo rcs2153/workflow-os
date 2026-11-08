@@ -4390,7 +4390,7 @@ mod tests {
         use crate::dispatch_reservation::{request_commitment, DispatchReservationStore};
         use crate::live_sandbox_continuation_authority::{
             tests::{with_live_grant_test_facts, LiveGrantTestContext},
-            LiveSandboxPrincipalVerifier, LIVE_CAPABILITY,
+            LiveSandboxPrincipalVerifier, LiveSandboxProviderBinding, LIVE_CAPABILITY,
         };
         use crate::local_fixture_replacement_authority::LocalFixturePrincipalVerifier;
         use crate::provider_write::GitHubCommentContinuationAction;
@@ -4485,12 +4485,18 @@ mod tests {
                     .open_live_sandbox_attempt(opening(&cursor, &observed), facts)
                     .is_err());
                 assert!(fixture.backend.record_live_sandbox_policy(facts).is_err());
+                let provider_binding = || LiveSandboxProviderBinding {
+                    repository_id: std::num::NonZeroU64::new(123).expect("provider repository id"),
+                    author_id: std::num::NonZeroU64::new(456).expect("provider author id"),
+                    adapter_commitment: SpecContentHash::from_text("trusted synthetic adapter"),
+                };
                 let provision =
                     crate::live_sandbox_continuation_authority::LiveSandboxPolicyTarget::provision(
                         action.target.clone(),
                         facts.decision.actor.clone(),
                         SpecContentHash::from_text("synthetic target revision"),
                         expiry,
+                        provider_binding(),
                     )
                     .expect("synthetic target");
                 fixture
@@ -4677,6 +4683,7 @@ mod tests {
                         facts.decision.actor.clone(),
                         SpecContentHash::from_text("changed policy revision"),
                         facts.window_expires_at,
+                        provider_binding(),
                     )
                     .expect("revised policy");
                 let original_target = serde_json::to_string(&provision).expect("target payload");
@@ -4691,6 +4698,34 @@ mod tests {
                 assert!(backend
                     .reserve_live_sandbox_dispatch(request(), admission)
                     .is_err());
+                set_target(&original_target);
+                let registered: serde_json::Value =
+                    serde_json::from_str(&original_target).expect("registered target");
+                let mut legacy = registered.clone();
+                legacy
+                    .as_object_mut()
+                    .expect("target object")
+                    .remove("provider");
+                set_target(&legacy.to_string());
+                assert!(backend
+                    .reserve_live_sandbox_dispatch(request(), admission)
+                    .is_err());
+                for (field, replacement) in [
+                    ("repository_id", serde_json::json!(124)),
+                    ("author_id", serde_json::json!(457)),
+                    (
+                        "adapter_commitment",
+                        serde_json::json!(SpecContentHash::from_text("substituted adapter")),
+                    ),
+                ] {
+                    let mut drifted = registered.clone();
+                    drifted["provider"][field] = replacement;
+                    set_target(&drifted.to_string());
+                    assert!(backend
+                        .reserve_live_sandbox_dispatch(request(), admission)
+                        .is_err());
+                    assert_eq!(counts(), (0, 0));
+                }
                 set_target(&original_target);
                 assert_eq!(counts(), (0, 0));
                 if matches!(trial, LiveGrantTrial::TargetRevoked) {
