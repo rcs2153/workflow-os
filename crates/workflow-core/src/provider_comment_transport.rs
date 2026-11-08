@@ -83,13 +83,9 @@ struct PageLinks {
     last: Option<NonZeroU64>,
 }
 
-pub(crate) enum BoundCommentObservation {
-    Unverified(CurrentCommentPosture),
-    Verified(VerifiedGitHubCommentObservation),
-}
-
 /// An exact current match from the fixed provider reader, not proof of creation.
 /// No public constructor, deserialization, body, or authentication material.
+/// No production constructor until trusted creation-time provenance is available.
 pub(crate) struct VerifiedGitHubCommentObservation {
     projection: StoredGitHubCommentObservation,
 }
@@ -278,7 +274,8 @@ impl<'a> GitHubCommentCreationTransport<'a> {
 
     /// Reads only the reservation's target. A provider snapshot or acceptance
     /// proof cannot be inferred from a complete traversal.
-    pub(crate) fn observe_comment(
+    #[cfg(test)]
+    fn observe_comment(
         self,
         expected: &ExpectedComment<'_>,
         timestamp_bounds: Option<ProviderTimestampBounds>,
@@ -289,43 +286,6 @@ impl<'a> GitHubCommentCreationTransport<'a> {
                 |posture| posture,
                 |_| CurrentCommentPosture::ExactCurrentMatch,
             )
-    }
-
-    /// Versioned identity of the fixed reader, not a claim about access scope.
-    pub(crate) fn observation_adapter_commitment(&self) -> Option<SpecContentHash> {
-        (self.origin == GITHUB_ORIGIN).then(fixed_comment_observer_commitment)
-    }
-
-    pub(crate) fn observe_bound_comment(
-        self,
-        reservation: &SpecContentHash,
-        expected: &ExpectedComment<'_>,
-        timestamp_bounds: Option<ProviderTimestampBounds>,
-        observe_time: impl FnOnce() -> Option<Timestamp>,
-    ) -> BoundCommentObservation {
-        if self.observation_adapter_commitment().is_none() {
-            return BoundCommentObservation::Unverified(self.observe_comment(
-                expected,
-                timestamp_bounds,
-                observe_time,
-            ));
-        }
-        let (comment_id, observed_at) =
-            match self.read_exact_comment(expected, timestamp_bounds, observe_time) {
-                Ok(match_data) => match_data,
-                Err(posture) => return BoundCommentObservation::Unverified(posture),
-            };
-        let Some(context) = comment_observation_context(expected) else {
-            return BoundCommentObservation::Unverified(CurrentCommentPosture::Unresolved);
-        };
-        BoundCommentObservation::Verified(VerifiedGitHubCommentObservation {
-            projection: StoredGitHubCommentObservation {
-                reservation: reservation.clone(),
-                context,
-                comment_id,
-                observed_at,
-            },
-        })
     }
 
     fn read_exact_comment(
@@ -875,18 +835,12 @@ pub(crate) mod tests {
                 origin,
                 ..GitHubCommentCreationTransport::new(&auth)
             };
-            assert!(transport.observation_adapter_commitment().is_none());
-            let reservation = SpecContentHash::from_text("test reservation");
-            let observed = transport.observe_bound_comment(&reservation, &expected, bounds, || {
-                Some(observation_time(21))
-            });
+            let posture =
+                transport.observe_comment(&expected, bounds, || Some(observation_time(21)));
             server.join().expect("read-only fixture");
             assert!(
                 matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
             );
-            let BoundCommentObservation::Unverified(posture) = observed else {
-                unreachable!("loopback must never mint provider evidence");
-            };
             posture
         })
     }

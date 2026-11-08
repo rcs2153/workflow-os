@@ -22,14 +22,13 @@ use crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding;
 use crate::provider_comment_observation::{
     can_encode_marked_comment, encode_marked_comment, verify_created_comment_response,
     verify_current_comment, CommentEnumeration, CreatedCommentResponse, CurrentCommentPosture,
-    ExpectedComment, ProviderTimestampBounds, MARKER_NAMESPACE,
+    ExpectedComment, MARKER_NAMESPACE,
 };
 #[cfg(test)]
 use crate::provider_comment_transport::PreparedGitHubCommentCreation;
 use crate::provider_comment_transport::{
-    fixed_comment_exchange_commitment, fixed_comment_observer_commitment, BoundCommentObservation,
-    GitHubCommentCreationTransport, StoredGitHubCommentObservation,
-    VerifiedGitHubCommentObservation,
+    fixed_comment_exchange_commitment, fixed_comment_observer_commitment,
+    StoredGitHubCommentObservation, VerifiedGitHubCommentObservation,
 };
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
@@ -274,27 +273,21 @@ impl SqliteStateBackend {
     }
 
     #[allow(dead_code)] // Not exposed to a live caller.
-    pub(super) fn observe_reserved_http_comment(
+    pub(super) fn observe_reserved_live_comment(
         &self,
         operation: &DispatchReservationOperationId,
         action: GitHubCommentContinuationAction<'_>,
-        transport: GitHubCommentCreationTransport<'_>,
-        timestamp_bounds: Option<ProviderTimestampBounds>,
-    ) -> Result<BoundCommentObservation, WorkflowOsError> {
-        let adapter = transport
-            .observation_adapter_commitment()
-            .ok_or_else(not_dispatchable)?;
+    ) -> Result<CurrentCommentPosture, WorkflowOsError> {
+        // A verified reservation does not establish the provider's creation clock.
+        // Without such a source there is no reason to contact the provider.
         self.with_reserved_comment_context_for_adapters(
             operation,
             action,
-            &[adapter, fixed_comment_exchange_commitment()],
-            |reservation, expected| {
-                transport.observe_bound_comment(reservation, expected, timestamp_bounds, || {
-                    continuity_store::observe_continuity_trusted_time()
-                        .ok()
-                        .map(|time| time.observed_at())
-                })
-            },
+            &[
+                fixed_comment_observer_commitment(),
+                fixed_comment_exchange_commitment(),
+            ],
+            |_, _| CurrentCommentPosture::Unresolved,
         )
     }
 
