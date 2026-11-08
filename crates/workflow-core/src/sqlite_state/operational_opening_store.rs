@@ -5210,6 +5210,21 @@ mod tests {
         assert!(!payload.contains(marker));
         assert!(!payload.contains(action.body));
         assert!(payload.contains(SpecContentHash::from_text(marker).as_str()));
+        let prepared: serde_json::Value = serde_json::from_str(&payload).expect("prepared JSON");
+        let writer_scope =
+            serde_json::from_value(prepared["scope"].clone()).expect("fixture writer scope");
+        let earliest =
+            serde_json::from_value(prepared["clock"].clone()).expect("fixture preparation clock");
+        let latest = super::super::continuity_store::observe_continuity_trusted_time()
+            .expect("fixture receiving clock");
+        crate::provider_comment_transport::installation_notification::tests::exercise_prepared_notification(
+            &body, &writer_scope, &earliest, &latest,
+            serde_json::from_value(prepared["deadline"].clone()).expect("fixture deadline"),
+            |receiver, notification| {
+                backend.verify_prepared_installation_notification(&request.operation_id, action, receiver, notification)
+                    .expect("read-only candidate classification")
+            },
+        );
         connection
             .execute(
                 "UPDATE installation_send_preparations SET payload_hash=?1 WHERE operation_id=?2",

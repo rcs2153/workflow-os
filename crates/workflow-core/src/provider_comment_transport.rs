@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 pub(crate) mod installation_exchange;
+pub(crate) mod installation_notification;
 #[cfg(test)]
 mod installation_scope_fixture;
 #[cfg(any(target_os = "linux", target_os = "macos"))]

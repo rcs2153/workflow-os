@@ -1486,6 +1486,30 @@ witness must match the committed marked body for V17; old direct witnesses
 still use their original deterministic marker. No notification, read-only
 observer endpoint, or provider-derived outcome was admitted by this slice.
 
+### Private Creation Notification Verification
+
+The private verifier now reads the exact V17 preparation and historical
+reservation in a read-only transaction. It checks bounded GitHub-shaped
+payload bytes using the provider HMAC, and independently verifies an Ed25519
+receiver receipt over the payload digest, receiver installation, repository,
+and trusted receipt interval. The interval must use the preparation's clock
+source, provenance, and epoch and end before the deadline and no later than
+Core's current sample. The verifier ignores provider creation timestamps.
+
+The webhook installation identifies the **receiving** App installation, not
+the authorizing writer. A reviewed receiver is bound separately to the stored
+writer scope. The payload must identify the exact repository, PR and comment
+author, and the full marked body must match both stored commitments. A
+candidate contains no payload or verification material. Exact replay yields
+the same candidate but does not write evidence, complete an effect, or make
+a new send possible. One candidate is not an exhaustive provider count.
+
+The offline rehearsal signs provider-shaped fixtures from the independent
+effect ledger, verifies the result against the reopened store, and exercises
+signature, target, receipt, clock and body substitution. The reviewed
+receiver input is internal; no receiver is provisioned, and no live provider
+traffic, registration, permission change, or outcome persistence is enabled.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
