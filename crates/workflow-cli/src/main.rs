@@ -468,8 +468,8 @@ fn inspect_synthetic_sandbox_recovery_command(
     operation_id: &str,
     side_effect_id: &str,
 ) -> Result<(), WorkflowOsError> {
-    let posture = SqliteStateBackend::open_read_only(github_pr_comment_continuation_database(invocation))
-        .and_then(|backend| backend.inspect_synthetic_sandbox_recovery(
+    let inspection = SqliteStateBackend::open_read_only(github_pr_comment_continuation_database(invocation))
+        .and_then(|backend| backend.inspect_synthetic_sandbox_recovery_proof(
             &WorkflowRunId::new(run_id)?,
             operation_id,
             &workflow_core::SideEffectId::new(side_effect_id)?,
@@ -482,7 +482,8 @@ fn inspect_synthetic_sandbox_recovery_command(
         serde_json::json!({
             "evidence_source": "synthetic_sandbox",
             "historical_admission_verified": true,
-            "execution_posture": posture,
+            "execution_posture": inspection.posture(),
+            "completion_proof_source": inspection.completion_proof_source(),
             "dispatch_authorized": false,
             "provider_called": false
         })

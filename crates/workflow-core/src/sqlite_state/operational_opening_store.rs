@@ -3967,6 +3967,11 @@ mod tests {
             reopened.read_events(action.run).expect("unchanged history"),
             history
         );
+        #[cfg(unix)]
+        if let Some(export) = SyntheticRecoveryTrialExport::start(action.run) {
+            export.snapshot(&reopened, "response-completed");
+            export.write_manifest(action, operation.as_str(), &["response-completed"]);
+        }
     }
 
     #[allow(clippy::too_many_lines)]
@@ -4240,7 +4245,7 @@ mod tests {
         #[cfg(unix)]
         if let Some(export) = &trial_export {
             export.snapshot(&restarted, "completed");
-            export.write_manifest(action, operation.as_str());
+            export.write_manifest(action, operation.as_str(), &["unresolved", "completed"]);
         }
         let completed_history = restarted.read_events(action.run).expect("history");
         assert_eq!(
@@ -4497,16 +4502,20 @@ mod tests {
             &self,
             action: crate::provider_write::GitHubCommentContinuationAction<'_>,
             operation: &str,
+            ids: &[&str],
         ) {
             use std::io::Write;
             use std::os::unix::fs::OpenOptionsExt;
 
-            let cases = ["unresolved", "completed"].map(|id| {
-                serde_json::json!({
-                    "id": id, "state": self.root.join(id), "run_id": action.run,
-                    "operation_id": operation, "side_effect_id": action.side_effect,
+            let cases: Vec<_> = ids
+                .iter()
+                .map(|id| {
+                    serde_json::json!({
+                        "id": id, "state": self.root.join(id), "run_id": action.run,
+                        "operation_id": operation, "side_effect_id": action.side_effect,
+                    })
                 })
-            });
+                .collect();
             let manifest = serde_json::json!({
                 "mode": "synthetic-recovery", "kernel": self.kernel, "cases": cases,
             });

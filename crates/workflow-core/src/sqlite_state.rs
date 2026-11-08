@@ -231,7 +231,10 @@ pub(crate) mod capability_source_continuity_store;
 mod continuity_codec;
 mod continuity_store;
 mod dispatch_reservation_store;
-pub use dispatch_reservation_store::SyntheticSandboxRecoveryPosture;
+pub use dispatch_reservation_store::{
+    SyntheticSandboxCompletionProofSource, SyntheticSandboxRecoveryInspection,
+    SyntheticSandboxRecoveryPosture,
+};
 pub(crate) mod fixture_replacement_authority_store;
 #[allow(dead_code)] // Kept internal until the live opening path supplies authoritative facts.
 mod live_sandbox_grant_store;

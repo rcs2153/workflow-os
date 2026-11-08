@@ -75,9 +75,13 @@ separate operator-approved Desktop configuration, with the same local
 bridge script. This manifest exposes exactly one tool,
 `inspect_workflow_os_synthetic_recovery`. It cannot validate delegated
 fixture grants or dispatch. The model supplies only `case_id`: use
-`unresolved`, then `completed` twice. Expect `reconciliation_required`
-and two matching `completion_verified` results. No credential, comment,
-marker, target, or provider reference is sent to the model.
+`unresolved`, then `completed` twice. Expect `reconciliation_required` with
+`completion_proof_source: null` and two matching `completion_verified`
+results with `completion_proof_source: lookup`. The CI bridge check also
+exports `response-completed` and verifies `creation_response` on two reads.
+Rebuild the pinned CLI when updating the bridge: it rejects completion output
+without a recognized source. No credential, comment, marker, target, or
+provider reference is sent to the model. Neither source is live provider proof.
 
 Before configuring Desktop, validate the exported manifest through the
 stdio bridge and real CLI:
