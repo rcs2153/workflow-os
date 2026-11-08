@@ -515,9 +515,17 @@ bytes to the injected sender. A synthetic response verifies only when it
 matches the [creation response contract](https://docs.github.com/en/rest/issues/comments#create-an-issue-comment):
 status `201`, a positive comment ID, exact raw body, and the expected target,
 stable repository and author. Missing or substituted responses remain
-recovery-only. Even a verified response is transient: it cannot complete a
-SideEffect, authorize a resend, or resolve a lost HTTP response. The injected
-sender and its claimed adapter commitment are not authenticated live evidence.
+recovery-only. The injected sender and its claimed adapter commitment are not
+authenticated live evidence.
+
+An exact synthetic response now persists a completed SideEffect and a
+distinct creation-response proof event in the same SQLite transaction.
+Reopening the database verifies the proof against the original reservation
+and completed effect without calling the sender. Legacy lookup proof IDs
+and commitments remain readable. A later synthetic lookup may confirm the
+same outcome but cannot replace it, create a second proof, or authorize a
+resend. Missing responses and interrupted persistence still need recovery;
+this does not establish acceptance when an HTTP response never arrived.
 
 ## Delivery And Tests
 
