@@ -368,6 +368,8 @@ pub(crate) struct LiveSandboxReservationWitness {
     pub(crate) installation_scope_commitment: Option<SpecContentHash>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) installation_issuance_claim_commitment: Option<SpecContentHash>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) installation_send_preparation_version: Option<u8>,
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]

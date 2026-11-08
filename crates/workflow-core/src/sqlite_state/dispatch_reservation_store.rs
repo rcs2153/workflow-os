@@ -77,6 +77,65 @@ struct CheckedCommentSend {
     window: CommentSendWindow,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct InstallationSendPreparationRecord {
+    operation: String,
+    reservation: SpecContentHash,
+    invocation: SpecContentHash,
+    scope: SpecContentHash,
+    marker_commitment: SpecContentHash,
+    body_commitment: SpecContentHash,
+    clock: TrustedTimeObservation,
+    deadline: Timestamp,
+}
+
+fn installation_send_preparation_payload(
+    record: &InstallationSendPreparationRecord,
+) -> Result<(String, SpecContentHash), WorkflowOsError> {
+    let payload = encode_json(record, "installation send preparation")?;
+    let hash = SpecContentHash::from_text(&format!(
+        "workflow-os/installation-send-preparation/v1\0{payload}"
+    ));
+    Ok((payload, hash))
+}
+
+fn read_installation_send_preparation_record(
+    tx: &rusqlite::Transaction<'_>,
+    operation: &DispatchReservationOperationId,
+    action: GitHubCommentContinuationAction<'_>,
+    durable: &LiveRecoveryAdmission,
+) -> Result<Option<InstallationSendPreparationRecord>, WorkflowOsError> {
+    let row: Option<(String, String)> = tx.query_row(
+        "SELECT payload, payload_hash FROM installation_send_preparations WHERE operation_id=?1",
+        [operation.as_str()], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional().map_err(|_| corrupt())?;
+    row.map(|(payload, hash)| {
+        let record: InstallationSendPreparationRecord =
+            super::decode_json(&payload, "installation send preparation")?;
+        let (canonical, commitment) = installation_send_preparation_payload(&record)?;
+        let witness = durable.witness.as_ref().ok_or_else(corrupt)?;
+        if payload != canonical
+            || hash != commitment.as_str()
+            || record.operation != operation.as_str()
+            || &record.reservation != durable.event.reservation_commitment()
+            || &record.invocation != durable.event.invocation_commitment()
+            || record.invocation != action.commitment()?
+            || witness.installation_scope_commitment.as_ref() != Some(&record.scope)
+            || witness.installation_issuance_claim_commitment.is_none()
+            || witness.installation_send_preparation_version != Some(1)
+            || witness.creation_deadline != Some(record.deadline)
+            || record.clock.observed_at() < durable.committed_at
+            || record.clock.observed_at() >= record.deadline
+            || !is_installation_comment_adapter(&witness.provider.adapter_commitment, false)
+        {
+            return Err(corrupt());
+        }
+        Ok(record)
+    })
+    .transpose()
+}
+
 pub(crate) struct InstallationCommentSendPermit<'a> {
     context: InstallationCreationContext<'a>,
     window: CommentSendWindow,
@@ -526,7 +585,7 @@ impl SqliteStateBackend {
         if claim.is_some() {
             return Ok(InstallationIssuanceDisposition::IssuanceUncertain);
         }
-        if require_signer_schema && schema != super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION {
+        if require_signer_schema && !installation_signer_schema(schema) {
             return Err(not_dispatchable());
         }
         let now = verify_current_installation_exchange(&tx, request, admission, reviewed)?;
@@ -671,31 +730,48 @@ impl SqliteStateBackend {
         action: GitHubCommentContinuationAction<'_>,
         reviewed: ReviewedInstallation<'_>,
         exchanged: &InstallationExchangedScope,
-        accept_without_response: impl FnOnce(&str, Timestamp),
+        outcome: (
+            Option<InjectedDispatchCommitFault>,
+            impl FnOnce(&str, Timestamp),
+        ),
     ) -> Result<Option<EventId>, WorkflowOsError> {
         let operation = request.operation_id.clone();
         let capability = self
             .reserve_installation_exchange_for_test(request, admission, reviewed, exchanged)?
             .ok_or_else(not_dispatchable)?;
-        let binding = (*capability)
-            .into_parts()
-            .attempt_capability
-            .dispatch_reservation
-            .ok_or_else(corrupt)?;
-        let reservation = &binding.reservation_commitment;
-        let checked = self
-            .checked_comment_send(
+        let (fault, accept_without_response) = outcome;
+        if let Some(fault) = fault {
+            inject_dispatch_commit_fault(fault);
+        }
+        let (checked, raw_body) = self
+            .prepare_installation_comment_send(
                 &operation,
                 action,
                 admission,
-                reservation,
+                *capability,
+                false,
                 continuity_store::observe_continuity_trusted_time,
             )?
             .ok_or_else(not_dispatchable)?;
-        let marker = live_comment_marker(&action.commitment()?, reservation);
-        let raw_body = encode_marked_comment(action.body, &marker).ok_or_else(corrupt)?;
         accept_without_response(&raw_body, checked.window.checked_at);
         Ok(None)
+    }
+
+    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+    pub(super) fn inspect_prepared_installation_send_for_test(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+    ) -> Result<Option<(SpecContentHash, Timestamp)>, WorkflowOsError> {
+        let mut connection = self.existing_read_only_connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|_| storage_error("begin_failed"))?;
+        let admission = read_live_recovery_admission(&tx, operation, action.run)?;
+        verify_live_recovery_state(&tx, &admission, action.run, action.side_effect)?;
+        let record = read_installation_send_preparation_record(&tx, operation, action, &admission)?;
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(record.map(|record| (record.body_commitment, record.clock.observed_at())))
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1338,7 +1414,21 @@ impl SqliteStateBackend {
         let tx = connection
             .transaction()
             .map_err(|_| storage_error("begin_failed"))?;
-        let durable = read_live_recovery_admission(&tx, operation, action.run)?;
+        let result =
+            Self::check_comment_send_in(&tx, operation, action, admission, reservation, &time)?;
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(result)
+    }
+
+    fn check_comment_send_in(
+        tx: &rusqlite::Transaction<'_>,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        admission: LiveGrantAdmission<'_>,
+        reservation: &SpecContentHash,
+        time: &TrustedTimeObservation,
+    ) -> Result<Option<CheckedCommentSend>, WorkflowOsError> {
+        let durable = read_live_recovery_admission(tx, operation, action.run)?;
         let witness = durable.witness.as_ref().ok_or_else(corrupt)?;
         if durable.event.reservation_commitment() != reservation
             || durable.event.invocation_commitment() != &action.commitment()?
@@ -1346,7 +1436,7 @@ impl SqliteStateBackend {
         {
             return Err(corrupt());
         }
-        let state = continuity_codec::load_snapshot(&tx)?;
+        let state = continuity_codec::load_snapshot(tx)?;
         let trusted_time = &state.trusted_time;
         let Some(deadline) = witness.creation_deadline else {
             return Ok(None);
@@ -1365,10 +1455,10 @@ impl SqliteStateBackend {
                 .is_some_and(|watermark| time.observed_at() < watermark)
             && time.observed_at() < deadline;
         if !current_time
-            || !current_comment_execution(&tx, &state, &durable, action, &time, deadline)?
+            || !current_comment_execution(tx, &state, &durable, action, time, deadline)?
             || admission
                 .verify_current_send(
-                    &tx,
+                    tx,
                     &durable.event,
                     action.target,
                     &witness.provider,
@@ -1378,7 +1468,6 @@ impl SqliteStateBackend {
         {
             return Ok(None);
         }
-        tx.commit().map_err(|_| storage_error("commit_failed"))?;
         Ok(Some(CheckedCommentSend {
             durable,
             window: CommentSendWindow {
@@ -1386,6 +1475,107 @@ impl SqliteStateBackend {
                 deadline,
             },
         }))
+    }
+
+    fn prepare_installation_comment_send(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        admission: LiveGrantAdmission<'_>,
+        capability: ReservedAttemptDispatchCapability,
+        fixture: bool,
+        observe: impl FnOnce() -> Result<TrustedTimeObservation, WorkflowOsError>,
+    ) -> Result<Option<(CheckedCommentSend, String)>, WorkflowOsError> {
+        let binding = capability
+            .into_parts()
+            .attempt_capability
+            .dispatch_reservation
+            .ok_or_else(corrupt)?;
+        let reservation = &binding.reservation_commitment;
+        if fixture
+            || super::validate_operational_schema(&self.existing_read_only_connection()?)?
+                != super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+        {
+            return self
+                .checked_comment_send(operation, action, admission, reservation, observe)?
+                .map(|checked| {
+                    if checked.durable.witness.as_ref().is_some_and(|witness| {
+                        witness.installation_send_preparation_version.is_some()
+                    }) {
+                        return Err(not_dispatchable());
+                    }
+                    let marker = live_comment_marker(&action.commitment()?, reservation);
+                    let body = encode_marked_comment(action.body, &marker).ok_or_else(corrupt)?;
+                    Ok((checked, body))
+                })
+                .transpose();
+        }
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| storage_error("begin_failed"))?;
+        if super::validate_operational_schema(&tx)?
+            != super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+        {
+            return Err(not_dispatchable());
+        }
+        let time = observe()?;
+        let Some(checked) =
+            Self::check_comment_send_in(&tx, operation, action, admission, reservation, &time)?
+        else {
+            return Ok(None);
+        };
+        let witness = checked.durable.witness.as_ref().ok_or_else(corrupt)?;
+        if checked.durable.event.receipt_id() != &binding.receipt_id
+            || !is_installation_comment_adapter(&witness.provider.adapter_commitment, false)
+        {
+            return Err(not_dispatchable());
+        }
+        let scope = witness
+            .installation_scope_commitment
+            .clone()
+            .ok_or_else(corrupt)?;
+        if witness.installation_issuance_claim_commitment.is_none()
+            || witness.installation_send_preparation_version != Some(1)
+        {
+            return Err(not_dispatchable());
+        }
+        if read_installation_send_preparation_record(&tx, operation, action, &checked.durable)?
+            .is_some()
+        {
+            return Ok(None);
+        }
+        let mut entropy = [0_u8; 32];
+        getrandom::getrandom(&mut entropy).map_err(|_| not_dispatchable())?;
+        let marker = format!("{MARKER_NAMESPACE}{}", SpecContentHash::from_bytes(entropy));
+        let body = encode_marked_comment(action.body, &marker).ok_or_else(corrupt)?;
+        let record = InstallationSendPreparationRecord {
+            operation: operation.as_str().to_owned(),
+            reservation: reservation.clone(),
+            invocation: action.commitment()?,
+            scope,
+            marker_commitment: SpecContentHash::from_text(&marker),
+            body_commitment: SpecContentHash::from_text(&body),
+            clock: time,
+            deadline: checked.window.deadline,
+        };
+        let (payload, hash) = installation_send_preparation_payload(&record)?;
+        tx.execute(
+            "INSERT INTO installation_send_preparations (operation_id, payload, payload_hash) VALUES (?1,?2,?3)",
+            params![operation.as_str(), payload, hash.as_str()],
+        ).map_err(|_| storage_error("write_failed"))?;
+        #[cfg(test)]
+        let fault = INJECTED_COMMIT_FAULT.with(Cell::take);
+        #[cfg(test)]
+        if fault == Some(InjectedDispatchCommitFault::Before) {
+            return Err(storage_error("commit_failed"));
+        }
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        #[cfg(test)]
+        if fault == Some(InjectedDispatchCommitFault::After) {
+            return Err(storage_error("commit_failed"));
+        }
+        Ok(Some((checked, body)))
     }
 
     #[allow(dead_code)] // No public or operator route is connected.
@@ -1460,18 +1650,18 @@ impl SqliteStateBackend {
         else {
             return Ok(None);
         };
-        let binding = (*capability)
-            .into_parts()
-            .attempt_capability
-            .dispatch_reservation
-            .ok_or_else(corrupt)?;
         if transport.verify_pull_request().is_none() {
             return Ok(None);
         }
-        let reservation = &binding.reservation_commitment;
-        let Some(CheckedCommentSend { durable, window }) =
-            self.checked_comment_send(&operation, action, admission, reservation, observe)?
-        else {
+        let send = self.prepare_installation_comment_send(
+            &operation,
+            action,
+            admission,
+            *capability,
+            fixture,
+            observe,
+        )?;
+        let Some((CheckedCommentSend { durable, window }, body)) = send else {
             return Ok(None);
         };
         let witness = durable.witness.as_ref().ok_or_else(corrupt)?;
@@ -1479,11 +1669,9 @@ impl SqliteStateBackend {
             .installation_scope_commitment
             .as_ref()
             .ok_or_else(corrupt)?;
-        let marker = live_comment_marker(&invocation, reservation);
-        let body = encode_marked_comment(action.body, &marker).ok_or_else(corrupt)?;
         let permit = InstallationCommentSendPermit {
             context: InstallationCreationContext {
-                reservation,
+                reservation: durable.event.reservation_commitment(),
                 scope,
                 target: action.target,
                 provider: &witness.provider,
@@ -1589,17 +1777,27 @@ impl SqliteStateBackend {
             return Err(not_dispatchable());
         }
         let reservation = durable.event.reservation_commitment();
-        let marker = live_comment_marker(&invocation, reservation);
-        let body = encode_marked_comment(action.body, &marker).ok_or_else(not_dispatchable)?;
+        let body = match witness.installation_send_preparation_version {
+            Some(1) if !fixture => {
+                read_installation_send_preparation_record(&tx, operation, action, &durable)?
+                    .ok_or_else(not_dispatchable)?
+                    .body_commitment
+            }
+            None => {
+                let marker = live_comment_marker(&invocation, reservation);
+                let raw =
+                    encode_marked_comment(action.body, &marker).ok_or_else(not_dispatchable)?;
+                SpecContentHash::from_text(&raw)
+            }
+            Some(_) => return Err(not_dispatchable()),
+        };
         let comment = proof
-            .matches(
-                InstallationCreationContext {
-                    reservation,
-                    scope,
-                    target: action.target,
-                    provider: &witness.provider,
-                    marked_body: &body,
-                },
+            .matches_committed_body(
+                reservation,
+                scope,
+                action.target,
+                &witness.provider,
+                &body,
                 fixture,
             )
             .ok_or_else(not_dispatchable)?;
@@ -1817,6 +2015,15 @@ impl SqliteStateBackend {
                 .and_then(|scope| scope.claim)
                 .map(|claim| claim.record.commitment())
                 .transpose()?;
+            // The schema was validated on entry, before the deferred grant-use FK.
+            let preparation_version = if claim_commitment.is_some() {
+                let version: u32 = transaction
+                    .pragma_query_value(None, "user_version", |row| row.get(0))
+                    .map_err(|_| corrupt())?;
+                (version == super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION).then_some(1)
+            } else {
+                None
+            };
             let (scope_commitment, deadline) = if let Some(scope) = scope {
                 let (commitment, effective_deadline) = scope.validate(
                     &transaction,
@@ -1846,6 +2053,7 @@ impl SqliteStateBackend {
                 creation_deadline: Some(deadline),
                 installation_scope_commitment: scope_commitment,
                 installation_issuance_claim_commitment: claim_commitment,
+                installation_send_preparation_version: preparation_version,
             })
         } else {
             None
@@ -2052,6 +2260,7 @@ fn read_installation_claim_by_key(
         version,
         super::INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
             | super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
+            | super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
     ) {
         return Err(not_dispatchable());
     }
@@ -2099,12 +2308,18 @@ fn read_installation_claim_by_key(
 fn require_installation_signer_schema(
     tx: &rusqlite::Transaction<'_>,
 ) -> Result<(), WorkflowOsError> {
-    if super::validate_operational_schema(tx)?
-        != super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
-    {
+    if !installation_signer_schema(super::validate_operational_schema(tx)?) {
         return Err(not_dispatchable());
     }
     Ok(())
+}
+
+const fn installation_signer_schema(version: u32) -> bool {
+    matches!(
+        version,
+        super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
+            | super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+    )
 }
 
 fn read_installation_signer_admission(
@@ -2223,6 +2438,7 @@ fn inspect_unreserved_installation_claim(
         version,
         super::INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
             | super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
+            | super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
     ) {
         return Err(not_dispatchable());
     }
@@ -2244,7 +2460,7 @@ fn inspect_unreserved_installation_claim(
     if &claim.run != run || &claim.effect != effect_id || claim.claimed_at >= claim.deadline {
         return Err(not_dispatchable());
     }
-    if version == super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION {
+    if installation_signer_schema(version) {
         read_installation_signer_admission(tx, &claim)?;
     }
     require_no_installation_dispatch(tx, run, operation, &attempt)?;
@@ -2473,6 +2689,7 @@ fn durable_comment_context(
         super::LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
             | super::INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
             | super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
+            | super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
     ) {
         return Err(not_dispatchable());
     }

@@ -3572,9 +3572,30 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn live_installation_coordinator_opens_only_a_fresh_claim() {
-        for reserve in [false, true] {
+        for trial in [CoordinatorTrial::Unavailable, CoordinatorTrial::Lost] {
             exercise_live_grant_reservation(LiveGrantTrial::InstallationClaim(
-                InstallationClaimTrial::Coordinator { reserve },
+                InstallationClaimTrial::Coordinator(trial),
+            ));
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn live_installation_send_preparation_is_private_and_not_reissued() {
+        exercise_live_grant_reservation(LiveGrantTrial::InstallationClaim(
+            InstallationClaimTrial::Coordinator(CoordinatorTrial::Correlated),
+        ));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn live_installation_send_preparation_commit_loss_never_sends() {
+        for fault in [
+            InjectedDispatchCommitFault::Before,
+            InjectedDispatchCommitFault::After,
+        ] {
+            exercise_live_grant_reservation(LiveGrantTrial::InstallationClaim(
+                InstallationClaimTrial::Coordinator(CoordinatorTrial::CorrelatedFault(fault)),
             ));
         }
     }
@@ -4205,6 +4226,10 @@ mod tests {
             .backend
             .enable_installation_signer_admission_store()
             .is_err());
+        assert!(fixture
+            .backend
+            .enable_installation_send_preparation_store()
+            .is_err());
         fixture
             .backend
             .enable_live_sandbox_grant_store()
@@ -4225,6 +4250,12 @@ mod tests {
             schema_manifest_digest(&tx).expect("manifest"),
             INSTALLATION_SIGNER_ADMISSION_SCHEMA_DIGEST
         );
+        tx.execute_batch(super::super::INSTALLATION_SEND_PREPARATION_SCHEMA_V17)
+            .expect("V17 DDL");
+        assert_eq!(
+            schema_manifest_digest(&tx).expect("V17 manifest"),
+            super::super::INSTALLATION_SEND_PREPARATION_SCHEMA_DIGEST
+        );
         tx.rollback().expect("discard test manifest transaction");
         fixture
             .backend
@@ -4243,6 +4274,19 @@ mod tests {
             reopened
                 .read_events(&fixture.run_id)
                 .expect("unchanged history"),
+            history
+        );
+        reopened
+            .enable_installation_send_preparation_store()
+            .expect("explicit V17");
+        reopened
+            .enable_installation_send_preparation_store()
+            .expect("exact V17 retry");
+        let reopened = SqliteStateBackend::open_read_only(&fixture.path).expect("read-only V17");
+        assert_eq!(
+            reopened
+                .read_events(&fixture.run_id)
+                .expect("unchanged V17 history"),
             history
         );
     }
@@ -4701,6 +4745,14 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    enum CoordinatorTrial {
+        Unavailable,
+        Lost,
+        Correlated,
+        CorrelatedFault(InjectedDispatchCommitFault),
+    }
+
     #[derive(Clone, Copy)]
     enum InstallationClaimTrial {
         Reserved {
@@ -4714,9 +4766,7 @@ mod tests {
         StaleScope,
         MissingApprovalProof,
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        Coordinator {
-            reserve: bool,
-        },
+        Coordinator(CoordinatorTrial),
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         RevokedDuringSigner,
         #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -4774,9 +4824,9 @@ mod tests {
             deadline,
         };
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        if let InstallationClaimTrial::Coordinator { reserve } = trial {
+        if let InstallationClaimTrial::Coordinator(trial) = trial {
             exercise_installation_coordinator(
-                backend, path, request, admission, action, reviewed, reserve,
+                backend, path, request, admission, action, reviewed, trial,
             );
             return;
         }
@@ -4894,10 +4944,9 @@ mod tests {
         reviewed: crate::provider_comment_transport::installation_exchange::ReviewedInstallation<
             '_,
         >,
-        reserve: bool,
+        trial: CoordinatorTrial,
     ) {
         use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture;
-        use crate::provider_comment_transport::installation_exchange::VerifiedInstallationScope;
         use std::cell::Cell;
 
         let opens = Cell::new(0);
@@ -4921,6 +4970,14 @@ mod tests {
         backend
             .enable_installation_signer_admission_store()
             .expect("V16");
+        if matches!(
+            trial,
+            CoordinatorTrial::Correlated | CoordinatorTrial::CorrelatedFault(_)
+        ) {
+            backend
+                .enable_installation_send_preparation_store()
+                .expect("explicit V17");
+        }
         let wrong = crate::provider_write::GitHubCommentContinuationAction {
             body: "changed action",
             ..action
@@ -4928,80 +4985,116 @@ mod tests {
         assert!(coordinate(wrong).is_err());
         assert_eq!(opens.get(), 0);
 
-        let expected = if reserve {
-            let release = Cell::new(None);
-            let ledger_path = path.with_extension("provider.sqlite3");
-            let ledger = Connection::open(&ledger_path).expect("independent provider ledger");
-            ledger
-                .execute_batch(
-                    "CREATE TABLE accepted (id INTEGER PRIMARY KEY, body TEXT, created_at TEXT)",
-                )
-                .expect("provider ledger schema");
-            assert_eq!(
-                backend
-                    .coordinate_installation_comment_using(
-                        request(),
-                        admission,
-                        action,
-                        reviewed,
-                        |request, claim| {
-                            opens.set(opens.get() + 1);
-                            backend.use_installation_exchange_claim(
-                                request,
-                                admission,
-                                reviewed,
-                                claim,
-                                || {
-                                    Some(VerifiedInstallationScope::test_receipt_with_live_shape(
-                                        reviewed,
-                                        Timestamp::now_utc(),
-                                        reviewed.deadline,
-                                    ))
-                                },
-                            )
-                        },
-                        |request, exchanged| {
-                            backend.dispatch_lost_installation_ack_for_test(
-                                request, admission, action, reviewed, &exchanged, |body, released_at| {
-                                    assert!(release.replace(Some(released_at)).is_none());
-                                    let time = Timestamp::now_utc();
-                                    ledger.execute(
-                                        "INSERT INTO accepted (id, body, created_at) VALUES (22, ?1, ?2)",
-                                        params![body, serde_json::to_string(&time).expect("fixture clock")],
-                                    ).expect("commit the provider effect before losing the response");
-                                },
-                            )
-                        },
-                    )
-                    .expect("synthetic reserved disposition"),
-                InstallationCommentRecoveryPosture::ReconciliationRequired,
-            );
-            drop(ledger);
-            assert_reopened_installation_ack(
-                path,
-                (&ledger_path, release.get().expect("fixture send release")),
-                &request,
-                admission,
-                action,
-                reviewed,
-            );
-            InstallationCommentRecoveryPosture::ReconciliationRequired
-        } else {
+        let expected = if trial == CoordinatorTrial::Unavailable {
             assert_eq!(
                 coordinate(action).expect("unavailable signer disposition"),
                 InstallationCommentRecoveryPosture::IssuanceUncertain,
             );
             InstallationCommentRecoveryPosture::IssuanceUncertain
+        } else {
+            exercise_reserved_installation_coordinator(
+                backend, path, &request, admission, action, reviewed, trial,
+            );
+            InstallationCommentRecoveryPosture::ReconciliationRequired
         };
-        assert_eq!(opens.get(), 1);
+        let unavailable_calls = u8::from(trial == CoordinatorTrial::Unavailable);
+        assert_eq!(opens.get(), unavailable_calls);
         assert_eq!(coordinate(action).expect("exact replay"), expected);
+        assert_eq!(opens.get(), unavailable_calls);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn exercise_reserved_installation_coordinator(
+        backend: &SqliteStateBackend,
+        path: &std::path::Path,
+        request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        reviewed: crate::provider_comment_transport::installation_exchange::ReviewedInstallation<
+            '_,
+        >,
+        trial: CoordinatorTrial,
+    ) {
+        use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture;
+        use crate::provider_comment_transport::installation_exchange::VerifiedInstallationScope;
+        use std::cell::Cell;
+
+        let opens = Cell::new(0);
+        let release = Cell::new(None);
+        let ledger_path = path.with_extension("provider.sqlite3");
+        let ledger = Connection::open(&ledger_path).expect("independent provider ledger");
+        ledger
+            .execute_batch(
+                "CREATE TABLE accepted (id INTEGER PRIMARY KEY, body TEXT, created_at TEXT)",
+            )
+            .expect("provider ledger schema");
+        let fault = match trial {
+            CoordinatorTrial::CorrelatedFault(fault) => Some(fault),
+            _ => None,
+        };
+        let result = backend.coordinate_installation_comment_using(
+            request(),
+            admission,
+            action,
+            reviewed,
+            |request, claim| {
+                opens.set(opens.get() + 1);
+                backend.use_installation_exchange_claim(request, admission, reviewed, claim, || {
+                    Some(VerifiedInstallationScope::test_receipt_with_live_shape(
+                        reviewed,
+                        Timestamp::now_utc(),
+                        reviewed.deadline,
+                    ))
+                })
+            },
+            |request, exchanged| {
+                backend.dispatch_lost_installation_ack_for_test(
+                    request,
+                    admission,
+                    action,
+                    reviewed,
+                    &exchanged,
+                    (fault, |body, released_at| {
+                        assert!(release.replace(Some(released_at)).is_none());
+                        let time = Timestamp::now_utc();
+                        ledger
+                            .execute(
+                                "INSERT INTO accepted (id, body, created_at) VALUES (22, ?1, ?2)",
+                                params![body, serde_json::to_string(&time).expect("fixture clock")],
+                            )
+                            .expect("commit the provider effect before losing the response");
+                    }),
+                )
+            },
+        );
+        if fault.is_some() {
+            assert!(result.is_err());
+            assert!(
+                release.get().is_none(),
+                "ambiguous commit must not expose the body"
+            );
+        } else {
+            assert_eq!(
+                result.expect("synthetic reserved disposition"),
+                InstallationCommentRecoveryPosture::ReconciliationRequired
+            );
+        }
+        drop(ledger);
+        assert_reopened_installation_ack(
+            path,
+            (&ledger_path, release.get(), trial),
+            &request,
+            admission,
+            action,
+            reviewed,
+        );
         assert_eq!(opens.get(), 1);
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn assert_reopened_installation_ack(
         path: &std::path::Path,
-        ledger: (&std::path::Path, Timestamp),
+        ledger: (&std::path::Path, Option<Timestamp>, CoordinatorTrial),
         request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
         admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
         action: crate::provider_write::GitHubCommentContinuationAction<'_>,
@@ -5027,7 +5120,44 @@ mod tests {
             );
         };
         assert_no_send();
-        assert_lost_installation_ack_observation(&reopened, ledger, &request(), action, reviewed);
+        let (ledger_path, release, trial) = ledger;
+        if let CoordinatorTrial::CorrelatedFault(fault) = trial {
+            let ledger = Connection::open(ledger_path).expect("provider ledger");
+            let count: u32 = ledger
+                .query_row("SELECT COUNT(*) FROM accepted", [], |row| row.get(0))
+                .expect("effect count");
+            assert_eq!(count, 0);
+            assert_eq!(
+                reopened
+                    .inspect_prepared_installation_send_for_test(&request().operation_id, action)
+                    .expect("read after failed commit")
+                    .is_some(),
+                fault == InjectedDispatchCommitFault::After
+            );
+        } else if trial == CoordinatorTrial::Correlated {
+            assert_prepared_installation_evidence(
+                &reopened,
+                ledger_path,
+                release.expect("fixture send release"),
+                &request(),
+                action,
+            );
+        } else {
+            assert_lost_installation_ack_observation(
+                &reopened,
+                (ledger_path, release.expect("fixture send release")),
+                &request(),
+                action,
+                reviewed,
+            );
+            reopened
+                .enable_installation_send_preparation_store()
+                .expect("upgrade the historical reservation");
+            assert!(reopened
+                .inspect_prepared_installation_send_for_test(&request().operation_id, action)
+                .expect("historical V16 reservation still readable")
+                .is_none());
+        }
         assert_no_send();
         assert_eq!(
             crate::SideEffectRecordStore::read_side_effect_record(&reopened, action.side_effect)
@@ -5036,6 +5166,62 @@ mod tests {
                 .lifecycle_state(),
             crate::SideEffectLifecycleState::Attempted
         );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn assert_prepared_installation_evidence(
+        backend: &SqliteStateBackend,
+        ledger_path: &std::path::Path,
+        release: Timestamp,
+        request: &crate::dispatch_reservation::DispatchReservationRequest,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+    ) {
+        let ledger = Connection::open(ledger_path).expect("provider ledger");
+        let (body, count): (String, u32) = ledger
+            .query_row(
+                "SELECT body, (SELECT COUNT(*) FROM accepted) FROM accepted",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("one synthetic provider effect");
+        assert_eq!(count, 1);
+        assert_eq!(
+            backend
+                .inspect_prepared_installation_send_for_test(&request.operation_id, action)
+                .expect("historical preparation"),
+            Some((SpecContentHash::from_text(&body), release))
+        );
+        let connection = backend
+            .existing_connection()
+            .expect("disposable Core store");
+        let payload: String = connection
+            .query_row(
+                "SELECT payload FROM installation_send_preparations WHERE operation_id=?1",
+                [request.operation_id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("prepared payload");
+        let suffix = body.strip_prefix(action.body).expect("exact approved body");
+        let marker = suffix
+            .trim()
+            .strip_prefix("<!-- ")
+            .and_then(|s| s.strip_suffix(" -->"))
+            .expect("prepared marker");
+        assert!(!payload.contains(marker));
+        assert!(!payload.contains(action.body));
+        assert!(payload.contains(SpecContentHash::from_text(marker).as_str()));
+        connection
+            .execute(
+                "UPDATE installation_send_preparations SET payload_hash=?1 WHERE operation_id=?2",
+                params![
+                    SpecContentHash::from_text("damaged record").as_str(),
+                    request.operation_id.as_str()
+                ],
+            )
+            .expect("fault in disposable state");
+        assert!(backend
+            .inspect_prepared_installation_send_for_test(&request.operation_id, action)
+            .is_err());
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -5486,8 +5672,7 @@ mod tests {
                 unreachable!("handled by historical inspection test")
             }
             #[cfg(any(target_os = "linux", target_os = "macos"))]
-            InstallationClaimTrial::Coordinator { .. }
-            | InstallationClaimTrial::SignerRehearsal => {
+            InstallationClaimTrial::Coordinator(_) | InstallationClaimTrial::SignerRehearsal => {
                 unreachable!("handled by coordinator test")
             }
         }
@@ -7015,9 +7200,9 @@ mod tests {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let body = if matches!(
             trial,
-            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::Coordinator {
-                reserve: true
-            })
+            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::Coordinator(
+                CoordinatorTrial::Lost
+            ))
         ) {
             correlated_body = super::creation_notification_fixture::correlate(body);
             &correlated_body
@@ -7571,7 +7756,11 @@ mod tests {
                                 assert_eq!(event_count(), before + 1 + usize::from(completed));
                             }
                             #[cfg(any(target_os = "linux", target_os = "macos"))]
-                            InstallationClaimTrial::Coordinator { reserve: true } => {
+                            InstallationClaimTrial::Coordinator(
+                                CoordinatorTrial::Lost
+                                | CoordinatorTrial::Correlated
+                                | CoordinatorTrial::CorrelatedFault(_),
+                            ) => {
                                 assert_eq!(counts(), (1, 1));
                                 assert_eq!(event_count(), before + 1);
                             }
