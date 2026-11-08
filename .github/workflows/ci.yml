@@ -37,6 +37,9 @@ jobs:
           npm run check
           test -x target/debug/workflow-os
 
+      - name: Verify synthetic recovery bridge with the real CLI
+        run: npm run test:synthetic-recovery-bridge
+
   rust:
     name: Rust
     runs-on: ubuntu-latest
