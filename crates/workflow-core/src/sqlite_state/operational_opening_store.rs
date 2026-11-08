@@ -5039,6 +5039,9 @@ mod tests {
         trial: InstallationClaimTrial,
     ) {
         use super::super::dispatch_reservation_store::InstallationIssuanceDisposition::Fresh;
+        use crate::provider_comment_transport::installation_signer_channel::decision::{
+            InstallationSignerDecisionChannel, InstallationSignerDecisionReceiver,
+        };
         use crate::provider_comment_transport::installation_signer_channel::{
             InstallationSignerChannel, InstallationSignerReceiver,
             ReceivedInstallationSignerRequest,
@@ -5090,15 +5093,20 @@ mod tests {
         match trial {
             InstallationClaimTrial::SignerAdmitted => {
                 let (client, peer) = UnixStream::pair().expect("fixture pair");
+                let (decision_client, decision_core) = UnixStream::pair().expect("decision pair");
                 let signs = AtomicUsize::new(0);
                 std::thread::scope(|threads| {
-                    let worker = threads.spawn(|| {
-                        InstallationSignerReceiver::from_fixture_stream(peer).serve_once(
-                            |wire| {
+                    let authority = threads.spawn(|| {
+                        InstallationSignerDecisionReceiver::from_fixture_stream(decision_core)
+                            .serve_once(|wire| {
                                 backend.admit_installation_signer_request(
                                     request, admission, reviewed, wire,
                                 )
-                            },
+                            })
+                    });
+                    let worker = threads.spawn(|| {
+                        InstallationSignerReceiver::from_fixture_stream(peer).serve_once_via_core(
+                            InstallationSignerDecisionChannel::from_fixture_stream(decision_client),
                             |_| {
                                 signs.fetch_add(1, Ordering::Relaxed);
                                 Some((
@@ -5130,6 +5138,10 @@ mod tests {
                         .join()
                         .expect("receiver worker")
                         .expect("fixture reply");
+                    authority
+                        .join()
+                        .expect("Core worker")
+                        .expect("Core decision");
                     assert_eq!(exchanges, 1);
                 });
                 assert_eq!(signs.load(Ordering::Relaxed), 1);

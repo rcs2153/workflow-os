@@ -9,8 +9,10 @@ use nix::sys::socket::getsockopt;
 use serde::{Deserialize, Serialize};
 
 use super::installation_exchange::valid_app_assertion;
-use crate::sqlite_state::InstallationSignerAdmission;
 use crate::{SpecContentHash, Timestamp, WorkflowOsError};
+
+pub(crate) mod decision;
+use decision::{InstallationSignerDecisionChannel, SignerDecisionPermit};
 
 const VERSION: u8 = 1;
 const MAX_REQUEST: usize = 1024;
@@ -59,7 +61,7 @@ impl<'a> InstallationSignerRequest<'a> {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReceivedInstallationSignerRequest {
     version: u8,
@@ -139,12 +141,10 @@ impl InstallationSignerReceiver {
         Ok(Self { stream })
     }
 
-    pub(crate) fn serve_once(
+    pub(crate) fn serve_once_via_core(
         mut self,
-        admit: impl FnOnce(
-            &ReceivedInstallationSignerRequest,
-        ) -> Result<InstallationSignerAdmission, WorkflowOsError>,
-        sign: impl FnOnce(InstallationSignerAdmission) -> Option<(String, Timestamp)>,
+        decision: InstallationSignerDecisionChannel,
+        sign: impl FnOnce(SignerDecisionPermit) -> Option<(String, Timestamp)>,
     ) -> Result<(), WorkflowOsError> {
         let stop = Instant::now()
             .checked_add(EXCHANGE_TIMEOUT)
@@ -161,8 +161,8 @@ impl InstallationSignerReceiver {
         {
             return Err(channel_denied());
         }
-        let permit = admit(&request).map_err(|_| channel_denied())?;
-        let admitted_at = permit.admitted_at(&request).ok_or_else(channel_denied)?;
+        let permit = decision.request(&request, stop)?;
+        let admitted_at = permit.admitted_at();
         let before_sign = Timestamp::now_utc();
         remaining(stop)?;
         if before_sign < admitted_at || before_sign >= request.deadline {
@@ -475,17 +475,14 @@ mod tests {
             peer.write_all(&size.to_be_bytes()).expect("size");
             peer.write_all(payload).expect("payload");
             peer.shutdown(Shutdown::Write).expect("single request");
-            let admitted = std::cell::Cell::new(false);
+            let (decision_client, mut decision_peer) = UnixStream::pair().expect("decision pair");
             assert!(InstallationSignerReceiver::from_fixture_stream(receiver)
-                .serve_once(
-                    |_| {
-                        admitted.set(true);
-                        Err(channel_denied())
-                    },
+                .serve_once_via_core(
+                    InstallationSignerDecisionChannel::from_fixture_stream(decision_client),
                     |_| None,
                 )
                 .is_err());
-            assert!(!admitted.get());
+            assert_eq!(decision_peer.read(&mut [0]).expect("decision EOF"), 0);
         }
     }
 
