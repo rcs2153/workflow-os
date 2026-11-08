@@ -32,6 +32,7 @@ use crate::provider_comment_transport::installation_exchange::{
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::provider_comment_transport::installation_signer_channel::{
     InstallationAppAssertion, InstallationSignerChannel, InstallationSignerRequest,
+    ReceivedInstallationSignerRequest,
 };
 #[cfg(test)]
 use crate::provider_comment_transport::PreparedGitHubCommentCreation;
@@ -217,6 +218,35 @@ pub(super) struct InstallationIssuanceClaim {
 pub(super) struct InstallationExchangedScope {
     claim: InstallationIssuanceClaim,
     verified: VerifiedInstallationScope,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) struct InstallationSignerAdmission(SignerAdmissionRecord);
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SignerAdmissionRecord {
+    claim: SpecContentHash,
+    operation: String,
+    scope: SpecContentHash,
+    deadline: Timestamp,
+    admitted_at: Timestamp,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl InstallationSignerAdmission {
+    pub(crate) fn admitted_at(
+        &self,
+        request: &ReceivedInstallationSignerRequest,
+    ) -> Option<Timestamp> {
+        (self.0.claim == request.claim
+            && self.0.operation == request.operation
+            && self.0.scope == request.scope
+            && self.0.deadline == request.deadline
+            && self.0.admitted_at < request.deadline)
+            .then_some(self.0.admitted_at)
+    }
 }
 
 #[allow(dead_code)] // No signer or operator caller is admitted yet.
@@ -570,7 +600,7 @@ impl SqliteStateBackend {
             InstallationAppAssertion,
         ) -> Option<VerifiedInstallationScope>,
     ) -> Result<Option<InstallationExchangedScope>, WorkflowOsError> {
-        self.recheck_installation_exchange_claim(request, admission, reviewed, &claim)?;
+        self.recheck_installation_signer_exchange(request, admission, reviewed, &claim, None)?;
         let commitment = claim.record.commitment()?;
         let signer_request = InstallationSignerRequest::new(
             &claim.record.operation,
@@ -579,9 +609,110 @@ impl SqliteStateBackend {
             claim.record.deadline,
         );
         let assertion = channel.request(&signer_request)?;
-        let now = self.recheck_installation_exchange_claim(request, admission, reviewed, &claim)?;
+        let now = self.recheck_installation_signer_exchange(
+            request,
+            admission,
+            reviewed,
+            &claim,
+            Some(assertion.issued_at()),
+        )?;
         let verified = exchange(reviewed, assertion);
         finish_installation_exchange(claim, verified, now)
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[allow(dead_code)] // No signer service is deployed.
+    pub(super) fn admit_installation_signer_request(
+        &self,
+        request: &DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        received: &ReceivedInstallationSignerRequest,
+    ) -> Result<InstallationSignerAdmission, WorkflowOsError> {
+        self.admit_installation_signer_request_with_fault(
+            request,
+            admission,
+            reviewed,
+            received,
+            |_| Ok(()),
+        )
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(super) fn admit_installation_signer_request_with_fault(
+        &self,
+        request: &DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        received: &ReceivedInstallationSignerRequest,
+        mut commit_boundary: impl FnMut(bool) -> Result<(), WorkflowOsError>,
+    ) -> Result<InstallationSignerAdmission, WorkflowOsError> {
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| storage_error("begin_failed"))?;
+        require_installation_signer_schema(&tx)?;
+        let (record, now) = revalidate_installation_claim(&tx, request, admission, reviewed)?;
+        let claim = record.commitment()?;
+        if !received.has_current_version()
+            || received.operation != record.operation
+            || received.claim != claim
+            || received.scope != record.scope
+            || received.deadline != record.deadline
+            || read_installation_signer_admission(&tx, &record)?.is_some()
+        {
+            return Err(not_dispatchable());
+        }
+        let admitted = SignerAdmissionRecord {
+            claim,
+            operation: record.operation.clone(),
+            scope: record.scope.clone(),
+            deadline: record.deadline,
+            admitted_at: now,
+        };
+        let payload = encode_json(&admitted, "installation signer admission")?;
+        let changed = tx.execute(
+            "UPDATE installation_issuance_claims SET signer_admission=?1, signer_admission_hash=?2
+             WHERE operation_id=?3 AND payload_hash=?4 AND signer_admission IS NULL AND signer_admission_hash IS NULL",
+            params![payload, SpecContentHash::from_text(&payload).as_str(), record.operation, admitted.claim.as_str()],
+        ).map_err(|_| storage_error("write_failed"))?;
+        if changed != 1 {
+            return Err(not_dispatchable());
+        }
+        commit_boundary(false)?;
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        commit_boundary(true)?;
+        Ok(InstallationSignerAdmission(admitted))
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn recheck_installation_signer_exchange(
+        &self,
+        request: &DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        claim: &InstallationIssuanceClaim,
+        assertion_issued_at: Option<Timestamp>,
+    ) -> Result<Timestamp, WorkflowOsError> {
+        let mut connection = self.existing_read_only_connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|_| storage_error("begin_failed"))?;
+        require_installation_signer_schema(&tx)?;
+        let (record, now) = revalidate_installation_claim(&tx, request, admission, reviewed)?;
+        if record != *claim.record {
+            return Err(not_dispatchable());
+        }
+        match (
+            assertion_issued_at,
+            read_installation_signer_admission(&tx, &record)?,
+        ) {
+            (None, None) => {}
+            (Some(issued), Some(admitted)) if admitted.admitted_at <= issued && issued <= now => {}
+            _ => return Err(not_dispatchable()),
+        }
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(now)
     }
 
     #[cfg(test)]
@@ -610,17 +741,8 @@ impl SqliteStateBackend {
             .transaction()
             .map_err(|_| storage_error("begin_failed"))?;
         super::validate_operational_schema(&tx)?;
-        let record = read_installation_claim(&tx, request)?.ok_or_else(not_dispatchable)?;
-        if record != *claim.record
-            || !record.matches(request, admission.side_effect, reviewed)
-            || record.grant != admission.grant_id.as_str()
-            || request.request_commitment != request_commitment(request)
-            || existing_installation_disposition(&tx, request, admission.side_effect)?.is_some()
-        {
-            return Err(not_dispatchable());
-        }
-        let now = verify_current_installation_exchange(&tx, request, admission, reviewed)?;
-        if now < record.claimed_at {
+        let (record, now) = revalidate_installation_claim(&tx, request, admission, reviewed)?;
+        if record != *claim.record {
             return Err(not_dispatchable());
         }
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
@@ -1792,7 +1914,11 @@ fn read_installation_claim_by_key(
     let version: u32 = tx
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|_| corrupt())?;
-    if version != super::INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION {
+    if !matches!(
+        version,
+        super::INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
+            | super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
+    ) {
         return Err(not_dispatchable());
     }
     let row = tx.query_row(
@@ -1833,6 +1959,69 @@ fn read_installation_claim_by_key(
         return Err(corrupt());
     }
     Ok(Some(record))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn require_installation_signer_schema(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<(), WorkflowOsError> {
+    if super::validate_operational_schema(tx)?
+        != super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
+    {
+        return Err(not_dispatchable());
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn read_installation_signer_admission(
+    tx: &rusqlite::Transaction<'_>,
+    claim: &InstallationClaimRecord,
+) -> Result<Option<SignerAdmissionRecord>, WorkflowOsError> {
+    let (payload, hash): (Option<String>, Option<String>) = tx.query_row(
+        "SELECT signer_admission,signer_admission_hash FROM installation_issuance_claims WHERE operation_id=?1",
+        [claim.operation.as_str()], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).map_err(|_| corrupt())?;
+    match (payload, hash) {
+        (None, None) => Ok(None),
+        (Some(payload), Some(hash)) if SpecContentHash::from_text(&payload).as_str() == hash => {
+            let admission: SignerAdmissionRecord =
+                super::decode_json(&payload, "installation signer admission")
+                    .map_err(|_| corrupt())?;
+            if admission.claim != claim.commitment()?
+                || admission.operation != claim.operation
+                || admission.scope != claim.scope
+                || admission.deadline != claim.deadline
+                || admission.admitted_at < claim.claimed_at
+                || admission.admitted_at >= claim.deadline
+            {
+                return Err(corrupt());
+            }
+            Ok(Some(admission))
+        }
+        _ => Err(corrupt()),
+    }
+}
+
+fn revalidate_installation_claim(
+    tx: &rusqlite::Transaction<'_>,
+    request: &DispatchReservationRequest,
+    admission: LiveGrantAdmission<'_>,
+    reviewed: ReviewedInstallation<'_>,
+) -> Result<(InstallationClaimRecord, Timestamp), WorkflowOsError> {
+    let record = read_installation_claim(tx, request)?.ok_or_else(not_dispatchable)?;
+    if !record.matches(request, admission.side_effect, reviewed)
+        || record.grant != admission.grant_id.as_str()
+        || request.request_commitment != request_commitment(request)
+        || existing_installation_disposition(tx, request, admission.side_effect)?.is_some()
+    {
+        return Err(not_dispatchable());
+    }
+    let now = verify_current_installation_exchange(tx, request, admission, reviewed)?;
+    if now < record.claimed_at {
+        return Err(not_dispatchable());
+    }
+    Ok((record, now))
 }
 
 fn existing_installation_disposition(
@@ -2080,6 +2269,7 @@ fn durable_comment_context(
         super::validate_operational_schema(tx)?,
         super::LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
             | super::INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
+            | super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
     ) {
         return Err(not_dispatchable());
     }

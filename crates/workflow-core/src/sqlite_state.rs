@@ -48,6 +48,11 @@ const LIVE_AUTHORITY_PROOF_SCHEMA_VERSION: u32 = 12;
 const LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION: u32 = 13;
 const LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION: u32 = 14;
 const INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION: u32 = 15;
+const INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION: u32 = 16;
+const INSTALLATION_SIGNER_ADMISSION_SCHEMA_DIGEST: &str =
+    "c8667e92339a481866be57073f990c0c3ff026dd8af92f885471409b5e98411f";
+const INSTALLATION_SIGNER_ADMISSION_SCHEMA_CHECKSUM: &str =
+    "sha256:810d9eea962c3d286b79ef037162ced25429ead1cf3401d7490976ef774deb9a";
 const INSTALLATION_ISSUANCE_CLAIM_SCHEMA_DIGEST: &str =
     "d1a9efa18d5458bba30ca1331569e2703140cba257159f77d4b9948efadbd716";
 const INSTALLATION_ISSUANCE_CLAIM_SCHEMA_CHECKSUM: &str =
@@ -237,6 +242,8 @@ const LIVE_COMMENT_OBSERVATION_SCHEMA_V14: &str =
     include_str!("sqlite_live_comment_observation_schema_v14.sql");
 const INSTALLATION_ISSUANCE_CLAIM_SCHEMA_V15: &str =
     include_str!("sqlite_installation_issuance_claim_schema_v15.sql");
+const INSTALLATION_SIGNER_ADMISSION_SCHEMA_V16: &str =
+    include_str!("sqlite_installation_signer_admission_schema_v16.sql");
 pub(crate) const CONTINUITY_CLOCK_PROVENANCE: &str =
     "77efdb5ae4c8696d8573d816a52dce594793b1749471a98cc58a85fc8129e50f";
 pub(crate) const CONTINUITY_CLOCK_EPOCH: &str = "epoch/sqlite-local-live-state/1";
@@ -246,6 +253,8 @@ mod continuity_codec;
 mod continuity_store;
 mod dispatch_reservation_store;
 pub(crate) use dispatch_reservation_store::InstallationCommentSendPermit;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) use dispatch_reservation_store::InstallationSignerAdmission;
 pub use dispatch_reservation_store::{
     SyntheticSandboxCompletionProofSource, SyntheticSandboxRecoveryInspection,
     SyntheticSandboxRecoveryPosture,
@@ -1288,7 +1297,8 @@ impl SqliteStateBackend {
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(&connection)?,
             LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION
             | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
-            | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION => {
+            | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
+            | INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION => {
                 validate_live_authority_schema(&connection)?;
             }
             LIVE_AUTHORITY_PROOF_SCHEMA_VERSION => validate_recognized_v12_schema(&connection)?,
@@ -2381,7 +2391,8 @@ impl SqliteStateBackend {
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(connection),
             LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION
             | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
-            | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION => {
+            | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
+            | INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION => {
                 validate_live_authority_schema(connection)
             }
             LIVE_AUTHORITY_PROOF_SCHEMA_VERSION => validate_recognized_v12_schema(connection),
@@ -4133,6 +4144,7 @@ fn validate_operational_schema(connection: &Connection) -> Result<u32, WorkflowO
         LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION
             | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
             | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
+            | INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
     ) {
         validate_live_authority_schema(connection)?;
     } else if version == LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION {
@@ -4149,6 +4161,14 @@ fn validate_live_authority_schema(connection: &Connection) -> Result<(), Workflo
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|_| schema_recovery_required())?;
+    if version == INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION {
+        return validate_schema_metadata_version(
+            connection,
+            version,
+            INSTALLATION_SIGNER_ADMISSION_SCHEMA_CHECKSUM,
+            INSTALLATION_SIGNER_ADMISSION_SCHEMA_DIGEST,
+        );
+    }
     if version == INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION {
         return validate_schema_metadata_version(
             connection,
@@ -4245,7 +4265,7 @@ fn validate_schema_metadata_version(
             validate_continuity_security_state(connection)?;
             validate_time_window_wait_binding_columns(connection)
         }
-        Some((version, _, _)) if version > INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION => {
+        Some((version, _, _)) if version > INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION => {
             Err(sqlite_state_error(
                 "schema.incompatible",
                 "SQLite state schema version is not supported",
