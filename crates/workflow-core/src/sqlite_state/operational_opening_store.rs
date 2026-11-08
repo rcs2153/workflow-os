@@ -5217,13 +5217,21 @@ mod tests {
             serde_json::from_value(prepared["clock"].clone()).expect("fixture preparation clock");
         let latest = super::super::continuity_store::observe_continuity_trusted_time()
             .expect("fixture receiving clock");
-        crate::provider_comment_transport::installation_notification::tests::exercise_prepared_notification(
+        let candidate = crate::provider_comment_transport::installation_notification::tests::exercise_prepared_notification(
             &body, &writer_scope, &earliest, &latest,
             serde_json::from_value(prepared["deadline"].clone()).expect("fixture deadline"),
             |receiver, notification| {
                 backend.verify_prepared_installation_notification(&request.operation_id, action, receiver, notification)
                     .expect("read-only candidate classification")
             },
+        );
+        assert_independent_installation_inventory(
+            backend,
+            request,
+            action,
+            &candidate,
+            &body,
+            &writer_scope,
         );
         connection
             .execute(
@@ -5237,6 +5245,47 @@ mod tests {
         assert!(backend
             .inspect_prepared_installation_send_for_test(&request.operation_id, action)
             .is_err());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn assert_independent_installation_inventory(
+        backend: &SqliteStateBackend,
+        request: &crate::dispatch_reservation::DispatchReservationRequest,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        candidate: &crate::provider_comment_transport::installation_notification::CreationCandidate,
+        body: &str,
+        writer_scope: &SpecContentHash,
+    ) {
+        use crate::provider_comment_observation::CurrentCommentPosture;
+        use crate::provider_comment_transport::tests::{
+            with_independent_inventory, InventoryTrial,
+        };
+        for (trial, expected) in [
+            (
+                InventoryTrial::Exact,
+                CurrentCommentPosture::ExactCurrentMatch,
+            ),
+            (
+                InventoryTrial::WrongReader,
+                CurrentCommentPosture::Unresolved,
+            ),
+            (InventoryTrial::Duplicate, CurrentCommentPosture::Ambiguous),
+            (InventoryTrial::Edited, CurrentCommentPosture::Unresolved),
+            (InventoryTrial::Truncated, CurrentCommentPosture::Unresolved),
+            (InventoryTrial::Absent, CurrentCommentPosture::Absent),
+        ] {
+            let observed = with_independent_inventory(trial, body, writer_scope, |reader| {
+                backend
+                    .observe_prepared_installation_inventory(
+                        &request.operation_id,
+                        action,
+                        candidate,
+                        reader,
+                    )
+                    .expect("read-only observation")
+            });
+            assert_eq!(observed, expected);
+        }
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]

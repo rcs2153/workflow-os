@@ -70,6 +70,22 @@ pub(crate) struct CreationCandidate {
     reservation: SpecContentHash,
     payload_digest: SpecContentHash,
     comment_id: NonZeroU64,
+    body_commitment: SpecContentHash,
+    marker_commitment: SpecContentHash,
+}
+
+impl CreationCandidate {
+    pub(crate) fn prepared_comment_id(
+        &self,
+        reservation: &SpecContentHash,
+        body: &SpecContentHash,
+        marker: &SpecContentHash,
+    ) -> Option<NonZeroU64> {
+        (&self.reservation == reservation
+            && &self.body_commitment == body
+            && &self.marker_commitment == marker)
+            .then_some(self.comment_id)
+    }
 }
 
 #[derive(Deserialize)]
@@ -157,6 +173,8 @@ pub(crate) fn verify_creation_notification(
         reservation: expected.reservation.clone(),
         payload_digest: receipt.payload_digest.clone(),
         comment_id: event.comment.id,
+        body_commitment: expected.body_commitment.clone(),
+        marker_commitment: expected.marker_commitment.clone(),
     })
 }
 
@@ -243,7 +261,7 @@ pub(crate) mod tests {
             ReviewedCreationReceiver<'_>,
             CreationNotification<'_>,
         ) -> Option<CreationCandidate>,
-    ) {
+    ) -> CreationCandidate {
         let signer =
             signature::Ed25519KeyPair::from_seed_unchecked(&[7; 32]).expect("fixture signing key");
         let receiver = ReviewedCreationReceiver {
@@ -285,7 +303,10 @@ pub(crate) mod tests {
         let candidate =
             check(&payload, receiver, earliest, latest).expect("exact creation candidate");
         assert_eq!(candidate.comment_id.get(), 22);
-        assert_eq!(check(&payload, receiver, earliest, latest), Some(candidate));
+        assert_eq!(
+            check(&payload, receiver, earliest, latest).as_ref(),
+            Some(&candidate)
+        );
         let at_deadline =
             crate::authorized_execution_continuity_state::internal::trusted_time_observation(
                 deadline,
@@ -333,6 +354,7 @@ pub(crate) mod tests {
             *altered.pointer_mut(path).expect("fixture field") = wrong;
             assert!(check(&altered, receiver, earliest, latest).is_none());
         }
+        candidate
     }
 
     fn assert_receipt_authentication(
