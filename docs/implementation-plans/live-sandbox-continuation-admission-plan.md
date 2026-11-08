@@ -1549,6 +1549,27 @@ rows. Readback fails closed on damaged or transplanted rows. A receipt is not
 an outcome and does not change the SideEffect, workflow event history, or
 send authority. No live observer or credentials were provisioned.
 
+### Private Recovery After A Lost Acknowledgement
+
+Core can now reconcile the attempted installation comment using a verified
+creation candidate and a fresh traversal by the independently reviewed
+GET-only reader. The traversal and local decision must finish within a
+30-second monotonic interval. The write transaction reloads the exact
+preparation and journal, and accepts only an exact current match with no
+stored contrary finding or different candidate. Incomplete traversals and
+full journals cannot complete an effect. A complete contrary finding remains
+recorded even when recovery cannot proceed.
+
+The recovery-specific journal record binds the fresh read interval, even
+when an older traversal returned identical rows. That record, the completed
+SideEffect, and the distinct observation proof are committed together.
+Readback revalidates the record, interval, and outcome binding. Exact replay
+after reopening uses this durable proof,
+without reader traffic, signer access, or another POST. A direct creation
+response remains a separate proof source. This covers one reconciliation
+boundary, not a global historical count or a provider snapshot; it does not
+admit a live operator, new provider mutation, public CLI, or harness tool.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

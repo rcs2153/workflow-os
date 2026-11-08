@@ -1,4 +1,4 @@
-//! Private, payload-free observation history. It never records an outcome.
+//! Private observation history and bounded recovery after acknowledgement loss.
 #![allow(dead_code)] // No operator observer is admitted yet.
 
 use std::num::NonZeroU64;
@@ -13,11 +13,18 @@ use crate::provider_comment_transport::{
     installation_notification::CreationCandidate, IndependentCommentInventory,
 };
 use crate::provider_write::GitHubCommentContinuationAction;
-use crate::{SpecContentHash, Timestamp, WorkflowOsError};
+use crate::{
+    EventId, SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
+    SpecContentHash, Timestamp, WorkflowOsError, WorkflowRunEvent,
+};
 
 use super::{
-    corrupt, installation_inventory_context, installation_send_preparation_payload,
-    not_dispatchable, storage_error, InstallationInventoryContext,
+    corrupt, find_live_comment_proof, installation_inventory_context,
+    installation_send_preparation_payload, live_comment_proof_key, not_dispatchable,
+    persist_bound_live_comment_outcome, read_bound_installation_preparation,
+    read_live_recovery_admission, storage_error, verify_comment_disposition,
+    CollectedInstallationInventory, InstallationInventoryContext, LiveCommentProofKind,
+    LiveRecoveryAdmission,
 };
 use crate::sqlite_state::{
     continuity_store, decode_json, encode_json, validate_operational_schema, SqliteStateBackend,
@@ -25,6 +32,7 @@ use crate::sqlite_state::{
 };
 
 const MAX_OBSERVATIONS: u16 = 16;
+const MAX_RECOVERY_OBSERVATION_AGE: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[derive(Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -38,6 +46,8 @@ struct ObservationIdentity {
     reader: NonZeroU64,
     candidate: NonZeroU64,
     posture: CurrentCommentPosture,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recovery_started_at: Option<Timestamp>,
 }
 
 #[derive(Deserialize, Eq, PartialEq, Serialize)]
@@ -103,12 +113,149 @@ fn read_journal(
             || record.identity.received_latest < context.record.clock.observed_at()
             || record.identity.received_latest >= context.record.deadline
             || record.clock.observed_at() < record.identity.received_latest
+            || record.identity.recovery_started_at.is_some_and(|started| {
+                !within_recovery_observation_interval(
+                    started,
+                    record.clock.observed_at(),
+                    record.identity.received_latest,
+                ) || record.identity.posture != CurrentCommentPosture::ExactCurrentMatch
+            })
         {
             return Err(corrupt());
         }
         records.push((key, record));
     }
     Ok(records)
+}
+
+fn observation_identity(
+    candidate: &CreationCandidate,
+    (context, traversal, comment): &CollectedInstallationInventory,
+) -> Result<ObservationIdentity, WorkflowOsError> {
+    let (notification, receipt) = candidate.commitments();
+    let (_, preparation) = installation_send_preparation_payload(&context.record)?;
+    Ok(ObservationIdentity {
+        operation: context.record.operation.clone(),
+        preparation,
+        notification: notification.clone(),
+        receipt: receipt.clone(),
+        received_latest: candidate.received_latest(),
+        inventory: traversal.commitment.clone(),
+        reader: traversal.reader,
+        candidate: *comment,
+        posture: traversal.posture,
+        recovery_started_at: None,
+    })
+}
+
+fn within_recovery_observation_interval(
+    started: Timestamp,
+    observed: Timestamp,
+    received_latest: Timestamp,
+) -> bool {
+    started >= received_latest
+        && observed >= started
+        && observed.as_offset_date_time() - started.as_offset_date_time()
+            <= MAX_RECOVERY_OBSERVATION_AGE
+}
+
+fn persist_observation(
+    tx: &rusqlite::Transaction<'_>,
+    existing: &[(SpecContentHash, ObservationRecord)],
+    context: &InstallationInventoryContext,
+    identity: ObservationIdentity,
+) -> Result<(SpecContentHash, SpecContentHash), WorkflowOsError> {
+    let id = identity_commitment(&identity)?;
+    if let Some((_, prior)) = existing.iter().find(|(prior_id, _)| prior_id == &id) {
+        if prior.identity != identity {
+            return Err(corrupt());
+        }
+        return Ok((id, record_commitment(prior)?));
+    }
+    if existing.len() >= usize::from(MAX_OBSERVATIONS) {
+        return Err(not_dispatchable());
+    }
+    let clock = continuity_store::observe_continuity_trusted_time()?;
+    if !verify_clock(&clock, &context.record.clock)
+        || clock.observed_at() < identity.received_latest
+    {
+        return Err(not_dispatchable());
+    }
+    let record = ObservationRecord { identity, clock };
+    let hash = record_commitment(&record)?;
+    tx.execute(
+        "INSERT INTO installation_observation_journal (operation_id, evidence_id, payload, payload_hash) VALUES (?1,?2,?3,?4)",
+        params![context.record.operation, id.as_str(), encode_json(&record, "installation observation")?, hash.as_str()],
+    ).map_err(|_| storage_error("write_failed"))?;
+    Ok((id, hash))
+}
+
+fn compatible_observation(record: &ObservationRecord, comment: NonZeroU64) -> bool {
+    record.identity.posture == CurrentCommentPosture::ExactCurrentMatch
+        && record.identity.candidate == comment
+}
+
+fn comment_outcome(comment: NonZeroU64) -> Result<SideEffectOutcomeReference, WorkflowOsError> {
+    SideEffectOutcomeReference::new(
+        SideEffectOutcomeReferenceKind::Outcome,
+        format!("github/comment/{comment}"),
+    )
+}
+
+pub(super) fn verify_observed_completion(
+    tx: &rusqlite::Transaction<'_>,
+    admission: &LiveRecoveryAdmission,
+    effect: &SideEffectRecord,
+    event: &WorkflowRunEvent,
+) -> Result<bool, WorkflowOsError> {
+    require_journal_schema(tx)?;
+    let operation = &admission.operation;
+    let context = InstallationInventoryContext {
+        record: read_bound_installation_preparation(tx, operation, admission)?
+            .ok_or_else(corrupt)?,
+        provider: admission
+            .witness
+            .as_ref()
+            .ok_or_else(corrupt)?
+            .provider
+            .clone(),
+    };
+    let records = read_journal(tx, operation, &context)?;
+    let Some((_, first)) = records.first() else {
+        return Ok(false);
+    };
+    let comment = first.identity.candidate;
+    if effect.outcome_reference() != Some(&comment_outcome(comment)?) {
+        return Ok(false);
+    }
+    let mut matched = false;
+    for (_, record) in &records {
+        if !compatible_observation(record, comment) || record.clock.observed_at() > event.timestamp
+        {
+            return Ok(false);
+        }
+        let key = live_comment_proof_key(
+            admission,
+            effect,
+            LiveCommentProofKind::InstallationObservation,
+            Some(&record_commitment(record)?),
+        )?;
+        if event.idempotency_key.as_ref() == Some(&key)
+            && record.identity.recovery_started_at.is_some_and(|started| {
+                within_recovery_observation_interval(
+                    started,
+                    event.timestamp,
+                    record.identity.received_latest,
+                )
+            })
+        {
+            if matched {
+                return Err(corrupt());
+            }
+            matched = true;
+        }
+    }
+    Ok(matched)
 }
 
 impl SqliteStateBackend {
@@ -120,57 +267,125 @@ impl SqliteStateBackend {
         reader: &IndependentCommentInventory<'_>,
     ) -> Result<Option<SpecContentHash>, WorkflowOsError> {
         require_journal_schema(&self.existing_read_only_connection()?)?;
-        let Some((before, traversal, comment)) =
+        let Some(collected) =
             self.collect_prepared_installation_inventory(operation, action, candidate, reader)?
         else {
             return Ok(None);
         };
+        let before = &collected.0;
         let mut connection = self.existing_connection()?;
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| storage_error("begin_failed"))?;
         require_journal_schema(&tx)?;
-        if installation_inventory_context(&tx, operation, action, false)?.as_ref() != Some(&before)
+        if installation_inventory_context(&tx, operation, action, false)?.as_ref() != Some(before) {
+            return Err(not_dispatchable());
+        }
+        let existing = read_journal(&tx, operation, before)?;
+        let (id, _) = persist_observation(
+            &tx,
+            &existing,
+            before,
+            observation_identity(candidate, &collected)?,
+        )?;
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(Some(id))
+    }
+
+    pub(in crate::sqlite_state) fn reconcile_prepared_installation_comment(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        candidate: &CreationCandidate,
+        reader: &IndependentCommentInventory<'_>,
+    ) -> Result<Option<EventId>, WorkflowOsError> {
+        {
+            let mut connection = self.existing_read_only_connection()?;
+            let tx = connection
+                .transaction()
+                .map_err(|_| storage_error("begin_failed"))?;
+            require_journal_schema(&tx)?;
+            if installation_inventory_context(&tx, operation, action, true)?.is_none() {
+                return Ok(None);
+            }
+            let admission = read_live_recovery_admission(&tx, operation, action.run)?;
+            let history = Self::read_events_with_connection(&tx, action.run)?;
+            if let Some((event, kind)) = find_live_comment_proof(&admission.event, &history)? {
+                return Ok((kind == LiveCommentProofKind::InstallationObservation)
+                    .then(|| event.event_id.clone()));
+            }
+        }
+
+        let started = std::time::Instant::now();
+        let started_clock = continuity_store::observe_continuity_trusted_time()?;
+        let Some(collected) =
+            self.collect_prepared_installation_inventory(operation, action, candidate, reader)?
+        else {
+            return Ok(None);
+        };
+        let (before, traversal, comment) = &collected;
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| storage_error("begin_failed"))?;
+        require_journal_schema(&tx)?;
+        if installation_inventory_context(&tx, operation, action, false)?.as_ref() != Some(before) {
+            return Err(not_dispatchable());
+        }
+        let existing = read_journal(&tx, operation, before)?;
+        if existing.len() >= usize::from(MAX_OBSERVATIONS) {
+            return Ok(None);
+        }
+        let mut identity = observation_identity(candidate, &collected)?;
+        let clock = continuity_store::observe_continuity_trusted_time()?;
+        let eligible = traversal.posture == CurrentCommentPosture::ExactCurrentMatch
+            && existing.iter().all(|(_, record)| {
+                compatible_observation(record, *comment)
+                    && record.clock.observed_at() <= clock.observed_at()
+            })
+            && verify_clock(&clock, &started_clock)
+            && verify_clock(&started_clock, &before.record.clock)
+            && within_recovery_observation_interval(
+                started_clock.observed_at(),
+                clock.observed_at(),
+                candidate.received_latest(),
+            )
+            && started.elapsed() <= MAX_RECOVERY_OBSERVATION_AGE;
+        if eligible {
+            identity.recovery_started_at = Some(started_clock.observed_at());
+        }
+        let (_, receipt) = persist_observation(&tx, &existing, before, identity)?;
+        if !eligible {
+            tx.commit().map_err(|_| storage_error("commit_failed"))?;
+            return Ok(None);
+        }
+        let admission = read_live_recovery_admission(&tx, operation, action.run)?;
+        let event = persist_bound_live_comment_outcome(
+            &tx,
+            action,
+            &admission,
+            comment_outcome(*comment)?,
+            LiveCommentProofKind::InstallationObservation,
+            Some(&receipt),
+        )?;
+        if verify_comment_disposition(&tx, &admission, action.run, action.side_effect)?
+            != Some(LiveCommentProofKind::InstallationObservation)
+            || started.elapsed() > MAX_RECOVERY_OBSERVATION_AGE
         {
             return Err(not_dispatchable());
         }
-        let (notification, receipt) = candidate.commitments();
-        let (_, preparation) = installation_send_preparation_payload(&before.record)?;
-        let identity = ObservationIdentity {
-            operation: operation.as_str().to_owned(),
-            preparation,
-            notification: notification.clone(),
-            receipt: receipt.clone(),
-            received_latest: candidate.received_latest(),
-            inventory: traversal.commitment,
-            reader: traversal.reader,
-            candidate: comment,
-            posture: traversal.posture,
-        };
-        let id = identity_commitment(&identity)?;
-        let existing = read_journal(&tx, operation, &before)?;
-        if let Some((_, prior)) = existing.iter().find(|(prior_id, _)| prior_id == &id) {
-            if prior.identity != identity {
-                return Err(corrupt());
-            }
-        } else {
-            if existing.len() >= usize::from(MAX_OBSERVATIONS) {
-                return Err(not_dispatchable());
-            }
-            let clock = continuity_store::observe_continuity_trusted_time()?;
-            if !verify_clock(&clock, &before.record.clock)
-                || clock.observed_at() < identity.received_latest
-            {
-                return Err(not_dispatchable());
-            }
-            let record = ObservationRecord { identity, clock };
-            tx.execute(
-                "INSERT INTO installation_observation_journal (operation_id, evidence_id, payload, payload_hash) VALUES (?1,?2,?3,?4)",
-                params![operation.as_str(), id.as_str(), encode_json(&record, "installation observation")?, record_commitment(&record)?.as_str()],
-            ).map_err(|_| storage_error("write_failed"))?;
+        #[cfg(test)]
+        let fault = super::INJECTED_COMMIT_FAULT.with(std::cell::Cell::take);
+        #[cfg(test)]
+        if fault == Some(super::InjectedDispatchCommitFault::Before) {
+            return Err(storage_error("commit_failed"));
         }
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
-        Ok(Some(id))
+        #[cfg(test)]
+        if fault == Some(super::InjectedDispatchCommitFault::After) {
+            return Err(storage_error("commit_failed"));
+        }
+        Ok(Some(event))
     }
 
     pub(in crate::sqlite_state) fn inspect_installation_observation_journal(

@@ -3589,6 +3589,18 @@ mod tests {
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
+    fn live_installation_observed_recovery_is_durable_and_rejects_contradictions() {
+        for contradictory in [false, true] {
+            exercise_live_grant_reservation(LiveGrantTrial::InstallationClaim(
+                InstallationClaimTrial::Coordinator(CoordinatorTrial::ObservedRecovery {
+                    contradictory,
+                }),
+            ));
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
     fn live_installation_send_preparation_commit_loss_never_sends() {
         for fault in [
             InjectedDispatchCommitFault::Before,
@@ -4767,6 +4779,7 @@ mod tests {
         Unavailable,
         Lost,
         Correlated,
+        ObservedRecovery { contradictory: bool },
         CorrelatedFault(InjectedDispatchCommitFault),
     }
 
@@ -4989,7 +5002,9 @@ mod tests {
             .expect("V16");
         if matches!(
             trial,
-            CoordinatorTrial::Correlated | CoordinatorTrial::CorrelatedFault(_)
+            CoordinatorTrial::Correlated
+                | CoordinatorTrial::CorrelatedFault(_)
+                | CoordinatorTrial::ObservedRecovery { .. }
         ) {
             backend
                 .enable_installation_send_preparation_store()
@@ -5017,7 +5032,15 @@ mod tests {
             exercise_reserved_installation_coordinator(
                 backend, path, &request, admission, action, reviewed, trial,
             );
-            InstallationCommentRecoveryPosture::ReconciliationRequired
+            if trial
+                == (CoordinatorTrial::ObservedRecovery {
+                    contradictory: false,
+                })
+            {
+                InstallationCommentRecoveryPosture::ObservationReconciled
+            } else {
+                InstallationCommentRecoveryPosture::ReconciliationRequired
+            }
         };
         let unavailable_calls = u8::from(trial == CoordinatorTrial::Unavailable);
         assert_eq!(opens.get(), unavailable_calls);
@@ -5126,7 +5149,7 @@ mod tests {
     ) {
         use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture;
         let reopened = SqliteStateBackend::open(path).expect("reopen Core after response loss");
-        let assert_no_send = || {
+        let assert_no_send = |expected| {
             assert_eq!(
                 reopened
                     .coordinate_installation_comment_using(
@@ -5138,10 +5161,10 @@ mod tests {
                         |_, _| panic!("reserved replay must not POST"),
                     )
                     .expect("historical disposition"),
-                InstallationCommentRecoveryPosture::ReconciliationRequired,
+                expected,
             );
         };
-        assert_no_send();
+        assert_no_send(InstallationCommentRecoveryPosture::ReconciliationRequired);
         let (ledger_path, release, trial) = ledger;
         if let CoordinatorTrial::CorrelatedFault(fault) = trial {
             let ledger = Connection::open(ledger_path).expect("provider ledger");
@@ -5156,13 +5179,17 @@ mod tests {
                     .is_some(),
                 fault == InjectedDispatchCommitFault::After
             );
-        } else if trial == CoordinatorTrial::Correlated {
+        } else if matches!(
+            trial,
+            CoordinatorTrial::Correlated | CoordinatorTrial::ObservedRecovery { .. }
+        ) {
             assert_prepared_installation_evidence(
                 &reopened,
                 ledger_path,
                 release.expect("fixture send release"),
                 &request(),
                 action,
+                trial,
             );
         } else {
             assert_lost_installation_ack_observation(
@@ -5180,14 +5207,33 @@ mod tests {
                 .expect("historical V16 reservation still readable")
                 .is_none());
         }
-        assert_no_send();
+        let completed = trial
+            == (CoordinatorTrial::ObservedRecovery {
+                contradictory: false,
+            });
+        assert_no_send(if completed {
+            InstallationCommentRecoveryPosture::ObservationReconciled
+        } else {
+            InstallationCommentRecoveryPosture::ReconciliationRequired
+        });
         assert_eq!(
             crate::SideEffectRecordStore::read_side_effect_record(&reopened, action.side_effect)
                 .expect("read effect")
                 .expect("attempted effect")
                 .lifecycle_state(),
-            crate::SideEffectLifecycleState::Attempted
+            if completed {
+                crate::SideEffectLifecycleState::Completed
+            } else {
+                crate::SideEffectLifecycleState::Attempted
+            }
         );
+        if completed {
+            let ledger = Connection::open(ledger_path).expect("reopen provider ledger");
+            let count: u32 = ledger
+                .query_row("SELECT COUNT(*) FROM accepted", [], |row| row.get(0))
+                .expect("effect count");
+            assert_eq!(count, 1);
+        }
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -5197,6 +5243,7 @@ mod tests {
         release: Timestamp,
         request: &crate::dispatch_reservation::DispatchReservationRequest,
         action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        trial: CoordinatorTrial,
     ) {
         let ledger = Connection::open(ledger_path).expect("provider ledger");
         let (body, count): (String, u32) = ledger
@@ -5247,6 +5294,18 @@ mod tests {
                     .expect("read-only candidate classification")
             },
         );
+        if let CoordinatorTrial::ObservedRecovery { contradictory } = trial {
+            assert_reconciled_installation_observation(
+                backend,
+                request,
+                action,
+                &candidate,
+                &body,
+                &writer_scope,
+                contradictory,
+            );
+            return;
+        }
         assert_independent_installation_inventory(
             backend,
             request,
@@ -5275,6 +5334,116 @@ mod tests {
         assert!(backend
             .inspect_prepared_installation_send_for_test(&request.operation_id, action)
             .is_err());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn assert_reconciled_installation_observation(
+        backend: &SqliteStateBackend,
+        request: &crate::dispatch_reservation::DispatchReservationRequest,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        candidate: &crate::provider_comment_transport::installation_notification::CreationCandidate,
+        body: &str,
+        writer_scope: &SpecContentHash,
+        contradictory: bool,
+    ) {
+        use crate::provider_comment_transport::{
+            tests::{with_independent_inventory, InventoryTrial},
+            IndependentCommentInventory,
+        };
+        let operation = &request.operation_id;
+        backend
+            .enable_installation_observation_journal()
+            .expect("V18");
+        let attempt = |trial| {
+            with_independent_inventory(trial, body, writer_scope, |reader| {
+                backend
+                    .reconcile_prepared_installation_comment(operation, action, candidate, reader)
+            })
+        };
+        assert!(attempt(InventoryTrial::Truncated)
+            .expect("incomplete read")
+            .is_none());
+        if contradictory {
+            assert!(attempt(InventoryTrial::Duplicate)
+                .expect("retain contradiction")
+                .is_none());
+            assert!(attempt(InventoryTrial::Exact)
+                .expect("contradiction remains")
+                .is_none());
+            assert_eq!(
+                backend
+                    .inspect_installation_observation_journal(operation, action)
+                    .expect("inspect")
+                    .len(),
+                2
+            );
+            return;
+        }
+        let connection = backend.existing_connection().expect("test store");
+        super::super::dispatch_reservation_store::inject_dispatch_commit_fault(
+            InjectedDispatchCommitFault::Before,
+        );
+        assert!(attempt(InventoryTrial::Exact).is_err());
+        assert_eq!(
+            backend
+                .inspect_installation_observation_journal(operation, action)
+                .expect("inspect rollback"),
+            Vec::new()
+        );
+        with_independent_inventory(InventoryTrial::Exact, body, writer_scope, |reader| {
+            assert!(backend
+                .record_prepared_installation_inventory(operation, action, candidate, reader)
+                .expect("record an earlier identical traversal")
+                .is_some());
+        });
+        super::super::dispatch_reservation_store::inject_dispatch_commit_fault(
+            InjectedDispatchCommitFault::After,
+        );
+        assert!(attempt(InventoryTrial::Exact).is_err());
+        let reopened = SqliteStateBackend::open(&backend.database_path).expect("restart Core");
+        let wrong_scope = SpecContentHash::from_text("unusable replay reader");
+        let no_reader = IndependentCommentInventory::new(
+            std::num::NonZeroU64::MIN,
+            std::num::NonZeroU64::MIN,
+            &wrong_scope,
+            "not-configured",
+        );
+        let event = reopened
+            .reconcile_prepared_installation_comment(operation, action, candidate, &no_reader)
+            .expect("recover lost local acknowledgement without a reader")
+            .expect("completion proof");
+        assert!(event.as_str().starts_with("installation-comment-observed/"));
+        assert_eq!(
+            reopened
+                .reconcile_prepared_installation_comment(operation, action, candidate, &no_reader)
+                .expect("replay without a reader"),
+            Some(event)
+        );
+        assert_eq!(
+            reopened
+                .inspect_installation_observation_journal(operation, action)
+                .expect("retained receipt")
+                .len(),
+            2
+        );
+        connection
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("begin fixture damage");
+        // Commit damage so a newly opened verifier observes the missing receipt.
+        connection.execute_batch(
+            "CREATE TEMP TABLE saved_observation AS SELECT * FROM installation_observation_journal
+             WHERE json_extract(payload, '$.identity.recovery_started_at') IS NOT NULL;
+             DELETE FROM installation_observation_journal
+             WHERE evidence_id IN (SELECT evidence_id FROM saved_observation); COMMIT;",
+        ).expect("remove proof source");
+        assert!(reopened
+            .inspect_installation_comment_recovery(action.run, operation, action.side_effect)
+            .is_err());
+        connection
+            .execute_batch(
+                "INSERT INTO installation_observation_journal SELECT * FROM saved_observation;",
+            )
+            .expect("restore receipt");
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -7921,10 +8090,22 @@ mod tests {
                             InstallationClaimTrial::Coordinator(
                                 CoordinatorTrial::Lost
                                 | CoordinatorTrial::Correlated
-                                | CoordinatorTrial::CorrelatedFault(_),
+                                | CoordinatorTrial::CorrelatedFault(_)
+                                | CoordinatorTrial::ObservedRecovery {
+                                    contradictory: true,
+                                },
                             ) => {
                                 assert_eq!(counts(), (1, 1));
                                 assert_eq!(event_count(), before + 1);
+                            }
+                            #[cfg(any(target_os = "linux", target_os = "macos"))]
+                            InstallationClaimTrial::Coordinator(
+                                CoordinatorTrial::ObservedRecovery {
+                                    contradictory: false,
+                                },
+                            ) => {
+                                assert_eq!(counts(), (1, 1));
+                                assert_eq!(event_count(), before + 2);
                             }
                             _ => {
                                 assert_eq!(counts(), (0, 0));

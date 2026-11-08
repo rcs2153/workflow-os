@@ -77,6 +77,7 @@ struct ProjectionBinding {
 }
 
 struct LiveRecoveryAdmission {
+    operation: DispatchReservationOperationId,
     event: DispatchAdmissionProjectionEvent,
     witness: Option<LiveSandboxReservationWitness>,
     committed_at: Timestamp,
@@ -124,7 +125,10 @@ fn installation_inventory_context(
     let admission = read_live_recovery_admission(tx, operation, action.run)?;
     match verify_comment_disposition(tx, &admission, action.run, action.side_effect)? {
         None => {}
-        Some(LiveCommentProofKind::InstallationCreation) if historical => {}
+        Some(
+            LiveCommentProofKind::InstallationCreation
+            | LiveCommentProofKind::InstallationObservation,
+        ) if historical => {}
         Some(_) => return Err(not_dispatchable()),
     }
     let witness = admission.witness.as_ref().ok_or_else(corrupt)?;
@@ -151,6 +155,17 @@ fn read_installation_send_preparation_record(
     action: GitHubCommentContinuationAction<'_>,
     durable: &LiveRecoveryAdmission,
 ) -> Result<Option<InstallationSendPreparationRecord>, WorkflowOsError> {
+    if durable.event.invocation_commitment() != &action.commitment()? {
+        return Err(not_dispatchable());
+    }
+    read_bound_installation_preparation(tx, operation, durable)
+}
+
+fn read_bound_installation_preparation(
+    tx: &rusqlite::Transaction<'_>,
+    operation: &DispatchReservationOperationId,
+    durable: &LiveRecoveryAdmission,
+) -> Result<Option<InstallationSendPreparationRecord>, WorkflowOsError> {
     let row: Option<(String, String)> = tx.query_row(
         "SELECT payload, payload_hash FROM installation_send_preparations WHERE operation_id=?1",
         [operation.as_str()], |row| Ok((row.get(0)?, row.get(1)?)),
@@ -165,7 +180,6 @@ fn read_installation_send_preparation_record(
             || record.operation != operation.as_str()
             || &record.reservation != durable.event.reservation_commitment()
             || &record.invocation != durable.event.invocation_commitment()
-            || record.invocation != action.commitment()?
             || witness.installation_scope_commitment.as_ref() != Some(&record.scope)
             || witness.installation_issuance_claim_commitment.is_none()
             || witness.installation_send_preparation_version != Some(1)
@@ -454,6 +468,7 @@ pub(super) enum InstallationCommentRecoveryPosture {
     IssuanceUncertain,
     ReconciliationRequired,
     CreationVerified,
+    ObservationReconciled,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -467,6 +482,7 @@ enum LiveCommentProofKind {
     Lookup,
     CreationResponse,
     InstallationCreation,
+    InstallationObservation,
     InstallationFixtureCreation,
 }
 
@@ -475,13 +491,18 @@ impl LiveCommentProofKind {
         match self {
             Self::Lookup => Some(SyntheticSandboxCompletionProofSource::Lookup),
             Self::CreationResponse => Some(SyntheticSandboxCompletionProofSource::CreationResponse),
-            Self::InstallationCreation | Self::InstallationFixtureCreation => None,
+            Self::InstallationCreation
+            | Self::InstallationObservation
+            | Self::InstallationFixtureCreation => None,
         }
     }
 
     const fn fixture(self) -> bool {
         match self {
-            Self::Lookup | Self::CreationResponse | Self::InstallationCreation => false,
+            Self::Lookup
+            | Self::CreationResponse
+            | Self::InstallationCreation
+            | Self::InstallationObservation => false,
             Self::InstallationFixtureCreation => true,
         }
     }
@@ -2966,6 +2987,7 @@ fn read_live_recovery_admission(
         }
     }
     Ok(LiveRecoveryAdmission {
+        operation: operation.clone(),
         event: binding.event,
         witness: record.live_witness,
         committed_at: record.committed_at,
@@ -3006,6 +3028,9 @@ fn installation_disposition(
         Some(LiveCommentProofKind::InstallationCreation) => {
             Ok(InstallationCommentRecoveryPosture::CreationVerified)
         }
+        Some(LiveCommentProofKind::InstallationObservation) => {
+            Ok(InstallationCommentRecoveryPosture::ObservationReconciled)
+        }
         None => Ok(InstallationCommentRecoveryPosture::ReconciliationRequired),
         Some(_) => Err(not_dispatchable()),
     }
@@ -3035,7 +3060,7 @@ fn verify_comment_disposition(
         return Err(not_dispatchable());
     }
     if let Some((event, kind)) = find_live_comment_proof(&admission.event, &history)? {
-        verify_live_comment_proof(admission, &effect, event, kind)?;
+        verify_live_comment_proof(tx, admission, &effect, event, kind)?;
         return Ok(Some(kind));
     }
     verify_live_comment_attempt(admission, &effect)?;
@@ -3050,6 +3075,7 @@ fn live_comment_proof_id(
         LiveCommentProofKind::Lookup => "live-comment-proof",
         LiveCommentProofKind::CreationResponse => "live-comment-response-proof",
         LiveCommentProofKind::InstallationCreation => "installation-comment-created",
+        LiveCommentProofKind::InstallationObservation => "installation-comment-observed",
         LiveCommentProofKind::InstallationFixtureCreation => "fixture-installation-comment-created",
     };
     EventId::new(format!("{prefix}/{}", admission.reservation_commitment()))
@@ -3064,6 +3090,7 @@ fn find_live_comment_proof<'a>(
         LiveCommentProofKind::Lookup,
         LiveCommentProofKind::CreationResponse,
         LiveCommentProofKind::InstallationCreation,
+        LiveCommentProofKind::InstallationObservation,
         LiveCommentProofKind::InstallationFixtureCreation,
     ] {
         let id = live_comment_proof_id(admission, kind)?;
@@ -3101,6 +3128,7 @@ fn verify_live_comment_attempt(
 }
 
 fn verify_live_comment_proof(
+    tx: &rusqlite::Transaction<'_>,
     admission: &LiveRecoveryAdmission,
     effect: &SideEffectRecord,
     event: &WorkflowRunEvent,
@@ -3108,6 +3136,12 @@ fn verify_live_comment_proof(
 ) -> Result<(), WorkflowOsError> {
     let expected = crate::side_effect::transition_event(effect, 0)?;
     let admission_event = admission.event.committed_result_cursor();
+    let key_matches = if kind == LiveCommentProofKind::InstallationObservation {
+        observation_journal::verify_observed_completion(tx, admission, effect, event)?
+    } else {
+        event.idempotency_key.as_ref()
+            == Some(&live_comment_proof_key(admission, effect, kind, None)?)
+    };
     if !comment_proof_source_matches(admission, kind)
         || effect.lifecycle_state() != SideEffectLifecycleState::Completed
         || !effect
@@ -3115,7 +3149,7 @@ fn verify_live_comment_proof(
             .is_some_and(|outcome| outcome.kind() == SideEffectOutcomeReferenceKind::Outcome)
         || event.sequence_number <= admission_event.sequence_number()
         || Some(event.timestamp) != effect.updated_at()
-        || event.idempotency_key.as_ref() != Some(&live_comment_proof_key(admission, effect, kind)?)
+        || !key_matches
         || !effect.references().iter().any(|reference| {
             reference.kind() == SideEffectReferenceKind::WorkflowEvent
                 && reference.reference() == admission_event.event_id().as_str()
@@ -3131,7 +3165,11 @@ fn live_comment_proof_key(
     admission: &LiveRecoveryAdmission,
     effect: &SideEffectRecord,
     kind: LiveCommentProofKind,
+    observation: Option<&SpecContentHash>,
 ) -> Result<IdempotencyKey, WorkflowOsError> {
+    if (kind == LiveCommentProofKind::InstallationObservation) != observation.is_some() {
+        return Err(corrupt());
+    }
     let domain: &[u8] = match (kind, admission.witness.is_some()) {
         (LiveCommentProofKind::Lookup, false) => b"workflow-os/live-comment-proof/v1\0",
         (LiveCommentProofKind::Lookup, true) => b"workflow-os/live-comment-proof/v2\0",
@@ -3141,12 +3179,16 @@ fn live_comment_proof_key(
         (LiveCommentProofKind::InstallationCreation, true) => {
             b"workflow-os/github-installation-comment-created/v1\0"
         }
+        (LiveCommentProofKind::InstallationObservation, true) => {
+            b"workflow-os/github-installation-comment-observed/v1\0"
+        }
         (LiveCommentProofKind::InstallationFixtureCreation, true) => {
             b"workflow-os/fixture-installation-comment-created/v1\0"
         }
         (
             LiveCommentProofKind::CreationResponse
             | LiveCommentProofKind::InstallationCreation
+            | LiveCommentProofKind::InstallationObservation
             | LiveCommentProofKind::InstallationFixtureCreation,
             false,
         ) => return Err(corrupt()),
@@ -3157,6 +3199,11 @@ fn live_comment_proof_key(
         admission.event.reservation_commitment(),
         effect,
     )?;
+    let proof = observation.map_or(proof.clone(), |receipt| {
+        SpecContentHash::from_text(&format!(
+            "workflow-os/installation-observation-outcome/v1\0{proof}\0{receipt}"
+        ))
+    });
     IdempotencyKey::new(format!("live-comment-proof/{proof}"))
 }
 
@@ -3183,6 +3230,17 @@ fn persist_live_comment_outcome(
     admission: &LiveRecoveryAdmission,
     outcome: SideEffectOutcomeReference,
     kind: LiveCommentProofKind,
+) -> Result<EventId, WorkflowOsError> {
+    persist_bound_live_comment_outcome(tx, action, admission, outcome, kind, None)
+}
+
+fn persist_bound_live_comment_outcome(
+    tx: &rusqlite::Transaction<'_>,
+    action: GitHubCommentContinuationAction<'_>,
+    admission: &LiveRecoveryAdmission,
+    outcome: SideEffectOutcomeReference,
+    kind: LiveCommentProofKind,
+    observation: Option<&SpecContentHash>,
 ) -> Result<EventId, WorkflowOsError> {
     if !comment_proof_source_matches(admission, kind) {
         return Err(not_dispatchable());
@@ -3211,7 +3269,7 @@ fn persist_live_comment_outcome(
         {
             return Err(not_dispatchable());
         }
-        verify_live_comment_proof(admission, &effect, event, existing_kind)?;
+        verify_live_comment_proof(tx, admission, &effect, event, existing_kind)?;
         return Ok(event.event_id.clone());
     }
     let id = live_comment_proof_id(&admission.event, kind)?;
@@ -3259,7 +3317,12 @@ fn persist_live_comment_outcome(
             spec_content_hash: identity.spec_content_hash.clone(),
             correlation_id: updated.correlation_id().cloned(),
             actor: None,
-            idempotency_key: Some(live_comment_proof_key(admission, updated, kind)?),
+            idempotency_key: Some(live_comment_proof_key(
+                admission,
+                updated,
+                kind,
+                observation,
+            )?),
             kind: WorkflowRunEventKind::SideEffectCompleted(Box::new(transition.event().clone())),
         },
     )?;
