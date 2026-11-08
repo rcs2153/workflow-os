@@ -295,8 +295,13 @@ and the existing approval-backed sandbox composition requires a terminal run.
 The next implementation follows the
 [live admission and recovery plan](docs/implementation-plans/live-sandbox-continuation-admission-plan.md):
 exact live authority and atomic reservation first, then injected dispatch and
-loss recovery, then a reviewed public tool. A live disposable target remains
-separately gated.
+loss recovery, then a reviewed public tool. The synthetic recovery CLI and
+MCP bridge now run together in clean-checkout CI; native recovery inspection
+remains unverified. The
+[focused maintainer review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#focused-maintainer-review-live-lookup-not-admitted)
+rejects reuse of the legacy lookup for live completion and defines the
+required exact provider observer. This is not independent review, and a
+live disposable target remains separately gated.
 
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
