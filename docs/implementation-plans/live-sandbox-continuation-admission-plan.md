@@ -446,6 +446,18 @@ selection; those tests do not exercise it. Repository reads, tests, and
 documentation edits were performed outside the phase runner. No WorkReport
 artifact or provider evidence was generated.
 
+### Duplicate Candidate Identity Correction
+
+The offline verifier now checks candidate IDs against the full bounded
+enumeration before reporting a match or ambiguity. A repeated candidate ID
+is unresolved even if only one row carries the marker, and even if the rows
+are identical. Distinct unique IDs carrying the marker remain ambiguous;
+unrelated unique rows do not hide a match. The offline regression reproduced
+the false match before the correction. The SQLite lost-acknowledgement test
+now exercises both row orders and checks that recovery posture and events
+remain unchanged. Provider time mapping, transport completeness, and proof
+of the originally accepted payload are still separate requirements.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
