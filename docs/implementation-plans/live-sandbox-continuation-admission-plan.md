@@ -961,6 +961,25 @@ The transport and Core completion writer are not connected to an operator
 or live dispatch route. Connecting them still requires a one-shot reserved
 send capability, final authority and PR preflight, and trial admission.
 
+### Compose The One-Shot Installation Dispatch
+
+The private Core path consumes a fresh scoped reservation before any
+comment preflight. An exact replay never reaches the provider. The same
+installation bearer verifies the pull request number and base repository;
+an ordinary issue, mismatched response, or unavailable preflight cannot
+reach POST. Core then rechecks the committed reservation, grant,
+principal, target, and trusted time in one final read. Only that path
+mints the non-cloneable send permit, and the transport consumes it and
+checks the deadline again before handing the request to HTTP.
+
+The private sender persists only the exact acknowledgement proof. A
+failed preflight, observed revocation, elapsed deadline, or lost response
+leaves the committed attempt recovery-only; reopening cannot mint
+another permit. Loopback and disposable SQLite exercise this composition
+without a real provider or live operator route. Revocation and time
+checks are local and not atomic with remote acceptance. The reviewed
+issuer, operator admission, and independent trial remain outstanding.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

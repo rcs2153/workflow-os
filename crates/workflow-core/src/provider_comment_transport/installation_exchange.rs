@@ -5,14 +5,16 @@ use std::num::NonZeroU64;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{
-    bounded_read, comment_path, github_agent, github_request, GitHubRepositoryIdentity,
-    GITHUB_ORIGIN, MAX_IDENTITY_RESPONSE_BYTES,
+    bounded_read, comment_path, github_agent, github_request, CommentSendWindow,
+    GitHubPullRequestIdentity, GitHubRepositoryIdentity, GITHUB_ORIGIN,
+    MAX_IDENTITY_RESPONSE_BYTES,
 };
 use crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding;
 use crate::provider_comment_observation::{
     verify_created_comment_response, CreatedCommentResponse, MAX_CREATION_RESPONSE_BYTES,
     MAX_RAW_BODY_BYTES,
 };
+use crate::sqlite_state::InstallationCommentSendPermit;
 use crate::{
     GitHubPullRequestCommentProviderAuth, GitHubPullRequestCommentTarget, SpecContentHash,
     Timestamp, WorkflowRunId,
@@ -37,6 +39,72 @@ pub(crate) struct ReviewedInstallation<'a> {
 pub(crate) struct VerifiedInstallationScope {
     bearer: GitHubPullRequestCommentProviderAuth,
     receipt: InstallationScopeReceipt,
+}
+
+pub(crate) struct InstallationCommentTransport<'a> {
+    exchange: Exchange<'a>,
+    verified: VerifiedInstallationScope,
+    reviewed: ReviewedInstallation<'a>,
+}
+
+impl<'a> InstallationCommentTransport<'a> {
+    pub(crate) fn new(
+        verified: VerifiedInstallationScope,
+        reviewed: ReviewedInstallation<'a>,
+    ) -> Self {
+        Self {
+            exchange: Exchange {
+                agent: github_agent(),
+                origin: GITHUB_ORIGIN,
+            },
+            verified,
+            reviewed,
+        }
+    }
+
+    pub(crate) const fn reviewed(&self) -> ReviewedInstallation<'a> {
+        self.reviewed
+    }
+
+    pub(crate) const fn verified(&self) -> &VerifiedInstallationScope {
+        &self.verified
+    }
+
+    pub(crate) fn is_fixture(&self) -> bool {
+        self.exchange.origin != GITHUB_ORIGIN
+    }
+
+    pub(crate) fn verify_pull_request(&self) -> Option<()> {
+        let scope = self.reviewed;
+        self.verified
+            .admission_binding(scope, Timestamp::now_utc(), self.is_fixture())?;
+        let path = format!(
+            "/repos/{}/{}/pulls/{}",
+            scope.target.owner(),
+            scope.target.repository(),
+            scope.target.pull_request_number()
+        );
+        let pull: GitHubPullRequestIdentity = self
+            .exchange
+            .get(&path, self.verified.bearer.secret_for_provider())?;
+        (pull.number.get() == scope.target.pull_request_number()
+            && matches_repo(&pull.base.repo, scope))
+        .then_some(())
+    }
+
+    pub(crate) fn send(
+        self,
+        permit: InstallationCommentSendPermit<'_>,
+    ) -> Option<VerifiedInstallationCreation> {
+        let (context, window) = permit.into_parts();
+        self.verified.send_creation(
+            &self.exchange,
+            self.reviewed,
+            context,
+            window,
+            Timestamp::now_utc,
+        )
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -119,13 +187,12 @@ impl VerifiedInstallationScope {
         Some((commitment, self.receipt.effective_deadline))
     }
 
-    // No caller is connected until Core can hand the transport a one-shot
-    // reserved capability and recheck its final send authority.
     fn send_creation(
         self,
         exchange: &Exchange<'_>,
         reviewed: ReviewedInstallation<'_>,
         context: InstallationCreationContext<'_>,
+        window: CommentSendWindow,
         now: impl FnOnce() -> Timestamp,
     ) -> Option<VerifiedInstallationCreation> {
         let fixture = exchange.origin != GITHUB_ORIGIN;
@@ -152,7 +219,11 @@ impl VerifiedInstallationScope {
         )
         .set("Content-Type", "application/json")
         .set("Accept", "application/vnd.github.raw+json");
-        let (scope, _) = self.admission_binding(reviewed, now(), fixture)?;
+        let now = now();
+        if now < window.checked_at || now >= window.deadline {
+            return None;
+        }
+        let (scope, _) = self.admission_binding(reviewed, now, fixture)?;
         if &scope != context.scope {
             return None;
         }
@@ -176,7 +247,7 @@ impl VerifiedInstallationScope {
         effective_deadline: Timestamp,
     ) -> Self {
         Self {
-            bearer: GitHubPullRequestCommentProviderAuth::new("synthetic-admission-fixture", None)
+            bearer: GitHubPullRequestCommentProviderAuth::new("fixture-installation-bearer", None)
                 .expect("fixture bearer"),
             receipt: InstallationScopeReceipt {
                 scope_commitment: scope_commitment(scope, &fixture_adapter_commitment())
@@ -544,7 +615,7 @@ fn decode<T: DeserializeOwned>(response: ureq::Response, status: u16) -> Option<
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::{
         io::{BufRead, BufReader, Read, Write},
@@ -592,6 +663,12 @@ mod tests {
         body: r#"{"id":17,"login":"fixture-app[bot]","user":{"id":22},"body":"marked fixture comment","issue_url":"https://api.github.com/repos/example/sandbox/issues/7","url":"https://api.github.com/repos/example/sandbox/issues/comments/17"}"#,
     };
     const MARKED: &str = "marked fixture comment";
+    const PR: Reply = Reply {
+        request: "GET /repos/example/sandbox/pulls/7 HTTP/1.1",
+        status: "200 OK",
+        header: "",
+        body: r#"{"number":7,"base":{"repo":{"id":123,"full_name":"example/sandbox"}}}"#,
+    };
 
     #[derive(Clone, Copy)]
     struct Reply<'a> {
@@ -697,7 +774,16 @@ mod tests {
             provider: &provider,
             marked_body: MARKED,
         };
-        let proof = verified.send_creation(exchange, reviewed, context, now);
+        let proof = verified.send_creation(
+            exchange,
+            reviewed,
+            context,
+            CommentSendWindow {
+                checked_at: at(20),
+                deadline: at(40),
+            },
+            now,
+        );
         assert_eq!(proof.is_some(), expected);
         if let Some(proof) = proof {
             assert_eq!(proof.matches(context, true), NonZeroU64::new(17));
@@ -756,6 +842,10 @@ mod tests {
     }
 
     fn serve(listener: &TcpListener, reply: Reply<'_>) {
+        serve_with_echo(listener, reply, false);
+    }
+
+    fn serve_with_echo(listener: &TcpListener, reply: Reply<'_>, echo: bool) {
         let start = Instant::now();
         let mut stream = loop {
             match listener.accept() {
@@ -798,13 +888,14 @@ mod tests {
             }
         }
         let expected_bearer =
-            if [LIST.request, BOT.request, CREATE.request].contains(&reply.request) {
+            if [LIST.request, BOT.request, CREATE.request, PR.request].contains(&reply.request) {
                 ISSUED
             } else {
                 ASSERTION
             };
         let bearer_matches = auth.as_deref() == Some(format!("Bearer {expected_bearer}").as_str());
         assert!(bearer_matches, "unexpected fixture authorization");
+        let mut response_body = reply.body.to_owned();
         if reply.request == ISSUE.request || reply.request == CREATE.request {
             assert!(length <= 1024);
             let mut body = vec![0; length];
@@ -814,10 +905,20 @@ mod tests {
             } else {
                 serde_json::json!({"body": MARKED})
             };
-            assert_eq!(
-                serde_json::from_slice::<serde_json::Value>(&body).expect("JSON"),
-                expected
-            );
+            let received = serde_json::from_slice::<serde_json::Value>(&body).expect("JSON");
+            if echo {
+                assert!(received["body"]
+                    .as_str()
+                    .expect("marked body")
+                    .contains("workflow-os/live-comment/"));
+                let mut response: serde_json::Value =
+                    serde_json::from_str(reply.body).expect("response JSON");
+                response["body"] = received["body"].clone();
+                response["user"]["id"] = serde_json::json!(456);
+                response_body = response.to_string();
+            } else {
+                assert_eq!(received, expected);
+            }
         } else {
             assert_eq!(length, 0);
         }
@@ -829,10 +930,67 @@ mod tests {
             "HTTP/1.1 {}\r\nConnection: close\r\n{}Content-Length: {}\r\n\r\n{}",
             reply.status,
             reply.header,
-            reply.body.len(),
-            reply.body,
+            response_body.len(),
+            response_body,
         )
         .expect("fixture response");
+    }
+
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    pub(crate) enum ReservedExchange {
+        Replay,
+        WrongPull,
+        PreflightOnly,
+        Created,
+        Lost,
+    }
+
+    pub(crate) fn with_reserved_exchange<T>(
+        reviewed: ReviewedInstallation<'_>,
+        verified_at: Timestamp,
+        effective_deadline: Timestamp,
+        mode: ReservedExchange,
+        run: impl FnOnce(InstallationCommentTransport<'_>) -> T,
+    ) -> T {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("loopback");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
+        let origin = format!("http://{}", listener.local_addr().expect("address"));
+        thread::scope(|threads| {
+            let server = threads.spawn(|| match mode {
+                ReservedExchange::Replay => {}
+                ReservedExchange::WrongPull => serve(&listener, Reply {
+                    body: r#"{"number":8,"base":{"repo":{"id":123,"full_name":"example/sandbox"}}}"#,
+                    ..PR
+                }),
+                _ => {
+                    serve(&listener, PR);
+                    if matches!(mode, ReservedExchange::Created | ReservedExchange::Lost) {
+                        let status = if mode == ReservedExchange::Lost { "" } else { CREATE.status };
+                        serve_with_echo(&listener, Reply { status, ..CREATE }, true);
+                    }
+                }
+            });
+            let result = run(InstallationCommentTransport {
+                exchange: Exchange {
+                    agent: github_agent(),
+                    origin: &origin,
+                },
+                reviewed,
+                verified: VerifiedInstallationScope::test_receipt(
+                    reviewed,
+                    verified_at,
+                    effective_deadline,
+                ),
+            });
+            server.join().expect("reserved fixture exchange");
+            assert!(
+                matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+                "unexpected request or resend"
+            );
+            result
+        })
     }
 
     #[test]
@@ -881,6 +1039,17 @@ mod tests {
                 Some(false),
             );
         }
+        let samples = std::cell::Cell::new(0);
+        exercise_with_creation(
+            &[APP, INSTALLATION, ISSUE, LIST, BOT],
+            || {
+                let sample = samples.get();
+                samples.set(sample + 1);
+                at(if sample == 4 { 40 } else { 20 })
+            },
+            Some(at(40)),
+            Some(false),
+        );
     }
 
     #[test]
