@@ -25,8 +25,9 @@ use crate::provider_comment_observation::{
     ExpectedComment, MARKER_NAMESPACE,
 };
 use crate::provider_comment_transport::installation_exchange::{
-    installation_comment_adapter_commitment, InstallationCreationContext, ReviewedInstallation,
-    VerifiedInstallationCreation, VerifiedInstallationScope,
+    installation_comment_adapter_commitment, InstallationCommentTransport,
+    InstallationCreationContext, ReviewedInstallation, VerifiedInstallationCreation,
+    VerifiedInstallationScope,
 };
 #[cfg(test)]
 use crate::provider_comment_transport::PreparedGitHubCommentCreation;
@@ -63,6 +64,22 @@ struct LiveRecoveryAdmission {
     event: DispatchAdmissionProjectionEvent,
     witness: Option<LiveSandboxReservationWitness>,
     committed_at: Timestamp,
+}
+
+struct CheckedCommentSend {
+    durable: LiveRecoveryAdmission,
+    window: CommentSendWindow,
+}
+
+pub(crate) struct InstallationCommentSendPermit<'a> {
+    context: InstallationCreationContext<'a>,
+    window: CommentSendWindow,
+}
+
+impl<'a> InstallationCommentSendPermit<'a> {
+    pub(crate) fn into_parts(self) -> (InstallationCreationContext<'a>, CommentSendWindow) {
+        (self.context, self.window)
+    }
 }
 
 struct LiveInstallationScopeAdmission<'a> {
@@ -658,25 +675,58 @@ impl SqliteStateBackend {
             .ok_or_else(corrupt)?;
         let marker = live_comment_marker(&invocation, &binding.reservation_commitment);
         let raw_body = encode_marked_comment(action.body, &marker).ok_or_else(corrupt)?;
+        let Some(CheckedCommentSend { durable, window }) = self.checked_comment_send(
+            &operation,
+            action,
+            admission,
+            &binding.reservation_commitment,
+            observe,
+        )?
+        else {
+            return Ok(LiveCommentDispatchPosture::RecoveryOnly);
+        };
+        let witness = durable.witness.as_ref().ok_or_else(corrupt)?;
+        if prepared.is_some_and(|expected| expected != &witness.provider) {
+            return Err(corrupt());
+        }
+        let response = send(action.target, &raw_body, window);
+        let Some(comment_id) = verify_created_comment_response(
+            response.as_ref(),
+            action.target,
+            &witness.provider,
+            &raw_body,
+        ) else {
+            return Ok(LiveCommentDispatchPosture::RecoveryOnly);
+        };
+        self.persist_synthetic_creation_response(action, &operation, &durable.event, comment_id)
+    }
+
+    fn checked_comment_send(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        admission: LiveGrantAdmission<'_>,
+        reservation: &SpecContentHash,
+        observe: impl FnOnce() -> Result<TrustedTimeObservation, WorkflowOsError>,
+    ) -> Result<Option<CheckedCommentSend>, WorkflowOsError> {
         let mut connection = self.existing_read_only_connection()?;
         let Ok(time) = observe() else {
-            return Ok(LiveCommentDispatchPosture::RecoveryOnly);
+            return Ok(None);
         };
         let tx = connection
             .transaction()
             .map_err(|_| storage_error("begin_failed"))?;
-        let durable = read_live_recovery_admission(&tx, &operation, action.run)?;
-        let witness = durable.witness.ok_or_else(corrupt)?;
-        if durable.event.reservation_commitment() != &binding.reservation_commitment
-            || durable.event.invocation_commitment() != &invocation
+        let durable = read_live_recovery_admission(&tx, operation, action.run)?;
+        let witness = durable.witness.as_ref().ok_or_else(corrupt)?;
+        if durable.event.reservation_commitment() != reservation
+            || durable.event.invocation_commitment() != &action.commitment()?
             || &witness.provider.adapter_commitment != admission.adapter_commitment
-            || prepared.is_some_and(|expected| expected != &witness.provider)
         {
             return Err(corrupt());
         }
         let trusted_time = continuity_codec::load_snapshot(&tx)?.trusted_time;
         let Some(deadline) = witness.creation_deadline else {
-            return Ok(LiveCommentDispatchPosture::RecoveryOnly);
+            return Ok(None);
         };
         // Admission is irreversible. A paused or time-uncertain caller may
         // reconcile, but must not hand an expired send right to the adapter.
@@ -702,26 +752,129 @@ impl SqliteStateBackend {
                 )
                 .is_err()
         {
-            return Ok(LiveCommentDispatchPosture::RecoveryOnly);
+            return Ok(None);
         }
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
-        let response = send(
-            action.target,
-            &raw_body,
-            CommentSendWindow {
+        Ok(Some(CheckedCommentSend {
+            durable,
+            window: CommentSendWindow {
                 checked_at: time.observed_at(),
                 deadline,
             },
-        );
-        let Some(comment_id) = verify_created_comment_response(
-            response.as_ref(),
-            action.target,
-            &witness.provider,
-            &raw_body,
-        ) else {
-            return Ok(LiveCommentDispatchPosture::RecoveryOnly);
+        }))
+    }
+
+    #[allow(dead_code)] // No public or operator route is connected.
+    pub(super) fn dispatch_scoped_installation_comment(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        action: GitHubCommentContinuationAction<'_>,
+        transport: InstallationCommentTransport<'_>,
+    ) -> Result<Option<EventId>, WorkflowOsError> {
+        if transport.is_fixture() {
+            return Err(not_dispatchable());
+        }
+        self.dispatch_installation_comment_with_clock(
+            request,
+            admission,
+            action,
+            transport,
+            continuity_store::observe_continuity_trusted_time,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn dispatch_fixture_installation_comment_with_clock(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        action: GitHubCommentContinuationAction<'_>,
+        transport: InstallationCommentTransport<'_>,
+        observe: impl FnOnce() -> Result<TrustedTimeObservation, WorkflowOsError>,
+    ) -> Result<Option<EventId>, WorkflowOsError> {
+        if !transport.is_fixture() {
+            return Err(not_dispatchable());
+        }
+        self.dispatch_installation_comment_with_clock(
+            request, admission, action, transport, observe,
+        )
+    }
+
+    fn dispatch_installation_comment_with_clock(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        action: GitHubCommentContinuationAction<'_>,
+        transport: InstallationCommentTransport<'_>,
+        observe: impl FnOnce() -> Result<TrustedTimeObservation, WorkflowOsError>,
+    ) -> Result<Option<EventId>, WorkflowOsError> {
+        let invocation = action.commitment()?;
+        let reviewed = transport.reviewed();
+        if invocation != request.invocation_commitment
+            || admission.side_effect != action.side_effect
+            || admission.body != action.body
+            || reviewed.target != action.target
+        {
+            return Err(not_dispatchable());
+        }
+        let fixture = transport.is_fixture();
+        let operation = request.operation_id.clone();
+        let Some(capability) = self.reserve_live_sandbox_dispatch_with_binding(
+            request,
+            admission,
+            None,
+            Some(LiveInstallationScopeAdmission {
+                reviewed,
+                verified: transport.verified(),
+                fixture,
+            }),
+        )?
+        else {
+            return Ok(None);
         };
-        self.persist_synthetic_creation_response(action, &operation, &durable.event, comment_id)
+        let binding = (*capability)
+            .into_parts()
+            .attempt_capability
+            .dispatch_reservation
+            .ok_or_else(corrupt)?;
+        if transport.verify_pull_request().is_none() {
+            return Ok(None);
+        }
+        let reservation = &binding.reservation_commitment;
+        let Some(CheckedCommentSend { durable, window }) =
+            self.checked_comment_send(&operation, action, admission, reservation, observe)?
+        else {
+            return Ok(None);
+        };
+        let witness = durable.witness.as_ref().ok_or_else(corrupt)?;
+        let scope = witness
+            .installation_scope_commitment
+            .as_ref()
+            .ok_or_else(corrupt)?;
+        let marker = live_comment_marker(&invocation, reservation);
+        let body = encode_marked_comment(action.body, &marker).ok_or_else(corrupt)?;
+        let permit = InstallationCommentSendPermit {
+            context: InstallationCreationContext {
+                reservation,
+                scope,
+                target: action.target,
+                provider: &witness.provider,
+                marked_body: &body,
+            },
+            window,
+        };
+        let Some(proof) = transport.send(permit) else {
+            return Ok(None);
+        };
+        #[cfg(test)]
+        if fixture {
+            return self
+                .persist_fixture_installation_creation(&operation, action, &proof)
+                .map(Some);
+        }
+        self.persist_installation_creation(&operation, action, &proof)
+            .map(Some)
     }
 
     fn persist_synthetic_creation_response(

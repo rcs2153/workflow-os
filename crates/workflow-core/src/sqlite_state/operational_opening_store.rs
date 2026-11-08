@@ -3526,6 +3526,19 @@ mod tests {
     }
 
     #[test]
+    fn live_comment_installation_one_shot_dispatch_and_recovery() {
+        for trial in [
+            InstallationSendTrial::Created,
+            InstallationSendTrial::Lost,
+            InstallationSendTrial::WrongPull,
+            InstallationSendTrial::Expired,
+            InstallationSendTrial::Revoked,
+        ] {
+            exercise_live_grant_reservation(LiveGrantTrial::InstallationSend(trial));
+        }
+    }
+
+    #[test]
     fn live_comment_observation_reopens_without_completing_or_reauthorizing() {
         exercise_live_grant_reservation(LiveGrantTrial::DurableObservation);
         exercise_live_grant_reservation(LiveGrantTrial::SuiteObservation);
@@ -3976,6 +3989,7 @@ mod tests {
         LostAcknowledgement,
         PreparedLoopback { expired: bool },
         InstallationScope,
+        InstallationSend(InstallationSendTrial),
         DurableObservation,
         SuiteObservation,
         ExpiredBeforeSend,
@@ -4295,6 +4309,147 @@ mod tests {
                 .expect("accepted-witness test stand-in")
             })
             .expect("historical context")
+    }
+
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    enum InstallationSendTrial {
+        Created,
+        Lost,
+        WrongPull,
+        Expired,
+        Revoked,
+    }
+
+    fn exercise_installation_one_shot_send(
+        backend: &SqliteStateBackend,
+        path: &std::path::Path,
+        request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        provider: &crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding,
+        trial_and_deadline: (InstallationSendTrial, Timestamp),
+    ) {
+        use crate::provider_comment_transport::installation_exchange::{
+            tests::{with_reserved_exchange, ReservedExchange},
+            ReviewedInstallation,
+        };
+        use crate::SideEffectRecordStore;
+        let (trial, deadline) = trial_and_deadline;
+        let now = Timestamp::now_utc();
+        let provider_deadline = Timestamp::from_offset_date_time(
+            now.as_offset_date_time() + time::Duration::minutes(1),
+        );
+        assert!(provider_deadline < deadline);
+        let reviewed = ReviewedInstallation {
+            app_id: std::num::NonZeroU64::new(33).expect("app"),
+            app_slug: "scope-fixture",
+            bot_id: provider.author_id,
+            installation_id: std::num::NonZeroU64::new(44).expect("installation"),
+            repository_id: provider.repository_id,
+            target: action.target,
+            run_id: action.run,
+            immutable_run: action.bundle_root,
+            comment_adapter: &provider.adapter_commitment,
+            deadline,
+        };
+        let mode = match trial {
+            InstallationSendTrial::Created => ReservedExchange::Created,
+            InstallationSendTrial::Lost => ReservedExchange::Lost,
+            InstallationSendTrial::WrongPull => ReservedExchange::WrongPull,
+            InstallationSendTrial::Expired | InstallationSendTrial::Revoked => {
+                ReservedExchange::PreflightOnly
+            }
+        };
+        let completed =
+            with_reserved_exchange(reviewed, now, provider_deadline, mode, |transport| {
+                backend.dispatch_fixture_installation_comment_with_clock(
+                    request(),
+                    admission,
+                    action,
+                    transport,
+                    || {
+                        installation_fixture_send_time(
+                            backend,
+                            action.target,
+                            trial,
+                            provider_deadline,
+                        )
+                    },
+                )
+            })
+            .expect("scoped dispatch");
+        let reopened = SqliteStateBackend::open(path).expect("reopen scoped dispatch");
+        let replay = with_reserved_exchange(
+            reviewed,
+            now,
+            provider_deadline,
+            ReservedExchange::Replay,
+            |transport| {
+                reopened.dispatch_fixture_installation_comment_with_clock(
+                    request(),
+                    admission,
+                    action,
+                    transport,
+                    || {
+                        panic!("exact replay must not preflight or mint a send permit");
+                    },
+                )
+            },
+        )
+        .expect("exact replay");
+        assert!(replay.is_none());
+        let effect = reopened
+            .read_side_effect_record(action.side_effect)
+            .expect("effect read")
+            .expect("effect");
+        if trial == InstallationSendTrial::Created {
+            assert!(completed
+                .expect("fixture proof")
+                .as_str()
+                .starts_with("fixture-installation-comment-created/"));
+            assert_eq!(
+                effect.lifecycle_state(),
+                crate::SideEffectLifecycleState::Completed
+            );
+        } else {
+            assert!(completed.is_none());
+            assert_eq!(
+                effect.lifecycle_state(),
+                crate::SideEffectLifecycleState::Attempted
+            );
+        }
+    }
+
+    fn installation_fixture_send_time(
+        backend: &SqliteStateBackend,
+        target: &crate::GitHubPullRequestCommentTarget,
+        trial: InstallationSendTrial,
+        deadline: Timestamp,
+    ) -> Result<
+        crate::authorized_execution_continuity_state::internal::TrustedTimeObservation,
+        WorkflowOsError,
+    > {
+        use super::super::continuity_store::observe_continuity_trusted_time;
+        use crate::authorized_execution_continuity_state::internal::trusted_time_observation;
+        assert!(
+            trial != InstallationSendTrial::WrongPull,
+            "wrong PR must not reach final authority check"
+        );
+        if trial == InstallationSendTrial::Revoked {
+            backend
+                .revoke_live_sandbox_target(target)
+                .expect("revoke after preflight");
+        }
+        let time = observe_continuity_trusted_time()?;
+        if trial == InstallationSendTrial::Expired {
+            return Ok(trusted_time_observation(
+                deadline,
+                time.source(),
+                time.provenance_commitment().clone(),
+                time.epoch_id().clone(),
+            ));
+        }
+        Ok(time)
     }
 
     fn exercise_installation_scope_reservation(
@@ -5446,7 +5601,7 @@ mod tests {
                     LiveGrantTrial::PreparedLoopback { .. } => {
                         crate::provider_comment_transport::loopback_comment_exchange_commitment()
                     }
-                    LiveGrantTrial::InstallationScope => {
+                    LiveGrantTrial::InstallationScope | LiveGrantTrial::InstallationSend(_) => {
                         crate::provider_comment_transport::installation_exchange::fixture_installation_comment_adapter_commitment()
                     }
                     _ => SpecContentHash::from_text("trusted synthetic adapter"),
@@ -5792,7 +5947,10 @@ mod tests {
                 );
                 assert_eq!(counts(), (0, 0));
                 assert_eq!(event_count(), before);
-                if !matches!(trial, LiveGrantTrial::InstallationScope) {
+                if !matches!(
+                    trial,
+                    LiveGrantTrial::InstallationScope | LiveGrantTrial::InstallationSend(_)
+                ) {
                     inject_dispatch_commit_fault(InjectedDispatchCommitFault::Before);
                     assert!(backend
                         .reserve_live_sandbox_dispatch(request(), admission)
@@ -5837,6 +5995,20 @@ mod tests {
                             admission,
                             action,
                             expiry,
+                        );
+                    }
+                    LiveGrantTrial::InstallationSend(send_trial) => {
+                        exercise_installation_one_shot_send(
+                            &backend,
+                            &fixture.path,
+                            request,
+                            admission,
+                            action,
+                            &provider_binding(),
+                            (
+                                send_trial,
+                                grant.expires_at().expect("grant deadline").min(expiry),
+                            ),
                         );
                     }
                     LiveGrantTrial::InstallationScope => {
@@ -6050,6 +6222,10 @@ mod tests {
                         + 1
                         + usize::from(matches!(trial, LiveGrantTrial::VerifiedResponse))
                         + usize::from(matches!(trial, LiveGrantTrial::InstallationScope))
+                        + usize::from(matches!(
+                            trial,
+                            LiveGrantTrial::InstallationSend(InstallationSendTrial::Created)
+                        ))
                         + usize::from(matches!(
                             trial,
                             LiveGrantTrial::PreparedLoopback { expired: false }

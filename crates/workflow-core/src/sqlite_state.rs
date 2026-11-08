@@ -238,6 +238,7 @@ pub(crate) mod capability_source_continuity_store;
 mod continuity_codec;
 mod continuity_store;
 mod dispatch_reservation_store;
+pub(crate) use dispatch_reservation_store::InstallationCommentSendPermit;
 pub use dispatch_reservation_store::{
     SyntheticSandboxCompletionProofSource, SyntheticSandboxRecoveryInspection,
     SyntheticSandboxRecoveryPosture,
