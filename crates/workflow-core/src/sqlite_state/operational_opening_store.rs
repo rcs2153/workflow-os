@@ -3566,6 +3566,16 @@ mod tests {
         }
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn live_installation_coordinator_opens_only_a_fresh_claim() {
+        for reserve in [false, true] {
+            exercise_live_grant_reservation(LiveGrantTrial::InstallationClaim(
+                InstallationClaimTrial::Coordinator { reserve },
+            ));
+        }
+    }
+
     #[test]
     fn live_installation_claim_fences_exchange_and_preserves_uncertainty() {
         for trial in [
@@ -4701,6 +4711,10 @@ mod tests {
         StaleScope,
         MissingApprovalProof,
         #[cfg(any(target_os = "linux", target_os = "macos"))]
+        Coordinator {
+            reserve: bool,
+        },
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         RevokedDuringSigner,
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         SignerReplyWithoutAdmission,
@@ -4756,6 +4770,13 @@ mod tests {
             comment_adapter: &provider.adapter_commitment,
             deadline,
         };
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if let InstallationClaimTrial::Coordinator { reserve } = trial {
+            exercise_installation_coordinator(
+                backend, request, admission, action, reviewed, reserve,
+            );
+            return;
+        }
         let InstallationClaimTrial::Reserved { completed } = trial else {
             exercise_installation_claim_denials(backend, path, request, admission, reviewed, trial);
             return;
@@ -4800,6 +4821,24 @@ mod tests {
             matches!(reopened.claim_installation_exchange(&request(), admission, reviewed).expect("historical replay"),
             super::super::dispatch_reservation_store::InstallationIssuanceDisposition::Reserved(posture) if posture == expected)
         );
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            let opened = std::cell::Cell::new(false);
+            let disposition = reopened
+                .coordinate_scoped_installation_comment(
+                    request(),
+                    admission,
+                    action,
+                    reviewed,
+                    || {
+                        opened.set(true);
+                        None
+                    },
+                )
+                .expect("coordinated historical replay");
+            assert_eq!(disposition, expected);
+            assert!(!opened.get());
+        }
         let wrong_run = crate::WorkflowRunId::new("wrong-run").expect("run id");
         let wrong_effect = crate::SideEffectId::new("wrong-effect").expect("effect id");
         let wrong_operation =
@@ -4835,6 +4874,101 @@ mod tests {
             )
             .expect("inject corruption in disposable state");
         assert!(inspect().is_err());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn exercise_installation_coordinator(
+        backend: &SqliteStateBackend,
+        request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        reviewed: crate::provider_comment_transport::installation_exchange::ReviewedInstallation<
+            '_,
+        >,
+        reserve: bool,
+    ) {
+        use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture;
+        use crate::provider_comment_transport::installation_exchange::VerifiedInstallationScope;
+        use std::cell::Cell;
+
+        let opens = Cell::new(0);
+        let unavailable_signer = || {
+            opens.set(opens.get() + 1);
+            None
+        };
+        let coordinate = |action| {
+            backend.coordinate_scoped_installation_comment(
+                request(),
+                admission,
+                action,
+                reviewed,
+                unavailable_signer,
+            )
+        };
+        assert!(
+            coordinate(action).is_err(),
+            "V15 cannot start a signer claim"
+        );
+        backend
+            .enable_installation_signer_admission_store()
+            .expect("V16");
+        let wrong = crate::provider_write::GitHubCommentContinuationAction {
+            body: "changed action",
+            ..action
+        };
+        assert!(coordinate(wrong).is_err());
+        assert_eq!(opens.get(), 0);
+
+        let expected = if reserve {
+            let reserves = Cell::new(0);
+            assert_eq!(
+                backend
+                    .coordinate_installation_comment_using(
+                        request(),
+                        admission,
+                        action,
+                        reviewed,
+                        |request, claim| {
+                            opens.set(opens.get() + 1);
+                            backend.use_installation_exchange_claim(
+                                request,
+                                admission,
+                                reviewed,
+                                claim,
+                                || {
+                                    Some(VerifiedInstallationScope::test_receipt_with_live_shape(
+                                        reviewed,
+                                        Timestamp::now_utc(),
+                                        reviewed.deadline,
+                                    ))
+                                },
+                            )
+                        },
+                        |request, exchanged| {
+                            reserves.set(reserves.get() + 1);
+                            assert!(backend
+                                .reserve_installation_exchange_for_test(
+                                    request, admission, reviewed, &exchanged
+                                )?
+                                .is_some());
+                            Ok(None)
+                        },
+                    )
+                    .expect("synthetic reserved disposition"),
+                InstallationCommentRecoveryPosture::ReconciliationRequired,
+            );
+            assert_eq!(reserves.get(), 1);
+            InstallationCommentRecoveryPosture::ReconciliationRequired
+        } else {
+            assert_eq!(
+                coordinate(action).expect("unavailable signer disposition"),
+                InstallationCommentRecoveryPosture::IssuanceUncertain,
+            );
+            InstallationCommentRecoveryPosture::IssuanceUncertain
+        };
+        assert_eq!(opens.get(), 1);
+        assert_eq!(coordinate(action).expect("exact replay"), expected);
+        assert_eq!(opens.get(), 1);
     }
 
     #[allow(clippy::too_many_lines)]
@@ -5052,6 +5186,10 @@ mod tests {
             }
             InstallationClaimTrial::Reserved { .. } => {
                 unreachable!("handled by historical inspection test")
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            InstallationClaimTrial::Coordinator { .. } => {
+                unreachable!("handled by coordinator test")
             }
         }
         let reopened = SqliteStateBackend::open(path).expect("reopen uncertain claim");
@@ -7176,12 +7314,20 @@ mod tests {
                                 grant.expires_at().expect("grant deadline").min(expiry),
                             ),
                         );
-                        if let InstallationClaimTrial::Reserved { completed } = claim_trial {
-                            assert_eq!(counts(), (1, 1));
-                            assert_eq!(event_count(), before + 1 + usize::from(completed));
-                        } else {
-                            assert_eq!(counts(), (0, 0));
-                            assert_eq!(event_count(), before);
+                        match claim_trial {
+                            InstallationClaimTrial::Reserved { completed } => {
+                                assert_eq!(counts(), (1, 1));
+                                assert_eq!(event_count(), before + 1 + usize::from(completed));
+                            }
+                            #[cfg(any(target_os = "linux", target_os = "macos"))]
+                            InstallationClaimTrial::Coordinator { reserve: true } => {
+                                assert_eq!(counts(), (1, 1));
+                                assert_eq!(event_count(), before + 1);
+                            }
+                            _ => {
+                                assert_eq!(counts(), (0, 0));
+                                assert_eq!(event_count(), before);
+                            }
                         }
                         return;
                     }

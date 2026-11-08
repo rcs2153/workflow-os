@@ -1302,6 +1302,24 @@ provider, depend on a currently usable grant, issue another permit, or
 establish that no assertion or provider effect occurred. No public operator
 route or retry path is added.
 
+### Compose The Private One-Shot Installation Path
+
+The private Core coordinator binds the complete action to the request,
+reviewed target and immutable run before claiming issuance. Its atomic claim
+returns an existing reservation or issuance uncertainty without opening the
+signer. A fresh path requires the signer-admission schema, commits the claim,
+and rechecks current authority before opening one authenticated signer
+connection. Only the exact resulting installation scope reaches the existing
+final dispatch path. The returned outcome comes from durable inspection,
+not a callback return value or a new attempt.
+
+An unavailable signer or a missing exchange response leaves issuance
+uncertain. A reserved send without verified creation remains reconciliation
+required. Errors fail closed; none invokes a fallback or resets a claim.
+Focused fixtures exercise action drift, pre-admission schema rejection,
+unavailable signer, one synthetic reservation, and historical replay without
+signer access. The coordinator has no public caller or deployed signer.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

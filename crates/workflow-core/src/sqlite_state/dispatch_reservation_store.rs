@@ -473,6 +473,23 @@ impl SqliteStateBackend {
         request: &DispatchReservationRequest,
         admission: LiveGrantAdmission<'_>,
         reviewed: ReviewedInstallation<'_>,
+        commit_boundary: impl FnMut(bool) -> Result<(), WorkflowOsError>,
+    ) -> Result<InstallationIssuanceDisposition, WorkflowOsError> {
+        self.claim_installation_exchange_internal(
+            request,
+            admission,
+            reviewed,
+            false,
+            commit_boundary,
+        )
+    }
+
+    fn claim_installation_exchange_internal(
+        &self,
+        request: &DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        require_signer_schema: bool,
         mut commit_boundary: impl FnMut(bool) -> Result<(), WorkflowOsError>,
     ) -> Result<InstallationIssuanceDisposition, WorkflowOsError> {
         if request.request_commitment != request_commitment(request)
@@ -493,7 +510,7 @@ impl SqliteStateBackend {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| storage_error("begin_failed"))?;
-        super::validate_operational_schema(&tx)?;
+        let schema = super::validate_operational_schema(&tx)?;
         let claim = read_installation_claim(&tx, request)?;
         if claim.as_ref().is_some_and(|prior| {
             prior.grant != admission.grant_id.as_str()
@@ -508,6 +525,9 @@ impl SqliteStateBackend {
         }
         if claim.is_some() {
             return Ok(InstallationIssuanceDisposition::IssuanceUncertain);
+        }
+        if require_signer_schema && schema != super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION {
+            return Err(not_dispatchable());
         }
         let now = verify_current_installation_exchange(&tx, request, admission, reviewed)?;
         let record = InstallationClaimRecord {
@@ -545,6 +565,81 @@ impl SqliteStateBackend {
                 record: Box::new(record),
             },
         ))
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[allow(dead_code)] // No operator route is admitted yet.
+    pub(super) fn coordinate_scoped_installation_comment(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        action: GitHubCommentContinuationAction<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        open_signer: impl FnOnce() -> Option<InstallationSignerChannel>,
+    ) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
+        let exchange = |request: &DispatchReservationRequest, claim| {
+            self.recheck_installation_signer_exchange(request, admission, reviewed, &claim, None)?;
+            let Some(channel) = open_signer() else {
+                return Ok(None);
+            };
+            self.exchange_with_installation_signer(request, admission, reviewed, claim, channel)
+        };
+        self.coordinate_installation_comment_using(
+            request,
+            admission,
+            action,
+            reviewed,
+            exchange,
+            |request, exchanged| {
+                self.dispatch_scoped_installation_comment(
+                    request, admission, action, reviewed, exchanged,
+                )
+            },
+        )
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(super) fn coordinate_installation_comment_using(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        action: GitHubCommentContinuationAction<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        exchange: impl FnOnce(
+            &DispatchReservationRequest,
+            InstallationIssuanceClaim,
+        ) -> Result<Option<InstallationExchangedScope>, WorkflowOsError>,
+        dispatch: impl FnOnce(
+            DispatchReservationRequest,
+            InstallationExchangedScope,
+        ) -> Result<Option<EventId>, WorkflowOsError>,
+    ) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
+        if action.commitment()? != request.invocation_commitment
+            || admission.side_effect != action.side_effect
+            || admission.body != action.body
+            || reviewed.target != action.target
+            || reviewed.run_id != action.run
+            || reviewed.immutable_run != action.bundle_root
+        {
+            return Err(not_dispatchable());
+        }
+        let operation = request.operation_id.clone();
+        match self.claim_installation_exchange_internal(
+            &request,
+            admission,
+            reviewed,
+            true,
+            |_| Ok(()),
+        )? {
+            InstallationIssuanceDisposition::Reserved(posture) => return Ok(posture),
+            InstallationIssuanceDisposition::IssuanceUncertain => {}
+            InstallationIssuanceDisposition::Fresh(claim) => {
+                if let Some(exchanged) = exchange(&request, claim)? {
+                    dispatch(request, exchanged)?;
+                }
+            }
+        }
+        self.inspect_installation_comment_recovery(action.run, &operation, action.side_effect)
     }
 
     #[cfg(test)]
