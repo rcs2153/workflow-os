@@ -774,6 +774,59 @@ impl SqliteStateBackend {
         Ok(record.map(|record| (record.body_commitment, record.clock.observed_at())))
     }
 
+    #[allow(dead_code)] // No receiver is provisioned for this private verifier.
+    pub(super) fn verify_prepared_installation_notification(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        receiver: crate::provider_comment_transport::installation_notification::ReviewedCreationReceiver<'_>,
+        notification: crate::provider_comment_transport::installation_notification::CreationNotification<'_>,
+    ) -> Result<
+        Option<crate::provider_comment_transport::installation_notification::CreationCandidate>,
+        WorkflowOsError,
+    > {
+        use crate::provider_comment_transport::installation_notification::{
+            verify_creation_notification, PreparedCreation,
+        };
+        let mut connection = self.existing_read_only_connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|_| storage_error("begin_failed"))?;
+        if super::validate_operational_schema(&tx)?
+            != super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+        {
+            return Ok(None);
+        }
+        let admission = read_live_recovery_admission(&tx, operation, action.run)?;
+        verify_live_recovery_state(&tx, &admission, action.run, action.side_effect)?;
+        let witness = admission.witness.as_ref().ok_or_else(corrupt)?;
+        let Some(record) =
+            read_installation_send_preparation_record(&tx, operation, action, &admission)?
+        else {
+            return Ok(None);
+        };
+        let checked_at = continuity_store::observe_continuity_trusted_time()?;
+        let candidate = verify_creation_notification(
+            PreparedCreation {
+                reservation: &record.reservation,
+                writer_scope: &record.scope,
+                target: action.target,
+                repository: witness.provider.repository_id,
+                writer: witness.provider.author_id,
+                approved_body: action.body,
+                marker_commitment: &record.marker_commitment,
+                body_commitment: &record.body_commitment,
+                preparation_time: &record.clock,
+                checked_at: &checked_at,
+                deadline: record.deadline,
+            },
+            receiver,
+            notification,
+        );
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(candidate)
+    }
+
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[allow(dead_code)] // No operator or harness entry is admitted.
     pub(super) fn exchange_with_installation_signer(
