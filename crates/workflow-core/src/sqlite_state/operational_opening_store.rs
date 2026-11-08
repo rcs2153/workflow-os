@@ -4167,7 +4167,7 @@ mod tests {
         expiry: Timestamp,
     ) {
         use crate::provider_comment_observation::{
-            CommentEnumeration, CurrentCommentPosture, ProviderComment,
+            CommentEnumeration, CurrentCommentPosture, ProviderComment, ProviderTimestampBounds,
         };
         use std::num::NonZeroU64;
 
@@ -4204,13 +4204,18 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        let observe = |observed_at, comments: &[ProviderComment<'_>]| {
+        let exact_time = Some(ProviderTimestampBounds {
+            earliest_correction: time::Duration::ZERO,
+            latest_correction: time::Duration::ZERO,
+        });
+        let observe = |observed_at, timestamp_bounds, comments: &[ProviderComment<'_>]| {
             backend
                 .observe_reserved_sandbox_comment(operation, action, &adapter, |target, key| {
                     assert_eq!(target, action.target);
                     assert_eq!(key, marker);
                     CommentEnumeration::Complete {
                         observed_at,
+                        timestamp_bounds,
                         comments,
                     }
                 })
@@ -4237,7 +4242,7 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                observe(observed_at, std::slice::from_ref(&comment)),
+                observe(observed_at, exact_time, std::slice::from_ref(&comment)),
                 expected
             );
         }
@@ -4246,8 +4251,15 @@ mod tests {
             ..comment
         };
         for comments in [[comment, edited], [edited, comment]] {
-            assert_eq!(observe(now, &comments), CurrentCommentPosture::Unresolved);
+            assert_eq!(
+                observe(now, exact_time, &comments),
+                CurrentCommentPosture::Unresolved
+            );
         }
+        assert_eq!(
+            observe(now, None, &[comment]),
+            CurrentCommentPosture::Unresolved
+        );
         assert_eq!(inspect(), before);
         assert_eq!(
             backend
