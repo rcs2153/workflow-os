@@ -23,7 +23,8 @@ pub(crate) struct GitHubCommentCreationTransport<'a> {
 pub(crate) struct PreparedGitHubCommentCreation<'a> {
     transport: GitHubCommentCreationTransport<'a>,
     path: String,
-    repository_id: NonZeroU64,
+    target: GitHubPullRequestCommentTarget,
+    binding: LiveSandboxProviderBinding,
 }
 
 #[derive(Deserialize)]
@@ -94,7 +95,8 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         Some(PreparedGitHubCommentCreation {
             transport: self,
             path: format!("{repo}/issues/{number}/comments"),
-            repository_id: repository.id,
+            target: target.clone(),
+            binding: expected.clone(),
         })
     }
 
@@ -121,6 +123,13 @@ impl<'a> GitHubCommentCreationTransport<'a> {
 }
 
 impl PreparedGitHubCommentCreation<'_> {
+    pub(crate) fn binding_for(
+        &self,
+        target: &GitHubPullRequestCommentTarget,
+    ) -> Option<&LiveSandboxProviderBinding> {
+        (&self.target == target).then_some(&self.binding)
+    }
+
     /// No response is evidence for another attempt. Only Core can authorize dispatch.
     pub(crate) fn send(self, raw_body: &str) -> Option<CreatedCommentResponse> {
         if raw_body.is_empty() || raw_body.len() > MAX_RAW_BODY_BYTES {
@@ -140,7 +149,7 @@ impl PreparedGitHubCommentCreation<'_> {
         let json = bounded_read(response.into_reader(), MAX_CREATION_RESPONSE_BYTES)?;
         Some(CreatedCommentResponse {
             status: 201,
-            repository_id: self.repository_id,
+            repository_id: self.binding.repository_id,
             json,
         })
     }
@@ -157,7 +166,7 @@ fn bounded_read(reader: impl Read, max: usize) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
@@ -189,7 +198,9 @@ mod tests {
         thread::scope(|scope| {
             let server = scope.spawn(move || {
                 for reply in replies {
-                    serve(&listener, reply);
+                    if let Some(body) = serve(&listener, reply) {
+                        assert_eq!(body, MARKED_BODY);
+                    }
                 }
                 thread::sleep(Duration::from_millis(100));
                 assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock), "unexpected extra HTTP request");
@@ -214,7 +225,7 @@ mod tests {
         })
     }
 
-    fn serve(listener: &TcpListener, reply: &Reply<'_>) {
+    fn serve(listener: &TcpListener, reply: &Reply<'_>) -> Option<String> {
         let start = Instant::now();
         let accepted = loop {
             match listener.accept() {
@@ -251,16 +262,16 @@ mod tests {
             }
         }
         assert!(authorized);
-        if reply.line == TARGET {
+        let posted = if reply.line == TARGET {
             let mut body = vec![0; length];
             reader.read_exact(&mut body).expect("request body");
-            assert_eq!(
-                serde_json::from_slice::<serde_json::Value>(&body).expect("request JSON"),
-                serde_json::json!({"body": MARKED_BODY})
-            );
-        }
+            let json: serde_json::Value = serde_json::from_slice(&body).expect("request JSON");
+            Some(json["body"].as_str().expect("comment body").to_owned())
+        } else {
+            None
+        };
         if reply.status.is_empty() {
-            return;
+            return posted;
         } // Drop the accepted request without replying.
         write!(
             stream,
@@ -272,6 +283,64 @@ mod tests {
         .expect("response headers");
         // An over-limit response can be dropped while the fixture is still writing.
         let _ = stream.write_all(reply.body);
+        posted
+    }
+
+    pub(crate) fn with_lost_acknowledgement_server<T>(
+        provider: &LiveSandboxProviderBinding,
+        expect_post: bool,
+        exercise: impl FnOnce(GitHubCommentCreationTransport<'_>) -> T,
+    ) -> (T, Option<String>) {
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).expect("loopback");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
+        let origin = format!(
+            "http://{}",
+            listener.local_addr().expect("loopback address")
+        );
+        let repo_body =
+            serde_json::json!({"id": provider.repository_id, "full_name": "example/sandbox"});
+        let pr_body = serde_json::json!({"number": 7, "base": {"repo": repo_body}});
+        let user_body = serde_json::json!({"id": provider.author_id});
+        let auth = GitHubPullRequestCommentProviderAuth::new("synthetic-only", None)
+            .expect("fixture auth");
+        thread::scope(|scope| {
+            let server = scope.spawn(|| {
+                assert!(serve(&listener, &repo(repo_body.to_string().as_bytes())).is_none());
+                assert!(serve(&listener, &user(user_body.to_string().as_bytes())).is_none());
+                assert!(serve(
+                    &listener,
+                    &pull_request("200 OK", pr_body.to_string().as_bytes())
+                )
+                .is_none());
+                expect_post.then(|| {
+                    serve(
+                        &listener,
+                        &Reply {
+                            line: TARGET,
+                            status: "",
+                            headers: "",
+                            body: &[],
+                        },
+                    )
+                    .expect("one accepted POST")
+                })
+            });
+            let result = exercise(GitHubCommentCreationTransport {
+                origin,
+                ..GitHubCommentCreationTransport::new(&auth)
+            });
+            let body = server.join().expect("fixture server");
+            assert!(
+                matches!(
+                    listener.accept(),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+                ),
+                "unexpected request before the caller returned"
+            );
+            (result, body)
+        })
     }
 
     fn repo(body: &[u8]) -> Reply<'_> {

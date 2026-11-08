@@ -18,11 +18,14 @@ use crate::dispatch_reservation::{
     DispatchReservationReplayReceipt, DispatchReservationRequest, DispatchReservationStore,
     LiveSandboxReservationWitness, ReservedAttemptDispatchCapability,
 };
+use crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding;
 use crate::provider_comment_observation::{
     can_encode_marked_comment, encode_marked_comment, verify_created_comment_response,
     verify_current_comment, CommentEnumeration, CreatedCommentResponse, CurrentCommentPosture,
     ExpectedComment, MARKER_NAMESPACE,
 };
+#[cfg(test)]
+use crate::provider_comment_transport::PreparedGitHubCommentCreation;
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
     transition_side_effect_to_completed, EventId, EventSequenceNumber,
@@ -35,7 +38,7 @@ use crate::{
 
 use super::continuity_codec::timestamp_parts;
 use super::live_sandbox_grant_store::{
-    check_dispatch_lane, read_live_effect_record, LiveGrantAdmission,
+    check_dispatch_lane, read_active_live_target, read_live_effect_record, LiveGrantAdmission,
 };
 use super::{
     append_event_and_project_snapshot, encode_json, snapshot_commitment, SqliteStateBackend,
@@ -303,10 +306,26 @@ impl SqliteStateBackend {
         request: DispatchReservationRequest,
         admission: LiveGrantAdmission<'_>,
     ) -> Result<Option<Box<ReservedAttemptDispatchCapability>>, WorkflowOsError> {
+        self.reserve_live_sandbox_dispatch_with_binding(request, admission, None)
+    }
+
+    fn reserve_live_sandbox_dispatch_with_binding(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        prepared: Option<(&GitHubPullRequestCommentTarget, &LiveSandboxProviderBinding)>,
+    ) -> Result<Option<Box<ReservedAttemptDispatchCapability>>, WorkflowOsError> {
         if !can_encode_marked_comment(admission.body) {
             return Err(not_dispatchable());
         }
-        let outcome = self.reserve_dispatch(request, None, Some(admission), |_, _, _| Ok(()))?;
+        let outcome = self.reserve_dispatch(request, None, Some(admission), |tx, _, _| {
+            if let Some((target, binding)) = prepared {
+                if read_active_live_target(tx, &target.reference())?.provider_binding() != binding {
+                    return Err(not_dispatchable());
+                }
+            }
+            Ok(())
+        })?;
         Ok(match outcome {
             DispatchReservationOutcome::Admitted { capability } => Some(capability),
             DispatchReservationOutcome::AlreadyAdmitted { .. }
@@ -341,6 +360,42 @@ impl SqliteStateBackend {
         observe: impl FnOnce() -> Result<TrustedTimeObservation, WorkflowOsError>,
         send: impl FnOnce(&GitHubPullRequestCommentTarget, &str) -> Option<CreatedCommentResponse>,
     ) -> Result<LiveCommentDispatchPosture, WorkflowOsError> {
+        self.dispatch_live_sandbox_comment_with_binding(
+            request, admission, action, None, observe, send,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn dispatch_prepared_loopback_comment(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        action: GitHubCommentContinuationAction<'_>,
+        prepared: PreparedGitHubCommentCreation<'_>,
+    ) -> Result<LiveCommentDispatchPosture, WorkflowOsError> {
+        let binding = prepared
+            .binding_for(action.target)
+            .ok_or_else(not_dispatchable)?
+            .clone();
+        self.dispatch_live_sandbox_comment_with_binding(
+            request,
+            admission,
+            action,
+            Some(&binding),
+            continuity_store::observe_continuity_trusted_time,
+            |_, body| prepared.send(body),
+        )
+    }
+
+    fn dispatch_live_sandbox_comment_with_binding(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        action: GitHubCommentContinuationAction<'_>,
+        prepared: Option<&LiveSandboxProviderBinding>,
+        observe: impl FnOnce() -> Result<TrustedTimeObservation, WorkflowOsError>,
+        send: impl FnOnce(&GitHubPullRequestCommentTarget, &str) -> Option<CreatedCommentResponse>,
+    ) -> Result<LiveCommentDispatchPosture, WorkflowOsError> {
         let invocation = action.commitment()?;
         if invocation != request.invocation_commitment
             || admission.side_effect != action.side_effect
@@ -349,7 +404,12 @@ impl SqliteStateBackend {
             return Err(not_dispatchable());
         }
         let operation = request.operation_id.clone();
-        let Some(capability) = self.reserve_live_sandbox_dispatch(request, admission)? else {
+        let Some(capability) = self.reserve_live_sandbox_dispatch_with_binding(
+            request,
+            admission,
+            prepared.map(|binding| (action.target, binding)),
+        )?
+        else {
             return Ok(LiveCommentDispatchPosture::RecoveryOnly);
         };
         let binding = (*capability)
@@ -368,6 +428,7 @@ impl SqliteStateBackend {
         if durable.event.reservation_commitment() != &binding.reservation_commitment
             || durable.event.invocation_commitment() != &invocation
             || &witness.provider.adapter_commitment != admission.adapter_commitment
+            || prepared.is_some_and(|expected| expected != &witness.provider)
         {
             return Err(corrupt());
         }
