@@ -17,7 +17,7 @@ use crate::authorized_execution_continuity_state::internal::{
 use crate::dispatch_reservation::DispatchReservationRequest;
 use crate::live_sandbox_continuation_authority::{
     LiveSandboxContinuationFacts, LiveSandboxPolicyTarget, LiveSandboxPrincipalVerifier,
-    ResolvedLiveEffect, LIVE_CAPABILITY,
+    LiveSandboxProviderBinding, ResolvedLiveEffect, LIVE_CAPABILITY,
 };
 use crate::local_check_evidence_assurance::{
     StoredLocalCheckAssurance, StoredLocalCheckAssuranceWrite,
@@ -499,7 +499,7 @@ impl AuthenticatedLiveGrant<'_> {
         request: &DispatchReservationRequest,
         now: Timestamp,
         window_expiry: Timestamp,
-    ) -> Result<SideEffectRecord, WorkflowOsError> {
+    ) -> Result<(SideEffectRecord, LiveSandboxProviderBinding), WorkflowOsError> {
         let events = SqliteStateBackend::read_events_with_connection(
             tx,
             &request.expected_window_binding.run_id,
@@ -587,7 +587,7 @@ impl AuthenticatedLiveGrant<'_> {
             params![self.grant.grant_id().as_str(), facts.attempt.as_str()],
         )
         .map_err(|_| denied())?;
-        Ok(record)
+        Ok((record, target.provider_binding().clone()))
     }
 }
 

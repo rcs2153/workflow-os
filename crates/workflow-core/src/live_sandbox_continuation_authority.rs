@@ -20,7 +20,7 @@ use crate::{
 pub(crate) const LIVE_CAPABILITY: &str = "live-sandbox/github-pr-comment-continuation";
 
 /// Trusted operator expectations for the provider, not a transport attestation.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct LiveSandboxProviderBinding {
     pub(crate) repository_id: NonZeroU64,
@@ -41,6 +41,10 @@ pub(crate) struct LiveSandboxPolicyTarget {
 }
 
 impl LiveSandboxPolicyTarget {
+    pub(crate) const fn provider_binding(&self) -> &LiveSandboxProviderBinding {
+        &self.provider
+    }
+
     pub(crate) const fn target(&self) -> &GitHubPullRequestCommentTarget {
         &self.target
     }

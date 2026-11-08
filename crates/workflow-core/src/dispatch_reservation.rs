@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use crate::authorized_execution_continuity_state::internal::{
     AttemptUseCapability, ContinuityRevision, ExpectedWindowBinding,
 };
+use crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding;
 use crate::{
     AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId, EventId, EventSequenceNumber,
     SpecContentHash, Timestamp, WorkflowOsError, WorkflowOsErrorKind,
@@ -337,6 +338,13 @@ pub(crate) struct DispatchReservationRequest {
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LiveSandboxReservationWitness {
+    pub(crate) provider: LiveSandboxProviderBinding,
+    pub(crate) attempted_record_commitment: SpecContentHash,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DispatchReservationRecord {
     pub(crate) operation_id: DispatchReservationOperationId,
     pub(crate) receipt_id: DispatchReservationReceiptId,
@@ -347,6 +355,8 @@ pub(crate) struct DispatchReservationRecord {
     pub(crate) request_commitment: SpecContentHash,
     pub(crate) reservation_commitment: SpecContentHash,
     pub(crate) committed_at: Timestamp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) live_witness: Option<LiveSandboxReservationWitness>,
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]

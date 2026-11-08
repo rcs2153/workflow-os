@@ -388,6 +388,15 @@ admission. Older synthetic reservations are not upgraded into new authority.
 This pins expectations only; it does not verify a running adapter, its
 credential, or any accepted provider payload.
 
+New private reservations persist the provider binding and exact attempted
+record commitment atomically with admission. The versioned reservation
+commitment covers that witness; recovery verifies it and the existing
+attempt or completion proof before lookup. Registry revocation prevents
+new admission but does not erase historical recovery evidence. Removing
+the witness cannot downgrade a new reservation or proof to the older
+synthetic format. Older snapshots retain their original read-only
+inspection posture without gaining provider identity or send authority.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
