@@ -1388,6 +1388,84 @@ attempted and the coordinator in `ReconciliationRequired`. The separate
 installation loopback fixture covers loss at the HTTP boundary. Neither test
 supplies live provider time or changes production dispatch and recovery.
 
+### Independent Creation Evidence Decision
+
+Maintainer review at `b5634012` (PR #864): keep live admission denied. A
+bounded lookup verifies current presence, not which request caused creation
+or when it happened. A trusted sender could durably capture the exact `201`
+and make it replayable, but that cannot recover a response that never arrived.
+For the latter case, take an authenticated creation notification into offline
+validation as a candidate independent witness. Do not enable a receiver or
+replace the current exact-response proof.
+
+GitHub documents an [`issue_comment` creation payload](https://docs.github.com/en/webhooks/webhook-events-and-payloads#issue_comment)
+and [HMAC verification over the delivered body](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries).
+The signature does not prove when the event arrived, authenticate arbitrary
+headers, or provide third-party nonrepudiation. The subscription also needs
+Issues read access for a GitHub App; do not add it to the one-shot writer or
+assume the current installation grant covers it. A live observer registration
+and its key custody, repository scope, and trusted receiving host would need
+independent review and explicit admission.
+
+A candidate witness must establish both ends of a conservative interval
+on Core's trusted timeline, without treating a provider timestamp as a local
+clock:
+
+1. **Lower bound:** reserve the exact operation and commit to a fresh,
+   unpredictable correlation value bound to the reservation, attempt,
+   installation scope, target, and marked request. Keep the value private to
+   the trusted send path until the one-shot final send check releases it for
+   the exact POST. Prove that release occurred after reservation and in the
+   approved window. The current deterministic marker is not this witness;
+   historical reservations must not acquire the new proof by migration.
+2. **Upper bound:** a separately controlled receiver authenticates the
+   bounded original body, then attests to the trusted local receipt interval
+   and the digest of the authenticated event. Require the whole inferred
+   interval `[release.earliest, receipt.latest]` to fit inside the reservation
+   window and require `release.latest <= receipt.earliest`. Require signed body
+   fields for creation, exact installation,
+   repository and PR identity, exact App author, nonzero comment identity,
+   and the full committed marked body. Reject schema ambiguity, an unknown
+   receiver or clock epoch, or any mismatch. Receipt after expiry is not an
+   in-window witness, even if the provider reports an earlier creation time.
+3. **Replay:** bind proof to the operation and comment identity, not an
+   unsigned delivery header. Identical deliveries add no authority and no
+   second outcome; contradictory identities stay unresolved. Do not infer
+   enumeration completeness from one notification. The milestone still
+   requires an independently observed count at its declared boundary. Do not
+   persist full payloads, verification material, or the unexposed value in
+   public evidence.
+
+The next executable gate is an offline, test-only evidence composition:
+drive the existing lost-ack fixture with a separately authenticated creation
+record and controlled receipt interval; require exact scope, body and
+correlation before classifying it as an in-window candidate. Test tampering,
+replay, conflicting identity, wrong target, missing or late receipt, and a
+pre-release or out-of-window interval. The verifier must not call the signer,
+authorize another send, or enter the existing creation writer. This gate
+must demonstrate the causal proof before any durable outcome or hosted
+receiver implementation is approved.
+
+[Failed GitHub deliveries are not automatically redelivered](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries).
+Missing, late, or untrusted evidence leaves the original operation in
+`ReconciliationRequired`. A recovered notification is never permission to
+retry the comment, and the system must not manufacture success to complete
+the pilot. No GitHub subscription, access change, or live provider action
+was performed for this review.
+
+The offline coordinator fixture now takes this path through a synthetic
+creation record derived from the independent effect ledger. The approved
+fixture body includes a fresh correlation, the final send check supplies the
+release sample, and a simulated receiver supplies the receipt sample and
+body digest. The test uses HMAC over the exact record bytes; a valid signature
+cannot substitute a different receipt body. It covers duplicate and conflicting
+identities, scope and content drift, tampering, missing receipt, wrong epoch,
+pre-release receipt, and the exclusive deadline. Its exact candidate still
+leaves the reopened Core operation in `ReconciliationRequired` with no second
+signer or send call. This is not a GitHub webhook parser, independently
+attested receiver, or production mechanism for minting and protecting a
+correlation value. Those boundaries remain unimplemented and unadmitted.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

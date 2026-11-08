@@ -671,7 +671,7 @@ impl SqliteStateBackend {
         action: GitHubCommentContinuationAction<'_>,
         reviewed: ReviewedInstallation<'_>,
         exchanged: &InstallationExchangedScope,
-        accept_without_response: impl FnOnce(&str),
+        accept_without_response: impl FnOnce(&str, Timestamp),
     ) -> Result<Option<EventId>, WorkflowOsError> {
         let operation = request.operation_id.clone();
         let capability = self
@@ -683,17 +683,18 @@ impl SqliteStateBackend {
             .dispatch_reservation
             .ok_or_else(corrupt)?;
         let reservation = &binding.reservation_commitment;
-        self.checked_comment_send(
-            &operation,
-            action,
-            admission,
-            reservation,
-            continuity_store::observe_continuity_trusted_time,
-        )?
-        .ok_or_else(not_dispatchable)?;
+        let checked = self
+            .checked_comment_send(
+                &operation,
+                action,
+                admission,
+                reservation,
+                continuity_store::observe_continuity_trusted_time,
+            )?
+            .ok_or_else(not_dispatchable)?;
         let marker = live_comment_marker(&action.commitment()?, reservation);
         let raw_body = encode_marked_comment(action.body, &marker).ok_or_else(corrupt)?;
-        accept_without_response(&raw_body);
+        accept_without_response(&raw_body, checked.window.checked_at);
         Ok(None)
     }
 
