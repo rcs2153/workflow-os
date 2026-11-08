@@ -14,7 +14,7 @@ use super::{
 use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeAttemptState, AuthoritativeWindowState,
 };
-use crate::dispatch_reservation::DispatchReservationRequest;
+use crate::dispatch_reservation::{DispatchAdmissionProjectionEvent, DispatchReservationRequest};
 use crate::live_sandbox_continuation_authority::{
     LiveSandboxContinuationFacts, LiveSandboxPolicyTarget, LiveSandboxPrincipalVerifier,
     LiveSandboxProviderBinding, ResolvedLiveEffect, LIVE_CAPABILITY,
@@ -29,10 +29,11 @@ use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
     Action, ActorId, ApprovalPresentationRecord, AuthorizedExecutionAttemptId,
     AuthorizedExecutionWindowId, CapabilityGrant, CapabilityGrantId, CapabilityGrantLifecycle,
-    LocalCheckResultStatus, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
-    SideEffectLifecycleState, SideEffectRecord, SideEffectReferenceKind, SideEffectSensitivity,
-    SideEffectTargetKind, SpecContentHash, Timestamp, WorkReportSensitivity, WorkflowOsError,
-    WorkflowRun, WorkflowRunEventKind, WorkflowRunStatus,
+    GitHubPullRequestCommentTarget, LocalCheckResultStatus, SideEffectAuthorityDecision,
+    SideEffectCapability, SideEffectId, SideEffectLifecycleState, SideEffectRecord,
+    SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind, SpecContentHash,
+    Timestamp, WorkReportSensitivity, WorkflowOsError, WorkflowRun, WorkflowRunEventKind,
+    WorkflowRunStatus,
 };
 
 impl SqliteStateBackend {
@@ -453,14 +454,52 @@ impl<'a> LiveGrantAdmission<'a> {
         request: &DispatchReservationRequest,
         now: Timestamp,
     ) -> Result<AuthenticatedLiveGrant<'a>, WorkflowOsError> {
+        self.authenticate_binding(
+            tx,
+            &request.capability.attempt_id,
+            &request.executor_commitment,
+            now,
+        )
+    }
+
+    pub(super) fn verify_current_send(
+        self,
+        tx: &Transaction<'_>,
+        event: &DispatchAdmissionProjectionEvent,
+        target: &GitHubPullRequestCommentTarget,
+        provider: &LiveSandboxProviderBinding,
+        now: Timestamp,
+    ) -> Result<(), WorkflowOsError> {
+        let grant =
+            self.authenticate_binding(tx, event.attempt_id(), event.executor_commitment(), now)?;
+        let used: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM live_sandbox_grant_uses WHERE grant_id=?1 AND attempt_id=?2)",
+            params![grant.grant.grant_id().as_str(), event.attempt_id().as_str()],
+            |row| row.get(0),
+        ).map_err(|_| denied())?;
+        let registered = read_active_live_target(tx, &target.reference())?;
+        if !used
+            || registered.target() != target
+            || registered.provider_binding() != provider
+            || now >= registered.valid_until()
+        {
+            return Err(denied());
+        }
+        Ok(())
+    }
+
+    fn authenticate_binding(
+        self,
+        tx: &Transaction<'_>,
+        attempt: &AuthorizedExecutionAttemptId,
+        executor: &SpecContentHash,
+        now: Timestamp,
+    ) -> Result<AuthenticatedLiveGrant<'a>, WorkflowOsError> {
         let (binding, payload, registration_binding): (String, String, String) = tx
             .query_row(
                 "SELECT binding, payload, registration_binding FROM live_sandbox_grants
                  WHERE grant_id=?1 AND attempt_id=?2 AND revoked=0",
-                params![
-                    self.grant_id.as_str(),
-                    request.capability.attempt_id.as_str()
-                ],
+                params![self.grant_id.as_str(), attempt.as_str()],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()
@@ -469,7 +508,7 @@ impl<'a> LiveGrantAdmission<'a> {
         let grant: CapabilityGrant = decode_json(&payload, "live sandbox grant")?;
         let expires_at = grant.expires_at().ok_or_else(denied)?;
         if grant.grant_id() != self.grant_id
-            || binding != request.executor_commitment.as_str()
+            || binding != executor.as_str()
             || grant.lifecycle() != CapabilityGrantLifecycle::Active
             || grant.capability().as_str() != LIVE_CAPABILITY
             || grant.issued_at() > now

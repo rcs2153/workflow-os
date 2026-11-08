@@ -420,6 +420,9 @@ impl SqliteStateBackend {
         let marker = live_comment_marker(&invocation, &binding.reservation_commitment);
         let raw_body = encode_marked_comment(action.body, &marker).ok_or_else(corrupt)?;
         let mut connection = self.existing_read_only_connection()?;
+        let Ok(time) = observe() else {
+            return Ok(LiveCommentDispatchPosture::RecoveryOnly);
+        };
         let tx = connection
             .transaction()
             .map_err(|_| storage_error("begin_failed"))?;
@@ -433,26 +436,35 @@ impl SqliteStateBackend {
             return Err(corrupt());
         }
         let trusted_time = continuity_codec::load_snapshot(&tx)?.trusted_time;
-        tx.commit().map_err(|_| storage_error("commit_failed"))?;
-
         // Admission is irreversible. A paused or time-uncertain caller may
         // reconcile, but must not hand an expired send right to the adapter.
-        if !observe().is_ok_and(|time| {
-            trusted_time.eligibility == ContinuityInstanceEligibility::LiveStateEligible
-                && trusted_time.posture != TrustedTimePosture::Quarantined
-                && time.source() == trusted_time.source
-                && time.provenance_commitment() == &trusted_time.provenance_commitment
-                && time.epoch_id() == &trusted_time.epoch_id
-                && time.observed_at() >= durable.committed_at
-                && !trusted_time
-                    .last_observed_at
-                    .is_some_and(|watermark| time.observed_at() < watermark)
-                && witness
-                    .creation_deadline
-                    .is_some_and(|deadline| time.observed_at() < deadline)
-        }) {
+        let current_time = trusted_time.eligibility
+            == ContinuityInstanceEligibility::LiveStateEligible
+            && trusted_time.posture != TrustedTimePosture::Quarantined
+            && time.source() == trusted_time.source
+            && time.provenance_commitment() == &trusted_time.provenance_commitment
+            && time.epoch_id() == &trusted_time.epoch_id
+            && time.observed_at() >= durable.committed_at
+            && !trusted_time
+                .last_observed_at
+                .is_some_and(|watermark| time.observed_at() < watermark)
+            && witness
+                .creation_deadline
+                .is_some_and(|deadline| time.observed_at() < deadline);
+        if !current_time
+            || admission
+                .verify_current_send(
+                    &tx,
+                    &durable.event,
+                    action.target,
+                    &witness.provider,
+                    time.observed_at(),
+                )
+                .is_err()
+        {
             return Ok(LiveCommentDispatchPosture::RecoveryOnly);
         }
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
         let response = send(action.target, &raw_body);
         let Some(comment_id) = verify_created_comment_response(
             response.as_ref(),

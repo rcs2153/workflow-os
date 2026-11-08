@@ -3521,6 +3521,17 @@ mod tests {
     }
 
     #[test]
+    fn live_comment_revocation_after_reservation_blocks_send_and_preserves_recovery() {
+        for revocation in [
+            SendRevocation::Grant,
+            SendRevocation::Principal,
+            SendRevocation::Target,
+        ] {
+            exercise_live_grant_reservation(LiveGrantTrial::RevokedBeforeSend(revocation));
+        }
+    }
+
+    #[test]
     fn live_comment_verified_response_survives_reopen_without_resend() {
         exercise_live_grant_reservation(LiveGrantTrial::VerifiedResponse);
     }
@@ -3883,12 +3894,20 @@ mod tests {
     }
 
     #[derive(Clone, Copy)]
+    enum SendRevocation {
+        Grant,
+        Principal,
+        Target,
+    }
+
+    #[derive(Clone, Copy)]
     enum LiveGrantTrial {
         AmbiguousCommit,
         Contended,
         LostAcknowledgement,
         PreparedLoopbackLoss,
         ExpiredBeforeSend,
+        RevokedBeforeSend(SendRevocation),
         VerifiedResponse,
         Revoked,
         PrincipalRevoked,
@@ -5344,6 +5363,69 @@ mod tests {
                                 .expect("durable attempted effect"),
                             SyntheticSandboxRecoveryPosture::ReconciliationRequired
                         );
+                    }
+                    LiveGrantTrial::RevokedBeforeSend(revocation) => {
+                        use super::super::dispatch_reservation_store::{
+                            LiveCommentDispatchPosture, SyntheticSandboxRecoveryPosture,
+                        };
+                        let operation = request().operation_id;
+                        let revoke_and_observe = || {
+                            assert_eq!(counts(), (1, 1));
+                            match revocation {
+                                SendRevocation::Grant => {
+                                    backend.revoke_live_sandbox_grant(grant.grant_id())
+                                }
+                                SendRevocation::Principal => {
+                                    backend.revoke_live_sandbox_principal(facts.replacement)
+                                }
+                                SendRevocation::Target => {
+                                    backend.revoke_live_sandbox_target(action.target)
+                                }
+                            }
+                            .expect("commit revocation after reservation");
+                            super::super::continuity_store::observe_continuity_trusted_time()
+                        };
+                        assert_eq!(
+                            backend
+                                .dispatch_live_sandbox_comment_with_clock(
+                                    request(),
+                                    admission,
+                                    action,
+                                    revoke_and_observe,
+                                    |_, _| panic!("revoked send right must not reach adapter"),
+                                )
+                                .expect("recovery after revocation"),
+                            LiveCommentDispatchPosture::RecoveryOnly
+                        );
+                        let reopened = SqliteStateBackend::open(&fixture.path).expect("restart");
+                        let retry = reopened.dispatch_live_sandbox_comment(
+                            request(),
+                            admission,
+                            action,
+                            |_, _| panic!("restart must not recreate a send right"),
+                        );
+                        match revocation {
+                            SendRevocation::Grant | SendRevocation::Principal => {
+                                assert!(retry.is_err());
+                            }
+                            SendRevocation::Target => assert_eq!(
+                                retry.expect("historical replay"),
+                                LiveCommentDispatchPosture::RecoveryOnly
+                            ),
+                        }
+                        assert_eq!(counts(), (1, 1));
+                        assert_eq!(event_count(), before + 1);
+                        assert_eq!(
+                            reopened
+                                .inspect_synthetic_sandbox_recovery(
+                                    action.run,
+                                    operation.as_str(),
+                                    action.side_effect,
+                                )
+                                .expect("recoverable attempted effect"),
+                            SyntheticSandboxRecoveryPosture::ReconciliationRequired
+                        );
+                        return;
                     }
                     LiveGrantTrial::VerifiedResponse => {
                         exercise_persisted_comment_response(
