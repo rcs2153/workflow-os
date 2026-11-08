@@ -379,6 +379,15 @@ No transport feeds this verifier, no completion path consumes its result,
 and it cannot authorize a resend. A trusted adapter and independent evidence
 of accepted bytes remain prerequisites for live completion.
 
+The private target registration now requires stable provider repository and
+expected author IDs plus an operator-selected adapter commitment. The
+scoped policy commits to all three; reopening, grant issuance and
+reservation revalidate that policy rather than accepting recovery-supplied
+identity. Missing or substituted binding fields fail closed for new
+admission. Older synthetic reservations are not upgraded into new authority.
+This pins expectations only; it does not verify a running adapter, its
+credential, or any accepted provider payload.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
