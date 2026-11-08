@@ -3,6 +3,7 @@
 #![allow(dead_code)] // No trusted production observer is wired yet.
 
 use std::num::NonZeroU64;
+use time::Duration;
 
 use crate::{GitHubPullRequestCommentTarget, Timestamp};
 
@@ -33,12 +34,40 @@ pub(crate) struct ProviderComment<'a> {
     pub(crate) updated_at: Timestamp,
 }
 
+/// Inclusive corrections from reported provider time to the trusted local
+/// timeline. They must cover both timestamp precision and clock uncertainty.
+#[derive(Clone, Copy)]
+pub(crate) struct ProviderTimestampBounds {
+    pub(crate) earliest_correction: Duration,
+    pub(crate) latest_correction: Duration,
+}
+
+impl ProviderTimestampBounds {
+    fn proves_creation(
+        self,
+        reported: Timestamp,
+        expected: &ExpectedComment<'_>,
+        observed_at: Timestamp,
+    ) -> bool {
+        let reported = reported.as_offset_date_time();
+        reported
+            .checked_add(self.earliest_correction)
+            .zip(reported.checked_add(self.latest_correction))
+            .is_some_and(|(earliest, latest)| {
+                earliest >= expected.not_before.as_offset_date_time()
+                    && latest < expected.not_after.as_offset_date_time()
+                    && latest <= observed_at.as_offset_date_time()
+            })
+    }
+}
+
 /// Only an operator-controlled adapter may classify enumeration as complete.
 /// A model-supplied page count, marker, or digest is not that evidence.
 #[derive(Clone, Copy)]
 pub(crate) enum CommentEnumeration<'a> {
     Complete {
         observed_at: Timestamp,
+        timestamp_bounds: Option<ProviderTimestampBounds>,
         comments: &'a [ProviderComment<'a>],
     },
     Incomplete,
@@ -62,6 +91,7 @@ pub(crate) fn verify_current_comment(
 
     let CommentEnumeration::Complete {
         observed_at,
+        timestamp_bounds: Some(timestamp_bounds),
         comments,
     } = enumeration
     else {
@@ -78,6 +108,7 @@ pub(crate) fn verify_current_comment(
         || expected.target.validate().is_err()
         || expected.not_before >= expected.not_after
         || observed_at < expected.not_before
+        || timestamp_bounds.earliest_correction > timestamp_bounds.latest_correction
         || comments.len() > MAX_COMMENTS
     {
         return Unresolved;
@@ -123,9 +154,7 @@ pub(crate) fn verify_current_comment(
         || expected
             .known_comment_id
             .is_some_and(|id| id != comment.comment_id)
-        || comment.created_at < expected.not_before
-        || comment.created_at >= expected.not_after
-        || comment.created_at > observed_at
+        || !timestamp_bounds.proves_creation(comment.created_at, expected, observed_at)
         || comment.updated_at != comment.created_at
         || comment.raw_body.strip_suffix(&suffix) != Some(expected.body)
     {
@@ -142,6 +171,10 @@ mod tests {
 
     const MARKER: &str =
         "workflow-os/live-comment/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const EXACT_TIME: Option<ProviderTimestampBounds> = Some(ProviderTimestampBounds {
+        earliest_correction: Duration::ZERO,
+        latest_correction: Duration::ZERO,
+    });
 
     fn id(value: u64) -> NonZeroU64 {
         NonZeroU64::new(value).expect("nonzero provider id")
@@ -194,6 +227,7 @@ mod tests {
                 &expected,
                 CommentEnumeration::Complete {
                     observed_at: time(30),
+                    timestamp_bounds: EXACT_TIME,
                     comments,
                 },
             )
@@ -311,6 +345,7 @@ mod tests {
                 &expected,
                 CommentEnumeration::Complete {
                     observed_at: time(30),
+                    timestamp_bounds: EXACT_TIME,
                     comments,
                 },
             )
@@ -325,6 +360,54 @@ mod tests {
     }
 
     #[test]
+    fn requires_the_entire_creation_interval_to_fit_inside_the_window() {
+        use CurrentCommentPosture::{ExactCurrentMatch, Unresolved};
+
+        let target = GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target");
+        let expected = expected(&target);
+        let raw = format!("exact body\n\n<!-- {MARKER} -->");
+        let marked = comment(&target, &raw);
+        let inspect = |earliest_correction, latest_correction, observed_at| {
+            verify_current_comment(
+                &expected,
+                CommentEnumeration::Complete {
+                    observed_at,
+                    timestamp_bounds: Some(ProviderTimestampBounds {
+                        earliest_correction,
+                        latest_correction,
+                    }),
+                    comments: std::slice::from_ref(&marked),
+                },
+            )
+        };
+        let seconds = Duration::seconds;
+
+        assert_eq!(
+            inspect(seconds(-1), seconds(2), time(13)),
+            ExactCurrentMatch
+        );
+        assert_eq!(inspect(seconds(-2), seconds(2), time(30)), Unresolved);
+        assert_eq!(inspect(seconds(-1), seconds(9), time(30)), Unresolved);
+        assert_eq!(inspect(seconds(-1), seconds(2), time(12)), Unresolved);
+        assert_eq!(inspect(seconds(2), seconds(1), time(30)), Unresolved);
+        assert_eq!(inspect(Duration::MIN, seconds(0), time(30)), Unresolved);
+        assert_eq!(inspect(seconds(0), Duration::MAX, time(30)), Unresolved);
+        for comments in [&[][..], std::slice::from_ref(&marked)] {
+            assert_eq!(
+                verify_current_comment(
+                    &expected,
+                    CommentEnumeration::Complete {
+                        observed_at: time(30),
+                        timestamp_bounds: None,
+                        comments,
+                    },
+                ),
+                Unresolved
+            );
+        }
+    }
+
+    #[test]
     fn fails_closed_when_the_enumeration_exceeds_its_bound() {
         let target = GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target");
         let expected = expected(&target);
@@ -335,6 +418,7 @@ mod tests {
                 &expected,
                 CommentEnumeration::Complete {
                     observed_at: time(30),
+                    timestamp_bounds: EXACT_TIME,
                     comments: &comments,
                 }
             ),

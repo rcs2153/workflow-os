@@ -458,6 +458,21 @@ now exercises both row orders and checks that recovery posture and events
 remain unchanged. Provider time mapping, transport completeness, and proof
 of the originally accepted payload are still separate requirements.
 
+### Conservative Provider Timestamp Mapping
+
+The private verifier requires an explicit pair of inclusive signed
+corrections from the reported provider timestamp to the trusted local
+timeline. The bounds must cover the combined uncertainty from timestamp
+encoding and clock differences at creation, not just at lookup. All possible
+creation times must be at or after the recorded reservation, strictly before
+the recorded deadline, and no later than the observation. Unknown or reversed
+bounds stay unresolved, as does unrepresentable timestamp arithmetic. Zero
+correction is used only by exact-time synthetic fixtures. Nothing in this
+path estimates clock skew, trusts provider display precision, or attests a
+live adapter's mapping. Before admitting live data, establish a defensible
+source for those bounds; otherwise leave the outcome unresolved. Matching
+creation and update timestamps still do not prove the original payload.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
