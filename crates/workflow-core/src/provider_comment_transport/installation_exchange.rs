@@ -440,15 +440,17 @@ struct Exchange<'a> {
     origin: &'a str,
 }
 
-pub(super) fn exchange_installation_scope(
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn exchange_installation_scope(
     scope: ReviewedInstallation<'_>,
-    signed_app_assertion: &str,
+    signed_app_assertion: super::installation_signer_channel::InstallationAppAssertion,
 ) -> Option<VerifiedInstallationScope> {
+    let (assertion, expires_at) = signed_app_assertion.into_parts();
     Exchange {
         agent: github_agent(),
         origin: GITHUB_ORIGIN,
     }
-    .exchange(scope, signed_app_assertion, Timestamp::now_utc)
+    .exchange(scope, &assertion, expires_at, Timestamp::now_utc)
 }
 
 impl Exchange<'_> {
@@ -456,12 +458,14 @@ impl Exchange<'_> {
         &self,
         scope: ReviewedInstallation<'_>,
         app_assertion: &str,
+        assertion_deadline: Timestamp,
         now: impl Fn() -> Timestamp,
     ) -> Option<VerifiedInstallationScope> {
         scope.target.validate().ok()?;
         let adapter = self.adapter_commitment()?;
         let started = now();
-        if started >= scope.deadline
+        let issuance_deadline = scope.deadline.min(assertion_deadline);
+        if started >= issuance_deadline
             || !valid_app_assertion(app_assertion)
             || !valid_app_slug(scope.app_slug)
         {
@@ -484,7 +488,7 @@ impl Exchange<'_> {
             return None;
         }
         let before_issue = now();
-        if before_issue < started || before_issue >= scope.deadline {
+        if before_issue < started || before_issue >= issuance_deadline {
             return None;
         }
         let issued = self.issue(scope, app_assertion, &installation_path)?;
@@ -647,7 +651,7 @@ fn valid_app_slug(slug: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-fn valid_app_assertion(assertion: &str) -> bool {
+pub(super) fn valid_app_assertion(assertion: &str) -> bool {
     if assertion.len() > 8192 {
         return false;
     }
@@ -788,7 +792,7 @@ pub(crate) mod tests {
                 agent: github_agent(),
                 origin: &origin,
             };
-            let verified = exchange.exchange(scope, ASSERTION, &now);
+            let verified = exchange.exchange(scope, ASSERTION, scope.deadline, &now);
             assert_eq!(
                 verified
                     .as_ref()

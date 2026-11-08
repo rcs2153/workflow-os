@@ -32,6 +32,9 @@ toml = { version = "=0.8.23", default-features = false, features = ["parse"] }
 ureq = "2.12"
 url = "2.5"
 
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+nix = { version = "0.30", features = ["poll", "socket", "user"] }
+
 [dev-dependencies]
 
 [lints]

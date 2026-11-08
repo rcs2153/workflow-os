@@ -29,6 +29,10 @@ use crate::provider_comment_transport::installation_exchange::{
     InstallationCommentTransport, InstallationCreationContext, ReviewedInstallation,
     VerifiedInstallationCreation, VerifiedInstallationScope,
 };
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::provider_comment_transport::installation_signer_channel::{
+    InstallationAppAssertion, InstallationSignerChannel, InstallationSignerRequest,
+};
 #[cfg(test)]
 use crate::provider_comment_transport::PreparedGitHubCommentCreation;
 use crate::provider_comment_transport::{
@@ -533,7 +537,54 @@ impl SqliteStateBackend {
         )
     }
 
-    #[allow(dead_code)] // No real signer or provider call is connected here.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[allow(dead_code)] // No operator or harness entry is admitted.
+    pub(super) fn exchange_with_installation_signer(
+        &self,
+        request: &DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        claim: InstallationIssuanceClaim,
+        channel: InstallationSignerChannel,
+    ) -> Result<Option<InstallationExchangedScope>, WorkflowOsError> {
+        self.exchange_with_installation_signer_using(
+            request,
+            admission,
+            reviewed,
+            claim,
+            channel,
+            crate::provider_comment_transport::installation_exchange::exchange_installation_scope,
+        )
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(super) fn exchange_with_installation_signer_using(
+        &self,
+        request: &DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        claim: InstallationIssuanceClaim,
+        channel: InstallationSignerChannel,
+        exchange: impl FnOnce(
+            ReviewedInstallation<'_>,
+            InstallationAppAssertion,
+        ) -> Option<VerifiedInstallationScope>,
+    ) -> Result<Option<InstallationExchangedScope>, WorkflowOsError> {
+        self.recheck_installation_exchange_claim(request, admission, reviewed, &claim)?;
+        let commitment = claim.record.commitment()?;
+        let signer_request = InstallationSignerRequest::new(
+            &claim.record.operation,
+            &commitment,
+            &claim.record.scope,
+            claim.record.deadline,
+        );
+        let assertion = channel.request(&signer_request)?;
+        let now = self.recheck_installation_exchange_claim(request, admission, reviewed, &claim)?;
+        let verified = exchange(reviewed, assertion);
+        finish_installation_exchange(claim, verified, now)
+    }
+
+    #[cfg(test)]
     pub(super) fn use_installation_exchange_claim(
         &self,
         request: &DispatchReservationRequest,
@@ -542,6 +593,18 @@ impl SqliteStateBackend {
         claim: InstallationIssuanceClaim,
         exchange: impl FnOnce() -> Option<VerifiedInstallationScope>,
     ) -> Result<Option<InstallationExchangedScope>, WorkflowOsError> {
+        let now = self.recheck_installation_exchange_claim(request, admission, reviewed, &claim)?;
+        finish_installation_exchange(claim, exchange(), now)
+    }
+
+    #[allow(dead_code)] // Other targets expose no signer channel.
+    fn recheck_installation_exchange_claim(
+        &self,
+        request: &DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        claim: &InstallationIssuanceClaim,
+    ) -> Result<Timestamp, WorkflowOsError> {
         let mut connection = self.existing_read_only_connection()?;
         let tx = connection
             .transaction()
@@ -561,13 +624,7 @@ impl SqliteStateBackend {
             return Err(not_dispatchable());
         }
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
-        let Some(verified) = exchange() else {
-            return Ok(None);
-        };
-        if verified.verified_at() < now {
-            return Err(not_dispatchable());
-        }
-        Ok(Some(InstallationExchangedScope { claim, verified }))
+        Ok(now)
     }
 
     /// Inspects an existing synthetic reservation without granting authority,
@@ -2134,6 +2191,21 @@ fn read_live_recovery_admission(
         witness: record.live_witness,
         committed_at: record.committed_at,
     })
+}
+
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+fn finish_installation_exchange(
+    claim: InstallationIssuanceClaim,
+    verified: Option<VerifiedInstallationScope>,
+    checked_at: Timestamp,
+) -> Result<Option<InstallationExchangedScope>, WorkflowOsError> {
+    let Some(verified) = verified else {
+        return Ok(None);
+    };
+    if verified.verified_at() < checked_at {
+        return Err(not_dispatchable());
+    }
+    Ok(Some(InstallationExchangedScope { claim, verified }))
 }
 
 fn installation_disposition(
