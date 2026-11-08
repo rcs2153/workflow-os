@@ -4167,7 +4167,8 @@ mod tests {
         expiry: Timestamp,
     ) {
         use crate::provider_comment_observation::{
-            CommentEnumeration, CurrentCommentPosture, ProviderComment, ProviderTimestampBounds,
+            CommentEnumeration, CommentPage, CurrentCommentPosture, ProviderComment,
+            ProviderTimestampBounds,
         };
         use std::num::NonZeroU64;
 
@@ -4208,7 +4209,7 @@ mod tests {
             earliest_correction: time::Duration::ZERO,
             latest_correction: time::Duration::ZERO,
         });
-        let observe = |observed_at, timestamp_bounds, comments: &[ProviderComment<'_>]| {
+        let observe = |observed_at, timestamp_bounds, pages: &[CommentPage<'_>]| {
             backend
                 .observe_reserved_sandbox_comment(operation, action, &adapter, |target, key| {
                     assert_eq!(target, action.target);
@@ -4216,7 +4217,7 @@ mod tests {
                     CommentEnumeration::Complete {
                         observed_at,
                         timestamp_bounds,
-                        comments,
+                        pages,
                     }
                 })
                 .expect("reserved comment observation")
@@ -4242,22 +4243,17 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                observe(observed_at, exact_time, std::slice::from_ref(&comment)),
+                observe(
+                    observed_at,
+                    exact_time,
+                    &[CommentPage::single(std::slice::from_ref(&comment))]
+                ),
                 expected
             );
         }
-        let edited = ProviderComment {
-            raw_body: "edited without marker",
-            ..comment
-        };
-        for comments in [[comment, edited], [edited, comment]] {
-            assert_eq!(
-                observe(now, exact_time, &comments),
-                CurrentCommentPosture::Unresolved
-            );
-        }
+        assert_cross_page_comment_conflict(comment, |pages| observe(now, exact_time, pages));
         assert_eq!(
-            observe(now, None, &[comment]),
+            observe(now, None, &[CommentPage::single(&[comment])]),
             CurrentCommentPosture::Unresolved
         );
         assert_eq!(inspect(), before);
@@ -4267,6 +4263,35 @@ mod tests {
                 .expect("history after lookup"),
             events
         );
+    }
+
+    fn assert_cross_page_comment_conflict(
+        comment: crate::provider_comment_observation::ProviderComment<'_>,
+        observe: impl Fn(
+            &[crate::provider_comment_observation::CommentPage<'_>],
+        ) -> crate::provider_comment_observation::CurrentCommentPosture,
+    ) {
+        use crate::provider_comment_observation::{
+            CommentPage, CurrentCommentPosture, ProviderComment,
+        };
+        let edited = ProviderComment {
+            raw_body: "edited without marker",
+            ..comment
+        };
+        let cursor = std::num::NonZeroU64::new(1);
+        for (first, last) in [(comment, edited), (edited, comment)] {
+            let pages = [
+                CommentPage {
+                    next_cursor: cursor,
+                    ..CommentPage::single(std::slice::from_ref(&first))
+                },
+                CommentPage {
+                    request_cursor: cursor,
+                    ..CommentPage::single(std::slice::from_ref(&last))
+                },
+            ];
+            assert_eq!(observe(&pages), CurrentCommentPosture::Unresolved);
+        }
     }
 
     fn assert_live_reservation_witness_tamper_denied(
