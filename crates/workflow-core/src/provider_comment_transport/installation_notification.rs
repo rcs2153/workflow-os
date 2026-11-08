@@ -23,6 +23,7 @@ pub(crate) struct ReviewedCreationReceiver<'a> {
     pub(crate) writer_scope: &'a SpecContentHash,
     pub(crate) github_hmac: &'a [u8; 32],
     pub(crate) attestation_key: &'a [u8; 32],
+    pub(crate) webhook_verifier_generation: Option<&'a SpecContentHash>,
 }
 
 #[derive(Clone, Copy)]
@@ -38,6 +39,7 @@ pub(crate) struct PreparedCreation<'a> {
     pub(crate) preparation_time: &'a TrustedTimeObservation,
     pub(crate) checked_at: &'a TrustedTimeObservation,
     pub(crate) deadline: Timestamp,
+    pub(crate) observer_profile: Option<&'a super::InstallationObserverProfile>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -74,6 +76,7 @@ pub(crate) struct CreationCandidate {
     marker_commitment: SpecContentHash,
     receipt_commitment: SpecContentHash,
     received_latest: Timestamp,
+    observer_profile: Option<SpecContentHash>,
 }
 
 impl CreationCandidate {
@@ -88,10 +91,16 @@ impl CreationCandidate {
         reservation: &SpecContentHash,
         body: &SpecContentHash,
         marker: &SpecContentHash,
+        observer_profile: Option<&super::InstallationObserverProfile>,
     ) -> Option<NonZeroU64> {
+        let expected_profile = match observer_profile {
+            Some(profile) => Some(profile.commitment()?),
+            None => None,
+        };
         (&self.reservation == reservation
             && &self.body_commitment == body
-            && &self.marker_commitment == marker)
+            && &self.marker_commitment == marker
+            && self.observer_profile == expected_profile)
             .then_some(self.comment_id)
     }
 }
@@ -154,6 +163,12 @@ pub(crate) fn verify_creation_notification(
         || receipt.receiving_installation != receiver.installation
         || !valid_receipt_time(&expected, receipt)
         || receipt.payload_digest != SpecContentHash::from_bytes(input.body)
+        || expected.observer_profile.is_some_and(|profile| {
+            receiver.installation != profile.receiver_installation
+                || receiver.attestation_key != &profile.attestation_key
+                || receiver.webhook_verifier_generation
+                    != Some(&profile.webhook_verifier_generation)
+        })
     {
         return None;
     }
@@ -176,6 +191,10 @@ pub(crate) fn verify_creation_notification(
     let repo = format!("{}/{}", target.owner(), target.repository());
     let api = format!("https://api.github.com/repos/{repo}");
     let number = target.pull_request_number();
+    let observer_profile = match expected.observer_profile {
+        Some(profile) => Some(profile.commitment()?),
+        None => None,
+    };
     (event.action == "created"
         && event.installation.id == receiver.installation
         && event.repository.id == expected.repository
@@ -194,6 +213,7 @@ pub(crate) fn verify_creation_notification(
         marker_commitment: expected.marker_commitment.clone(),
         receipt_commitment,
         received_latest: receipt.latest.observed_at(),
+        observer_profile,
     })
 }
 
@@ -246,6 +266,24 @@ fn decode_signature(header: &str) -> Option<[u8; 32]> {
 pub(crate) mod tests {
     use super::*;
     use ring::signature::KeyPair;
+
+    pub(crate) fn fixture_observer_profile() -> super::super::InstallationObserverProfile {
+        let signer =
+            signature::Ed25519KeyPair::from_seed_unchecked(&[7; 32]).expect("fixture signing key");
+        super::super::InstallationObserverProfile {
+            receiver_installation: NonZeroU64::new(91).expect("receiver installation"),
+            attestation_key: signer
+                .public_key()
+                .as_ref()
+                .try_into()
+                .expect("fixture public key"),
+            webhook_verifier_generation: SpecContentHash::from_text("fixture webhook generation 1"),
+            reader: NonZeroU64::new(777).expect("reader id"),
+            reader_access_review: SpecContentHash::from_text(
+                "fixture independent repository reader",
+            ),
+        }
+    }
     use serde_json::{json, Value};
     use std::fmt::Write;
 
@@ -288,6 +326,7 @@ pub(crate) mod tests {
     ) -> CreationCandidate {
         let signer =
             signature::Ed25519KeyPair::from_seed_unchecked(&[7; 32]).expect("fixture signing key");
+        let profile = fixture_observer_profile();
         let receiver = ReviewedCreationReceiver {
             installation: NonZeroU64::new(91).expect("independent receiving installation"),
             repository: NonZeroU64::new(123).expect("repository id"),
@@ -298,6 +337,7 @@ pub(crate) mod tests {
                 .as_ref()
                 .try_into()
                 .expect("fixture public key"),
+            webhook_verifier_generation: Some(&profile.webhook_verifier_generation),
         };
         let payload = provider_payload(body);
         assert_receipt_authentication(&payload, receiver, &signer, earliest, latest, &verify);

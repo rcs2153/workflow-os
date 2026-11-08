@@ -186,8 +186,8 @@ fn live_installation_comment_recovers_across_process_replacement() {
             .recover_installation_comment(
                 &handoff.operation,
                 handoff.action(),
-                || panic!("terminal replay cannot load notification"),
-                || panic!("terminal replay cannot load reader")
+                |_| panic!("terminal replay cannot load notification"),
+                |_| panic!("terminal replay cannot load reader")
             )
             .expect("terminal proof replay"),
         InstallationCommentRecoveryPosture::ObservationReconciled,
@@ -266,8 +266,8 @@ fn replacement_child() {
                         .recover_installation_comment(
                             &handoff.operation,
                             handoff.action(),
-                            || Some((receiver, notification)),
-                            || Some(reader)
+                            |_| Some((receiver, notification)),
+                            |_| Some(reader)
                         )
                         .expect("reconcile replacement"),
                     InstallationCommentRecoveryPosture::ObservationReconciled,

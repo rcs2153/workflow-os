@@ -24,6 +24,7 @@ use crate::provider_comment_observation::{
     verify_current_comment, CommentEnumeration, CreatedCommentResponse, CurrentCommentPosture,
     ExpectedComment, MARKER_NAMESPACE,
 };
+use crate::provider_comment_transport::InstallationObserverProfile;
 
 mod observation_journal;
 
@@ -105,6 +106,7 @@ struct InstallationSendPreparationRecord {
 struct InstallationInventoryContext {
     record: InstallationSendPreparationRecord,
     provider: LiveSandboxProviderBinding,
+    observer_profile: Option<InstallationObserverProfile>,
 }
 
 type CollectedInstallationInventory = (
@@ -136,6 +138,7 @@ fn installation_inventory_context(
     Ok(record.map(|record| InstallationInventoryContext {
         record,
         provider: witness.provider.clone(),
+        observer_profile: witness.installation_observer_profile.clone(),
     }))
 }
 
@@ -272,6 +275,11 @@ fn verify_reviewed_installation(
         || scope.bot_id != provider.author_id
         || scope.comment_adapter != &provider.adapter_commitment
         || scope.deadline != deadline
+        || scope.observer_profile.is_some_and(|profile| {
+            fixture
+                || profile.reader == scope.bot_id
+                || profile.receiver_installation == scope.installation_id
+        })
         || (!fixture
             && installation_target_revision(
                 scope.target,
@@ -279,6 +287,7 @@ fn verify_reviewed_installation(
                 scope.app_slug,
                 scope.installation_id,
                 provider,
+                scope.observer_profile,
             )
             .as_ref()
                 != Some(registered.revision()))
@@ -883,6 +892,7 @@ impl SqliteStateBackend {
                 preparation_time: &record.clock,
                 checked_at: &checked_at,
                 deadline: record.deadline,
+                observer_profile: witness.installation_observer_profile.as_ref(),
             },
             receiver,
             notification,
@@ -940,11 +950,16 @@ impl SqliteStateBackend {
         let Some(context) = self.read_installation_inventory_context(operation, action)? else {
             return Ok(None);
         };
-        let InstallationInventoryContext { record, provider } = &context;
+        let InstallationInventoryContext {
+            record,
+            provider,
+            observer_profile,
+        } = &context;
         let Some(comment_id) = candidate.prepared_comment_id(
             &record.reservation,
             &record.body_commitment,
             &record.marker_commitment,
+            observer_profile.as_ref(),
         ) else {
             return Ok(None);
         };
@@ -957,6 +972,7 @@ impl SqliteStateBackend {
             comment_id,
             body: &record.body_commitment,
             marker: &record.marker_commitment,
+            observer_profile: observer_profile.as_ref(),
         });
         Ok(traversal.map(|value| (context, value, comment_id)))
     }
@@ -2196,6 +2212,9 @@ impl SqliteStateBackend {
         let trusted_commitment = trusted_time_commitment(&observation);
         let next_revision = request.capability.window_revision.checked_next()?;
         let live_witness = if let Some((effect, provider, deadline)) = attempted_effect {
+            let observer_profile = scope
+                .as_ref()
+                .and_then(|scope| scope.reviewed.observer_profile);
             let claim_commitment = scope
                 .as_ref()
                 .and_then(|scope| scope.claim)
@@ -2210,6 +2229,9 @@ impl SqliteStateBackend {
             } else {
                 None
             };
+            if observer_profile.is_some() && preparation_version.is_none() {
+                return Err(not_dispatchable());
+            }
             let (scope_commitment, deadline) = if let Some(scope) = scope {
                 let (commitment, effective_deadline) = scope.validate(
                     &transaction,
@@ -2240,6 +2262,7 @@ impl SqliteStateBackend {
                 installation_scope_commitment: scope_commitment,
                 installation_issuance_claim_commitment: claim_commitment,
                 installation_send_preparation_version: preparation_version,
+                installation_observer_profile: observer_profile.cloned(),
             })
         } else {
             None

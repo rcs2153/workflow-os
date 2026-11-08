@@ -4701,6 +4701,7 @@ mod tests {
             run_id: action.run,
             immutable_run: action.bundle_root,
             comment_adapter: &provider.adapter_commitment,
+            observer_profile: None,
             deadline,
         };
         let mode = match trial {
@@ -4818,6 +4819,22 @@ mod tests {
         SignerAdmissionContended,
     }
 
+    fn installation_fixture_observers(
+        trial: InstallationClaimTrial,
+    ) -> Option<crate::provider_comment_transport::InstallationObserverProfile> {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if matches!(
+            trial,
+            InstallationClaimTrial::Coordinator(
+                CoordinatorTrial::ObservedRecovery { .. } | CoordinatorTrial::ProcessRecovery
+            )
+        ) {
+            return Some(crate::provider_comment_transport::installation_notification::tests::fixture_observer_profile());
+        }
+        let _ = trial;
+        None
+    }
+
     #[allow(clippy::too_many_lines)]
     fn exercise_installation_claim(
         backend: &SqliteStateBackend,
@@ -4848,6 +4865,7 @@ mod tests {
             request.request_commitment = crate::dispatch_reservation::request_commitment(&request);
             request
         };
+        let observer_profile = installation_fixture_observers(trial);
         let reviewed = ReviewedInstallation {
             app_id: std::num::NonZeroU64::new(33).expect("app"),
             app_slug: "offline-contract-fixture",
@@ -4858,6 +4876,7 @@ mod tests {
             run_id: action.run,
             immutable_run: action.bundle_root,
             comment_adapter: &provider.adapter_commitment,
+            observer_profile: observer_profile.as_ref(),
             deadline,
         };
         #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -4913,8 +4932,8 @@ mod tests {
                 .recover_installation_comment(
                     &operation,
                     action,
-                    || panic!("historical disposition needs no notification"),
-                    || panic!("historical disposition needs no reader"),
+                    |_| panic!("historical disposition needs no notification"),
+                    |_| panic!("historical disposition needs no reader"),
                 )
                 .expect("recover exact historical disposition"),
             expected
@@ -5042,6 +5061,25 @@ mod tests {
             ..action
         };
         assert!(coordinate(wrong).is_err());
+        if let Some(profile) = reviewed.observer_profile {
+            let mut substituted = profile.clone();
+            substituted.reader_access_review =
+                SpecContentHash::from_text("different reader review");
+            let changed =
+                crate::provider_comment_transport::installation_exchange::ReviewedInstallation {
+                    observer_profile: Some(&substituted),
+                    ..reviewed
+                };
+            assert!(backend
+                .coordinate_scoped_installation_comment(
+                    request(),
+                    admission,
+                    action,
+                    changed,
+                    || panic!("changed target observer profile cannot open the signer"),
+                )
+                .is_err());
+        }
         assert_eq!(opens.get(), 0);
 
         let expected = if trial == CoordinatorTrial::Unavailable {
@@ -5380,14 +5418,18 @@ mod tests {
         contradictory: bool,
     ) {
         use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture::ReconciliationRequired;
-        use crate::provider_comment_transport::{
-            installation_notification::CreationNotification,
-            tests::{with_independent_inventory, InventoryTrial},
+        use crate::provider_comment_transport::tests::{
+            with_independent_inventory, InventoryTrial,
         };
         let (receiver, notification, candidate) = evidence;
         let operation = &request.operation_id;
-        let no_notification = || panic!("must not load recovery notification");
-        let no_reader = || panic!("must not open reader");
+        let no_notification =
+            |_: &crate::provider_comment_transport::InstallationObserverProfile| {
+                panic!("must not load recovery notification")
+            };
+        let no_reader = |_: &crate::provider_comment_transport::InstallationObserverProfile| {
+            panic!("must not open reader")
+        };
         assert_eq!(
             backend
                 .recover_installation_comment(operation, action, no_notification, no_reader)
@@ -5404,25 +5446,14 @@ mod tests {
         assert!(backend
             .recover_installation_comment(operation, wrong_action, no_notification, no_reader)
             .is_err());
-        let malformed = CreationNotification {
-            github_signature: "invalid",
-            ..notification
-        };
-        for received in [None, Some((receiver, malformed))] {
-            assert_eq!(
-                backend
-                    .recover_installation_comment(operation, action, || received, no_reader)
-                    .expect("unavailable or invalid notification"),
-                ReconciliationRequired,
-            );
-        }
+        assert_installation_receiver_pin(backend, operation, action, receiver, notification);
         let attempt = |trial| {
             with_independent_inventory(trial, body, writer_scope, |reader| {
                 backend.recover_installation_comment(
                     operation,
                     action,
-                    || Some((receiver, notification)),
-                    || Some(reader),
+                    |_| Some((receiver, notification)),
+                    |_| Some(reader),
                 )
             })
         };
@@ -5430,6 +5461,15 @@ mod tests {
             attempt(InventoryTrial::Truncated).expect("incomplete read"),
             ReconciliationRequired
         );
+        for substituted in [
+            InventoryTrial::SubstitutedReader,
+            InventoryTrial::SubstitutedAccessReview,
+        ] {
+            assert_eq!(
+                attempt(substituted).expect("reject changed reader before transport"),
+                ReconciliationRequired
+            );
+        }
         if contradictory {
             assert_eq!(
                 attempt(InventoryTrial::Duplicate).expect("retain contradiction"),
@@ -5472,6 +5512,73 @@ mod tests {
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn assert_installation_receiver_pin(
+        backend: &SqliteStateBackend,
+        operation: &crate::dispatch_reservation::DispatchReservationOperationId,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        receiver: crate::provider_comment_transport::installation_notification::ReviewedCreationReceiver<'_>,
+        notification: crate::provider_comment_transport::installation_notification::CreationNotification<'_>,
+    ) {
+        use crate::provider_comment_transport::installation_notification::{
+            CreationNotification, ReviewedCreationReceiver,
+        };
+        use ring::signature::{Ed25519KeyPair, KeyPair};
+        let malformed = CreationNotification {
+            github_signature: "invalid",
+            ..notification
+        };
+        for received in [None, Some((receiver, malformed))] {
+            assert_eq!(
+                backend.recover_installation_comment(
+                    operation, action, |_| received,
+                    |_| panic!("invalid or missing notification must not open the reader"),
+                ).expect("unavailable or invalid notification"),
+                super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture::ReconciliationRequired,
+            );
+        }
+        let key = Ed25519KeyPair::from_seed_unchecked(&[9; 32]).expect("alternate signing key");
+        let signed = key.sign(
+            &notification
+                .receipt
+                .signing_bytes()
+                .expect("fixture receipt"),
+        );
+        let alternate_generation =
+            SpecContentHash::from_text("alternate webhook verifier generation");
+        for (substituted, supplied) in [
+            (
+                ReviewedCreationReceiver {
+                    attestation_key: key
+                        .public_key()
+                        .as_ref()
+                        .try_into()
+                        .expect("alternate public key"),
+                    ..receiver
+                },
+                CreationNotification {
+                    receipt_signature: signed.as_ref().try_into().expect("alternate signature"),
+                    ..notification
+                },
+            ),
+            (
+                ReviewedCreationReceiver {
+                    webhook_verifier_generation: Some(&alternate_generation),
+                    ..receiver
+                },
+                notification,
+            ),
+        ] {
+            assert_eq!(
+                backend.recover_installation_comment(
+                    operation, action, |_| Some((substituted, supplied)),
+                    |_| panic!("receiver substitution must fail before opening the reader"),
+                ).expect("reject changed receiver"),
+                super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture::ReconciliationRequired,
+            );
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn assert_installation_recovery_replay(
         backend: &SqliteStateBackend,
         operation: &crate::dispatch_reservation::DispatchReservationOperationId,
@@ -5483,8 +5590,8 @@ mod tests {
             reopened.recover_installation_comment(
                 operation,
                 action,
-                || panic!("replay needs no notification"),
-                || panic!("replay needs no reader"),
+                |_| panic!("replay needs no notification"),
+                |_| panic!("replay needs no reader"),
             )
         };
         for _ in 0..2 {
@@ -5541,6 +5648,14 @@ mod tests {
         backend
             .enable_installation_observation_journal()
             .expect("explicit V18 journal");
+        assert_eq!(
+            backend.recover_installation_comment(
+                &request.operation_id, action,
+                |_| panic!("an upgraded legacy preparation must not load a receiver"),
+                |_| panic!("an upgraded legacy preparation must not load a reader"),
+            ).expect("inspect legacy operation"),
+            super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture::ReconciliationRequired,
+        );
         let reopened = SqliteStateBackend::open(&backend.database_path).expect("reopen journal");
         let record = |trial| {
             with_independent_inventory(trial, body, writer_scope, |reader| {
@@ -6563,6 +6678,7 @@ mod tests {
             run_id: action.run,
             immutable_run: action.bundle_root,
             comment_adapter: &provider.adapter_commitment,
+            observer_profile: None,
             deadline,
         };
         let reserve = |scope, proof| {
@@ -7723,10 +7839,12 @@ mod tests {
                     author_id: std::num::NonZeroU64::new(456).expect("provider author id"),
                     adapter_commitment: adapter_commitment.clone(),
                 };
-                let target_revision = if matches!(trial, LiveGrantTrial::InstallationClaim(_)) {
+                let target_revision = if let LiveGrantTrial::InstallationClaim(claim_trial) = trial
+                {
+                    let observers = installation_fixture_observers(claim_trial);
                     crate::provider_comment_transport::installation_exchange::installation_target_revision(
                         action.target, std::num::NonZeroU64::new(33).expect("app"), "offline-contract-fixture",
-                        std::num::NonZeroU64::new(44).expect("installation"), &provider_binding(),
+                        std::num::NonZeroU64::new(44).expect("installation"), &provider_binding(), observers.as_ref(),
                     ).expect("installation target revision")
                 } else {
                     SpecContentHash::from_text("synthetic target revision")

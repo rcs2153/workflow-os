@@ -6,8 +6,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{
     bounded_read, comment_path, github_agent, github_request, CommentSendWindow,
-    GitHubPullRequestIdentity, GitHubRepositoryIdentity, GITHUB_ORIGIN,
-    MAX_IDENTITY_RESPONSE_BYTES,
+    GitHubPullRequestIdentity, GitHubRepositoryIdentity, InstallationObserverProfile,
+    GITHUB_ORIGIN, MAX_IDENTITY_RESPONSE_BYTES,
 };
 use crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding;
 use crate::provider_comment_observation::{
@@ -31,6 +31,7 @@ pub(crate) struct ReviewedInstallation<'a> {
     pub(crate) run_id: &'a WorkflowRunId,
     pub(crate) immutable_run: &'a SpecContentHash,
     pub(crate) comment_adapter: &'a SpecContentHash,
+    pub(crate) observer_profile: Option<&'a InstallationObserverProfile>,
     pub(crate) deadline: Timestamp,
 }
 
@@ -48,11 +49,12 @@ pub(crate) fn installation_target_revision(
     app_slug: &str,
     installation_id: NonZeroU64,
     provider: &crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding,
+    observer_profile: Option<&InstallationObserverProfile>,
 ) -> Option<SpecContentHash> {
     if !valid_app_slug(app_slug) {
         return None;
     }
-    serde_json::to_vec(&(
+    let original = serde_json::to_vec(&(
         "workflow-os/github-installation-target-revision/v1",
         target,
         app_id,
@@ -61,7 +63,12 @@ pub(crate) fn installation_target_revision(
         provider,
     ))
     .ok()
-    .map(SpecContentHash::from_bytes)
+    .map(SpecContentHash::from_bytes)?;
+    bind_observer_profile(
+        "workflow-os/installation-target-observers/v1",
+        original,
+        observer_profile,
+    )
 }
 
 // No export, conversion to comment auth, or serialization. This is provider
@@ -659,7 +666,7 @@ fn scope_commitment(
     scope: ReviewedInstallation<'_>,
     adapter: &SpecContentHash,
 ) -> Option<SpecContentHash> {
-    serde_json::to_vec(&(
+    let original = serde_json::to_vec(&(
         "workflow-os/github-installation-scope-receipt/v1",
         scope.run_id,
         scope.immutable_run,
@@ -674,9 +681,26 @@ fn scope_commitment(
         adapter,
     ))
     .ok()
-    .map(SpecContentHash::from_bytes)
+    .map(SpecContentHash::from_bytes)?;
+    bind_observer_profile(
+        "workflow-os/installation-scope-observers/v1",
+        original,
+        scope.observer_profile,
+    )
 }
 
+fn bind_observer_profile(
+    domain: &str,
+    original: SpecContentHash,
+    profile: Option<&InstallationObserverProfile>,
+) -> Option<SpecContentHash> {
+    let Some(profile) = profile else {
+        return Some(original);
+    };
+    serde_json::to_vec(&(domain, original, profile.commitment()?))
+        .ok()
+        .map(SpecContentHash::from_bytes)
+}
 fn valid_app_slug(slug: &str) -> bool {
     !slug.is_empty()
         && slug.len() <= 100
@@ -814,6 +838,7 @@ pub(crate) mod tests {
             run_id: &run,
             immutable_run: &immutable_run,
             comment_adapter: &comment_adapter,
+            observer_profile: None,
             deadline: at(50),
         };
         thread::scope(|threads| {

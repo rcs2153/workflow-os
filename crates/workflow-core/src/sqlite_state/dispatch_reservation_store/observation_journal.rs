@@ -13,7 +13,7 @@ use crate::provider_comment_transport::{
     installation_notification::{
         CreationCandidate, CreationNotification, ReviewedCreationReceiver,
     },
-    IndependentCommentInventory,
+    IndependentCommentInventory, InstallationObserverProfile,
 };
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
@@ -49,6 +49,8 @@ struct ObservationIdentity {
     reader: NonZeroU64,
     candidate: NonZeroU64,
     posture: CurrentCommentPosture,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    observer_profile: Option<SpecContentHash>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     recovery_started_at: Option<Timestamp>,
 }
@@ -87,6 +89,7 @@ fn read_journal(
     context: &InstallationInventoryContext,
 ) -> Result<Vec<(SpecContentHash, ObservationRecord)>, WorkflowOsError> {
     let (_, preparation) = installation_send_preparation_payload(&context.record)?;
+    let observer_profile = observer_profile_commitment(context)?;
     let mut statement = tx
         .prepare(
             "SELECT evidence_id, payload, payload_hash FROM installation_observation_journal
@@ -112,6 +115,11 @@ fn read_journal(
             || record.identity.operation != operation.as_str()
             || record.identity.preparation != preparation
             || record.identity.reader == context.provider.author_id
+            || record.identity.observer_profile != observer_profile
+            || context
+                .observer_profile
+                .as_ref()
+                .is_some_and(|profile| record.identity.reader != profile.reader)
             || !verify_clock(&record.clock, &context.record.clock)
             || record.identity.received_latest < context.record.clock.observed_at()
             || record.identity.received_latest >= context.record.deadline
@@ -147,8 +155,19 @@ fn observation_identity(
         reader: traversal.reader,
         candidate: *comment,
         posture: traversal.posture,
+        observer_profile: observer_profile_commitment(context)?,
         recovery_started_at: None,
     })
+}
+
+fn observer_profile_commitment(
+    context: &InstallationInventoryContext,
+) -> Result<Option<SpecContentHash>, WorkflowOsError> {
+    context
+        .observer_profile
+        .as_ref()
+        .map(|profile| profile.commitment().ok_or_else(corrupt))
+        .transpose()
 }
 
 fn within_recovery_observation_interval(
@@ -213,15 +232,12 @@ pub(super) fn verify_observed_completion(
 ) -> Result<bool, WorkflowOsError> {
     require_journal_schema(tx)?;
     let operation = &admission.operation;
+    let witness = admission.witness.as_ref().ok_or_else(corrupt)?;
     let context = InstallationInventoryContext {
         record: read_bound_installation_preparation(tx, operation, admission)?
             .ok_or_else(corrupt)?,
-        provider: admission
-            .witness
-            .as_ref()
-            .ok_or_else(corrupt)?
-            .provider
-            .clone(),
+        provider: witness.provider.clone(),
+        observer_profile: witness.installation_observer_profile.clone(),
     };
     let records = read_journal(tx, operation, &context)?;
     let Some((_, first)) = records.first() else {
@@ -267,10 +283,15 @@ impl SqliteStateBackend {
         &self,
         operation: &DispatchReservationOperationId,
         action: GitHubCommentContinuationAction<'_>,
-        receive: impl FnOnce() -> Option<(ReviewedCreationReceiver<'a>, CreationNotification<'a>)>,
-        open_reader: impl FnOnce() -> Option<IndependentCommentInventory<'b>>,
+        receive: impl FnOnce(
+            &InstallationObserverProfile,
+        )
+            -> Option<(ReviewedCreationReceiver<'a>, CreationNotification<'a>)>,
+        open_reader: impl FnOnce(
+            &InstallationObserverProfile,
+        ) -> Option<IndependentCommentInventory<'b>>,
     ) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
-        {
+        let profile = {
             let mut connection = self.existing_read_only_connection()?;
             let tx = connection
                 .transaction()
@@ -288,9 +309,15 @@ impl SqliteStateBackend {
             {
                 return Ok(posture);
             }
-        }
+            admission
+                .witness
+                .and_then(|witness| witness.installation_observer_profile)
+        };
         let unresolved = InstallationCommentRecoveryPosture::ReconciliationRequired;
-        let Some((receiver, notification)) = receive() else {
+        let Some(profile) = profile else {
+            return Ok(unresolved);
+        };
+        let Some((receiver, notification)) = receive(&profile) else {
             return Ok(unresolved);
         };
         let Some(candidate) = self.verify_prepared_installation_notification(
@@ -302,7 +329,7 @@ impl SqliteStateBackend {
         else {
             return Ok(unresolved);
         };
-        let Some(reader) = open_reader() else {
+        let Some(reader) = open_reader(&profile) else {
             return Ok(unresolved);
         };
         self.reconcile_prepared_installation_comment(operation, action, &candidate, &reader)?;
