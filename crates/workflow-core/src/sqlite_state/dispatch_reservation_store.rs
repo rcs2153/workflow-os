@@ -19,7 +19,8 @@ use crate::dispatch_reservation::{
     LiveSandboxReservationWitness, ReservedAttemptDispatchCapability,
 };
 use crate::provider_comment_observation::{
-    verify_current_comment, CommentEnumeration, CurrentCommentPosture, ExpectedComment,
+    can_encode_marked_comment, encode_marked_comment, verify_current_comment, CommentEnumeration,
+    CurrentCommentPosture, ExpectedComment, MARKER_NAMESPACE,
 };
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
@@ -108,7 +109,7 @@ fn live_comment_marker(action: &SpecContentHash, reservation: &SpecContentHash) 
     hash.update(action.as_str().as_bytes());
     hash.update(b"\0");
     hash.update(reservation.as_str().as_bytes());
-    format!("workflow-os/live-comment/{:x}", hash.finalize())
+    format!("{MARKER_NAMESPACE}{:x}", hash.finalize())
 }
 
 fn live_effect_commitment(
@@ -250,6 +251,9 @@ impl SqliteStateBackend {
         request: DispatchReservationRequest,
         admission: LiveGrantAdmission<'_>,
     ) -> Result<Option<Box<ReservedAttemptDispatchCapability>>, WorkflowOsError> {
+        if !can_encode_marked_comment(admission.body) {
+            return Err(not_dispatchable());
+        }
         let outcome = self.reserve_dispatch(request, None, Some(admission), |_, _, _| Ok(()))?;
         Ok(match outcome {
             DispatchReservationOutcome::Admitted { capability } => Some(capability),
@@ -266,7 +270,7 @@ impl SqliteStateBackend {
         request: DispatchReservationRequest,
         admission: LiveGrantAdmission<'_>,
         action: GitHubCommentContinuationAction<'_>,
-        send: impl FnOnce(&GitHubPullRequestCommentTarget, &str, &str) -> bool,
+        send: impl FnOnce(&GitHubPullRequestCommentTarget, &str) -> bool,
     ) -> Result<LiveCommentDispatchPosture, WorkflowOsError> {
         let invocation = action.commitment()?;
         if invocation != request.invocation_commitment
@@ -284,7 +288,8 @@ impl SqliteStateBackend {
             .dispatch_reservation
             .ok_or_else(corrupt)?;
         let marker = live_comment_marker(&invocation, &binding.reservation_commitment);
-        Ok(if send(action.target, action.body, &marker) {
+        let raw_body = encode_marked_comment(action.body, &marker).ok_or_else(corrupt)?;
+        Ok(if send(action.target, &raw_body) {
             LiveCommentDispatchPosture::Acknowledged
         } else {
             LiveCommentDispatchPosture::RecoveryOnly

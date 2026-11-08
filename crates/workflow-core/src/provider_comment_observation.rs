@@ -11,7 +11,36 @@ const MAX_COMMENTS: usize = 128;
 const MAX_PAGES: usize = 8;
 const MAX_RAW_BODY_BYTES: usize = 64 * 1024;
 const MARKER_PREFIX: &str = "<!-- workflow-os/live-comment/";
-const MARKER_NAMESPACE: &str = "workflow-os/live-comment/";
+pub(crate) const MARKER_NAMESPACE: &str = "workflow-os/live-comment/";
+const SUFFIX_START: &str = "\n\n<!-- ";
+const SUFFIX_END: &str = " -->";
+const MARKER_DIGEST_BYTES: usize = 64;
+
+pub(crate) fn can_encode_marked_comment(body: &str) -> bool {
+    let suffix_bytes =
+        SUFFIX_START.len() + MARKER_NAMESPACE.len() + MARKER_DIGEST_BYTES + SUFFIX_END.len();
+    !body.is_empty()
+        && !body.contains(MARKER_PREFIX)
+        && body.len() <= MAX_RAW_BODY_BYTES - suffix_bytes
+}
+
+fn marked_comment_suffix(body: &str, marker: &str) -> Option<String> {
+    let digest = marker.strip_prefix(MARKER_NAMESPACE)?;
+    if digest.len() != MARKER_DIGEST_BYTES
+        || !digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || !can_encode_marked_comment(body)
+    {
+        return None;
+    }
+    Some(format!("{SUFFIX_START}{marker}{SUFFIX_END}"))
+}
+
+pub(crate) fn encode_marked_comment(body: &str, marker: &str) -> Option<String> {
+    let suffix = marked_comment_suffix(body, marker)?;
+    Some(format!("{body}{suffix}"))
+}
 
 pub(crate) struct ExpectedComment<'a> {
     pub(crate) target: &'a GitHubPullRequestCommentTarget,
@@ -140,24 +169,15 @@ pub(crate) fn verify_current_comment(
     else {
         return Unresolved;
     };
-    let Some(marker_digest) = expected.reservation_marker.strip_prefix(MARKER_NAMESPACE) else {
+    let Some(suffix) = marked_comment_suffix(expected.body, expected.reservation_marker) else {
         return Unresolved;
     };
-    if marker_digest.len() != 64
-        || !marker_digest
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        || expected.body.contains(MARKER_PREFIX)
-        || expected.target.validate().is_err()
+    if expected.target.validate().is_err()
         || expected.not_before >= expected.not_after
         || observed_at < expected.not_before
         || timestamp_bounds.earliest_correction > timestamp_bounds.latest_correction
         || !scan_is_complete(pages)
     {
-        return Unresolved;
-    }
-    let suffix = format!("\n\n<!-- {} -->", expected.reservation_marker);
-    if expected.body.len().saturating_add(suffix.len()) > MAX_RAW_BODY_BYTES {
         return Unresolved;
     }
     let comments = || pages.iter().flat_map(|page| page.comments);
@@ -252,6 +272,25 @@ mod tests {
             created_at: time(11),
             updated_at: time(11),
         }
+    }
+
+    #[test]
+    fn marked_encoding_is_exact_and_bounded_in_bytes() {
+        let body = "first\r\nsecond\n";
+        let exact = encode_marked_comment(body, MARKER).expect("valid encoding");
+        assert_eq!(exact, format!("first\r\nsecond\n\n\n<!-- {MARKER} -->"));
+        let max = "x".repeat(MAX_RAW_BODY_BYTES - (exact.len() - body.len()));
+        assert_eq!(
+            encode_marked_comment(&max, MARKER).expect("fits").len(),
+            MAX_RAW_BODY_BYTES
+        );
+        assert!(encode_marked_comment(&format!("{max}x"), MARKER).is_none());
+        assert!(encode_marked_comment("", MARKER).is_none());
+        assert!(
+            encode_marked_comment("<!-- workflow-os/live-comment/injected -->", MARKER).is_none()
+        );
+        assert!(encode_marked_comment(body, &MARKER.to_ascii_uppercase()).is_none());
+        assert!(encode_marked_comment(body, &MARKER[..MARKER.len() - 1]).is_none());
     }
 
     #[test]

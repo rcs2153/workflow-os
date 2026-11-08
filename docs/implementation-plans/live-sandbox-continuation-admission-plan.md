@@ -492,6 +492,19 @@ establishes a bound between the clock that recorded comment creation and the
 local reservation clock. Do not derive that bound from a later response
 header or an observed timestamp's display precision.
 
+### Exact Marked Dispatch Body
+
+Before creating a reservation, the private live-sandbox path now rejects
+empty bodies, reserved marker injection, and bodies that exceed the verifier's
+raw byte budget once encoded. After a fresh reservation, Core sends the
+injected callback one exact raw body: original bytes followed by the canonical
+reservation-derived marker suffix. The verifier shares that suffix contract;
+neither path normalizes newlines or Markdown. The existing reservation and
+marker commitments are unchanged. The SQLite lost-acknowledgement fixture
+feeds the exact bytes received by the sender into the observer after reopening
+the database. This binds the attempted bytes in the synthetic path, not what
+a real external service originally accepted.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
