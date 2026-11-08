@@ -4,6 +4,8 @@
 pub(crate) mod installation_exchange;
 #[cfg(test)]
 mod installation_scope_fixture;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) mod installation_signer_channel;
 
 use std::{io::Read, num::NonZeroU64, time::Duration};
 

@@ -1132,6 +1132,32 @@ classified by the offline inspector. A missing counterpart, changed request,
 or inconsistent evidence is not permission to start over. No public route,
 signer channel, real assertion, or live provider call is enabled by this slice.
 
+### Authenticate The Local Signer Channel
+
+The next private slice accepts a connected Unix stream from the trusted
+launcher on macOS or Linux. The client checks the configured exchange UID
+against its effective UID and the configured signer UID against the OS
+peer credentials before sending any bytes. Root and identities shared with
+either harness are rejected. This does not authenticate a process that shares
+the approved UID; the deployment must isolate and administer those accounts.
+
+One bounded request carries the operation, claim and scope commitments, and
+deadline. The single response must echo both commitments and supply a fresh,
+short-lived App assertion within the claim deadline. The response timestamps
+bound local use; they are not independent proof of the signed JWT lifetime.
+The kernel rechecks the
+claim and current authority before the socket exchange and after the reply,
+before the fixed-origin installation exchange. A lost, malformed, denied or
+late response leaves the original claim uncertain; the client does not retry
+or fall back. It does not log or persist the assertion.
+
+Socket-pair fixtures exercise the protocol and verify that an unexpected OS
+peer receives no data. They do not prove a deployed signer or cross-account
+isolation. A separately reviewed signer must authenticate the exchange peer,
+independently validate the exact claim, and keep the key outside Workflow OS
+and both harnesses. No service, account, public route or live trial is admitted
+by this client implementation.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
