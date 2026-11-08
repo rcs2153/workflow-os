@@ -91,6 +91,11 @@ This checks the two snapshot hashes before and after inspection. It is not
 a native Desktop result. For the native trial, use the isolation procedure
 above and remove the temporary configuration and exported directory afterward.
 
+Clean-checkout CI runs `npm run test:synthetic-recovery-bridge` after building
+the debug CLI. That command creates its own disposable snapshots, requires the
+real bridge round trip to pass, and cleans up its temporary directory. It does
+not configure or open Desktop.
+
 ### Delegated Fixture Validation
 
 For a repeatable synthetic starting fixture, the opt-in Unix evaluator export

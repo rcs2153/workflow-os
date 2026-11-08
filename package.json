@@ -22,6 +22,7 @@
     "smoke:integrations-live": "node scripts/smoke-live-integrations.mjs all",
     "smoke:jira-live": "node scripts/smoke-live-integrations.mjs jira",
     "test:dogfood-helper": "node --test scripts/self-governed-benchmark.test.mjs",
+    "test:synthetic-recovery-bridge": "node scripts/check-synthetic-recovery-bridge.mjs",
     "test:integration-helper": "node --test scripts/check-integrations.test.mjs",
     "test:candidate-workflow": "node --test scripts/final-candidate-workflow.test.mjs",
     "test:release-state": "node --test scripts/check-release-state.test.mjs",
