@@ -8,7 +8,7 @@ use std::cell::Cell;
 use crate::authorized_execution_continuity_state::internal::{
     trusted_time_commitment, window_binding_commitment, AuthoritativeAttemptState,
     AuthoritativeWindowState, ContinuityInstanceEligibility, ContinuityRevision,
-    TrustedTimePosture,
+    TrustedTimeObservation, TrustedTimePosture,
 };
 use crate::dispatch_reservation::{
     admitted_capability, dispatch_admission_event_id, request_commitment, reservation_commitment,
@@ -324,6 +324,23 @@ impl SqliteStateBackend {
         action: GitHubCommentContinuationAction<'_>,
         send: impl FnOnce(&GitHubPullRequestCommentTarget, &str) -> Option<CreatedCommentResponse>,
     ) -> Result<LiveCommentDispatchPosture, WorkflowOsError> {
+        self.dispatch_live_sandbox_comment_with_clock(
+            request,
+            admission,
+            action,
+            continuity_store::observe_continuity_trusted_time,
+            send,
+        )
+    }
+
+    pub(super) fn dispatch_live_sandbox_comment_with_clock(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        action: GitHubCommentContinuationAction<'_>,
+        observe: impl FnOnce() -> Result<TrustedTimeObservation, WorkflowOsError>,
+        send: impl FnOnce(&GitHubPullRequestCommentTarget, &str) -> Option<CreatedCommentResponse>,
+    ) -> Result<LiveCommentDispatchPosture, WorkflowOsError> {
         let invocation = action.commitment()?;
         if invocation != request.invocation_commitment
             || admission.side_effect != action.side_effect
@@ -354,8 +371,27 @@ impl SqliteStateBackend {
         {
             return Err(corrupt());
         }
+        let trusted_time = continuity_codec::load_snapshot(&tx)?.trusted_time;
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
 
+        // Admission is irreversible. A paused or time-uncertain caller may
+        // reconcile, but must not hand an expired send right to the adapter.
+        if !observe().is_ok_and(|time| {
+            trusted_time.eligibility == ContinuityInstanceEligibility::LiveStateEligible
+                && trusted_time.posture != TrustedTimePosture::Quarantined
+                && time.source() == trusted_time.source
+                && time.provenance_commitment() == &trusted_time.provenance_commitment
+                && time.epoch_id() == &trusted_time.epoch_id
+                && time.observed_at() >= durable.committed_at
+                && !trusted_time
+                    .last_observed_at
+                    .is_some_and(|watermark| time.observed_at() < watermark)
+                && witness
+                    .creation_deadline
+                    .is_some_and(|deadline| time.observed_at() < deadline)
+        }) {
+            return Ok(LiveCommentDispatchPosture::RecoveryOnly);
+        }
         let response = send(action.target, &raw_body);
         let Some(comment_id) = verify_created_comment_response(
             response.as_ref(),
@@ -637,7 +673,7 @@ impl SqliteStateBackend {
             DispatchAdmissionProjectionCursor::new(next_sequence, event_id.clone());
         let trusted_commitment = trusted_time_commitment(&observation);
         let next_revision = request.capability.window_revision.checked_next()?;
-        let live_witness = if let Some((effect, provider)) = attempted_effect {
+        let live_witness = if let Some((effect, provider, deadline)) = attempted_effect {
             Some(LiveSandboxReservationWitness {
                 attempted_record_commitment: live_effect_commitment(
                     b"workflow-os/live-comment-attempt/v1\0",
@@ -646,7 +682,7 @@ impl SqliteStateBackend {
                     &effect,
                 )?,
                 provider,
-                creation_deadline: Some(window.expires_at),
+                creation_deadline: Some(deadline),
             })
         } else {
             None

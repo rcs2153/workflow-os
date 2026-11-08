@@ -592,6 +592,15 @@ canonical name before returning a prepared client. A missing pull request
 oversized response all stop before POST. Items 2 and 3 still block live
 composition; none of these preflight reads is atomic with remote acceptance.
 
+The injected SQLite dispatch path now commits the earlier of the grant and
+window expiry to the reservation witness. Immediately before giving the marked
+body to the sender, it checks a fresh trusted-time observation against the
+committed admission, current time provenance, and the strict deadline. An
+unusable observation or elapsed deadline leaves the durable attempt in
+recovery-only posture. An exact retry cannot regain the send right. This is a
+local check, not an atomic deadline at GitHub. The HTTP preflight and adapter
+binding are not connected to this sender, and no live proof is issued.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
