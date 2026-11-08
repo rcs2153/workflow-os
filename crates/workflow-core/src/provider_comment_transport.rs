@@ -8,11 +8,14 @@ use url::Url;
 
 use crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding;
 use crate::provider_comment_observation::{
-    verify_current_comment, CommentEnumeration, CommentPage, CreatedCommentResponse,
+    verify_current_comment_identity, CommentEnumeration, CommentPage, CreatedCommentResponse,
     CurrentCommentPosture, ExpectedComment, ProviderComment, ProviderTimestampBounds, MAX_COMMENTS,
     MAX_CREATION_RESPONSE_BYTES, MAX_PAGES, MAX_RAW_BODY_BYTES,
 };
-use crate::{GitHubPullRequestCommentProviderAuth, GitHubPullRequestCommentTarget, Timestamp};
+use crate::{
+    GitHubPullRequestCommentProviderAuth, GitHubPullRequestCommentTarget, SpecContentHash,
+    Timestamp,
+};
 
 const GITHUB_ORIGIN: &str = "https://api.github.com";
 const MAX_IDENTITY_RESPONSE_BYTES: usize = 128 * 1024;
@@ -75,6 +78,55 @@ struct ObservedPage {
 struct PageLinks {
     next: Option<NonZeroU64>,
     last: Option<NonZeroU64>,
+}
+
+pub(crate) enum BoundCommentObservation {
+    Unverified(CurrentCommentPosture),
+    Verified(VerifiedGitHubCommentObservation),
+}
+
+/// An exact current match from the fixed provider reader, not proof of creation.
+/// No public constructor, deserialization, body, or authentication material.
+pub(crate) struct VerifiedGitHubCommentObservation {
+    reservation: SpecContentHash,
+    context: SpecContentHash,
+    comment_id: NonZeroU64,
+    observed_at: Timestamp,
+}
+
+impl VerifiedGitHubCommentObservation {
+    pub(crate) fn matches(
+        &self,
+        reservation: &SpecContentHash,
+        expected: &ExpectedComment<'_>,
+    ) -> bool {
+        &self.reservation == reservation
+            && comment_observation_context(expected).as_ref() == Some(&self.context)
+    }
+
+    pub(crate) const fn comment_id(&self) -> NonZeroU64 {
+        self.comment_id
+    }
+
+    pub(crate) const fn observed_at(&self) -> Timestamp {
+        self.observed_at
+    }
+}
+
+fn comment_observation_context(expected: &ExpectedComment<'_>) -> Option<SpecContentHash> {
+    serde_json::to_vec(&(
+        "workflow-os/github-comment-observation-context/v1",
+        expected.target.reference(),
+        expected.repository_id,
+        expected.author_id,
+        expected.known_comment_id,
+        SpecContentHash::from_text(expected.body),
+        expected.reservation_marker,
+        expected.not_before,
+        expected.not_after,
+    ))
+    .ok()
+    .map(SpecContentHash::from_bytes)
 }
 
 impl<'a> GitHubCommentCreationTransport<'a> {
@@ -146,12 +198,60 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         timestamp_bounds: Option<ProviderTimestampBounds>,
         observe_time: impl FnOnce() -> Option<Timestamp>,
     ) -> CurrentCommentPosture {
-        let Some(pages) = self.read_comment_pages(expected) else {
-            return CurrentCommentPosture::Unresolved;
+        self.read_exact_comment(expected, timestamp_bounds, observe_time)
+            .map_or_else(
+                |posture| posture,
+                |_| CurrentCommentPosture::ExactCurrentMatch,
+            )
+    }
+
+    /// Versioned identity of the fixed reader, not a claim about access scope.
+    pub(crate) fn observation_adapter_commitment(&self) -> Option<SpecContentHash> {
+        (self.origin == GITHUB_ORIGIN).then(|| SpecContentHash::from_text(
+            "workflow-os/github-comment-observer/v1\0https://api.github.com\0api=2022-11-28\0stable-repository-pagination\0no-redirect-or-proxy",
+        ))
+    }
+
+    pub(crate) fn observe_bound_comment(
+        self,
+        reservation: &SpecContentHash,
+        expected: &ExpectedComment<'_>,
+        timestamp_bounds: Option<ProviderTimestampBounds>,
+        observe_time: impl FnOnce() -> Option<Timestamp>,
+    ) -> BoundCommentObservation {
+        if self.observation_adapter_commitment().is_none() {
+            return BoundCommentObservation::Unverified(self.observe_comment(
+                expected,
+                timestamp_bounds,
+                observe_time,
+            ));
+        }
+        let (comment_id, observed_at) =
+            match self.read_exact_comment(expected, timestamp_bounds, observe_time) {
+                Ok(match_data) => match_data,
+                Err(posture) => return BoundCommentObservation::Unverified(posture),
+            };
+        let Some(context) = comment_observation_context(expected) else {
+            return BoundCommentObservation::Unverified(CurrentCommentPosture::Unresolved);
         };
-        let Some(observed_at) = observe_time() else {
-            return CurrentCommentPosture::Unresolved;
-        };
+        BoundCommentObservation::Verified(VerifiedGitHubCommentObservation {
+            reservation: reservation.clone(),
+            context,
+            comment_id,
+            observed_at,
+        })
+    }
+
+    fn read_exact_comment(
+        &self,
+        expected: &ExpectedComment<'_>,
+        timestamp_bounds: Option<ProviderTimestampBounds>,
+        observe_time: impl FnOnce() -> Option<Timestamp>,
+    ) -> Result<(NonZeroU64, Timestamp), CurrentCommentPosture> {
+        let pages = self
+            .read_comment_pages(expected)
+            .ok_or(CurrentCommentPosture::Unresolved)?;
+        let observed_at = observe_time().ok_or(CurrentCommentPosture::Unresolved)?;
         let normalized = pages
             .iter()
             .map(|page| {
@@ -178,7 +278,7 @@ impl<'a> GitHubCommentCreationTransport<'a> {
                 comments,
             })
             .collect::<Vec<_>>();
-        verify_current_comment(
+        verify_current_comment_identity(
             expected,
             CommentEnumeration::Complete {
                 observed_at,
@@ -186,6 +286,7 @@ impl<'a> GitHubCommentCreationTransport<'a> {
                 pages: &borrowed,
             },
         )
+        .map(|id| (id, observed_at))
     }
 
     fn read_comment_pages(&self, expected: &ExpectedComment<'_>) -> Option<Vec<ObservedPage>> {
@@ -675,16 +776,23 @@ pub(crate) mod tests {
                     .is_none());
                 }
             });
-            let observed = GitHubCommentCreationTransport {
+            let transport = GitHubCommentCreationTransport {
                 origin,
                 ..GitHubCommentCreationTransport::new(&auth)
-            }
-            .observe_comment(&expected, bounds, || Some(observation_time(21)));
+            };
+            assert!(transport.observation_adapter_commitment().is_none());
+            let reservation = SpecContentHash::from_text("test reservation");
+            let observed = transport.observe_bound_comment(&reservation, &expected, bounds, || {
+                Some(observation_time(21))
+            });
             server.join().expect("read-only fixture");
             assert!(
                 matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
             );
-            observed
+            let BoundCommentObservation::Unverified(posture) = observed else {
+                unreachable!("loopback must never mint provider evidence");
+            };
+            posture
         })
     }
 
@@ -692,6 +800,51 @@ pub(crate) mod tests {
         earliest_correction: time::Duration::ZERO,
         latest_correction: time::Duration::ZERO,
     });
+
+    #[test]
+    fn comment_observation_witness_rejects_context_substitution() {
+        let target = GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target");
+        let reservation = SpecContentHash::from_text("original reservation");
+        let expected = ExpectedComment {
+            target: &target,
+            repository_id: NonZeroU64::new(11).expect("repository ID"),
+            author_id: NonZeroU64::new(22).expect("author ID"),
+            known_comment_id: None,
+            body: "approved",
+            reservation_marker: MARKER,
+            not_before: observation_time(10),
+            not_after: observation_time(20),
+        };
+        let witness = VerifiedGitHubCommentObservation {
+            reservation: reservation.clone(),
+            context: comment_observation_context(&expected).expect("context"),
+            comment_id: NonZeroU64::new(44).expect("comment ID"),
+            observed_at: observation_time(21),
+        };
+        assert!(witness.matches(&reservation, &expected));
+        assert!(!witness.matches(
+            &SpecContentHash::from_text("different reservation"),
+            &expected
+        ));
+        for changed in [
+            ExpectedComment {
+                body: "changed body",
+                ..expected
+            },
+            ExpectedComment {
+                not_after: observation_time(22),
+                ..expected
+            },
+            ExpectedComment {
+                repository_id: NonZeroU64::new(12).expect("other repository"),
+                ..expected
+            },
+        ] {
+            assert!(!witness.matches(&reservation, &changed));
+        }
+        assert_eq!(witness.comment_id().get(), 44);
+        assert_eq!(witness.observed_at(), observation_time(21));
+    }
 
     fn listed_comment(id: usize, body: &str) -> serde_json::Value {
         serde_json::json!({
