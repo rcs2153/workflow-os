@@ -1570,6 +1570,18 @@ response remains a separate proof source. This covers one reconciliation
 boundary, not a global historical count or a provider snapshot; it does not
 admit a live operator, new provider mutation, public CLI, or harness tool.
 
+### Ordered Private Recovery Entry
+
+The private Core recovery entry first resolves the exact reserved action
+and its durable disposition without loading notification or reader inputs.
+An already verified creation or reconciled observation returns directly.
+An older reservation without a preparation or an enabled journal remains
+unresolved. Pending recovery requests a notification through the trusted
+host, verifies it against the stored preparation, and only then opens the
+reviewed read-only inventory. Missing or invalid evidence cannot complete
+the effect, and neither input loader can acquire a write permit through
+this entry. The entry does not provision or authorize a live host.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

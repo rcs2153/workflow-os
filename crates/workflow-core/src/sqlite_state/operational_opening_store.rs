@@ -4901,6 +4901,17 @@ mod tests {
             InstallationCommentRecoveryPosture::ReconciliationRequired
         };
         assert_eq!(inspect().expect("read exact disposition"), expected);
+        assert_eq!(
+            reopened
+                .recover_installation_comment(
+                    &operation,
+                    action,
+                    || panic!("historical disposition needs no notification"),
+                    || panic!("historical disposition needs no reader"),
+                )
+                .expect("recover exact historical disposition"),
+            expected
+        );
         backend
             .revoke_live_sandbox_grant(admission.grant_id)
             .expect("revoke consumed grant");
@@ -5293,17 +5304,16 @@ mod tests {
                 backend.verify_prepared_installation_notification(&request.operation_id, action, receiver, notification)
                     .expect("read-only candidate classification")
             },
+            |receiver, notification, candidate| {
+                if let CoordinatorTrial::ObservedRecovery { contradictory } = trial {
+                    assert_reconciled_installation_observation(
+                        backend, request, action, (receiver, notification, candidate),
+                        &body, &writer_scope, contradictory,
+                    );
+                }
+            },
         );
-        if let CoordinatorTrial::ObservedRecovery { contradictory } = trial {
-            assert_reconciled_installation_observation(
-                backend,
-                request,
-                action,
-                &candidate,
-                &body,
-                &writer_scope,
-                contradictory,
-            );
+        if matches!(trial, CoordinatorTrial::ObservedRecovery { .. }) {
             return;
         }
         assert_independent_installation_inventory(
@@ -5341,35 +5351,77 @@ mod tests {
         backend: &SqliteStateBackend,
         request: &crate::dispatch_reservation::DispatchReservationRequest,
         action: crate::provider_write::GitHubCommentContinuationAction<'_>,
-        candidate: &crate::provider_comment_transport::installation_notification::CreationCandidate,
+        evidence: (
+            crate::provider_comment_transport::installation_notification::ReviewedCreationReceiver<
+                '_,
+            >,
+            crate::provider_comment_transport::installation_notification::CreationNotification<'_>,
+            &crate::provider_comment_transport::installation_notification::CreationCandidate,
+        ),
         body: &str,
         writer_scope: &SpecContentHash,
         contradictory: bool,
     ) {
+        use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture::ReconciliationRequired;
         use crate::provider_comment_transport::{
+            installation_notification::CreationNotification,
             tests::{with_independent_inventory, InventoryTrial},
-            IndependentCommentInventory,
         };
+        let (receiver, notification, candidate) = evidence;
         let operation = &request.operation_id;
+        let no_notification = || panic!("must not load recovery notification");
+        let no_reader = || panic!("must not open reader");
+        assert_eq!(
+            backend
+                .recover_installation_comment(operation, action, no_notification, no_reader)
+                .expect("V17 must not open recovery inputs"),
+            ReconciliationRequired,
+        );
         backend
             .enable_installation_observation_journal()
             .expect("V18");
+        let wrong_action = crate::provider_write::GitHubCommentContinuationAction {
+            body: "substituted action",
+            ..action
+        };
+        assert!(backend
+            .recover_installation_comment(operation, wrong_action, no_notification, no_reader)
+            .is_err());
+        let malformed = CreationNotification {
+            github_signature: "invalid",
+            ..notification
+        };
+        for received in [None, Some((receiver, malformed))] {
+            assert_eq!(
+                backend
+                    .recover_installation_comment(operation, action, || received, no_reader)
+                    .expect("unavailable or invalid notification"),
+                ReconciliationRequired,
+            );
+        }
         let attempt = |trial| {
             with_independent_inventory(trial, body, writer_scope, |reader| {
-                backend
-                    .reconcile_prepared_installation_comment(operation, action, candidate, reader)
+                backend.recover_installation_comment(
+                    operation,
+                    action,
+                    || Some((receiver, notification)),
+                    || Some(reader),
+                )
             })
         };
-        assert!(attempt(InventoryTrial::Truncated)
-            .expect("incomplete read")
-            .is_none());
+        assert_eq!(
+            attempt(InventoryTrial::Truncated).expect("incomplete read"),
+            ReconciliationRequired
+        );
         if contradictory {
-            assert!(attempt(InventoryTrial::Duplicate)
-                .expect("retain contradiction")
-                .is_none());
-            assert!(attempt(InventoryTrial::Exact)
-                .expect("contradiction remains")
-                .is_none());
+            assert_eq!(
+                attempt(InventoryTrial::Duplicate).expect("retain contradiction"),
+                ReconciliationRequired
+            );
+            assert_eq!(
+                attempt(InventoryTrial::Exact).expect("contradiction remains"),
+                ReconciliationRequired
+            );
             assert_eq!(
                 backend
                     .inspect_installation_observation_journal(operation, action)
@@ -5379,7 +5431,6 @@ mod tests {
             );
             return;
         }
-        let connection = backend.existing_connection().expect("test store");
         super::super::dispatch_reservation_store::inject_dispatch_commit_fault(
             InjectedDispatchCommitFault::Before,
         );
@@ -5392,7 +5443,7 @@ mod tests {
         );
         with_independent_inventory(InventoryTrial::Exact, body, writer_scope, |reader| {
             assert!(backend
-                .record_prepared_installation_inventory(operation, action, candidate, reader)
+                .record_prepared_installation_inventory(operation, action, candidate, &reader)
                 .expect("record an earlier identical traversal")
                 .is_some());
         });
@@ -5400,25 +5451,31 @@ mod tests {
             InjectedDispatchCommitFault::After,
         );
         assert!(attempt(InventoryTrial::Exact).is_err());
+        assert_installation_recovery_replay(backend, operation, action);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn assert_installation_recovery_replay(
+        backend: &SqliteStateBackend,
+        operation: &crate::dispatch_reservation::DispatchReservationOperationId,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+    ) {
+        use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture::ObservationReconciled;
         let reopened = SqliteStateBackend::open(&backend.database_path).expect("restart Core");
-        let wrong_scope = SpecContentHash::from_text("unusable replay reader");
-        let no_reader = IndependentCommentInventory::new(
-            std::num::NonZeroU64::MIN,
-            std::num::NonZeroU64::MIN,
-            &wrong_scope,
-            "not-configured",
-        );
-        let event = reopened
-            .reconcile_prepared_installation_comment(operation, action, candidate, &no_reader)
-            .expect("recover lost local acknowledgement without a reader")
-            .expect("completion proof");
-        assert!(event.as_str().starts_with("installation-comment-observed/"));
-        assert_eq!(
-            reopened
-                .reconcile_prepared_installation_comment(operation, action, candidate, &no_reader)
-                .expect("replay without a reader"),
-            Some(event)
-        );
+        let replay = || {
+            reopened.recover_installation_comment(
+                operation,
+                action,
+                || panic!("replay needs no notification"),
+                || panic!("replay needs no reader"),
+            )
+        };
+        for _ in 0..2 {
+            assert_eq!(
+                replay().expect("replay without either input"),
+                ObservationReconciled,
+            );
+        }
         assert_eq!(
             reopened
                 .inspect_installation_observation_journal(operation, action)
@@ -5426,6 +5483,7 @@ mod tests {
                 .len(),
             2
         );
+        let connection = backend.existing_connection().expect("test store");
         connection
             .execute_batch("BEGIN IMMEDIATE")
             .expect("begin fixture damage");
@@ -5439,6 +5497,7 @@ mod tests {
         assert!(reopened
             .inspect_installation_comment_recovery(action.run, operation, action.side_effect)
             .is_err());
+        assert!(replay().is_err());
         connection
             .execute_batch(
                 "INSERT INTO installation_observation_journal SELECT * FROM saved_observation;",
@@ -5473,7 +5532,7 @@ mod tests {
                         &request.operation_id,
                         action,
                         candidate,
-                        reader,
+                        &reader,
                     )
                     .expect("record validated inventory")
             })
@@ -5547,7 +5606,7 @@ mod tests {
                         &request.operation_id,
                         action,
                         candidate,
-                        reader,
+                        &reader,
                     )
                     .expect("read-only observation")
             });

@@ -10,7 +10,10 @@ use crate::authorized_execution_continuity_state::internal::TrustedTimeObservati
 use crate::dispatch_reservation::DispatchReservationOperationId;
 use crate::provider_comment_observation::CurrentCommentPosture;
 use crate::provider_comment_transport::{
-    installation_notification::CreationCandidate, IndependentCommentInventory,
+    installation_notification::{
+        CreationCandidate, CreationNotification, ReviewedCreationReceiver,
+    },
+    IndependentCommentInventory,
 };
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
@@ -19,12 +22,12 @@ use crate::{
 };
 
 use super::{
-    corrupt, find_live_comment_proof, installation_inventory_context,
+    corrupt, find_live_comment_proof, installation_disposition, installation_inventory_context,
     installation_send_preparation_payload, live_comment_proof_key, not_dispatchable,
     persist_bound_live_comment_outcome, read_bound_installation_preparation,
     read_live_recovery_admission, storage_error, verify_comment_disposition,
-    CollectedInstallationInventory, InstallationInventoryContext, LiveCommentProofKind,
-    LiveRecoveryAdmission,
+    CollectedInstallationInventory, InstallationCommentRecoveryPosture,
+    InstallationInventoryContext, LiveCommentProofKind, LiveRecoveryAdmission,
 };
 use crate::sqlite_state::{
     continuity_store, decode_json, encode_json, validate_operational_schema, SqliteStateBackend,
@@ -259,6 +262,53 @@ pub(super) fn verify_observed_completion(
 }
 
 impl SqliteStateBackend {
+    /// Resolves historical state before asking the trusted host for evidence.
+    pub(in crate::sqlite_state) fn recover_installation_comment<'a, 'b>(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        receive: impl FnOnce() -> Option<(ReviewedCreationReceiver<'a>, CreationNotification<'a>)>,
+        open_reader: impl FnOnce() -> Option<IndependentCommentInventory<'b>>,
+    ) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
+        {
+            let mut connection = self.existing_read_only_connection()?;
+            let tx = connection
+                .transaction()
+                .map_err(|_| storage_error("begin_failed"))?;
+            let admission = read_live_recovery_admission(&tx, operation, action.run)?;
+            if admission.event.invocation_commitment() != &action.commitment()? {
+                return Err(not_dispatchable());
+            }
+            let posture =
+                installation_disposition(&tx, &admission, action.run, action.side_effect)?;
+            if posture != InstallationCommentRecoveryPosture::ReconciliationRequired
+                || validate_operational_schema(&tx)?
+                    != INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION
+                || read_bound_installation_preparation(&tx, operation, &admission)?.is_none()
+            {
+                return Ok(posture);
+            }
+        }
+        let unresolved = InstallationCommentRecoveryPosture::ReconciliationRequired;
+        let Some((receiver, notification)) = receive() else {
+            return Ok(unresolved);
+        };
+        let Some(candidate) = self.verify_prepared_installation_notification(
+            operation,
+            action,
+            receiver,
+            notification,
+        )?
+        else {
+            return Ok(unresolved);
+        };
+        let Some(reader) = open_reader() else {
+            return Ok(unresolved);
+        };
+        self.reconcile_prepared_installation_comment(operation, action, &candidate, &reader)?;
+        self.inspect_installation_comment_recovery(action.run, operation, action.side_effect)
+    }
+
     pub(in crate::sqlite_state) fn record_prepared_installation_inventory(
         &self,
         operation: &DispatchReservationOperationId,
@@ -292,7 +342,7 @@ impl SqliteStateBackend {
         Ok(Some(id))
     }
 
-    pub(in crate::sqlite_state) fn reconcile_prepared_installation_comment(
+    fn reconcile_prepared_installation_comment(
         &self,
         operation: &DispatchReservationOperationId,
         action: GitHubCommentContinuationAction<'_>,
