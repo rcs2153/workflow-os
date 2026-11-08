@@ -820,6 +820,19 @@ mod tests {
                 "workflow-os-operational-opening-{}-{id}.sqlite3",
                 std::process::id()
             ));
+            #[cfg(target_os = "linux")]
+            let path = if matches!(
+                trial,
+                Some(LiveGrantTrial::InstallationClaim(
+                    InstallationClaimTrial::LinuxSignerProcesses
+                ))
+            ) {
+                let path = std::env::temp_dir().join("rehearsal.sqlite3");
+                assert!(!path.exists(), "rehearsal case must start with fresh state");
+                path
+            } else {
+                path
+            };
             cleanup_database(&path);
             let backend = SqliteStateBackend::open(&path).expect("SQLite backend");
             let run_id = WorkflowRunId::new(format!("run-opening-{id}")).expect("run");
@@ -3594,6 +3607,79 @@ mod tests {
         ));
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires the isolated Linux signer rehearsal launcher"]
+    fn linux_rehearsal_replacement_core_process() {
+        use crate::dispatch_reservation::DispatchReservationOperationId;
+        use crate::provider_comment_transport::installation_signer_channel::linux_rehearsal::{
+            assert_isolated, trial, Trial, POLICY,
+        };
+        assert_isolated(POLICY.exchange_uid);
+        let expected = trial();
+        assert!(matches!(expected, Trial::BeforeCommit | Trial::AfterCommit));
+        let path = std::env::temp_dir().join("rehearsal.sqlite3");
+        assert!(
+            path.is_file(),
+            "replacement must reopen the original database"
+        );
+        let backend = SqliteStateBackend::open(&path).expect("reopen after abrupt Core exit");
+        let connection = backend
+            .existing_read_only_connection()
+            .expect("inspect recovered state");
+        let (claims, reservations): (u32, u32) = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM installation_issuance_claims),
+                        (SELECT COUNT(*) FROM dispatch_reservations)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("durable counts");
+        assert_eq!((claims, reservations), (1, 0));
+        let (operation, payload, hash, admission, admission_hash) = connection
+            .query_row(
+                "SELECT operation_id,payload,payload_hash,signer_admission,signer_admission_hash
+                 FROM installation_issuance_claims",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .expect("exact persisted claim");
+        assert_eq!(SpecContentHash::from_text(&payload).as_str(), hash);
+        let claim: serde_json::Value = serde_json::from_str(&payload).expect("claim record");
+        assert_eq!(claim["operation"], operation);
+        if expected == Trial::AfterCommit {
+            let admission = admission.expect("committed signer admission");
+            let admission_hash = admission_hash.expect("committed signer admission hash");
+            assert_eq!(
+                SpecContentHash::from_text(&admission).as_str(),
+                admission_hash
+            );
+            let record: serde_json::Value =
+                serde_json::from_str(&admission).expect("admission record");
+            assert_eq!(record["claim"], hash);
+            for field in ["operation", "scope", "deadline"] {
+                assert_eq!(record[field], claim[field]);
+            }
+        } else {
+            assert_eq!((admission, admission_hash), (None, None));
+        }
+        let run = WorkflowRunId::new(claim["run"].as_str().expect("bound run")).expect("run");
+        let effect = crate::SideEffectId::new(claim["effect"].as_str().expect("bound effect"))
+            .expect("effect");
+        let operation = DispatchReservationOperationId::new(operation).expect("operation");
+        assert!(backend
+            .inspect_installation_comment_recovery(&run, &operation, &effect)
+            .is_err());
+    }
+
     #[test]
     fn live_comment_observation_reopens_without_completing_or_reauthorizing() {
         exercise_live_grant_reservation(LiveGrantTrial::DurableObservation);
@@ -5119,16 +5205,6 @@ mod tests {
         ).expect("admission count")
         };
         assert_eq!(count(), 0);
-        let expected_admissions = 1;
-        #[cfg(target_os = "linux")]
-        let expected_admissions = if matches!(trial, InstallationClaimTrial::LinuxSignerProcesses)
-            && crate::provider_comment_transport::installation_signer_channel::linux_rehearsal::trial()
-                == crate::provider_comment_transport::installation_signer_channel::linux_rehearsal::Trial::BeforeCommit
-        {
-            0
-        } else {
-            expected_admissions
-        };
         match trial {
             #[cfg(target_os = "linux")]
             InstallationClaimTrial::LinuxSignerProcesses => {
@@ -5155,8 +5231,7 @@ mod tests {
                 .expect("signer assertion peer");
                 std::thread::scope(|threads| {
                     let authority = threads.spawn(|| {
-                        let mut interrupted = false;
-                        let decision = InstallationSignerDecisionReceiver::authenticate(
+                        InstallationSignerDecisionReceiver::authenticate(
                             accept_socket(&listener),
                             &POLICY,
                         )
@@ -5167,22 +5242,13 @@ mod tests {
                                 admission,
                                 reviewed,
                                 wire,
-                                |committed| {
-                                    if (!committed && trial == Trial::BeforeCommit)
-                                        || (committed && trial == Trial::AfterCommit)
-                                    {
-                                        interrupted = true;
-                                        Err(WorkflowOsError::security(
-                                            "test.signer_interrupted",
-                                            "decision delivery interrupted",
-                                        ))
-                                    } else {
-                                        Ok(())
-                                    }
+                                |committed| match (committed, trial) {
+                                    (false, Trial::BeforeCommit) => std::process::exit(78),
+                                    (true, Trial::AfterCommit) => std::process::exit(79),
+                                    _ => Ok(()),
                                 },
                             )
-                        });
-                        (decision, interrupted)
+                        })
                     });
                     let mut exchanges = 0;
                     let exchange = backend.exchange_with_installation_signer_using(
@@ -5197,15 +5263,10 @@ mod tests {
                         },
                     );
                     assert_eq!(exchange.is_ok(), trial == Trial::Success);
-                    let (decision, interrupted) = authority.join().expect("Core worker");
-                    assert_eq!(
-                        decision.is_ok(),
-                        matches!(trial, Trial::Success | Trial::AfterCallback)
-                    );
-                    assert_eq!(
-                        interrupted,
-                        matches!(trial, Trial::BeforeCommit | Trial::AfterCommit)
-                    );
+                    authority
+                        .join()
+                        .expect("Core worker")
+                        .expect("Core decision");
                     assert_eq!(exchanges, u8::from(trial == Trial::Success));
                 });
             }
@@ -5308,10 +5369,7 @@ mod tests {
             }
             _ => unreachable!("only signer admission trials use this helper"),
         }
-        assert_eq!(count(), expected_admissions);
-        if expected_admissions == 0 {
-            return;
-        }
+        assert_eq!(count(), 1);
         let reopened = SqliteStateBackend::open(path).expect("reopen admission");
         assert!(reopened
             .admit_installation_signer_request(request, admission, reviewed, &received)

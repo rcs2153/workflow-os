@@ -64,9 +64,10 @@ run_worker() {
 
 signer_test=provider_comment_transport::installation_signer_channel::linux_rehearsal::linux_rehearsal_signer_process
 core_test=sqlite_state::operational_opening_store::tests::linux_rehearsal_core_process
+replacement_test=sqlite_state::operational_opening_store::tests::linux_rehearsal_replacement_core_process
 harness_test=provider_comment_transport::installation_signer_channel::linux_rehearsal::linux_rehearsal_untrusted_process
 listed=$("$1" --list)
-for test in "$signer_test" "$core_test" "$harness_test"; do
+for test in "$signer_test" "$core_test" "$replacement_test" "$harness_test"; do
   if ! grep -Fqx "$test: test" <<<"$listed"; then
     echo "Missing exact rehearsal test: $test" >&2
     exit 2
@@ -88,11 +89,19 @@ for trial in success before-commit after-commit after-callback; do
   run_worker "$core_uid" "$service_gid" "$core_test" || core_status=$?
   signer_status=0
   wait "$signer_pid" || signer_status=$?
+  expected_core=0
   expected_signer=0
-  if [[ $trial == after-callback ]]; then expected_signer=77; fi
-  if ((core_status != 0 || signer_status != expected_signer)); then
-    echo "Unexpected process exit: Core=$core_status signer=$signer_status expected signer=$expected_signer" >&2
+  case "$trial" in
+    before-commit) expected_core=78 ;;
+    after-commit) expected_core=79 ;;
+    after-callback) expected_signer=77 ;;
+  esac
+  if ((core_status != expected_core || signer_status != expected_signer)); then
+    echo "Unexpected process exit: Core=$core_status (expected $expected_core) signer=$signer_status (expected $expected_signer)" >&2
     exit 1
+  fi
+  if ((expected_core != 0)); then
+    run_worker "$core_uid" "$service_gid" "$replacement_test"
   fi
   run_worker "$harness_uid" "$harness_uid" "$harness_test"
 done
