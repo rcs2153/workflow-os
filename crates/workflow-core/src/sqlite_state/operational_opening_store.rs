@@ -4112,10 +4112,11 @@ mod tests {
         backend
             .enable_live_comment_observation_store()
             .expect("explicit upgrade of reserved V13");
-        assert!(backend
-            .read_reserved_comment_observation(&operation, action)
-            .expect("empty store")
-            .is_none());
+        assert_missing_comment_clock_stays_unresolved(backend, path, request(), admission, action);
+        assert_eq!(
+            backend.read_events(action.run).expect("unchanged history"),
+            history
+        );
         assert!(backend
             .persist_reserved_comment_observation(
                 &operation,
@@ -4177,6 +4178,64 @@ mod tests {
             &operation,
             action,
             witness(17, None),
+        );
+    }
+
+    fn assert_missing_comment_clock_stays_unresolved(
+        backend: &SqliteStateBackend,
+        path: &std::path::Path,
+        request: crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+    ) {
+        use super::super::dispatch_reservation_store::{
+            LiveCommentDispatchPosture, SyntheticSandboxRecoveryPosture,
+        };
+        use crate::provider_comment_observation::CurrentCommentPosture;
+        let operation = &request.operation_id;
+        assert_eq!(
+            backend
+                .observe_reserved_live_comment(operation, action)
+                .expect("bound reservation without a provider clock"),
+            CurrentCommentPosture::Unresolved
+        );
+        let reopened = SqliteStateBackend::open(path).expect("reopen unresolved observation");
+        assert_eq!(
+            reopened
+                .observe_reserved_live_comment(operation, action)
+                .expect("clock remains unproven after reopen"),
+            CurrentCommentPosture::Unresolved
+        );
+        assert!(reopened
+            .observe_reserved_live_comment(
+                operation,
+                crate::provider_write::GitHubCommentContinuationAction {
+                    body: "changed action",
+                    ..action
+                },
+            )
+            .is_err());
+        assert!(reopened
+            .read_reserved_comment_observation(operation, action)
+            .expect("empty store")
+            .is_none());
+        assert_eq!(
+            reopened
+                .inspect_synthetic_sandbox_recovery(
+                    action.run,
+                    operation.as_str(),
+                    action.side_effect
+                )
+                .expect("effect still needs reconciliation"),
+            SyntheticSandboxRecoveryPosture::ReconciliationRequired
+        );
+        assert_eq!(
+            reopened
+                .dispatch_live_sandbox_comment(request, admission, action, |_, _| {
+                    panic!("an unresolved observation must not allow another send")
+                })
+                .expect("recovery-only exact retry"),
+            LiveCommentDispatchPosture::RecoveryOnly
         );
     }
 

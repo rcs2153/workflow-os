@@ -757,6 +757,54 @@ This does not add an operator command, grant GitHub access, or enable live
 dispatch. Trusted observation bounds, the final transport deadline, and
 independent trial approval remain separate requirements.
 
+### Maintainer Review Of Observation Time At `d11a1644`
+
+The creation adapter binding is merged and locally accepted. Do not admit
+a live trial on that evidence. The remaining time problem has two distinct
+boundaries:
+
+- **Local execution window.** `read_reserved_comment_context` reconstructs
+  its start and deadline from the verified reservation; the reservation
+  commits to the trusted local observation. The observation clock sampled
+  after pagination establishes when the reader finished. Neither value
+  calibrates the provider's creation clock.
+- **Provider creation interval.** `observe_reserved_live_comment` accepts
+  caller-supplied corrections and passes them to `observe_bound_comment`.
+  `verify_current_comment_identity` checks interval arithmetic, not where
+  those corrections came from. The V14 stored projection records reservation,
+  context, comment identity, and observation time, but not a source or
+  commitment for the corrections. A plausible interval can therefore pass
+  the arithmetic without proving its provenance.
+
+There is no reviewed evidence in this lane that bounds the creation clock
+for the exact GitHub run. Do not substitute local UTC, displayed timestamp
+precision, a lookup response header, or calibration measured only after the
+fact. The next code change must remove caller-supplied bounds from the
+production witness path and keep that path unresolved until a defensible
+source exists. Synthetic loopback tests can still exercise interval math but
+must not mint a production witness. Prove the unresolved path does not insert
+an observation row, complete an effect, or authorize resend after reopen.
+
+Any future positive time proof must cover timestamp encoding and clock
+uncertainty at creation, bind its reviewed source and validity interval to the
+exact reservation and adapter, and carry that commitment into the durable
+observation and its replay checks. A missing, stale, mismatched, or
+contradictory proof must remain unresolved. This does not prohibit separately
+reviewing the final local deadline at transport handoff: that deadline limits
+when the executor may start a request, not when GitHub will apply it. A lost
+acknowledgement remains unresolved and must not lead to another POST.
+
+### Enforce Missing Observation Time Provenance
+
+The private live observation boundary now validates the reservation and
+returns unresolved without starting HTTP. It accepts neither time corrections
+nor a caller-provided transport. There is no production constructor for the
+persistable current-match witness. Loopback verification still tests bounded
+pagination and timestamp arithmetic but only returns a non-persistable
+posture. The V14 format is unchanged; tests on both supported adapter
+bindings verify that an unresolved attempt leaves no row or new events,
+requires reconciliation after reopen, and cannot send again.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
