@@ -3,13 +3,12 @@
 
 use std::num::NonZeroU64;
 
-use serde::Deserialize;
-
 use crate::{
     GitHubPullRequestCommentProviderAuth, GitHubPullRequestCommentTarget, SpecContentHash,
     Timestamp, WorkflowRunId,
 };
 
+use super::installation_exchange::Permissions;
 use super::LiveSandboxProviderBinding;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -36,25 +35,6 @@ struct Issuance<'a> {
     effective_permissions_json: &'a [u8],
     issued_at: Timestamp,
     expires_at: Timestamp,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Permissions {
-    metadata: MetadataPermission,
-    pull_requests: PullRequestPermission,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum MetadataPermission {
-    Read,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum PullRequestPermission {
-    Write,
 }
 
 #[derive(Clone, Copy)]
@@ -123,10 +103,7 @@ fn verify<'a>(
         return None;
     }
     // Struct decoding rejects missing, duplicate, unknown, and broader grants.
-    let Permissions {
-        metadata: MetadataPermission::Read,
-        pull_requests: PullRequestPermission::Write,
-    } = serde_json::from_slice(issuance.effective_permissions_json).ok()?;
+    serde_json::from_slice::<Permissions>(issuance.effective_permissions_json).ok()?;
     Some(FixtureScopeReceipt {
         scope,
         verified_at: now,

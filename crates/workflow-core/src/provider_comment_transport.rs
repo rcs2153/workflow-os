@@ -1,6 +1,7 @@
 //! Private GitHub comment exchange and bounded read-only observation.
 #![allow(dead_code)]
 
+mod installation_exchange;
 #[cfg(test)]
 mod installation_scope_fixture;
 
@@ -187,14 +188,7 @@ impl<'a> GitHubCommentCreationTransport<'a> {
     pub(crate) fn new(auth: &'a GitHubPullRequestCommentProviderAuth) -> Self {
         Self {
             origin: GITHUB_ORIGIN.to_owned(),
-            agent: ureq::AgentBuilder::new()
-                .try_proxy_from_env(false)
-                .redirects(0)
-                .max_idle_connections(0)
-                .max_idle_connections_per_host(0)
-                .timeout_connect(Duration::from_secs(CONNECT_SECONDS))
-                .timeout(Duration::from_secs(REQUEST_SECONDS))
-                .build(),
+            agent: github_agent(),
             auth,
         }
     }
@@ -427,15 +421,13 @@ impl<'a> GitHubCommentCreationTransport<'a> {
     }
 
     fn request(&self, method: &str, path: &str) -> ureq::Request {
-        self.agent
-            .request(method, &format!("{}{path}", self.origin))
-            .set(
-                "Authorization",
-                &format!("Bearer {}", self.auth.secret_for_provider()),
-            )
-            .set("Accept", "application/vnd.github+json")
-            .set("User-Agent", "workflow-os-comment-sandbox")
-            .set("X-GitHub-Api-Version", GITHUB_API_VERSION)
+        github_request(
+            &self.agent,
+            &self.origin,
+            method,
+            path,
+            self.auth.secret_for_provider(),
+        )
     }
 
     fn read_identity<T: serde::de::DeserializeOwned>(&self, path: &str) -> Option<T> {
@@ -446,6 +438,32 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         let body = bounded_read(response.into_reader(), MAX_IDENTITY_RESPONSE_BYTES)?;
         serde_json::from_slice(&body).ok()
     }
+}
+
+fn github_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .try_proxy_from_env(false)
+        .redirects(0)
+        .max_idle_connections(0)
+        .max_idle_connections_per_host(0)
+        .timeout_connect(Duration::from_secs(CONNECT_SECONDS))
+        .timeout(Duration::from_secs(REQUEST_SECONDS))
+        .build()
+}
+
+fn github_request(
+    agent: &ureq::Agent,
+    origin: &str,
+    method: &str,
+    path: &str,
+    bearer: &str,
+) -> ureq::Request {
+    agent
+        .request(method, &format!("{origin}{path}"))
+        .set("Authorization", &format!("Bearer {bearer}"))
+        .set("Accept", "application/vnd.github+json")
+        .set("User-Agent", "workflow-os-comment-sandbox")
+        .set("X-GitHub-Api-Version", GITHUB_API_VERSION)
 }
 
 fn comment_path(target: &GitHubPullRequestCommentTarget) -> String {
