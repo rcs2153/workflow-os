@@ -18,6 +18,9 @@ use crate::dispatch_reservation::{
     DispatchReservationReplayReceipt, DispatchReservationRequest, DispatchReservationStore,
     LiveSandboxReservationWitness, ReservedAttemptDispatchCapability,
 };
+use crate::provider_comment_observation::{
+    verify_current_comment, CommentEnumeration, CurrentCommentPosture, ExpectedComment,
+};
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
     transition_side_effect_to_completed, EventId, EventSequenceNumber,
@@ -46,6 +49,7 @@ struct ProjectionBinding {
 struct LiveRecoveryAdmission {
     event: DispatchAdmissionProjectionEvent,
     witness: Option<LiveSandboxReservationWitness>,
+    committed_at: Timestamp,
 }
 
 fn live_reservation_commitment(
@@ -165,6 +169,49 @@ impl SqliteStateBackend {
             .map_err(|_| storage_error("begin_failed"))?;
         let admission = read_live_recovery_admission(&tx, &operation, run_id)?;
         verify_live_recovery_state(&tx, &admission, run_id, side_effect_id)
+    }
+
+    /// Uses a historical reservation to check a current observation. This
+    /// result cannot enter the synthetic completion writer.
+    #[allow(dead_code)] // No production observer is connected.
+    pub(super) fn observe_reserved_sandbox_comment<'a>(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        adapter_commitment: &SpecContentHash,
+        lookup: impl FnOnce(&GitHubPullRequestCommentTarget, &str) -> CommentEnumeration<'a>,
+    ) -> Result<CurrentCommentPosture, WorkflowOsError> {
+        let invocation = action.commitment()?;
+        let mut connection = self.existing_read_only_connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|_| storage_error("begin_failed"))?;
+        let admission = read_live_recovery_admission(&tx, operation, action.run)?;
+        let witness = admission.witness.as_ref().ok_or_else(not_dispatchable)?;
+        let deadline = witness.creation_deadline.ok_or_else(not_dispatchable)?;
+        if admission.event.invocation_commitment() != &invocation
+            || &witness.provider.adapter_commitment != adapter_commitment
+            || admission.committed_at >= deadline
+        {
+            return Err(not_dispatchable());
+        }
+        verify_live_recovery_state(&tx, &admission, action.run, action.side_effect)?;
+        let marker = live_comment_marker(&invocation, admission.event.reservation_commitment());
+        let expected = ExpectedComment {
+            target: action.target,
+            repository_id: witness.provider.repository_id,
+            author_id: witness.provider.author_id,
+            known_comment_id: None,
+            body: action.body,
+            reservation_marker: &marker,
+            not_before: admission.committed_at,
+            not_after: deadline,
+        };
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(verify_current_comment(
+            &expected,
+            lookup(action.target, &marker),
+        ))
     }
 
     pub(crate) fn reserve_attempt_dispatch_with_lifecycle(
@@ -496,6 +543,7 @@ impl SqliteStateBackend {
                     &effect,
                 )?,
                 provider,
+                creation_deadline: Some(window.expires_at),
             })
         } else {
             None
@@ -688,6 +736,7 @@ fn read_live_recovery_admission(
     Ok(LiveRecoveryAdmission {
         event: binding.event,
         witness: record.live_witness,
+        committed_at: record.committed_at,
     })
 }
 
@@ -1033,6 +1082,7 @@ fn validate_existing_projection(
         _ => return Err(corrupt()),
     };
     if durable_projection != &binding.event
+        || durable_event.timestamp != record.committed_at
         || durable_event.sequence_number
             != binding.event.committed_result_cursor().sequence_number()
         || durable_event.event_id != *binding.event.committed_result_cursor().event_id()
