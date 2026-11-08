@@ -22,10 +22,11 @@ use crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding;
 use crate::provider_comment_observation::{
     can_encode_marked_comment, encode_marked_comment, verify_created_comment_response,
     verify_current_comment, CommentEnumeration, CreatedCommentResponse, CurrentCommentPosture,
-    ExpectedComment, MARKER_NAMESPACE,
+    ExpectedComment, ProviderTimestampBounds, MARKER_NAMESPACE,
 };
 #[cfg(test)]
 use crate::provider_comment_transport::PreparedGitHubCommentCreation;
+use crate::provider_comment_transport::{BoundCommentObservation, GitHubCommentCreationTransport};
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
     transition_side_effect_to_completed, EventId, EventSequenceNumber,
@@ -237,6 +238,41 @@ impl SqliteStateBackend {
         adapter_commitment: &SpecContentHash,
         lookup: impl FnOnce(&GitHubPullRequestCommentTarget, &str) -> CommentEnumeration<'a>,
     ) -> Result<CurrentCommentPosture, WorkflowOsError> {
+        self.with_reserved_comment_context(operation, action, adapter_commitment, |_, expected| {
+            verify_current_comment(
+                expected,
+                lookup(expected.target, expected.reservation_marker),
+            )
+        })
+    }
+
+    #[allow(dead_code)] // Not exposed to a live caller.
+    pub(super) fn observe_reserved_http_comment(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        transport: GitHubCommentCreationTransport<'_>,
+        timestamp_bounds: Option<ProviderTimestampBounds>,
+    ) -> Result<BoundCommentObservation, WorkflowOsError> {
+        let adapter = transport
+            .observation_adapter_commitment()
+            .ok_or_else(not_dispatchable)?;
+        self.with_reserved_comment_context(operation, action, &adapter, |reservation, expected| {
+            transport.observe_bound_comment(reservation, expected, timestamp_bounds, || {
+                continuity_store::observe_continuity_trusted_time()
+                    .ok()
+                    .map(|time| time.observed_at())
+            })
+        })
+    }
+
+    fn with_reserved_comment_context<T>(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        adapter_commitment: &SpecContentHash,
+        observe: impl FnOnce(&SpecContentHash, &ExpectedComment<'_>) -> T,
+    ) -> Result<T, WorkflowOsError> {
         let invocation = action.commitment()?;
         let mut connection = self.existing_read_only_connection()?;
         let tx = connection
@@ -264,10 +300,7 @@ impl SqliteStateBackend {
             not_after: deadline,
         };
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
-        Ok(verify_current_comment(
-            &expected,
-            lookup(action.target, &marker),
-        ))
+        Ok(observe(admission.event.reservation_commitment(), &expected))
     }
 
     pub(crate) fn reserve_attempt_dispatch_with_lifecycle(

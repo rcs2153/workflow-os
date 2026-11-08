@@ -212,7 +212,17 @@ pub(crate) fn verify_current_comment(
     expected: &ExpectedComment<'_>,
     enumeration: CommentEnumeration<'_>,
 ) -> CurrentCommentPosture {
-    use CurrentCommentPosture::{Absent, Ambiguous, ExactCurrentMatch, Unresolved};
+    verify_current_comment_identity(expected, enumeration).map_or_else(
+        |posture| posture,
+        |_| CurrentCommentPosture::ExactCurrentMatch,
+    )
+}
+
+pub(crate) fn verify_current_comment_identity(
+    expected: &ExpectedComment<'_>,
+    enumeration: CommentEnumeration<'_>,
+) -> Result<NonZeroU64, CurrentCommentPosture> {
+    use CurrentCommentPosture::{Absent, Ambiguous, Unresolved};
 
     let CommentEnumeration::Complete {
         observed_at,
@@ -220,10 +230,10 @@ pub(crate) fn verify_current_comment(
         pages,
     } = enumeration
     else {
-        return Unresolved;
+        return Err(Unresolved);
     };
     let Some(suffix) = marked_comment_suffix(expected.body, expected.reservation_marker) else {
-        return Unresolved;
+        return Err(Unresolved);
     };
     if expected.target.validate().is_err()
         || expected.not_before >= expected.not_after
@@ -231,7 +241,7 @@ pub(crate) fn verify_current_comment(
         || timestamp_bounds.earliest_correction > timestamp_bounds.latest_correction
         || !scan_is_complete(pages)
     {
-        return Unresolved;
+        return Err(Unresolved);
     }
     let comments = || pages.iter().flat_map(|page| page.comments);
     let mut candidates = comments().filter(|comment| {
@@ -240,10 +250,10 @@ pub(crate) fn verify_current_comment(
     });
     // Refuse an oversized response rather than reasoning from a truncated scan.
     if comments().any(|comment| comment.raw_body.len() > MAX_RAW_BODY_BYTES) {
-        return Unresolved;
+        return Err(Unresolved);
     }
     let Some(comment) = candidates.next() else {
-        return Absent;
+        return Err(Absent);
     };
     let mut ambiguous = false;
     for candidate in std::iter::once(comment).chain(candidates) {
@@ -254,12 +264,12 @@ pub(crate) fn verify_current_comment(
             .count()
             == 2
         {
-            return Unresolved;
+            return Err(Unresolved);
         }
         ambiguous |= candidate.comment_id != comment.comment_id;
     }
     if ambiguous {
-        return Ambiguous;
+        return Err(Ambiguous);
     }
     if comment.target != expected.target
         || comment.repository_id != expected.repository_id
@@ -271,10 +281,10 @@ pub(crate) fn verify_current_comment(
         || comment.updated_at != comment.created_at
         || comment.raw_body.strip_suffix(&suffix) != Some(expected.body)
     {
-        return Unresolved;
+        return Err(Unresolved);
     }
     // Matching timestamps can hide edits at the provider's clock resolution.
-    ExactCurrentMatch
+    Ok(comment.comment_id)
 }
 
 #[cfg(test)]

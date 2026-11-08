@@ -677,6 +677,21 @@ another admission event, or turn uncertainty into completion. The transaction
 ends before the sender is called; a later local change cannot be made atomic
 with provider acceptance. Live wiring and evidence provenance remain gated.
 
+### Separate Provider Observation Provenance
+
+The private reservation reader now compares the registered adapter binding
+with a versioned identity derived by the fixed GitHub HTTP reader. It uses
+the same durable action, reservation marker, repository and author IDs, and
+creation interval as the offline verifier, without holding SQLite open across
+HTTP. Only an exact match from the fixed production origin can create the
+private, non-deserializable current-observation witness. The witness binds the
+reservation, target context, comment ID and observation time without storing
+the body or authentication material. Injected pages still return a posture;
+loopback HTTP can also return a matching posture but cannot mint the witness.
+This does not attest provider-side scope, prove creation, persist completion,
+or authorize a send. A production caller and durable live evidence path
+remain separate review requirements.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
