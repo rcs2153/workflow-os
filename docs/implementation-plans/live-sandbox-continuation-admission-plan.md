@@ -805,6 +805,17 @@ posture. The V14 format is unchanged; tests on both supported adapter
 bindings verify that an unresolved attempt leaves no row or new events,
 requires reconciliation after reopen, and cannot send again.
 
+### Recheck The Deadline At HTTP Handoff
+
+The prepared sender receives the final Core-validated local time and the
+exclusive deadline from the committed reservation. It samples the same
+local UTC source again after building the request and before handing it to
+HTTP. A sample before the validated time or at or after the deadline rejects
+the POST. Loopback tests cover the boundary and confirm the consumed
+reservation remains recovery-only after reopening. No production dispatch
+entry point is enabled. This is a local handoff check, not an atomic network
+deadline, provider clock proof, or guarantee of remote cancellation.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
