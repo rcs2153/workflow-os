@@ -1181,6 +1181,22 @@ requires a protected way for the isolated signer to obtain the exact Core
 decision without sharing harness authority or giving the signer general access
 to kernel state.
 
+### Isolate The Signer Decision Channel
+
+The private signer receiver requests admission over a second Unix connection.
+Both ends authenticate the expected local UID independently of the assertion
+exchange. The signer sends the exact operation, claim and scope digests, and
+deadline with a fresh challenge. Core alone accesses the admission store and
+replies only after the exact one-shot admission commits. The signer verifies the
+echoed challenge and request, the admission timestamp, and the deadline before
+invoking its signing callback. The signer receives neither the store nor the
+principal inputs used to decide admission.
+
+Denial, mismatch, expiry, or lost reply cannot produce an assertion. A lost
+reply after commit does not reopen the consumed admission. Tests use disposable
+local socket pairs and a synthetic callback; they do not establish production
+process separation, key custody, or provider access.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
