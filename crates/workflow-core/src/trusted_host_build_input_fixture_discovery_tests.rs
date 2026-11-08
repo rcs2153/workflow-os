@@ -282,10 +282,11 @@ fn workflow_os_workspace_snapshot_is_repeatable_and_honestly_incomplete() {
         count(&first, BuildTimeInputKind::ManifestOrConfiguration),
         6
     );
-    assert_eq!(count(&first, BuildTimeInputKind::DependencyPackage), 210);
+    // The nix socket feature adds memoffset and its autocfg build dependency.
+    assert_eq!(count(&first, BuildTimeInputKind::DependencyPackage), 212);
     assert_eq!(count(&first, BuildTimeInputKind::BuildScript), 0);
     assert_eq!(count(&first, BuildTimeInputKind::ProceduralMacro), 0);
-    assert_eq!(first.result().total_count(), 217);
+    assert_eq!(first.result().total_count(), 219);
     assert!(first
         .result()
         .host_obligations()
