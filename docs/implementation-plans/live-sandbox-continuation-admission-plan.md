@@ -270,6 +270,16 @@ contract for that commitment before permitting an effect. A body-only match,
 caller-supplied summary, absent result, or ambiguous match is not proof of
 one accepted effect and must not authorize another POST.
 
+The private SQLite path now exercises this boundary through injected,
+non-network callbacks. Only fresh reservation can invoke send. Exact replay
+and ambiguous commit return recovery-only. Recovery validates the stored
+reservation projection and grant use before recomputing a marker bound to
+the action and reservation. A positive synthetic observation requires an
+exact target, marker, action commitment and provider reference. The callback
+is trusted in this test; a real adapter must independently verify the author
+and exact accepted payload, not infer authorship from a copyable marker.
+Recovery does not yet persist outcome proof or expose a public tool.
+
 After positive provider observation, bind the remote reference and observation
 to the reservation and attempted record. Persist eligible SideEffect and
 event proof before report disclosure. Repeated recovery can confirm an

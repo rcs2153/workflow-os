@@ -1,5 +1,6 @@
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -13,12 +14,15 @@ use crate::dispatch_reservation::{
     admitted_capability, dispatch_admission_event_id, request_commitment, reservation_commitment,
     reservation_error, DispatchAdmissionProjectionCursor, DispatchAdmissionProjectionEvent,
     DispatchAdmissionProjectionEventDefinition, DispatchReservationBinding,
-    DispatchReservationOutcome, DispatchReservationRecord, DispatchReservationReplayReceipt,
-    DispatchReservationRequest, DispatchReservationStore, ReservedAttemptDispatchCapability,
+    DispatchReservationOperationId, DispatchReservationOutcome, DispatchReservationRecord,
+    DispatchReservationReplayReceipt, DispatchReservationRequest, DispatchReservationStore,
+    ReservedAttemptDispatchCapability,
 };
+use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
-    IdempotencyKey, Timestamp, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent,
-    WorkflowRunEventKind, WorkflowRunSnapshot,
+    GitHubPullRequestCommentProviderLookupObservation, GitHubPullRequestCommentTarget,
+    IdempotencyKey, SpecContentHash, Timestamp, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
+    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunSnapshot,
 };
 
 use super::continuity_codec::timestamp_parts;
@@ -32,6 +36,45 @@ use super::{continuity_codec, continuity_store};
 struct ProjectionBinding {
     event: DispatchAdmissionProjectionEvent,
     snapshot_commitment: crate::SpecContentHash,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum LiveCommentDispatchPosture {
+    Acknowledged,
+    RecoveryOnly,
+}
+
+// Only a trusted synthetic lookup may supply this result until a provider
+// adapter can independently verify author and exact accepted payload.
+#[allow(dead_code)] // No production transport is connected.
+pub(super) enum LiveCommentLookup {
+    Absent,
+    Ambiguous,
+    Unauthorized,
+    Unavailable,
+    Observed {
+        comment: GitHubPullRequestCommentProviderLookupObservation,
+        verified_action: SpecContentHash,
+    },
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(super) enum LiveCommentRecovery {
+    Absent,
+    Ambiguous,
+    Unauthorized,
+    Unavailable,
+    Mismatch,
+    Observed(GitHubPullRequestCommentProviderLookupObservation),
+}
+
+fn live_comment_marker(action: &SpecContentHash, reservation: &SpecContentHash) -> String {
+    let mut hash = Sha256::new();
+    hash.update(b"workflow-os/live-comment-recovery/v1\0");
+    hash.update(action.as_str().as_bytes());
+    hash.update(b"\0");
+    hash.update(reservation.as_str().as_bytes());
+    format!("workflow-os/live-comment/{:x}", hash.finalize())
 }
 
 #[cfg(test)]
@@ -102,6 +145,98 @@ impl SqliteStateBackend {
             DispatchReservationOutcome::Admitted { capability } => Some(capability),
             DispatchReservationOutcome::AlreadyAdmitted { .. }
             | DispatchReservationOutcome::CommittedButCapabilityUnavailable { .. } => None,
+        })
+    }
+
+    /// A fresh, committed reservation is the only path to the injected send.
+    /// An acknowledgement is not durable execution proof.
+    #[allow(dead_code)] // Private until synthetic dispatch is exposed.
+    pub(super) fn dispatch_live_sandbox_comment(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        action: GitHubCommentContinuationAction<'_>,
+        send: impl FnOnce(&GitHubPullRequestCommentTarget, &str, &str) -> bool,
+    ) -> Result<LiveCommentDispatchPosture, WorkflowOsError> {
+        let invocation = action.commitment()?;
+        if invocation != request.invocation_commitment
+            || admission.side_effect != action.side_effect
+            || admission.body != action.body
+        {
+            return Err(not_dispatchable());
+        }
+        let Some(capability) = self.reserve_live_sandbox_dispatch(request, admission)? else {
+            return Ok(LiveCommentDispatchPosture::RecoveryOnly);
+        };
+        let binding = (*capability)
+            .into_parts()
+            .attempt_capability
+            .dispatch_reservation
+            .ok_or_else(corrupt)?;
+        let marker = live_comment_marker(&invocation, &binding.reservation_commitment);
+        Ok(if send(action.target, action.body, &marker) {
+            LiveCommentDispatchPosture::Acknowledged
+        } else {
+            LiveCommentDispatchPosture::RecoveryOnly
+        })
+    }
+
+    /// Operator-only lookup. This validates historical admission, not current
+    /// permission to write. It never consumes a grant or persists an outcome.
+    #[allow(dead_code)] // Private until a reviewed recovery caller exists.
+    pub(super) fn recover_live_sandbox_comment(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        lookup: impl FnOnce(&GitHubPullRequestCommentTarget, &str) -> LiveCommentLookup,
+    ) -> Result<LiveCommentRecovery, WorkflowOsError> {
+        let invocation = action.commitment()?;
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|_| storage_error("begin_failed"))?;
+        let (record, binding) =
+            read_existing(&tx, operation.as_str())?.ok_or_else(not_dispatchable)?;
+        check_dispatch_lane(&tx, &record.window_id, &record.attempt_id, true)?;
+        validate_existing_projection(&tx, &record, &binding)?;
+        let has_exact_live_use: bool = tx
+            .query_row(
+                "SELECT EXISTS(
+               SELECT 1 FROM events e JOIN live_sandbox_grant_uses u ON u.attempt_id=?3
+               JOIN live_sandbox_grants g ON g.grant_id=u.grant_id AND g.attempt_id=u.attempt_id
+               WHERE e.event_id=?1 AND e.run_id=?2 AND g.binding=?4
+             )",
+                params![
+                    binding.event.committed_result_cursor().event_id().as_str(),
+                    action.run.as_str(),
+                    record.attempt_id.as_str(),
+                    binding.event.executor_commitment().as_str(),
+                ],
+                |row| row.get(0),
+            )
+            .map_err(|_| corrupt())?;
+        if !has_exact_live_use || binding.event.invocation_commitment() != &invocation {
+            return Err(not_dispatchable());
+        }
+        let marker = live_comment_marker(&invocation, &record.reservation_commitment);
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(match lookup(action.target, &marker) {
+            LiveCommentLookup::Absent => LiveCommentRecovery::Absent,
+            LiveCommentLookup::Ambiguous => LiveCommentRecovery::Ambiguous,
+            LiveCommentLookup::Unauthorized => LiveCommentRecovery::Unauthorized,
+            LiveCommentLookup::Unavailable => LiveCommentRecovery::Unavailable,
+            LiveCommentLookup::Observed {
+                comment,
+                verified_action,
+            } if verified_action == invocation
+                && comment.target() == action.target
+                && comment.managed_marker() == Some(marker.as_str())
+                && comment.provider_comment_reference().is_some()
+                && comment.validate().is_ok() =>
+            {
+                LiveCommentRecovery::Observed(comment)
+            }
+            LiveCommentLookup::Observed { .. } => LiveCommentRecovery::Mismatch,
         })
     }
 
