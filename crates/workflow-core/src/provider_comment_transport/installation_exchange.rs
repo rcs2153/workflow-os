@@ -246,12 +246,41 @@ impl VerifiedInstallationScope {
         verified_at: Timestamp,
         effective_deadline: Timestamp,
     ) -> Self {
+        Self::test_receipt_for_adapter(
+            scope,
+            verified_at,
+            effective_deadline,
+            &fixture_adapter_commitment(),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_receipt_with_live_shape(
+        scope: ReviewedInstallation<'_>,
+        verified_at: Timestamp,
+        effective_deadline: Timestamp,
+    ) -> Self {
+        Self::test_receipt_for_adapter(
+            scope,
+            verified_at,
+            effective_deadline,
+            &fixed_adapter_commitment(),
+        )
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::expect_used)]
+    fn test_receipt_for_adapter(
+        scope: ReviewedInstallation<'_>,
+        verified_at: Timestamp,
+        effective_deadline: Timestamp,
+        adapter: &SpecContentHash,
+    ) -> Self {
         Self {
             bearer: GitHubPullRequestCommentProviderAuth::new("fixture-installation-bearer", None)
                 .expect("fixture bearer"),
             receipt: InstallationScopeReceipt {
-                scope_commitment: scope_commitment(scope, &fixture_adapter_commitment())
-                    .expect("fixture scope"),
+                scope_commitment: scope_commitment(scope, adapter).expect("fixture scope"),
                 verified_at,
                 effective_deadline,
             },

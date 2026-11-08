@@ -1042,6 +1042,22 @@ drift tests exercise the denial and no-resend boundary without requiring
 a live operator or changing the persisted history contract. This is a
 local precondition, not atomic with provider acceptance.
 
+### Inspect Scoped Installation Disposition Offline
+
+Core can read the exact run, reservation operation, and SideEffect in one
+read-only SQLite transaction. It verifies the durable admission, projected
+history, installation scope commitment, and matching attempted effect or
+installation-creation proof. It returns only verified creation or reconciliation
+required. Missing or inconsistent records and synthetic or fixture proof fail
+closed; reconciliation required does not mean the provider rejected the POST.
+
+Historical inspection does not depend on a currently usable grant, request
+provider authority, write state, or yield a send permit. The contract tests seed
+disposable production-shaped records without transport and separately reject
+actual fixture records. These tests are not evidence of a live GitHub creation.
+The trusted issuer, operator route, and independently reviewed live trial remain
+separate admission steps.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

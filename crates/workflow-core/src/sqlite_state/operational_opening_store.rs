@@ -3545,6 +3545,13 @@ mod tests {
     }
 
     #[test]
+    fn live_comment_installation_offline_inspection_is_exact_after_reopen() {
+        for completed in [false, true] {
+            exercise_live_grant_reservation(LiveGrantTrial::InstallationInspection { completed });
+        }
+    }
+
+    #[test]
     fn live_comment_observation_reopens_without_completing_or_reauthorizing() {
         exercise_live_grant_reservation(LiveGrantTrial::DurableObservation);
         exercise_live_grant_reservation(LiveGrantTrial::SuiteObservation);
@@ -3996,6 +4003,7 @@ mod tests {
         PreparedLoopback { expired: bool },
         InstallationScope,
         InstallationSend(InstallationSendTrial),
+        InstallationInspection { completed: bool },
         DurableObservation,
         SuiteObservation,
         ExpiredBeforeSend,
@@ -4058,6 +4066,9 @@ mod tests {
         );
         let operation = request().operation_id;
         let reopened = SqliteStateBackend::open(path).expect("reopen after response");
+        assert!(reopened
+            .inspect_installation_comment_recovery(action.run, &operation, action.side_effect)
+            .is_err());
         assert_eq!(
             reopened
                 .inspect_synthetic_sandbox_recovery(
@@ -4390,6 +4401,13 @@ mod tests {
             })
             .expect("scoped dispatch");
         let reopened = SqliteStateBackend::open(path).expect("reopen scoped dispatch");
+        assert!(reopened
+            .inspect_installation_comment_recovery(
+                action.run,
+                &request().operation_id,
+                action.side_effect
+            )
+            .is_err());
         let replay = with_reserved_exchange(
             reviewed,
             now,
@@ -4429,6 +4447,115 @@ mod tests {
                 crate::SideEffectLifecycleState::Attempted
             );
         }
+    }
+
+    fn exercise_installation_offline_inspection(
+        backend: &SqliteStateBackend,
+        path: &std::path::Path,
+        request: crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        provider: &crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding,
+        case: (bool, Timestamp),
+    ) {
+        use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture;
+        use crate::provider_comment_transport::installation_exchange::{
+            ReviewedInstallation, VerifiedInstallationScope,
+        };
+        use crate::SideEffectRecordStore;
+
+        let (completed, deadline) = case;
+        let reviewed = ReviewedInstallation {
+            app_id: std::num::NonZeroU64::new(33).expect("app"),
+            app_slug: "offline-contract-fixture",
+            bot_id: provider.author_id,
+            installation_id: std::num::NonZeroU64::new(44).expect("installation"),
+            repository_id: provider.repository_id,
+            target: action.target,
+            run_id: action.run,
+            immutable_run: action.bundle_root,
+            comment_adapter: &provider.adapter_commitment,
+            deadline,
+        };
+        let verified = VerifiedInstallationScope::test_receipt_with_live_shape(
+            reviewed,
+            Timestamp::now_utc(),
+            deadline,
+        );
+        let operation = request.operation_id.clone();
+        backend
+            .seed_installation_recovery_for_test(
+                request, admission, action, reviewed, &verified, completed,
+            )
+            .expect("seed disposable production-shaped state without transport");
+        drop(verified);
+        let connection = backend.existing_connection().expect("fixture connection");
+        let mut time = super::super::continuity_codec::load_snapshot(&connection)
+            .expect("fixture continuity")
+            .trusted_time;
+        time.last_observed_at = Some(Timestamp::from_offset_date_time(
+            deadline.as_offset_date_time() + time::Duration::hours(1),
+        ));
+        super::super::continuity_store::persist_trusted_time(&connection, &time)
+            .expect("advance durable clock past expiry in disposable state");
+        let reopened = SqliteStateBackend::open(path).expect("reopen historical state");
+        let before = reopened.read_events(action.run).expect("read events");
+        let effect = reopened
+            .read_side_effect_record(action.side_effect)
+            .expect("read effect")
+            .expect("effect");
+        let inspect = || {
+            reopened.inspect_installation_comment_recovery(
+                action.run,
+                &operation,
+                action.side_effect,
+            )
+        };
+        let expected = if completed {
+            InstallationCommentRecoveryPosture::CreationVerified
+        } else {
+            InstallationCommentRecoveryPosture::ReconciliationRequired
+        };
+        assert_eq!(inspect().expect("read exact disposition"), expected);
+        backend
+            .revoke_live_sandbox_grant(admission.grant_id)
+            .expect("revoke consumed grant");
+        assert_eq!(inspect().expect("repeat read"), expected);
+        let wrong_run = crate::WorkflowRunId::new("wrong-run").expect("run id");
+        let wrong_effect = crate::SideEffectId::new("wrong-effect").expect("effect id");
+        let wrong_operation =
+            crate::dispatch_reservation::DispatchReservationOperationId::new("wrong-operation")
+                .expect("operation id");
+        assert!(reopened
+            .inspect_installation_comment_recovery(&wrong_run, &operation, action.side_effect)
+            .is_err());
+        assert!(reopened
+            .inspect_installation_comment_recovery(action.run, &operation, &wrong_effect)
+            .is_err());
+        assert!(reopened
+            .inspect_installation_comment_recovery(action.run, &wrong_operation, action.side_effect)
+            .is_err());
+        assert_eq!(
+            reopened.read_events(action.run).expect("read events"),
+            before
+        );
+        assert_eq!(
+            reopened
+                .read_side_effect_record(action.side_effect)
+                .expect("read effect"),
+            Some(effect.clone())
+        );
+        let mut changed = serde_json::to_value(&effect).expect("effect JSON");
+        changed["summary"] = serde_json::json!("substituted durable effect");
+        reopened
+            .existing_connection()
+            .expect("fixture connection")
+            .execute(
+                "UPDATE side_effect_records SET payload=?1 WHERE side_effect_id=?2",
+                params![changed.to_string(), action.side_effect.as_str()],
+            )
+            .expect("inject corruption in disposable state");
+        assert!(inspect().is_err());
     }
 
     fn installation_fixture_send_time(
@@ -5703,6 +5830,9 @@ mod tests {
                     LiveGrantTrial::InstallationScope | LiveGrantTrial::InstallationSend(_) => {
                         crate::provider_comment_transport::installation_exchange::fixture_installation_comment_adapter_commitment()
                     }
+                    LiveGrantTrial::InstallationInspection { .. } => {
+                        crate::provider_comment_transport::installation_exchange::installation_comment_adapter_commitment()
+                    }
                     _ => SpecContentHash::from_text("trusted synthetic adapter"),
                 };
                 let provider_binding = || LiveSandboxProviderBinding {
@@ -6048,7 +6178,9 @@ mod tests {
                 assert_eq!(event_count(), before);
                 if !matches!(
                     trial,
-                    LiveGrantTrial::InstallationScope | LiveGrantTrial::InstallationSend(_)
+                    LiveGrantTrial::InstallationScope
+                        | LiveGrantTrial::InstallationSend(_)
+                        | LiveGrantTrial::InstallationInspection { .. }
                 ) {
                     inject_dispatch_commit_fault(InjectedDispatchCommitFault::Before);
                     assert!(backend
@@ -6120,6 +6252,23 @@ mod tests {
                             &provider_binding(),
                             grant.expires_at().expect("grant deadline").min(expiry),
                         );
+                    }
+                    LiveGrantTrial::InstallationInspection { completed } => {
+                        exercise_installation_offline_inspection(
+                            &backend,
+                            &fixture.path,
+                            request(),
+                            admission,
+                            action,
+                            &provider_binding(),
+                            (
+                                completed,
+                                grant.expires_at().expect("grant deadline").min(expiry),
+                            ),
+                        );
+                        assert_eq!(counts(), (1, 1));
+                        assert_eq!(event_count(), before + 1 + usize::from(completed));
+                        return;
                     }
                     LiveGrantTrial::PreparedLoopback { expired } => {
                         exercise_prepared_loopback(
