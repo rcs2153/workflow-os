@@ -4,18 +4,20 @@ use sha2::{Digest, Sha256};
 
 use super::{
     decode_json, encode_json, schema_recovery_required, validate_live_authority_schema,
-    validate_previous_live_authority_schema, validate_schema_metadata,
-    validate_unscoped_v12_schema, SqliteStateBackend, ADAPTER_SCHEMA_VERSION,
+    validate_previous_live_authority_schema, validate_recognized_v12_schema,
+    validate_schema_metadata, SqliteStateBackend, ADAPTER_SCHEMA_VERSION,
     LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION, LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION,
-    LIVE_AUTHORITY_SCHEMA_CHECKSUM, LIVE_SANDBOX_AUTHORITY_SCHEMA_V11,
-    LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12,
+    LIVE_AUTHORITY_PROOF_SCHEMA_VERSION, LIVE_AUTHORITY_SCHEMA_CHECKSUM,
+    LIVE_SANDBOX_AUTHORITY_SCHEMA_V11, LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12,
+    LIVE_SANDBOX_TARGET_SCHEMA_V13,
 };
 use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeAttemptState, AuthoritativeWindowState,
 };
 use crate::dispatch_reservation::DispatchReservationRequest;
 use crate::live_sandbox_continuation_authority::{
-    LiveSandboxContinuationFacts, LiveSandboxPrincipalVerifier, ResolvedLiveEffect, LIVE_CAPABILITY,
+    LiveSandboxContinuationFacts, LiveSandboxPolicyTarget, LiveSandboxPrincipalVerifier,
+    ResolvedLiveEffect, LIVE_CAPABILITY,
 };
 use crate::local_check_evidence_assurance::{
     StoredLocalCheckAssurance, StoredLocalCheckAssuranceWrite,
@@ -33,6 +35,124 @@ use crate::{
 };
 
 impl SqliteStateBackend {
+    pub(crate) fn provision_live_sandbox_target(
+        &self,
+        target: &LiveSandboxPolicyTarget,
+    ) -> Result<(), WorkflowOsError> {
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| denied())?;
+        validate_live_store(&tx)?;
+        if target.valid_until()
+            <= super::continuity_store::observe_continuity_trusted_time()?.observed_at()
+        {
+            return Err(denied());
+        }
+        let inserted = tx
+            .execute(
+                "INSERT INTO live_sandbox_targets (target_key, payload) VALUES (?1, ?2)
+             ON CONFLICT(target_key) DO NOTHING",
+                params![
+                    live_target_key(target.target()),
+                    encode_json(target, "live sandbox target")?
+                ],
+            )
+            .map_err(|_| denied())?;
+        if inserted != 1 {
+            return Err(denied());
+        }
+        tx.commit().map_err(|_| denied())
+    }
+
+    pub(crate) fn revoke_live_sandbox_target(
+        &self,
+        target: &crate::GitHubPullRequestCommentTarget,
+    ) -> Result<(), WorkflowOsError> {
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| denied())?;
+        validate_live_store(&tx)?;
+        let changed = tx
+            .execute(
+                "UPDATE live_sandbox_targets SET revoked=1 WHERE target_key=?1 AND revoked=0",
+                [live_target_key(target)],
+            )
+            .map_err(|_| denied())?;
+        if changed != 1 {
+            return Err(denied());
+        }
+        tx.commit().map_err(|_| denied())
+    }
+
+    /// Record policy only from current durable target registration and approval.
+    pub(crate) fn record_live_sandbox_policy(
+        &self,
+        facts: LiveSandboxContinuationFacts<'_>,
+    ) -> Result<crate::EventId, WorkflowOsError> {
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| denied())?;
+        validate_live_store(&tx)?;
+        let now = super::continuity_store::observe_continuity_trusted_time()?.observed_at();
+        let events = Self::read_events_with_connection(&tx, facts.action.run)?;
+        let run = WorkflowRun::rehydrate(&events)?;
+        verify_persisted_approval(&tx, facts, &run)?;
+        let identity = &run.snapshot.identity;
+        let bundle = identity.immutable_run_bundle.as_ref().ok_or_else(denied)?;
+        if bundle.root_hash() != facts.action.bundle_root {
+            return Err(denied());
+        }
+        verify_live_bundle(&tx, facts, &run, bundle)?;
+        let policy = durable_scoped_policy(&tx, facts, now)?;
+        let id = durable_policy_event_id(&policy)?;
+        if let Some((event, existing)) =
+            latest_correlated_policy(&run, &facts.decision.correlation_id)
+        {
+            return if event.event_id == id
+                && existing == &policy
+                && policy_follows_approval(&run, event, facts, now)
+            {
+                Ok(id)
+            } else {
+                Err(denied())
+            };
+        }
+        let last = events.last().ok_or_else(denied)?;
+        if last.timestamp > now
+            || events.iter().any(|event| {
+                matches!(&event.kind, WorkflowRunEventKind::OperationalExecutionWindowOpened(open)
+                if open.window_id() == facts.window)
+            })
+        {
+            return Err(denied());
+        }
+        let event = crate::WorkflowRunEvent {
+            sequence_number: crate::EventSequenceNumber::new(
+                last.sequence_number
+                    .get()
+                    .checked_add(1)
+                    .ok_or_else(denied)?,
+            )?,
+            event_id: id.clone(),
+            timestamp: now,
+            run_id: identity.run_id.clone(),
+            workflow_id: identity.workflow_id.clone(),
+            schema_version: identity.schema_version.clone(),
+            workflow_version: identity.workflow_version.clone(),
+            spec_content_hash: identity.spec_content_hash.clone(),
+            correlation_id: Some(facts.decision.correlation_id.clone()),
+            actor: None,
+            idempotency_key: None,
+            kind: WorkflowRunEventKind::PolicyDecisionRecorded(Box::new(policy)),
+        };
+        super::append_event_and_project_snapshot(&tx, &event)?;
+        tx.commit().map_err(|_| denied())?;
+        Ok(id)
+    }
+
     #[cfg(feature = "trusted-host-application-spi")]
     pub(crate) fn live_check_proof_store_enabled(&self) -> Result<bool, WorkflowOsError> {
         Ok(
@@ -133,21 +253,23 @@ impl SqliteStateBackend {
                 validate_previous_live_authority_schema(&tx)?;
                 true
             }
+            LIVE_AUTHORITY_PROOF_SCHEMA_VERSION => {
+                validate_recognized_v12_schema(&tx)?;
+                true
+            }
             LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => {
-                if validate_live_authority_schema(&tx).is_ok() {
-                    false
-                } else {
-                    validate_unscoped_v12_schema(&tx)?;
-                    true
-                }
+                validate_live_authority_schema(&tx)?;
+                false
             }
             _ => return Err(schema_recovery_required()),
         };
         if updating {
-            if current != LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION {
+            if current < LIVE_AUTHORITY_PROOF_SCHEMA_VERSION {
                 tx.execute_batch(LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12)
                     .map_err(|_| schema_recovery_required())?;
             }
+            tx.execute_batch(LIVE_SANDBOX_TARGET_SCHEMA_V13)
+                .map_err(|_| schema_recovery_required())?;
             tx.execute(
                 "UPDATE schema_metadata SET schema_version=?1, checksum=?2
                          WHERE singleton=1",
@@ -518,7 +640,7 @@ pub(super) fn verify_live_opening_approval(
 ) -> Result<(), WorkflowOsError> {
     let observation = super::continuity_store::observe_continuity_trusted_time()?;
     let now = observation.observed_at();
-    facts.scoped_policy_decision(now)?;
+    durable_scoped_policy(tx, facts, now)?;
     if now >= facts.window_expires_at
         || facts.window_expires_at.as_offset_date_time() - now.as_offset_date_time()
             > time::Duration::minutes(5)
@@ -601,7 +723,7 @@ fn resolve_live_effect(
     {
         return Err(denied());
     }
-    let policy = resolve_effect_policy(run, &record, facts, now)?;
+    let policy = resolve_effect_policy(tx, run, &record, facts, now)?;
     let checks = resolve_effect_checks(run, &record, facts, bundle)?;
     let proofs = resolve_required_check_proofs(tx, &stored, facts.action.step, &checks, now)?;
     let bundle_sensitivity = match stored.manifest().sensitivity() {
@@ -834,7 +956,66 @@ fn required_check_unverified() -> WorkflowOsError {
     )
 }
 
+fn live_target_key(target: &crate::GitHubPullRequestCommentTarget) -> String {
+    target.reference().to_ascii_lowercase()
+}
+
+fn durable_scoped_policy(
+    tx: &Connection,
+    facts: LiveSandboxContinuationFacts<'_>,
+    now: Timestamp,
+) -> Result<crate::PolicyDecision, WorkflowOsError> {
+    let payload: String = tx
+        .query_row(
+            "SELECT payload FROM live_sandbox_targets WHERE target_key=?1 AND revoked=0",
+            [live_target_key(facts.action.target)],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| denied())?
+        .ok_or_else(denied)?;
+    let target: LiveSandboxPolicyTarget = decode_json(&payload, "live sandbox target")?;
+    facts.scoped_policy_decision(&target, now)
+}
+
+fn latest_correlated_policy<'a>(
+    run: &'a WorkflowRun,
+    correlation: &crate::CorrelationId,
+) -> Option<(&'a crate::WorkflowRunEvent, &'a crate::PolicyDecision)> {
+    run.events.iter().rev().find_map(|event| match &event.kind {
+        WorkflowRunEventKind::PolicyDecisionRecorded(decision)
+            if decision.action == Action::InvokeAdapter
+                && decision.correlation_id.as_ref() == Some(correlation) =>
+        {
+            Some((event, decision.as_ref()))
+        }
+        _ => None,
+    })
+}
+
+fn policy_follows_approval(
+    run: &WorkflowRun,
+    event: &crate::WorkflowRunEvent,
+    facts: LiveSandboxContinuationFacts<'_>,
+    now: Timestamp,
+) -> bool {
+    event.timestamp >= facts.decision.decided_at
+        && event.timestamp <= now
+        && run.events.iter().any(|approval| {
+            approval.event_id == *facts.approval_event
+                && approval.sequence_number < event.sequence_number
+        })
+}
+
+fn durable_policy_event_id(
+    policy: &crate::PolicyDecision,
+) -> Result<crate::EventId, WorkflowOsError> {
+    let digest = proof_commitment(b"workflow-os/durable-live-sandbox-policy/v1\0", policy)?;
+    crate::EventId::new(format!("event/live-sandbox-policy/{digest}"))
+}
+
 fn resolve_effect_policy<'a>(
+    tx: &Connection,
     run: &'a WorkflowRun,
     record: &SideEffectRecord,
     facts: LiveSandboxContinuationFacts<'_>,
@@ -844,36 +1025,16 @@ fn resolve_effect_policy<'a>(
         return Err(denied());
     };
     let correlation = record.correlation_id().ok_or_else(denied)?;
-    let approval_sequence = run
-        .events
-        .iter()
-        .find(|event| event.event_id == *facts.approval_event)
-        .ok_or_else(denied)?
-        .sequence_number;
-    let latest = run
-        .events
-        .iter()
-        .rev()
-        .find_map(|event| match &event.kind {
-            WorkflowRunEventKind::PolicyDecisionRecorded(decision)
-                if decision.action == Action::InvokeAdapter
-                    && decision.correlation_id.as_ref() == Some(correlation) =>
-            {
-                Some((event, decision))
-            }
-            _ => None,
-        })
-        .ok_or_else(denied)?;
+    let (event, decision) = latest_correlated_policy(run, correlation).ok_or_else(denied)?;
     if reference.kind() != SideEffectReferenceKind::PolicyDecision
-        || reference.reference() != latest.0.event_id.as_str()
-        || latest.0.sequence_number <= approval_sequence
-        || latest.0.timestamp < facts.decision.decided_at
-        || latest.0.timestamp > now
-        || latest.1.as_ref() != &facts.scoped_policy_decision(now)?
+        || reference.reference() != event.event_id.as_str()
+        || !policy_follows_approval(run, event, facts, now)
+        || decision != &durable_scoped_policy(tx, facts, now)?
+        || event.event_id != durable_policy_event_id(decision)?
     {
         return Err(denied());
     }
-    Ok(latest.0)
+    Ok(event)
 }
 
 fn resolve_effect_checks<'a>(

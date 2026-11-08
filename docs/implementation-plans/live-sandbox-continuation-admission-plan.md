@@ -239,6 +239,18 @@ protocol checksum upgrade before operational writes; no physical schema or
 ordinary policy changes. Tests provision synthetic targets only. A trusted
 production resolver and provider route remain unconnected.
 
+Implementation run `run-1794095556237154000-2` adds a private opt-in V13
+target registry. The trusted operator can register one exact PR target with
+an operator, revision and expiry, and revoke it without permitting
+re-registration of the same target. Opening, grant issuance, and reservation
+resolve the current registration under their SQLite transaction, not from a
+caller-provided provisioning object. Core records the scoped policy event
+only after matching durable approval and immutable bundle identity. Exact
+recording replay returns the same event; a later conflicting decision
+cannot be overwritten. Upgrade preserves history and does not infer target
+registrations from earlier policy events. Tests use disposable local stores
+and synthetic targets; no real target or provider route is enabled.
+
 ## Post-Admission Recovery
 
 After a reservation, an interrupted process is recovery-only. This includes
