@@ -30,6 +30,9 @@ use crate::{
 };
 
 use super::live_sandbox_grant_store::{check_opening_lane, verify_live_opening_approval};
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod creation_notification_fixture;
 use super::{
     append_event_and_project_snapshot, encode_json, map_sqlite_error, snapshot_commitment,
 };
@@ -4926,6 +4929,7 @@ mod tests {
         assert_eq!(opens.get(), 0);
 
         let expected = if reserve {
+            let release = Cell::new(None);
             let ledger_path = path.with_extension("provider.sqlite3");
             let ledger = Connection::open(&ledger_path).expect("independent provider ledger");
             ledger
@@ -4958,7 +4962,8 @@ mod tests {
                         },
                         |request, exchanged| {
                             backend.dispatch_lost_installation_ack_for_test(
-                                request, admission, action, reviewed, &exchanged, |body| {
+                                request, admission, action, reviewed, &exchanged, |body, released_at| {
+                                    assert!(release.replace(Some(released_at)).is_none());
                                     let time = Timestamp::now_utc();
                                     ledger.execute(
                                         "INSERT INTO accepted (id, body, created_at) VALUES (22, ?1, ?2)",
@@ -4974,7 +4979,7 @@ mod tests {
             drop(ledger);
             assert_reopened_installation_ack(
                 path,
-                &ledger_path,
+                (&ledger_path, release.get().expect("fixture send release")),
                 &request,
                 admission,
                 action,
@@ -4996,7 +5001,7 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn assert_reopened_installation_ack(
         path: &std::path::Path,
-        ledger_path: &std::path::Path,
+        ledger: (&std::path::Path, Timestamp),
         request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
         admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
         action: crate::provider_write::GitHubCommentContinuationAction<'_>,
@@ -5022,20 +5027,21 @@ mod tests {
             );
         };
         assert_no_send();
-        assert_lost_installation_ack_observation(
-            &reopened,
-            ledger_path,
-            &request(),
-            action,
-            reviewed,
-        );
+        assert_lost_installation_ack_observation(&reopened, ledger, &request(), action, reviewed);
         assert_no_send();
+        assert_eq!(
+            crate::SideEffectRecordStore::read_side_effect_record(&reopened, action.side_effect)
+                .expect("read effect")
+                .expect("attempted effect")
+                .lifecycle_state(),
+            crate::SideEffectLifecycleState::Attempted
+        );
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn assert_lost_installation_ack_observation(
         backend: &SqliteStateBackend,
-        ledger_path: &std::path::Path,
+        ledger: (&std::path::Path, Timestamp),
         request: &crate::dispatch_reservation::DispatchReservationRequest,
         action: crate::provider_write::GitHubCommentContinuationAction<'_>,
         reviewed: crate::provider_comment_transport::installation_exchange::ReviewedInstallation<
@@ -5047,10 +5053,10 @@ mod tests {
             CurrentCommentPosture::{Ambiguous, ExactCurrentMatch, Unresolved},
             ProviderComment, ProviderTimestampBounds,
         };
-        use crate::SideEffectRecordStore;
         use std::num::NonZeroU64;
         use time::Duration;
 
+        let (ledger_path, release) = ledger;
         let ledger = Connection::open(ledger_path).expect("reopen independent ledger");
         let (id, body, created_at, count): (u32, String, String, u32) = ledger
             .query_row(
@@ -5079,6 +5085,13 @@ mod tests {
                 action,
                 reviewed.comment_adapter,
                 |_, expected| {
+                    super::creation_notification_fixture::exercise(
+                        expected,
+                        observed,
+                        reviewed.installation_id,
+                        release,
+                        observed_at,
+                    );
                     let bounds = Some(ProviderTimestampBounds {
                         earliest_correction: Duration::ZERO,
                         latest_correction: Duration::ZERO,
@@ -5129,14 +5142,6 @@ mod tests {
                 },
             )
             .expect("observation uses the exact historical installation reservation");
-        assert_eq!(
-            backend
-                .read_side_effect_record(action.side_effect)
-                .expect("read effect")
-                .expect("attempted effect")
-                .lifecycle_state(),
-            crate::SideEffectLifecycleState::Attempted
-        );
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -7004,6 +7009,21 @@ mod tests {
 
         let fixture = Fixture::new_with_live_bundle(Some(trial));
         let actor = ActorId::new("agent/opening-test").expect("actor");
+        let body = "synthetic approved comment";
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let correlated_body;
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let body = if matches!(
+            trial,
+            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::Coordinator {
+                reserve: true
+            })
+        ) {
+            correlated_body = super::creation_notification_fixture::correlate(body);
+            &correlated_body
+        } else {
+            body
+        };
         let action = GitHubCommentContinuationAction {
             run: &fixture.run_id,
             step: &fixture.step_id,
@@ -7011,7 +7031,7 @@ mod tests {
             original_actor: &actor,
             side_effect: &SideEffectId::new("effect/comment").expect("effect"),
             target: &GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target"),
-            body: "synthetic approved comment",
+            body,
             idempotency_key: &IdempotencyKey::new("comment/live-reservation").expect("key"),
             mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
         };

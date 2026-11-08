@@ -1904,6 +1904,7 @@ dependencies = [
  "log",
  "nix",
  "postgres",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",
