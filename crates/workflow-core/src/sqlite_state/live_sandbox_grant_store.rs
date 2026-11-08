@@ -25,10 +25,11 @@ use crate::local_check_evidence_assurance::{
 use crate::operational_execution_window_opening::{
     operation_binding_commitment, OperationalExecutionWindowOpeningRequest,
 };
+use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
     Action, ActorId, ApprovalPresentationRecord, AuthorizedExecutionAttemptId,
     AuthorizedExecutionWindowId, CapabilityGrant, CapabilityGrantId, CapabilityGrantLifecycle,
-    LocalCheckResultStatus, SideEffectAuthorityDecision, SideEffectCapability,
+    LocalCheckResultStatus, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
     SideEffectLifecycleState, SideEffectRecord, SideEffectReferenceKind, SideEffectSensitivity,
     SideEffectTargetKind, SpecContentHash, Timestamp, WorkReportSensitivity, WorkflowOsError,
     WorkflowRun, WorkflowRunEventKind, WorkflowRunStatus,
@@ -431,12 +432,14 @@ fn encode_check_proof(
 #[derive(Clone, Copy)]
 pub(super) struct LiveGrantAdmission<'a> {
     pub(crate) grant_id: &'a CapabilityGrantId,
-    pub(crate) facts: LiveSandboxContinuationFacts<'a>,
+    pub(crate) side_effect: &'a SideEffectId,
+    pub(crate) body: &'a str,
     pub(crate) credential: &'a [u8; 32],
 }
 
 pub(super) struct AuthenticatedLiveGrant<'a> {
-    facts: LiveSandboxContinuationFacts<'a>,
+    side_effect: &'a SideEffectId,
+    body: &'a str,
     grant: CapabilityGrant,
     registration: SpecContentHash,
 }
@@ -481,7 +484,8 @@ impl<'a> LiveGrantAdmission<'a> {
             return Err(denied());
         }
         Ok(AuthenticatedLiveGrant {
-            facts: self.facts,
+            side_effect: self.side_effect,
+            body: self.body,
             grant,
             registration,
         })
@@ -496,11 +500,67 @@ impl AuthenticatedLiveGrant<'_> {
         now: Timestamp,
         window_expiry: Timestamp,
     ) -> Result<(), WorkflowOsError> {
-        let facts = self.facts;
+        let events = SqliteStateBackend::read_events_with_connection(
+            tx,
+            &request.expected_window_binding.run_id,
+        )?;
+        let run = WorkflowRun::rehydrate(&events)?;
+        let identity = &run.snapshot.identity;
+        let [approval_id] = self.grant.requirements().approval_ids() else {
+            return Err(denied());
+        };
+        let approval = run
+            .snapshot
+            .approval_requests
+            .iter()
+            .find(|approval| approval.approval_id == approval_id.as_str())
+            .ok_or_else(denied)?;
+        let decision = approval.decision.as_ref().ok_or_else(denied)?;
+        let marker = decision.proof_marker.as_ref().ok_or_else(denied)?;
+        let presentation: ApprovalPresentationRecord = super::read_optional_payload(
+            tx,
+            "approval_presentations",
+            "presentation_id",
+            marker.presentation_id().as_str(),
+            "live sandbox approval presentation",
+        )?
+        .ok_or_else(denied)?;
+        let mut approval_events = run.events.iter().filter(|event| {
+            matches!(&event.kind, WorkflowRunEventKind::ApprovalGranted(granted) if granted == decision)
+        });
+        let approval_event = approval_events.next().ok_or_else(denied)?;
+        if approval_events.next().is_some() {
+            return Err(denied());
+        }
+        let record = read_live_effect_record(tx, self.side_effect)?;
+        let target = read_active_live_target(tx, record.target().reference())?;
+        let bundle = identity.immutable_run_bundle.as_ref().ok_or_else(denied)?;
+        let facts = LiveSandboxContinuationFacts {
+            action: GitHubCommentContinuationAction {
+                run: &identity.run_id,
+                step: record.step_id().ok_or_else(denied)?,
+                bundle_root: bundle.root_hash(),
+                original_actor: record.actor().ok_or_else(denied)?,
+                side_effect: self.side_effect,
+                target: target.target(),
+                body: self.body,
+                idempotency_key: record.idempotency().key(),
+                mode: crate::GitHubPullRequestCommentWriteMode::LiveSandbox,
+            },
+            replacement: self.grant.subject(),
+            scope: self.grant.scope(),
+            approval: approval_id,
+            approval_event: &approval_event.event_id,
+            decision,
+            presentation: &presentation,
+            approval_expires_at: approval.expires_at,
+            window: &request.capability.window_id,
+            attempt: &request.capability.attempt_id,
+            window_expires_at: window_expiry,
+            requirements: self.grant.requirements(),
+        };
         let action = facts.action.commitment()?;
-        if facts.window != &request.capability.window_id
-            || facts.attempt != &request.capability.attempt_id
-            || facts.action.run != &request.expected_window_binding.run_id
+        if facts.action.run != &request.expected_window_binding.run_id
             || facts.action.step != &request.expected_window_binding.step_id
             || facts.scope.workflow_id() != &request.expected_window_binding.workflow_id
             || facts.action.original_actor != &request.expected_window_binding.subject_actor_id
@@ -509,13 +569,12 @@ impl AuthenticatedLiveGrant<'_> {
                     .expected_window_binding
                     .immutable_run_bundle
                     .root_hash()
-            || facts.window_expires_at != window_expiry
             || action != request.invocation_commitment
             || request.operation_binding_commitment != opening_binding(facts, &action)
         {
             return Err(denied());
         }
-        let effect = verify_opening(tx, facts, &action, now)?;
+        let effect = verify_opening_in_run(tx, facts, &action, &run, &record, now)?;
         facts.verify_bound_grant(
             &self.grant,
             now,
@@ -660,7 +719,20 @@ fn verify_opening(
     now: Timestamp,
 ) -> Result<ResolvedLiveEffect, WorkflowOsError> {
     let events = SqliteStateBackend::read_events_with_connection(tx, facts.action.run)?;
-    let last = events.last().ok_or_else(denied)?;
+    let run = WorkflowRun::rehydrate(&events)?;
+    let record = read_live_effect_record(tx, facts.action.side_effect)?;
+    verify_opening_in_run(tx, facts, action, &run, &record, now)
+}
+
+fn verify_opening_in_run(
+    tx: &Connection,
+    facts: LiveSandboxContinuationFacts<'_>,
+    action: &SpecContentHash,
+    run: &WorkflowRun,
+    record: &SideEffectRecord,
+    now: Timestamp,
+) -> Result<ResolvedLiveEffect, WorkflowOsError> {
+    let last = run.events.last().ok_or_else(denied)?;
     let expected = opening_binding(facts, action);
     if !matches!(&last.kind, WorkflowRunEventKind::OperationalExecutionWindowOpened(open)
         if open.attempt_id() == facts.attempt && open.window_id() == facts.window
@@ -669,26 +741,32 @@ fn verify_opening(
     {
         return Err(denied());
     }
-    let run = WorkflowRun::rehydrate(&events)?;
-    verify_persisted_approval(tx, facts, &run)?;
-    resolve_live_effect(tx, facts, &run, &last.event_id, now)
+    verify_persisted_approval(tx, facts, run)?;
+    resolve_live_effect(tx, facts, run, record, &last.event_id, now)
+}
+
+fn read_live_effect_record(
+    tx: &Connection,
+    id: &SideEffectId,
+) -> Result<SideEffectRecord, WorkflowOsError> {
+    super::read_optional_payload(
+        tx,
+        "side_effect_records",
+        "side_effect_id",
+        id.as_str(),
+        "live sandbox attempted effect",
+    )?
+    .ok_or_else(denied)
 }
 
 fn resolve_live_effect(
     tx: &Connection,
     facts: LiveSandboxContinuationFacts<'_>,
     run: &WorkflowRun,
+    record: &SideEffectRecord,
     opening_event: &crate::EventId,
     now: Timestamp,
 ) -> Result<ResolvedLiveEffect, WorkflowOsError> {
-    let record: SideEffectRecord = super::read_optional_payload(
-        tx,
-        "side_effect_records",
-        "side_effect_id",
-        facts.action.side_effect.as_str(),
-        "live sandbox attempted effect",
-    )?
-    .ok_or_else(denied)?;
     let identity = &run.snapshot.identity;
     let bundle = identity.immutable_run_bundle.as_ref().ok_or_else(denied)?;
     let stored = verify_live_bundle(tx, facts, run, bundle)?;
@@ -723,8 +801,8 @@ fn resolve_live_effect(
     {
         return Err(denied());
     }
-    let policy = resolve_effect_policy(tx, run, &record, facts, now)?;
-    let checks = resolve_effect_checks(run, &record, facts, bundle)?;
+    let policy = resolve_effect_policy(tx, run, record, facts, now)?;
+    let checks = resolve_effect_checks(run, record, facts, bundle)?;
     let proofs = resolve_required_check_proofs(tx, &stored, facts.action.step, &checks, now)?;
     let bundle_sensitivity = match stored.manifest().sensitivity() {
         crate::ImmutableRunBundleSensitivity::Internal => WorkReportSensitivity::Internal,
@@ -965,17 +1043,28 @@ fn durable_scoped_policy(
     facts: LiveSandboxContinuationFacts<'_>,
     now: Timestamp,
 ) -> Result<crate::PolicyDecision, WorkflowOsError> {
+    let target = read_active_live_target(tx, &facts.action.target.reference())?;
+    facts.scoped_policy_decision(&target, now)
+}
+
+fn read_active_live_target(
+    tx: &Connection,
+    reference: &str,
+) -> Result<LiveSandboxPolicyTarget, WorkflowOsError> {
     let payload: String = tx
         .query_row(
             "SELECT payload FROM live_sandbox_targets WHERE target_key=?1 AND revoked=0",
-            [live_target_key(facts.action.target)],
+            [reference.to_ascii_lowercase()],
             |row| row.get(0),
         )
         .optional()
         .map_err(|_| denied())?
         .ok_or_else(denied)?;
     let target: LiveSandboxPolicyTarget = decode_json(&payload, "live sandbox target")?;
-    facts.scoped_policy_decision(&target, now)
+    if target.target().reference() != reference {
+        return Err(denied());
+    }
+    Ok(target)
 }
 
 fn latest_correlated_policy<'a>(
@@ -1119,6 +1208,7 @@ fn verify_persisted_approval(
     )?;
     if run.snapshot.status != WorkflowRunStatus::Running
         || approval.step_id.as_ref() != Some(facts.action.step)
+        || &approval.requested_by != facts.action.original_actor
         || approval.expires_at != facts.approval_expires_at
         || approval.decision.as_ref() != Some(facts.decision)
         || presentation.as_ref() != Some(facts.presentation)

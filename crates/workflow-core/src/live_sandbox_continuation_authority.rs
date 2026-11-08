@@ -8,11 +8,11 @@ use subtle::ConstantTimeEq;
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
     Action, ActorId, ApprovalDecision, ApprovalDecisionKind, ApprovalPresentationRecord,
-    ApprovalReferenceId, AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId, Capability,
-    CapabilityDelegationPosture, CapabilityGrant, CapabilityGrantLifecycle,
-    CapabilityGrantRequirements, CapabilityGrantScope, CapabilityResourceKind, EventId,
-    GitHubPullRequestCommentTarget, PolicyDecision, SpecContentHash, Timestamp,
-    WorkReportSensitivity, WorkflowOsError,
+    ApprovalPresentationSensitivity, ApprovalReferenceId, AuthorizedExecutionAttemptId,
+    AuthorizedExecutionWindowId, Capability, CapabilityDelegationPosture, CapabilityGrant,
+    CapabilityGrantLifecycle, CapabilityGrantRequirements, CapabilityGrantScope,
+    CapabilityResourceKind, EventId, GitHubPullRequestCommentTarget, PolicyDecision,
+    SpecContentHash, Timestamp, WorkReportSensitivity, WorkflowOsError,
 };
 
 pub(crate) const LIVE_CAPABILITY: &str = "live-sandbox/github-pr-comment-continuation";
@@ -130,7 +130,6 @@ pub(crate) struct LiveSandboxContinuationFacts<'a> {
     pub(crate) attempt: &'a AuthorizedExecutionAttemptId,
     pub(crate) window_expires_at: Timestamp,
     pub(crate) requirements: &'a CapabilityGrantRequirements,
-    pub(crate) sensitivity: WorkReportSensitivity,
 }
 
 pub(crate) struct ResolvedLiveEffect {
@@ -242,7 +241,13 @@ impl LiveSandboxContinuationFacts<'_> {
     ) -> Result<SpecContentHash, WorkflowOsError> {
         self.verify_exact_approval(observed_at)?;
         let expires_at = grant.expires_at().ok_or_else(denied)?;
-        let sensitivity = self.sensitivity.max(effect.sensitivity);
+        let approval_sensitivity = match self.presentation.sensitivity() {
+            ApprovalPresentationSensitivity::Public => WorkReportSensitivity::Public,
+            ApprovalPresentationSensitivity::Internal => WorkReportSensitivity::Internal,
+            ApprovalPresentationSensitivity::Confidential => WorkReportSensitivity::Confidential,
+            ApprovalPresentationSensitivity::Restricted => WorkReportSensitivity::Secret,
+        };
+        let sensitivity = approval_sensitivity.max(effect.sensitivity);
         if self
             .approval_expires_at
             .is_some_and(|expiry| expires_at > expiry)
@@ -447,7 +452,6 @@ pub(crate) mod tests {
             attempt,
             window_expires_at: window_expiry,
             requirements: &requirements,
-            sensitivity: WorkReportSensitivity::Internal,
         };
         let grant = |capability: &str, lifecycle: CapabilityGrantLifecycle| {
             CapabilityGrant::new(CapabilityGrantDefinition {
