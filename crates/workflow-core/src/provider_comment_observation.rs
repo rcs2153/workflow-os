@@ -9,8 +9,8 @@ use time::Duration;
 use crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding;
 use crate::{GitHubPullRequestCommentTarget, Timestamp};
 
-const MAX_COMMENTS: usize = 128;
-const MAX_PAGES: usize = 8;
+pub(crate) const MAX_COMMENTS: usize = 128;
+pub(crate) const MAX_PAGES: usize = 8;
 pub(crate) const MAX_RAW_BODY_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_CREATION_RESPONSE_BYTES: usize = 512 * 1024;
 const MARKER_PREFIX: &str = "<!-- workflow-os/live-comment/";
