@@ -518,6 +518,16 @@ stable repository and author. Missing or substituted responses remain
 recovery-only. The injected sender and its claimed adapter commitment are not
 authenticated live evidence.
 
+The synthetic sender now passes bounded JSON to the same verifier used
+before proof persistence. The decoder requires one positive comment ID and
+author ID, the exact raw body, and exact issue and comment URLs at the
+expected `api.github.com` target. It rejects duplicate required fields,
+malformed payloads, and responses larger than 512 KiB before decoding.
+The repository ID is supplied by the adapter's separate identity resolution;
+it is not inferred from the comment body or URL. A real adapter must still
+establish that identity, enforce the byte limit while reading, and disable
+redirects and write retries. The parser does not follow response URLs.
+
 An exact synthetic response now persists a completed SideEffect and a
 distinct creation-response proof event in the same SQLite transaction.
 Reopening the database verifies the proof against the original reservation

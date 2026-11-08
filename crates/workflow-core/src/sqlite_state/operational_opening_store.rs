@@ -3912,13 +3912,22 @@ mod tests {
         assert_eq!(
             backend
                 .dispatch_live_sandbox_comment(request(), admission, action, |target, raw_body| {
+                    let issues = format!(
+                        "https://api.github.com/repos/{}/{}/issues",
+                        target.owner(),
+                        target.repository()
+                    );
                     Some(CreatedCommentResponse {
                         status: 201,
-                        target: target.clone(),
                         repository_id: provider.repository_id,
-                        author_id: provider.author_id,
-                        comment_id,
-                        raw_body: raw_body.to_owned(),
+                        json: serde_json::to_vec(&serde_json::json!({
+                            "id": comment_id,
+                            "issue_url": format!("{issues}/{}", target.pull_request_number()),
+                            "url": format!("{issues}/comments/{comment_id}"),
+                            "user": { "id": provider.author_id },
+                            "body": raw_body,
+                        }))
+                        .expect("encode synthetic provider response"),
                     })
                 })
                 .expect("persist creation response"),
