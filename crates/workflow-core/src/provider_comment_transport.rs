@@ -529,18 +529,45 @@ impl PreparedGitHubCommentCreation<'_> {
     }
 
     /// No response is evidence for another attempt. Only Core can authorize dispatch.
-    pub(crate) fn send(self, raw_body: &str) -> Option<CreatedCommentResponse> {
+    pub(crate) fn send(
+        self,
+        raw_body: &str,
+        window: CommentSendWindow,
+    ) -> Option<CreatedCommentResponse> {
+        self.send_with_clock(raw_body, window, Timestamp::now_utc)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn send_with_test_clock(
+        self,
+        raw_body: &str,
+        window: CommentSendWindow,
+        observe: impl FnOnce() -> Timestamp,
+    ) -> Option<CreatedCommentResponse> {
+        self.send_with_clock(raw_body, window, observe)
+    }
+
+    fn send_with_clock(
+        self,
+        raw_body: &str,
+        window: CommentSendWindow,
+        observe: impl FnOnce() -> Timestamp,
+    ) -> Option<CreatedCommentResponse> {
         if raw_body.is_empty() || raw_body.len() > MAX_RAW_BODY_BYTES {
             return None;
         }
         let body = serde_json::json!({ "body": raw_body }).to_string();
-        let response = self
+        let request = self
             .transport
             .request("POST", &self.path)
             .set("Content-Type", "application/json")
-            .set("Accept", "application/vnd.github.raw+json")
-            .send_string(&body)
-            .ok()?;
+            .set("Accept", "application/vnd.github.raw+json");
+        // This limits the local HTTP handoff, not provider-side execution.
+        let now = observe();
+        if now < window.checked_at || now >= window.deadline {
+            return None;
+        }
+        let response = request.send_string(&body).ok()?;
         if response.status() != 201 {
             return None;
         }
@@ -551,6 +578,12 @@ impl PreparedGitHubCommentCreation<'_> {
             json,
         })
     }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct CommentSendWindow {
+    pub(crate) checked_at: Timestamp,
+    pub(crate) deadline: Timestamp,
 }
 
 fn bounded_read(reader: impl Read, max: usize) -> Option<Vec<u8>> {
@@ -592,6 +625,14 @@ pub(crate) mod tests {
         replies: &[Reply<'_>],
         adapter_commitment: SpecContentHash,
     ) -> Option<CreatedCommentResponse> {
+        exchange_at(replies, adapter_commitment, observation_time(10))
+    }
+
+    fn exchange_at(
+        replies: &[Reply<'_>],
+        adapter_commitment: SpecContentHash,
+        observed_at: Timestamp,
+    ) -> Option<CreatedCommentResponse> {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).expect("loopback");
         listener
             .set_nonblocking(true)
@@ -622,7 +663,16 @@ pub(crate) mod tests {
                 ..GitHubCommentCreationTransport::new(&auth)
             }
             .prepare(&target, &binding)
-            .and_then(|prepared| prepared.send(MARKED_BODY));
+            .and_then(|prepared| {
+                prepared.send_with_test_clock(
+                    MARKED_BODY,
+                    CommentSendWindow {
+                        checked_at: observation_time(10),
+                        deadline: observation_time(20),
+                    },
+                    || observed_at,
+                )
+            });
             server.join().expect("fixture server");
             assert!(
                 matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
@@ -646,6 +696,9 @@ pub(crate) mod tests {
             }
         };
         let (mut stream, _) = accepted.expect("fixture HTTP request");
+        stream
+            .set_nonblocking(false)
+            .expect("blocking fixture stream");
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .expect("fixture read timeout");
@@ -1066,6 +1119,18 @@ pub(crate) mod tests {
             SpecContentHash::from_text("other adapter"),
         ] {
             assert!(exchange_with_binding(&[], wrong).is_none());
+        }
+    }
+
+    #[test]
+    fn comment_creation_rejects_elapsed_or_regressed_handoff_before_post() {
+        for seconds in [9, 20, 21] {
+            assert!(exchange_at(
+                &[repo(REPO), user(USER), pull_request("200 OK", PR)],
+                loopback_comment_exchange_commitment(),
+                observation_time(seconds),
+            )
+            .is_none());
         }
     }
 

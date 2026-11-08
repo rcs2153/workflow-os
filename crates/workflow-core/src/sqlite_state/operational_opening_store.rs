@@ -3512,7 +3512,12 @@ mod tests {
 
     #[test]
     fn live_comment_prepared_loopback_loses_response_without_resending() {
-        exercise_live_grant_reservation(LiveGrantTrial::PreparedLoopbackLoss);
+        exercise_live_grant_reservation(LiveGrantTrial::PreparedLoopback { expired: false });
+    }
+
+    #[test]
+    fn live_comment_prepared_loopback_expiry_cannot_send_or_resend() {
+        exercise_live_grant_reservation(LiveGrantTrial::PreparedLoopback { expired: true });
     }
 
     #[test]
@@ -3964,7 +3969,7 @@ mod tests {
         AmbiguousCommit,
         Contended,
         LostAcknowledgement,
-        PreparedLoopbackLoss,
+        PreparedLoopback { expired: bool },
         DurableObservation,
         SuiteObservation,
         ExpiredBeforeSend,
@@ -4286,18 +4291,20 @@ mod tests {
             .expect("historical context")
     }
 
-    fn exercise_prepared_loopback_loss(
+    fn exercise_prepared_loopback(
         backend: &SqliteStateBackend,
         path: &std::path::Path,
         request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
         admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
         action: crate::provider_write::GitHubCommentContinuationAction<'_>,
         provider: &crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding,
+        expired: bool,
     ) {
         use super::super::dispatch_reservation_store::{
             LiveCommentDispatchPosture, LiveCommentLookup, SyntheticSandboxRecoveryPosture,
         };
         use crate::provider_comment_transport::tests::with_lost_acknowledgement_server;
+        use crate::provider_comment_transport::CommentSendWindow;
         use crate::{
             GitHubPullRequestCommentProviderLookupObservation as Comment,
             GitHubPullRequestCommentProviderLookupObservationDefinition as CommentDefinition,
@@ -4307,7 +4314,13 @@ mod tests {
                 let prepared = transport
                     .prepare(action.target, provider)
                     .expect("preflight");
-                store.dispatch_prepared_loopback_comment(request(), admission, proposed, prepared)
+                store.dispatch_prepared_loopback_comment(
+                    request(),
+                    admission,
+                    proposed,
+                    prepared,
+                    expired.then_some(|window: CommentSendWindow| window.deadline),
+                )
             })
         };
         let other_target = crate::GitHubPullRequestCommentTarget::new("example", "sandbox", 8)
@@ -4324,12 +4337,11 @@ mod tests {
         assert!(body.is_none());
 
         let operation = request().operation_id;
-        let (lost, body) = dispatch(backend, action, true);
+        let (lost, body) = dispatch(backend, action, !expired);
         assert_eq!(
             lost.expect("ambiguous response"),
             LiveCommentDispatchPosture::RecoveryOnly
         );
-        let body = body.expect("one POST received before response loss");
         let reopened = SqliteStateBackend::open(path).expect("restart after response loss");
         let (retry, second) = dispatch(&reopened, action, false);
         assert_eq!(
@@ -4347,6 +4359,11 @@ mod tests {
                 .expect("unresolved without observation"),
             SyntheticSandboxRecoveryPosture::ReconciliationRequired
         );
+        if expired {
+            assert!(body.is_none());
+            return;
+        }
+        let body = body.expect("one POST received before response loss");
         let expected_action = action.commitment().expect("action commitment");
         assert!(reopened
             .reconcile_live_sandbox_comment(&operation, action, |target, marker| {
@@ -5195,7 +5212,7 @@ mod tests {
                     LiveGrantTrial::SuiteObservation => {
                         crate::provider_comment_transport::fixed_comment_exchange_commitment()
                     }
-                    LiveGrantTrial::PreparedLoopbackLoss => {
+                    LiveGrantTrial::PreparedLoopback { .. } => {
                         crate::provider_comment_transport::loopback_comment_exchange_commitment()
                     }
                     _ => SpecContentHash::from_text("trusted synthetic adapter"),
@@ -5586,14 +5603,15 @@ mod tests {
                             expiry,
                         );
                     }
-                    LiveGrantTrial::PreparedLoopbackLoss => {
-                        exercise_prepared_loopback_loss(
+                    LiveGrantTrial::PreparedLoopback { expired } => {
+                        exercise_prepared_loopback(
                             &backend,
                             &fixture.path,
                             request,
                             admission,
                             action,
                             &provider_binding(),
+                            expired,
                         );
                     }
                     LiveGrantTrial::DurableObservation | LiveGrantTrial::SuiteObservation => {
@@ -5784,7 +5802,10 @@ mod tests {
                     before
                         + 1
                         + usize::from(matches!(trial, LiveGrantTrial::VerifiedResponse))
-                        + usize::from(matches!(trial, LiveGrantTrial::PreparedLoopbackLoss))
+                        + usize::from(matches!(
+                            trial,
+                            LiveGrantTrial::PreparedLoopback { expired: false }
+                        ))
                         + 2 * usize::from(matches!(trial, LiveGrantTrial::LostAcknowledgement))
                 );
                 assert!(backend

@@ -27,7 +27,7 @@ use crate::provider_comment_observation::{
 #[cfg(test)]
 use crate::provider_comment_transport::PreparedGitHubCommentCreation;
 use crate::provider_comment_transport::{
-    fixed_comment_exchange_commitment, fixed_comment_observer_commitment,
+    fixed_comment_exchange_commitment, fixed_comment_observer_commitment, CommentSendWindow,
     StoredGitHubCommentObservation, VerifiedGitHubCommentObservation,
 };
 use crate::provider_write::GitHubCommentContinuationAction;
@@ -460,7 +460,12 @@ impl SqliteStateBackend {
         send: impl FnOnce(&GitHubPullRequestCommentTarget, &str) -> Option<CreatedCommentResponse>,
     ) -> Result<LiveCommentDispatchPosture, WorkflowOsError> {
         self.dispatch_live_sandbox_comment_with_binding(
-            request, admission, action, None, observe, send,
+            request,
+            admission,
+            action,
+            None,
+            observe,
+            |target, body, _| send(target, body),
         )
     }
 
@@ -471,6 +476,7 @@ impl SqliteStateBackend {
         admission: LiveGrantAdmission<'_>,
         action: GitHubCommentContinuationAction<'_>,
         prepared: PreparedGitHubCommentCreation<'_>,
+        handoff_clock: Option<fn(CommentSendWindow) -> Timestamp>,
     ) -> Result<LiveCommentDispatchPosture, WorkflowOsError> {
         let binding = prepared
             .binding_for(action.target)
@@ -482,7 +488,10 @@ impl SqliteStateBackend {
             action,
             Some(&binding),
             continuity_store::observe_continuity_trusted_time,
-            |_, body| prepared.send(body),
+            |_, body, window| match handoff_clock {
+                Some(observe) => prepared.send_with_test_clock(body, window, || observe(window)),
+                None => prepared.send(body, window),
+            },
         )
     }
 
@@ -493,7 +502,11 @@ impl SqliteStateBackend {
         action: GitHubCommentContinuationAction<'_>,
         prepared: Option<&LiveSandboxProviderBinding>,
         observe: impl FnOnce() -> Result<TrustedTimeObservation, WorkflowOsError>,
-        send: impl FnOnce(&GitHubPullRequestCommentTarget, &str) -> Option<CreatedCommentResponse>,
+        send: impl FnOnce(
+            &GitHubPullRequestCommentTarget,
+            &str,
+            CommentSendWindow,
+        ) -> Option<CreatedCommentResponse>,
     ) -> Result<LiveCommentDispatchPosture, WorkflowOsError> {
         let invocation = action.commitment()?;
         if invocation != request.invocation_commitment
@@ -535,6 +548,9 @@ impl SqliteStateBackend {
             return Err(corrupt());
         }
         let trusted_time = continuity_codec::load_snapshot(&tx)?.trusted_time;
+        let Some(deadline) = witness.creation_deadline else {
+            return Ok(LiveCommentDispatchPosture::RecoveryOnly);
+        };
         // Admission is irreversible. A paused or time-uncertain caller may
         // reconcile, but must not hand an expired send right to the adapter.
         let current_time = trusted_time.eligibility
@@ -547,9 +563,7 @@ impl SqliteStateBackend {
             && !trusted_time
                 .last_observed_at
                 .is_some_and(|watermark| time.observed_at() < watermark)
-            && witness
-                .creation_deadline
-                .is_some_and(|deadline| time.observed_at() < deadline);
+            && time.observed_at() < deadline;
         if !current_time
             || admission
                 .verify_current_send(
@@ -564,7 +578,14 @@ impl SqliteStateBackend {
             return Ok(LiveCommentDispatchPosture::RecoveryOnly);
         }
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
-        let response = send(action.target, &raw_body);
+        let response = send(
+            action.target,
+            &raw_body,
+            CommentSendWindow {
+                checked_at: time.observed_at(),
+                deadline,
+            },
+        );
         let Some(comment_id) = verify_created_comment_response(
             response.as_ref(),
             action.target,
@@ -573,6 +594,16 @@ impl SqliteStateBackend {
         ) else {
             return Ok(LiveCommentDispatchPosture::RecoveryOnly);
         };
+        self.persist_synthetic_creation_response(action, &operation, &durable.event, comment_id)
+    }
+
+    fn persist_synthetic_creation_response(
+        &self,
+        action: GitHubCommentContinuationAction<'_>,
+        operation: &DispatchReservationOperationId,
+        expected_admission: &DispatchAdmissionProjectionEvent,
+        comment_id: std::num::NonZeroU64,
+    ) -> Result<LiveCommentDispatchPosture, WorkflowOsError> {
         let outcome = SideEffectOutcomeReference::new(
             SideEffectOutcomeReferenceKind::Outcome,
             format!("github/comment/{comment_id}"),
@@ -581,8 +612,8 @@ impl SqliteStateBackend {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| storage_error("begin_failed"))?;
-        let current = read_live_recovery_admission(&tx, &operation, action.run)?;
-        if current.event != durable.event {
+        let current = read_live_recovery_admission(&tx, operation, action.run)?;
+        if &current.event != expected_admission {
             return Err(corrupt());
         }
         persist_live_comment_outcome(
