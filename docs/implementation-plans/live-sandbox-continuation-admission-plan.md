@@ -1683,6 +1683,27 @@ enrollment must use independently generated high-entropy webhook material,
 not a password or a reused key. This does not verify the resolver's
 operating-system custody or a live reader's repository permissions.
 
+### Private Scoped Reader Exchange
+
+The private reader path now requires a typed result from a fixed-origin
+installation exchange rather than accepting an arbitrary bearer plus a
+review label. The reviewed access commitment covers the exact App,
+installation, reader bot, repository, PR, and local deadline. Before issuing
+access, the exchange verifies the authenticated App and the selected,
+unsuspended installation with the exact read permissions. It requests only
+the reviewed repository and checks the issued scope, expiry, exact
+installation repository listing, and bot identity. GitHub documents the
+[scoping inputs and issuance response](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)
+and [read permission for issue-comment inventory](https://docs.github.com/en/rest/issues/comments?apiVersion=2022-11-28#list-issue-comments).
+
+The credential stays inside the private typed result. Its inventory path
+checks the pinned access commitment and exact PR before sending requests,
+and checks the effective deadline before each GET and after traversal.
+The loopback fixture rejects changed review, write or extra permissions,
+repository expansion, expired issuance, and bot substitution. This proves
+the local contract, not a live issuance, signer custody, intended-host
+configuration, or permission state. No live path or public tool was enabled.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
