@@ -76,8 +76,14 @@ pub enum SyntheticSandboxRecoveryPosture {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum LiveCommentDispatchPosture {
-    VerifiedSyntheticResponse { comment_id: std::num::NonZeroU64 },
+    PersistedSyntheticResponse { comment_id: std::num::NonZeroU64 },
     RecoveryOnly,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LiveCommentProofKind {
+    Lookup,
+    CreationResponse,
 }
 
 // Only a trusted synthetic lookup may supply this result until a provider
@@ -264,7 +270,7 @@ impl SqliteStateBackend {
     }
 
     /// A fresh, committed reservation is the only path to the injected send.
-    /// An acknowledgement is not durable execution proof.
+    /// Only an exact synthetic creation response may persist response proof.
     #[allow(dead_code)] // Private until synthetic dispatch is exposed.
     pub(super) fn dispatch_live_sandbox_comment(
         &self,
@@ -306,15 +312,35 @@ impl SqliteStateBackend {
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
 
         let response = send(action.target, &raw_body);
-        Ok(verify_created_comment_response(
+        let Some(comment_id) = verify_created_comment_response(
             response.as_ref(),
             action.target,
             &witness.provider,
             &raw_body,
-        )
-        .map_or(LiveCommentDispatchPosture::RecoveryOnly, |comment_id| {
-            LiveCommentDispatchPosture::VerifiedSyntheticResponse { comment_id }
-        }))
+        ) else {
+            return Ok(LiveCommentDispatchPosture::RecoveryOnly);
+        };
+        let outcome = SideEffectOutcomeReference::new(
+            SideEffectOutcomeReferenceKind::Outcome,
+            format!("github/comment/{comment_id}"),
+        )?;
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| storage_error("begin_failed"))?;
+        let current = read_live_recovery_admission(&tx, &operation, action.run)?;
+        if current.event != durable.event {
+            return Err(corrupt());
+        }
+        persist_live_comment_outcome(
+            &tx,
+            action,
+            &current,
+            outcome,
+            LiveCommentProofKind::CreationResponse,
+        )?;
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(LiveCommentDispatchPosture::PersistedSyntheticResponse { comment_id })
     }
 
     /// Operator-only lookup. This validates historical admission, not current
@@ -358,7 +384,7 @@ impl SqliteStateBackend {
         })
     }
 
-    /// An exact positive lookup is the only route to atomic completion.
+    /// Reconciles synthetic observations without replacing an existing proof.
     #[allow(dead_code)] // Private until synthetic proof is exposed.
     pub(super) fn reconcile_live_sandbox_comment(
         &self,
@@ -392,7 +418,13 @@ impl SqliteStateBackend {
                 .provider_comment_reference()
                 .ok_or_else(not_dispatchable)?,
         )?;
-        let id = persist_live_comment_outcome(&tx, action, &admission, outcome)?;
+        let id = persist_live_comment_outcome(
+            &tx,
+            action,
+            &admission,
+            outcome,
+            LiveCommentProofKind::Lookup,
+        )?;
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
         Ok(Some(id))
     }
@@ -777,9 +809,8 @@ fn verify_live_recovery_state(
     if effect.side_effect_id() != side_effect_id || effect.run_id() != run_id {
         return Err(not_dispatchable());
     }
-    let proof_id = live_comment_proof_id(&admission.event)?;
-    if let Some(event) = history.iter().find(|event| event.event_id == proof_id) {
-        verify_live_comment_proof(admission, &effect, event)?;
+    if let Some((event, kind)) = find_live_comment_proof(&admission.event, &history)? {
+        verify_live_comment_proof(admission, &effect, event, kind)?;
         return Ok(SyntheticSandboxRecoveryPosture::CompletionVerified);
     }
     verify_live_comment_attempt(admission, &effect)?;
@@ -788,11 +819,34 @@ fn verify_live_recovery_state(
 
 fn live_comment_proof_id(
     admission: &DispatchAdmissionProjectionEvent,
+    kind: LiveCommentProofKind,
 ) -> Result<EventId, WorkflowOsError> {
-    EventId::new(format!(
-        "live-comment-proof/{}",
-        admission.reservation_commitment()
-    ))
+    let prefix = match kind {
+        LiveCommentProofKind::Lookup => "live-comment-proof",
+        LiveCommentProofKind::CreationResponse => "live-comment-response-proof",
+    };
+    EventId::new(format!("{prefix}/{}", admission.reservation_commitment()))
+}
+
+fn find_live_comment_proof<'a>(
+    admission: &DispatchAdmissionProjectionEvent,
+    history: &'a [WorkflowRunEvent],
+) -> Result<Option<(&'a WorkflowRunEvent, LiveCommentProofKind)>, WorkflowOsError> {
+    let mut proof = None;
+    for kind in [
+        LiveCommentProofKind::Lookup,
+        LiveCommentProofKind::CreationResponse,
+    ] {
+        let id = live_comment_proof_id(admission, kind)?;
+        if history
+            .iter()
+            .find(|event| event.event_id == id)
+            .is_some_and(|event| proof.replace((event, kind)).is_some())
+        {
+            return Err(corrupt());
+        }
+    }
+    Ok(proof)
 }
 
 fn verify_live_comment_attempt(
@@ -821,6 +875,7 @@ fn verify_live_comment_proof(
     admission: &LiveRecoveryAdmission,
     effect: &SideEffectRecord,
     event: &WorkflowRunEvent,
+    kind: LiveCommentProofKind,
 ) -> Result<(), WorkflowOsError> {
     let expected = crate::side_effect::transition_event(effect, 0)?;
     let admission_event = admission.event.committed_result_cursor();
@@ -830,7 +885,7 @@ fn verify_live_comment_proof(
             .is_some_and(|outcome| outcome.kind() == SideEffectOutcomeReferenceKind::Outcome)
         || event.sequence_number <= admission_event.sequence_number()
         || Some(event.timestamp) != effect.updated_at()
-        || event.idempotency_key.as_ref() != Some(&live_comment_proof_key(admission, effect)?)
+        || event.idempotency_key.as_ref() != Some(&live_comment_proof_key(admission, effect, kind)?)
         || !effect.references().iter().any(|reference| {
             reference.kind() == SideEffectReferenceKind::WorkflowEvent
                 && reference.reference() == admission_event.event_id().as_str()
@@ -845,11 +900,15 @@ fn verify_live_comment_proof(
 fn live_comment_proof_key(
     admission: &LiveRecoveryAdmission,
     effect: &SideEffectRecord,
+    kind: LiveCommentProofKind,
 ) -> Result<IdempotencyKey, WorkflowOsError> {
-    let domain: &[u8] = if admission.witness.is_some() {
-        b"workflow-os/live-comment-proof/v2\0"
-    } else {
-        b"workflow-os/live-comment-proof/v1\0"
+    let domain: &[u8] = match (kind, admission.witness.is_some()) {
+        (LiveCommentProofKind::Lookup, false) => b"workflow-os/live-comment-proof/v1\0",
+        (LiveCommentProofKind::Lookup, true) => b"workflow-os/live-comment-proof/v2\0",
+        (LiveCommentProofKind::CreationResponse, true) => {
+            b"workflow-os/live-comment-response-proof/v1\0"
+        }
+        (LiveCommentProofKind::CreationResponse, false) => return Err(corrupt()),
     };
     let proof = live_effect_commitment(
         domain,
@@ -865,12 +924,12 @@ fn persist_live_comment_outcome(
     action: GitHubCommentContinuationAction<'_>,
     admission: &LiveRecoveryAdmission,
     outcome: SideEffectOutcomeReference,
+    kind: LiveCommentProofKind,
 ) -> Result<EventId, WorkflowOsError> {
     let history = SqliteStateBackend::read_events_with_connection(tx, action.run)?;
     let run = WorkflowRun::rehydrate(&history)?;
     let identity = &run.snapshot.identity;
     let effect = read_live_effect_record(tx, action.side_effect)?;
-    let id = live_comment_proof_id(&admission.event)?;
     let admission_event = admission.event.committed_result_cursor().event_id();
     if effect.side_effect_id() != action.side_effect
         || effect.run_id() != action.run
@@ -885,13 +944,16 @@ fn persist_live_comment_outcome(
     {
         return Err(not_dispatchable());
     }
-    if let Some(event) = history.iter().find(|event| event.event_id == id) {
-        if effect.outcome_reference() != Some(&outcome) {
+    if let Some((event, existing_kind)) = find_live_comment_proof(&admission.event, &history)? {
+        if effect.outcome_reference() != Some(&outcome)
+            || (kind == LiveCommentProofKind::CreationResponse && existing_kind != kind)
+        {
             return Err(not_dispatchable());
         }
-        verify_live_comment_proof(admission, &effect, event)?;
-        return Ok(id);
+        verify_live_comment_proof(admission, &effect, event, existing_kind)?;
+        return Ok(event.event_id.clone());
     }
+    let id = live_comment_proof_id(&admission.event, kind)?;
     verify_live_comment_attempt(admission, &effect)?;
     let last = history.last().ok_or_else(corrupt)?;
     let now = continuity_store::observe_continuity_trusted_time()?.observed_at();
@@ -936,7 +998,7 @@ fn persist_live_comment_outcome(
             spec_content_hash: identity.spec_content_hash.clone(),
             correlation_id: updated.correlation_id().cloned(),
             actor: None,
-            idempotency_key: Some(live_comment_proof_key(admission, updated)?),
+            idempotency_key: Some(live_comment_proof_key(admission, updated, kind)?),
             kind: WorkflowRunEventKind::SideEffectCompleted(Box::new(transition.event().clone())),
         },
     )?;

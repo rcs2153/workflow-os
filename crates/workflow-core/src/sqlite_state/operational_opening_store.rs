@@ -3506,7 +3506,7 @@ mod tests {
     }
 
     #[test]
-    fn live_comment_verified_response_does_not_complete_or_allow_resend() {
+    fn live_comment_verified_response_survives_reopen_without_resend() {
         exercise_live_grant_reservation(LiveGrantTrial::VerifiedResponse);
     }
 
@@ -3885,6 +3885,88 @@ mod tests {
         RequiredProof,
         StaleProof,
         NoReuseProof,
+    }
+
+    fn exercise_persisted_comment_response(
+        backend: &SqliteStateBackend,
+        path: &std::path::Path,
+        request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        provider: &crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding,
+    ) {
+        use super::super::dispatch_reservation_store::{
+            LiveCommentDispatchPosture, LiveCommentLookup, SyntheticSandboxRecoveryPosture,
+        };
+        use crate::provider_comment_observation::CreatedCommentResponse;
+        use crate::{
+            GitHubPullRequestCommentProviderLookupObservation as Comment,
+            GitHubPullRequestCommentProviderLookupObservationDefinition as CommentDefinition,
+        };
+        let comment_id = std::num::NonZeroU64::new(17).expect("comment id");
+        assert_eq!(
+            backend
+                .dispatch_live_sandbox_comment(request(), admission, action, |target, raw_body| {
+                    Some(CreatedCommentResponse {
+                        status: 201,
+                        target: target.clone(),
+                        repository_id: provider.repository_id,
+                        author_id: provider.author_id,
+                        comment_id,
+                        raw_body: raw_body.to_owned(),
+                    })
+                })
+                .expect("persist creation response"),
+            LiveCommentDispatchPosture::PersistedSyntheticResponse { comment_id }
+        );
+        let operation = request().operation_id;
+        let reopened = SqliteStateBackend::open(path).expect("reopen after response");
+        assert_eq!(
+            reopened
+                .inspect_synthetic_sandbox_recovery(
+                    action.run,
+                    operation.as_str(),
+                    action.side_effect
+                )
+                .expect("reopened proof"),
+            SyntheticSandboxRecoveryPosture::CompletionVerified
+        );
+        let history = reopened.read_events(action.run).expect("history");
+        let proof = history.last().expect("response proof");
+        assert!(proof
+            .event_id
+            .as_str()
+            .starts_with("live-comment-response-proof/"));
+        let reconcile = |reference: &str| {
+            reopened.reconcile_live_sandbox_comment(&operation, action, |target, marker| {
+                LiveCommentLookup::Observed {
+                    comment: Comment::new(CommentDefinition {
+                        target: target.clone(),
+                        provider_comment_reference: Some(reference.to_owned()),
+                        managed_marker: Some(marker.to_owned()),
+                    })
+                    .expect("synthetic lookup"),
+                    verified_action: action.commitment().expect("action binding"),
+                }
+            })
+        };
+        assert_eq!(
+            reconcile("github/comment/17").expect("exact proof replay"),
+            Some(proof.event_id.clone())
+        );
+        assert!(reconcile("github/comment/18").is_err());
+        assert_eq!(
+            reopened
+                .dispatch_live_sandbox_comment(request(), admission, action, |_, _| {
+                    panic!("a persisted creation response cannot authorize resend")
+                })
+                .expect("dispatch replay"),
+            LiveCommentDispatchPosture::RecoveryOnly
+        );
+        assert_eq!(
+            reopened.read_events(action.run).expect("unchanged history"),
+            history
+        );
     }
 
     #[allow(clippy::too_many_lines)]
@@ -5082,56 +5164,13 @@ mod tests {
                         );
                     }
                     LiveGrantTrial::VerifiedResponse => {
-                        use super::super::dispatch_reservation_store::{
-                            LiveCommentDispatchPosture, SyntheticSandboxRecoveryPosture,
-                        };
-                        use crate::provider_comment_observation::CreatedCommentResponse;
-                        let comment_id = std::num::NonZeroU64::new(17).expect("comment id");
-                        let provider = provider_binding();
-                        assert_eq!(
-                            backend
-                                .dispatch_live_sandbox_comment(
-                                    request(),
-                                    admission,
-                                    action,
-                                    |target, raw_body| {
-                                        Some(CreatedCommentResponse {
-                                            status: 201,
-                                            target: target.clone(),
-                                            repository_id: provider.repository_id,
-                                            author_id: provider.author_id,
-                                            comment_id,
-                                            raw_body: raw_body.to_owned(),
-                                        })
-                                    }
-                                )
-                                .expect("creation response"),
-                            LiveCommentDispatchPosture::VerifiedSyntheticResponse { comment_id }
-                        );
-                        assert_eq!(
-                            backend
-                                .inspect_synthetic_sandbox_recovery(
-                                    action.run,
-                                    request().operation_id.as_str(),
-                                    action.side_effect
-                                )
-                                .expect("read-only recovery"),
-                            SyntheticSandboxRecoveryPosture::ReconciliationRequired
-                        );
-                        assert_eq!(
-                            backend
-                                .dispatch_live_sandbox_comment(
-                                    request(),
-                                    admission,
-                                    action,
-                                    |_, _| {
-                                        panic!(
-                                            "a verified creation response cannot authorize resend"
-                                        )
-                                    }
-                                )
-                                .expect("replay"),
-                            LiveCommentDispatchPosture::RecoveryOnly
+                        exercise_persisted_comment_response(
+                            &backend,
+                            &fixture.path,
+                            request,
+                            admission,
+                            action,
+                            &provider_binding(),
                         );
                     }
                     LiveGrantTrial::Contended | LiveGrantTrial::RequiredProof => {
@@ -5186,6 +5225,7 @@ mod tests {
                     event_count(),
                     before
                         + 1
+                        + usize::from(matches!(trial, LiveGrantTrial::VerifiedResponse))
                         + 2 * usize::from(matches!(trial, LiveGrantTrial::LostAcknowledgement))
                 );
                 assert!(backend
