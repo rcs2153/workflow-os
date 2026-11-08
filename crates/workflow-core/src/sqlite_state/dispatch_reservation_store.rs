@@ -279,6 +279,7 @@ fn verify_reviewed_installation(
             fixture
                 || profile.reader == scope.bot_id
                 || profile.receiver_installation == scope.installation_id
+                || profile.webhook_material_tag.is_none()
         })
         || (!fixture
             && installation_target_revision(

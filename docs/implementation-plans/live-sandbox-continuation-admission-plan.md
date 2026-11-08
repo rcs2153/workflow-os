@@ -1666,6 +1666,23 @@ or prove that a live reader's access is limited to the reviewed repository.
 Provider setup, intended-host verification, native recovery inspection,
 independent review, and separate live approval remain outstanding.
 
+### Webhook Verifier Material Binding
+
+The receiver profile also binds the actual webhook verification material
+before dispatch. The protected enrollment side derives a domain-separated
+HMAC verification tag over the exact receiving installation, attestation
+public key, and verifier generation. Core stores the tag, not the HMAC key,
+and checks the tag against the key supplied by the resolver before accepting
+the provider notification. A replacement cannot relabel a different key
+as the same generation, even if its alternate notification HMAC is valid.
+
+Pending profiles created without a material tag cannot open the receiver
+or complete through this path. Their historical encoding and already
+recorded terminal proofs remain unchanged. The tag is an offline verifier:
+enrollment must use independently generated high-entropy webhook material,
+not a password or a reused key. This does not verify the resolver's
+operating-system custody or a live reader's repository permissions.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

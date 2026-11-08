@@ -5520,7 +5520,7 @@ mod tests {
         notification: crate::provider_comment_transport::installation_notification::CreationNotification<'_>,
     ) {
         use crate::provider_comment_transport::installation_notification::{
-            CreationNotification, ReviewedCreationReceiver,
+            tests::github_header, CreationNotification, ReviewedCreationReceiver,
         };
         use ring::signature::{Ed25519KeyPair, KeyPair};
         let malformed = CreationNotification {
@@ -5545,6 +5545,8 @@ mod tests {
         );
         let alternate_generation =
             SpecContentHash::from_text("alternate webhook verifier generation");
+        let alternate_material = [13; 32];
+        let alternate_header = github_header(&alternate_material, notification.body);
         for (substituted, supplied) in [
             (
                 ReviewedCreationReceiver {
@@ -5566,6 +5568,16 @@ mod tests {
                     ..receiver
                 },
                 notification,
+            ),
+            (
+                ReviewedCreationReceiver {
+                    github_hmac: &alternate_material,
+                    ..receiver
+                },
+                CreationNotification {
+                    github_signature: &alternate_header,
+                    ..notification
+                },
             ),
         ] {
             assert_eq!(

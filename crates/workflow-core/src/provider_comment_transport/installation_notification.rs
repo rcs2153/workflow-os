@@ -185,6 +185,12 @@ pub(crate) fn verify_creation_notification(
         .ok()?,
     );
     let mac = hmac::Key::new(hmac::HMAC_SHA256, receiver.github_hmac);
+    if expected
+        .observer_profile
+        .is_some_and(|profile| !profile.matches_webhook_material(&mac))
+    {
+        return None;
+    }
     hmac::verify(&mac, input.body, &decode_signature(input.github_signature)?).ok()?;
     let event: Notification<'_> = serde_json::from_slice(input.body).ok()?;
     let target = expected.target;
@@ -270,7 +276,7 @@ pub(crate) mod tests {
     pub(crate) fn fixture_observer_profile() -> super::super::InstallationObserverProfile {
         let signer =
             signature::Ed25519KeyPair::from_seed_unchecked(&[7; 32]).expect("fixture signing key");
-        super::super::InstallationObserverProfile {
+        let mut profile = super::super::InstallationObserverProfile {
             receiver_installation: NonZeroU64::new(91).expect("receiver installation"),
             attestation_key: signer
                 .public_key()
@@ -278,22 +284,45 @@ pub(crate) mod tests {
                 .try_into()
                 .expect("fixture public key"),
             webhook_verifier_generation: SpecContentHash::from_text("fixture webhook generation 1"),
+            webhook_material_tag: None,
             reader: NonZeroU64::new(777).expect("reader id"),
             reader_access_review: SpecContentHash::from_text(
                 "fixture independent repository reader",
             ),
-        }
+        };
+        profile.bind_webhook_material(&[12; 32]);
+        profile
     }
     use serde_json::{json, Value};
     use std::fmt::Write;
 
-    fn github_header(key: &[u8; 32], payload: &[u8]) -> String {
+    pub(crate) fn github_header(key: &[u8; 32], payload: &[u8]) -> String {
         let key = hmac::Key::new(hmac::HMAC_SHA256, key);
         let mut header = String::from("sha256=");
         for byte in hmac::sign(&key, payload).as_ref() {
             write!(header, "{byte:02x}").expect("format signature");
         }
         header
+    }
+
+    #[test]
+    fn comment_webhook_material_tags_bind_the_generation_and_preserve_legacy_encoding() {
+        let mut profile = fixture_observer_profile();
+        let verifier = hmac::Key::new(hmac::HMAC_SHA256, &[12; 32]);
+        assert!(profile.matches_webhook_material(&verifier));
+        let generation = profile.webhook_verifier_generation.clone();
+        profile.webhook_verifier_generation = SpecContentHash::from_text("another generation");
+        assert!(!profile.matches_webhook_material(&verifier));
+        profile.webhook_verifier_generation = generation;
+        let bound_commitment = profile.commitment();
+        profile.webhook_material_tag = None;
+        let legacy = serde_json::to_string(&profile).expect("legacy profile");
+        assert!(!legacy.contains("webhook_material_tag"));
+        let decoded: super::super::InstallationObserverProfile =
+            serde_json::from_str(&legacy).expect("read legacy profile");
+        assert_eq!(decoded.commitment(), profile.commitment());
+        assert_ne!(decoded.commitment(), bound_commitment);
+        assert!(!decoded.matches_webhook_material(&verifier));
     }
 
     fn provider_payload(body: &str) -> Value {
