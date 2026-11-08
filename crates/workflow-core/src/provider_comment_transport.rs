@@ -65,6 +65,12 @@ pub(crate) struct PreparedCommentInventory<'a> {
     pub(crate) marker: &'a SpecContentHash,
 }
 
+pub(crate) struct VerifiedInventoryTraversal {
+    pub(crate) posture: CurrentCommentPosture,
+    pub(crate) reader: NonZeroU64,
+    pub(crate) commitment: SpecContentHash,
+}
+
 pub(crate) struct PreparedGitHubCommentCreation<'a> {
     transport: GitHubCommentCreationTransport<'a>,
     path: String,
@@ -516,8 +522,10 @@ impl<'a> IndependentCommentInventory<'a> {
         }
     }
 
-    pub(crate) fn observe(&self, expected: &PreparedCommentInventory<'_>) -> CurrentCommentPosture {
-        use CurrentCommentPosture::{Absent, Ambiguous, ExactCurrentMatch, Unresolved};
+    pub(crate) fn observe(
+        &self,
+        expected: &PreparedCommentInventory<'_>,
+    ) -> Option<VerifiedInventoryTraversal> {
         if self.reader == expected.writer
             || self.repository != expected.repository
             || self.writer_scope != expected.writer_scope
@@ -525,37 +533,77 @@ impl<'a> IndependentCommentInventory<'a> {
             || self.bearer.len() > 4096
             || !self.bearer.bytes().all(|byte| byte.is_ascii_graphic())
         {
-            return Unresolved;
+            return None;
         }
         let reader = GetCommentReader {
             origin: &self.origin,
             agent: &self.agent,
             bearer: self.bearer,
         };
-        let Some(pages) =
-            reader.read_comment_pages(expected.target, expected.repository, self.reader)
-        else {
-            return Unresolved;
-        };
-        let mut matches = pages.iter().flat_map(|page| &page.comments).filter(|row| {
-            row.id == expected.comment_id || contains_marker_commitment(&row.body, expected.marker)
-        });
-        let Some(row) = matches.next() else {
-            return Absent;
-        };
-        if matches.next().is_some() {
-            return Ambiguous;
-        }
-        if row.id == expected.comment_id
-            && row.user.id == expected.writer
-            && row.created_at == row.updated_at
-            && SpecContentHash::from_text(&row.body) == *expected.body
-            && contains_marker_commitment(&row.body, expected.marker)
-        {
-            ExactCurrentMatch
-        } else {
-            Unresolved
-        }
+        let pages = reader.read_comment_pages(expected.target, expected.repository, self.reader)?;
+        let transcript = pages
+            .iter()
+            .map(|page| {
+                (
+                    page.cursor,
+                    page.next,
+                    page.comments
+                        .iter()
+                        .map(|row| {
+                            (
+                                row.id,
+                                row.user.id,
+                                SpecContentHash::from_text(&row.body),
+                                row.created_at,
+                                row.updated_at,
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let commitment = SpecContentHash::from_bytes(
+            serde_json::to_vec(&(
+                "workflow-os/independent-comment-inventory/v1",
+                expected.target.reference(),
+                self.repository,
+                self.reader,
+                self.writer_scope,
+                transcript,
+            ))
+            .ok()?,
+        );
+        Some(VerifiedInventoryTraversal {
+            posture: classify_inventory(expected, &pages),
+            reader: self.reader,
+            commitment,
+        })
+    }
+}
+
+fn classify_inventory(
+    expected: &PreparedCommentInventory<'_>,
+    pages: &[ObservedPage],
+) -> CurrentCommentPosture {
+    use CurrentCommentPosture::{Absent, Ambiguous, ExactCurrentMatch, Unresolved};
+    let mut matches = pages.iter().flat_map(|page| &page.comments).filter(|row| {
+        row.id == expected.comment_id || contains_marker_commitment(&row.body, expected.marker)
+    });
+    let Some(row) = matches.next() else {
+        return Absent;
+    };
+    if matches.next().is_some() {
+        return Ambiguous;
+    }
+    if row.id == expected.comment_id
+        && row.user.id == expected.writer
+        && row.created_at == row.updated_at
+        && SpecContentHash::from_text(&row.body) == *expected.body
+        && contains_marker_commitment(&row.body, expected.marker)
+    {
+        ExactCurrentMatch
+    } else {
+        Unresolved
     }
 }
 

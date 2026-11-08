@@ -7,15 +7,16 @@ use super::{
     validate_previous_live_authority_schema, validate_recognized_v12_schema,
     validate_schema_metadata, SqliteStateBackend, ADAPTER_SCHEMA_VERSION,
     INSTALLATION_ISSUANCE_CLAIM_SCHEMA_CHECKSUM, INSTALLATION_ISSUANCE_CLAIM_SCHEMA_V15,
-    INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION, INSTALLATION_SEND_PREPARATION_SCHEMA_CHECKSUM,
-    INSTALLATION_SEND_PREPARATION_SCHEMA_V17, INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION,
-    INSTALLATION_SIGNER_ADMISSION_SCHEMA_CHECKSUM, INSTALLATION_SIGNER_ADMISSION_SCHEMA_V16,
-    INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION, LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
-    LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION, LIVE_AUTHORITY_PROOF_SCHEMA_VERSION,
-    LIVE_AUTHORITY_SCHEMA_CHECKSUM, LIVE_COMMENT_OBSERVATION_SCHEMA_CHECKSUM,
-    LIVE_COMMENT_OBSERVATION_SCHEMA_V14, LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION,
-    LIVE_SANDBOX_AUTHORITY_SCHEMA_V11, LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12,
-    LIVE_SANDBOX_TARGET_SCHEMA_V13,
+    INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION, INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_CHECKSUM,
+    INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_V18, INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION,
+    INSTALLATION_SEND_PREPARATION_SCHEMA_CHECKSUM, INSTALLATION_SEND_PREPARATION_SCHEMA_V17,
+    INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION, INSTALLATION_SIGNER_ADMISSION_SCHEMA_CHECKSUM,
+    INSTALLATION_SIGNER_ADMISSION_SCHEMA_V16, INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION,
+    LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION, LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION,
+    LIVE_AUTHORITY_PROOF_SCHEMA_VERSION, LIVE_AUTHORITY_SCHEMA_CHECKSUM,
+    LIVE_COMMENT_OBSERVATION_SCHEMA_CHECKSUM, LIVE_COMMENT_OBSERVATION_SCHEMA_V14,
+    LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION, LIVE_SANDBOX_AUTHORITY_SCHEMA_V11,
+    LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12, LIVE_SANDBOX_TARGET_SCHEMA_V13,
 };
 use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeAttemptState, AuthoritativeWindowState,
@@ -269,7 +270,8 @@ impl SqliteStateBackend {
             | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
             | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
             | INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
-            | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION => {
+            | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION => {
                 validate_live_authority_schema(&tx)?;
                 false
             }
@@ -347,7 +349,8 @@ impl SqliteStateBackend {
             }
             INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
             | INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
-            | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION => {}
+            | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION => {}
             _ => return Err(schema_recovery_required()),
         }
         validate_live_store(&tx)?;
@@ -371,7 +374,8 @@ impl SqliteStateBackend {
                     .map_err(|_| schema_recovery_required())?;
             }
             INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
-            | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION => {}
+            | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION => {}
             _ => return Err(schema_recovery_required()),
         }
         validate_live_store(&tx)?;
@@ -395,7 +399,32 @@ impl SqliteStateBackend {
                     .and_then(|_| tx.pragma_update(None, "user_version", INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION))
                     .map_err(|_| schema_recovery_required())?;
             }
-            INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION => {}
+            INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION => {}
+            _ => return Err(schema_recovery_required()),
+        }
+        validate_live_store(&tx)?;
+        tx.commit().map_err(|_| schema_recovery_required())
+    }
+
+    #[allow(dead_code)] // Private until operator admission is reviewed.
+    pub(crate) fn enable_installation_observation_journal(&self) -> Result<(), WorkflowOsError> {
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| schema_recovery_required())?;
+        validate_live_store(&tx)?;
+        match version(&tx)? {
+            INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION => {
+                tx.execute_batch(INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_V18)
+                    .and_then(|()| tx.execute(
+                        "UPDATE schema_metadata SET schema_version=?1, checksum=?2 WHERE singleton=1",
+                        params![INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION, INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_CHECKSUM],
+                    ))
+                    .and_then(|_| tx.pragma_update(None, "user_version", INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION))
+                    .map_err(|_| schema_recovery_required())?;
+            }
+            INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION => {}
             _ => return Err(schema_recovery_required()),
         }
         validate_live_store(&tx)?;
@@ -800,6 +829,7 @@ pub(super) fn check_dispatch_lane(
         | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
         | INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
         | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+        | INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION
         | LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION) => {
             if version == LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION {
                 validate_previous_live_authority_schema(tx)?;
@@ -1424,6 +1454,7 @@ fn validate_live_store(connection: &Connection) -> Result<(), WorkflowOsError> {
             | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
             | INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
             | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION
     ) {
         return Err(denied());
     }

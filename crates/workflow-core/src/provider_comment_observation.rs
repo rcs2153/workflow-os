@@ -200,7 +200,8 @@ fn scan_is_complete(pages: &[CommentPage<'_>]) -> bool {
     true
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum CurrentCommentPosture {
     ExactCurrentMatch,
     Absent,

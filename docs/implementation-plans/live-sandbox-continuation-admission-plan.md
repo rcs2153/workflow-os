@@ -1531,6 +1531,24 @@ not a provider snapshot or the number of historical creations. The reader
 does not infer time of creation from inventory timestamps, persist outcomes,
 or issue a send right. No reader was provisioned or called against GitHub.
 
+### Private Installation Observation Journal
+
+An explicit V18 upgrade adds a bounded, create-only journal under the exact
+V17 preparation. It records the verified notification and receiver-receipt
+commitments, independent reader identity, candidate comment ID, normalized
+page traversal commitment, finding, and Core clock observation. Raw comments,
+provider response bodies, receipt bytes, and verification material are not
+stored. A partial or unauthorized traversal supplies no journal receipt.
+
+Core reloads the preparation and validates the entire existing journal in
+one write transaction after transport has finished. Repeating identical
+evidence returns the same receipt and preserves its first observation time.
+Distinct findings, including a later duplicate marker, are retained together.
+The per-operation limit rejects new evidence rather than evicting earlier
+rows. Readback fails closed on damaged or transplanted rows. A receipt is not
+an outcome and does not change the SideEffect, workflow event history, or
+send authority. No live observer or credentials were provisioned.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
