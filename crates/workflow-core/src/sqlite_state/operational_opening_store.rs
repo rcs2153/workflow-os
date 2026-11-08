@@ -3516,6 +3516,11 @@ mod tests {
     }
 
     #[test]
+    fn live_comment_observation_reopens_without_completing_or_reauthorizing() {
+        exercise_live_grant_reservation(LiveGrantTrial::DurableObservation);
+    }
+
+    #[test]
     fn live_comment_grant_expiry_after_reservation_never_sends_or_replays() {
         exercise_live_grant_reservation(LiveGrantTrial::ExpiredBeforeSend);
     }
@@ -3900,12 +3905,66 @@ mod tests {
         Target,
     }
 
+    #[test]
+    fn live_comment_observation_schema_upgrades_only_by_explicit_opt_in() {
+        use super::super::{
+            schema_manifest_digest, LIVE_COMMENT_OBSERVATION_SCHEMA_DIGEST,
+            LIVE_COMMENT_OBSERVATION_SCHEMA_V14, LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION,
+        };
+        let fixture = Fixture::new();
+        let history = fixture
+            .backend
+            .read_events(&fixture.run_id)
+            .expect("history");
+        assert!(fixture
+            .backend
+            .enable_live_comment_observation_store()
+            .is_err());
+        fixture
+            .backend
+            .enable_live_sandbox_grant_store()
+            .expect("live V13");
+        let mut connection = fixture.backend.existing_connection().expect("connection");
+        let tx = connection.transaction().expect("test manifest transaction");
+        tx.execute_batch(LIVE_COMMENT_OBSERVATION_SCHEMA_V14)
+            .expect("V14 DDL");
+        assert_eq!(
+            schema_manifest_digest(&tx).expect("manifest"),
+            LIVE_COMMENT_OBSERVATION_SCHEMA_DIGEST
+        );
+        tx.rollback().expect("discard test manifest transaction");
+        fixture
+            .backend
+            .enable_live_comment_observation_store()
+            .expect("explicit V14");
+        fixture
+            .backend
+            .enable_live_comment_observation_store()
+            .expect("exact upgrade retry");
+        fixture
+            .backend
+            .enable_live_sandbox_grant_store()
+            .expect("no downgrade");
+        let reopened = SqliteStateBackend::open(&fixture.path).expect("open V14");
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("version");
+        assert_eq!(version, LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION);
+        assert_eq!(
+            reopened
+                .read_events(&fixture.run_id)
+                .expect("unchanged history"),
+            history
+        );
+    }
+
     #[derive(Clone, Copy)]
     enum LiveGrantTrial {
         AmbiguousCommit,
         Contended,
         LostAcknowledgement,
         PreparedLoopbackLoss,
+        DurableObservation,
         ExpiredBeforeSend,
         RevokedBeforeSend(SendRevocation),
         VerifiedResponse,
@@ -4017,6 +4076,158 @@ mod tests {
             export.snapshot(&reopened, "response-completed");
             export.write_manifest(action, operation.as_str(), &["response-completed"]);
         }
+    }
+
+    fn exercise_durable_comment_observation(
+        backend: &SqliteStateBackend,
+        path: &std::path::Path,
+        request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+    ) {
+        use super::super::dispatch_reservation_store::SyntheticSandboxRecoveryPosture;
+        let operation = request().operation_id;
+        assert!(backend
+            .reserve_live_sandbox_dispatch(request(), admission)
+            .expect("reservation")
+            .is_some());
+        let history = backend.read_events(action.run).expect("reserved history");
+        let observed_at = Timestamp::now_utc();
+        let witness = |id, replacement| {
+            test_reserved_observation_witness(
+                backend,
+                &operation,
+                action,
+                observed_at,
+                id,
+                replacement,
+            )
+        };
+        assert!(backend
+            .persist_reserved_comment_observation(&operation, action, witness(17, None))
+            .is_err());
+        backend
+            .enable_live_comment_observation_store()
+            .expect("explicit upgrade of reserved V13");
+        assert!(backend
+            .read_reserved_comment_observation(&operation, action)
+            .expect("empty store")
+            .is_none());
+        assert!(backend
+            .persist_reserved_comment_observation(
+                &operation,
+                action,
+                witness(17, Some(SpecContentHash::from_text("other reservation"))),
+            )
+            .is_err());
+        let first = backend
+            .persist_reserved_comment_observation(&operation, action, witness(17, None))
+            .expect("persist accepted witness");
+        let reopened = SqliteStateBackend::open(path).expect("open V14");
+        assert!(
+            reopened
+                .read_reserved_comment_observation(&operation, action)
+                .expect("read accepted observation")
+                .as_ref()
+                == Some(&first)
+        );
+        assert!(
+            reopened
+                .persist_reserved_comment_observation(&operation, action, witness(17, None))
+                .expect("exact replay")
+                == first
+        );
+        assert!(reopened
+            .persist_reserved_comment_observation(&operation, action, witness(18, None))
+            .is_err());
+        assert!(reopened
+            .read_reserved_comment_observation(
+                &operation,
+                crate::provider_write::GitHubCommentContinuationAction {
+                    body: "changed action",
+                    ..action
+                },
+            )
+            .is_err());
+        assert_eq!(
+            reopened
+                .inspect_synthetic_sandbox_recovery(
+                    action.run,
+                    operation.as_str(),
+                    action.side_effect
+                )
+                .expect("unchanged effect"),
+            SyntheticSandboxRecoveryPosture::ReconciliationRequired
+        );
+        assert_eq!(
+            reopened
+                .read_events(action.run)
+                .expect("no new workflow events"),
+            history
+        );
+        assert!(reopened
+            .reserve_live_sandbox_dispatch(request(), admission)
+            .expect("replay")
+            .is_none());
+        assert_comment_observation_rejects_corruption(
+            &reopened,
+            &operation,
+            action,
+            witness(17, None),
+        );
+    }
+
+    fn assert_comment_observation_rejects_corruption(
+        backend: &SqliteStateBackend,
+        operation: &crate::dispatch_reservation::DispatchReservationOperationId,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        witness: crate::provider_comment_transport::VerifiedGitHubCommentObservation,
+    ) {
+        let connection = backend.existing_connection().expect("fixture connection");
+        connection
+            .execute(
+                "UPDATE live_comment_observations SET payload_hash=?1 WHERE operation_id=?2",
+                params![
+                    SpecContentHash::from_text("corrupt").as_str(),
+                    operation.as_str()
+                ],
+            )
+            .expect("inject corruption in disposable store");
+        assert!(backend
+            .read_reserved_comment_observation(operation, action)
+            .is_err());
+        assert!(backend
+            .persist_reserved_comment_observation(operation, action, witness)
+            .is_err());
+    }
+
+    fn test_reserved_observation_witness(
+        backend: &SqliteStateBackend,
+        operation: &crate::dispatch_reservation::DispatchReservationOperationId,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        observed_at: Timestamp,
+        id: u64,
+        replacement: Option<SpecContentHash>,
+    ) -> crate::provider_comment_transport::VerifiedGitHubCommentObservation {
+        use crate::provider_comment_transport::{
+            fixed_comment_observer_commitment, VerifiedGitHubCommentObservation,
+        };
+        backend
+            .with_reserved_comment_context(
+                operation,
+                action,
+                &fixed_comment_observer_commitment(),
+                |reservation, expected| {
+                    VerifiedGitHubCommentObservation::test_witness(
+                        replacement.unwrap_or_else(|| reservation.clone()),
+                        expected,
+                        std::num::NonZeroU64::new(id).expect("comment ID"),
+                        observed_at,
+                    )
+                    .expect("accepted-witness test stand-in")
+                },
+            )
+            .expect("historical context")
     }
 
     fn exercise_prepared_loopback_loss(
@@ -4914,7 +5125,11 @@ mod tests {
                     .open_live_sandbox_attempt(opening(&cursor, &observed), facts)
                     .is_err());
                 assert!(fixture.backend.record_live_sandbox_policy(facts).is_err());
-                let adapter_commitment = SpecContentHash::from_text("trusted synthetic adapter");
+                let adapter_commitment = if matches!(trial, LiveGrantTrial::DurableObservation) {
+                    crate::provider_comment_transport::fixed_comment_observer_commitment()
+                } else {
+                    SpecContentHash::from_text("trusted synthetic adapter")
+                };
                 let provider_binding = || LiveSandboxProviderBinding {
                     repository_id: std::num::NonZeroU64::new(123).expect("provider repository id"),
                     author_id: std::num::NonZeroU64::new(456).expect("provider author id"),
@@ -5309,6 +5524,15 @@ mod tests {
                             admission,
                             action,
                             &provider_binding(),
+                        );
+                    }
+                    LiveGrantTrial::DurableObservation => {
+                        exercise_durable_comment_observation(
+                            &backend,
+                            &fixture.path,
+                            request,
+                            admission,
+                            action,
                         );
                     }
                     LiveGrantTrial::ExpiredBeforeSend => {

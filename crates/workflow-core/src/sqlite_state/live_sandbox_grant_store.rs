@@ -8,8 +8,9 @@ use super::{
     validate_schema_metadata, SqliteStateBackend, ADAPTER_SCHEMA_VERSION,
     LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION, LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION,
     LIVE_AUTHORITY_PROOF_SCHEMA_VERSION, LIVE_AUTHORITY_SCHEMA_CHECKSUM,
-    LIVE_SANDBOX_AUTHORITY_SCHEMA_V11, LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12,
-    LIVE_SANDBOX_TARGET_SCHEMA_V13,
+    LIVE_COMMENT_OBSERVATION_SCHEMA_CHECKSUM, LIVE_COMMENT_OBSERVATION_SCHEMA_V14,
+    LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION, LIVE_SANDBOX_AUTHORITY_SCHEMA_V11,
+    LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12, LIVE_SANDBOX_TARGET_SCHEMA_V13,
 };
 use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeAttemptState, AuthoritativeWindowState,
@@ -259,7 +260,7 @@ impl SqliteStateBackend {
                 validate_recognized_v12_schema(&tx)?;
                 true
             }
-            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => {
+            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION => {
                 validate_live_authority_schema(&tx)?;
                 false
             }
@@ -286,6 +287,36 @@ impl SqliteStateBackend {
             .map_err(|_| schema_recovery_required())?;
         }
         validate_live_authority_schema(&tx)?;
+        tx.commit().map_err(|_| schema_recovery_required())
+    }
+
+    /// Explicitly adds the provider observation lane to a verified live store.
+    pub(crate) fn enable_live_comment_observation_store(&self) -> Result<(), WorkflowOsError> {
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| schema_recovery_required())?;
+        validate_live_store(&tx)?;
+        if version(&tx)? == LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION {
+            tx.execute_batch(LIVE_COMMENT_OBSERVATION_SCHEMA_V14)
+                .map_err(|_| schema_recovery_required())?;
+            tx.execute(
+                "UPDATE schema_metadata SET schema_version=?1, checksum=?2 WHERE singleton=1",
+                params![
+                    LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION,
+                    LIVE_COMMENT_OBSERVATION_SCHEMA_CHECKSUM
+                ],
+            )
+            .and_then(|_| {
+                tx.pragma_update(
+                    None,
+                    "user_version",
+                    LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION,
+                )
+            })
+            .map_err(|_| schema_recovery_required())?;
+        }
+        validate_live_store(&tx)?;
         tx.commit().map_err(|_| schema_recovery_required())
     }
 
@@ -669,6 +700,7 @@ pub(super) fn check_dispatch_lane(
     match version(tx)? {
         ADAPTER_SCHEMA_VERSION if !live && !marked => Ok(()),
         version @ (LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION
+        | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
         | LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION) => {
             if version == LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION {
                 validate_previous_live_authority_schema(tx)?;
@@ -1286,7 +1318,10 @@ fn opening_binding(
 }
 
 fn validate_live_store(connection: &Connection) -> Result<(), WorkflowOsError> {
-    if version(connection)? != LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION {
+    if !matches!(
+        version(connection)?,
+        LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
+    ) {
         return Err(denied());
     }
     validate_live_authority_schema(connection)

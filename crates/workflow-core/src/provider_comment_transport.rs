@@ -3,7 +3,7 @@
 
 use std::{io::Read, num::NonZeroU64, time::Duration};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding;
@@ -88,6 +88,13 @@ pub(crate) enum BoundCommentObservation {
 /// An exact current match from the fixed provider reader, not proof of creation.
 /// No public constructor, deserialization, body, or authentication material.
 pub(crate) struct VerifiedGitHubCommentObservation {
+    projection: StoredGitHubCommentObservation,
+}
+
+/// Historical local record. Decoding it cannot mint a verifier witness.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct StoredGitHubCommentObservation {
     reservation: SpecContentHash,
     context: SpecContentHash,
     comment_id: NonZeroU64,
@@ -95,6 +102,29 @@ pub(crate) struct VerifiedGitHubCommentObservation {
 }
 
 impl VerifiedGitHubCommentObservation {
+    pub(crate) fn into_stored(self) -> StoredGitHubCommentObservation {
+        self.projection
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_witness(
+        reservation: SpecContentHash,
+        expected: &ExpectedComment<'_>,
+        comment_id: NonZeroU64,
+        observed_at: Timestamp,
+    ) -> Option<Self> {
+        Some(Self {
+            projection: StoredGitHubCommentObservation {
+                reservation,
+                context: comment_observation_context(expected)?,
+                comment_id,
+                observed_at,
+            },
+        })
+    }
+}
+
+impl StoredGitHubCommentObservation {
     pub(crate) fn matches(
         &self,
         reservation: &SpecContentHash,
@@ -102,6 +132,10 @@ impl VerifiedGitHubCommentObservation {
     ) -> bool {
         &self.reservation == reservation
             && comment_observation_context(expected).as_ref() == Some(&self.context)
+            && self.observed_at >= expected.not_before
+            && !expected
+                .known_comment_id
+                .is_some_and(|id| id != self.comment_id)
     }
 
     pub(crate) const fn comment_id(&self) -> NonZeroU64 {
@@ -111,6 +145,12 @@ impl VerifiedGitHubCommentObservation {
     pub(crate) const fn observed_at(&self) -> Timestamp {
         self.observed_at
     }
+}
+
+pub(crate) fn fixed_comment_observer_commitment() -> SpecContentHash {
+    SpecContentHash::from_text(
+        "workflow-os/github-comment-observer/v1\0https://api.github.com\0api=2022-11-28\0stable-repository-pagination\0no-redirect-or-proxy",
+    )
 }
 
 fn comment_observation_context(expected: &ExpectedComment<'_>) -> Option<SpecContentHash> {
@@ -207,9 +247,7 @@ impl<'a> GitHubCommentCreationTransport<'a> {
 
     /// Versioned identity of the fixed reader, not a claim about access scope.
     pub(crate) fn observation_adapter_commitment(&self) -> Option<SpecContentHash> {
-        (self.origin == GITHUB_ORIGIN).then(|| SpecContentHash::from_text(
-            "workflow-os/github-comment-observer/v1\0https://api.github.com\0api=2022-11-28\0stable-repository-pagination\0no-redirect-or-proxy",
-        ))
+        (self.origin == GITHUB_ORIGIN).then(fixed_comment_observer_commitment)
     }
 
     pub(crate) fn observe_bound_comment(
@@ -235,10 +273,12 @@ impl<'a> GitHubCommentCreationTransport<'a> {
             return BoundCommentObservation::Unverified(CurrentCommentPosture::Unresolved);
         };
         BoundCommentObservation::Verified(VerifiedGitHubCommentObservation {
-            reservation: reservation.clone(),
-            context,
-            comment_id,
-            observed_at,
+            projection: StoredGitHubCommentObservation {
+                reservation: reservation.clone(),
+                context,
+                comment_id,
+                observed_at,
+            },
         })
     }
 
@@ -815,7 +855,7 @@ pub(crate) mod tests {
             not_before: observation_time(10),
             not_after: observation_time(20),
         };
-        let witness = VerifiedGitHubCommentObservation {
+        let witness = StoredGitHubCommentObservation {
             reservation: reservation.clone(),
             context: comment_observation_context(&expected).expect("context"),
             comment_id: NonZeroU64::new(44).expect("comment ID"),

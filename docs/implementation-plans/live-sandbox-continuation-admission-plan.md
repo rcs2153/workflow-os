@@ -692,6 +692,19 @@ This does not attest provider-side scope, prove creation, persist completion,
 or authorize a send. A production caller and durable live evidence path
 remain separate review requirements.
 
+### Durable Current Observation
+
+An explicit V13-to-V14 SQLite upgrade adds a separate observation table.
+The private writer accepts only the fixed reader's verifier witness and
+revalidates the exact durable context in its write transaction. One immutable
+record is retained per reservation: exact replay returns it and any changed
+record is rejected. Reads recheck the reservation and a domain-separated
+payload commitment; storage remains trusted, not externally attested. The
+record contains no raw comment or authentication material and cannot be
+decoded back into a verifier witness. It records a historical current match,
+not provider creation or ongoing presence. It does not complete the SideEffect,
+append a completion event, or permit a resend. No live caller is enabled.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
