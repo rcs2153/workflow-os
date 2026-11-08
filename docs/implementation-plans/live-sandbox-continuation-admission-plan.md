@@ -1582,6 +1582,19 @@ reviewed read-only inventory. Missing or invalid evidence cannot complete
 the effect, and neither input loader can acquire a write permit through
 this entry. The entry does not provision or authorize a live host.
 
+### Process Replacement Recovery Rehearsal
+
+The offline fixture runs the producer and replacement in separate Core
+processes. The producer exits after the fixture provider commits exactly one
+marked comment, before Core receives a creation acknowledgement. The
+replacement reopens the original reservation, verifies a synthetic signed
+notification and performs the independent loopback inventory through the
+ordered entry. A third process verifies that the original history is intact,
+one distinct recovery event was appended, and replay requires neither
+evidence input. The independent fixture ledger still contains one unchanged
+comment. This test does not establish isolation between operating-system
+principals, custody of live credentials, or native harness behavior.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
