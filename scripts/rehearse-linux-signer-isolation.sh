@@ -29,10 +29,26 @@ done
 
 umask 077
 root=$(mktemp -d /tmp/workflow-os-signer.XXXXXXXX)
-trap 'sudo -n /usr/bin/rm -rf -- "$root"' EXIT
+staging=
+cleanup() {
+  if [[ -n $staging ]]; then /usr/bin/rm -rf -- "$staging"; fi
+  sudo -n /usr/bin/rm -rf -- "$root"
+}
+trap cleanup EXIT
 sudo -n /usr/bin/chown 0:0 "$root"
 sudo -n /usr/bin/chmod 0711 "$root"
 sudo -n /usr/bin/install -o 0 -g 0 -m 0555 -- "$1" "$root/worker"
+
+staging=$(mktemp -d /tmp/workflow-os-signer-spec.XXXXXXXX)
+git archive --format=tar HEAD:dogfood/workflow-os-self-governance |
+  /usr/bin/tar -xf - -C "$staging"
+if [[ ! -f $staging/workflow-os.yml || -n $(find "$staging" ! -type d ! -type f -print -quit) ]]; then
+  echo "Expected a regular, tracked synthetic project fixture." >&2
+  exit 2
+fi
+sudo -n /usr/bin/install -d -o 0 -g 0 -m 0555 "$root/core-fixture"
+sudo -n /usr/bin/cp -R -- "$staging" "$root/core-fixture/project"
+sudo -n /usr/bin/chmod -R a=rX "$root/core-fixture/project"
 
 run_worker() {
   local uid=$1 gid=$2 test=$3

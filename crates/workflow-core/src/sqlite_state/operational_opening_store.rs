@@ -6361,6 +6361,18 @@ mod tests {
         };
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../dogfood/workflow-os-self-governance");
+        #[cfg(target_os = "linux")]
+        let root = if matches!(
+            trial,
+            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::LinuxSignerProcesses)
+        ) {
+            crate::provider_comment_transport::installation_signer_channel::linux_rehearsal::fixture_root()
+                .parent()
+                .expect("rehearsal root")
+                .join("core-fixture/project")
+        } else {
+            root
+        };
         let mut project = crate::load_project(root).bundle.expect("dogfood project");
         let workflow_id = WorkflowId::new("dg/trusted-host-docs-check").expect("workflow");
         if trial.requires_check() {
