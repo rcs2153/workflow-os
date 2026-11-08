@@ -943,6 +943,24 @@ issue a new send right, and the synthetic proof writer cannot complete
 an installation-scoped reservation. The trusted issuer, provider-backed
 completion path, and operator entry point are not connected.
 
+### Exact Installation Creation Acknowledgement
+
+The private transport verifies a bounded `201` response from the same
+installation bearer against the exact marked body, PR, provider repository,
+and bot author. It binds the resulting opaque proof to the reservation and
+scope commitments. A missing or mismatched response yields no proof; lookup
+does not substitute for the original response.
+
+Core reconstructs that context from the durable reservation and requested
+action before accepting the proof. It persists completion in one transaction
+with a distinct proof event identity and commitment domain. Exact replay
+returns the same event; conflicting outcomes and cross-reservation proof
+are rejected. Loopback uses a separate proof identity, and the existing
+synthetic writer and inspection do not promote it to provider evidence.
+The transport and Core completion writer are not connected to an operator
+or live dispatch route. Connecting them still requires a one-shot reserved
+send capability, final authority and PR preflight, and trial admission.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
