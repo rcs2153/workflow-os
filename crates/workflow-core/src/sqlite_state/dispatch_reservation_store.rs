@@ -26,7 +26,10 @@ use crate::provider_comment_observation::{
 };
 #[cfg(test)]
 use crate::provider_comment_transport::PreparedGitHubCommentCreation;
-use crate::provider_comment_transport::{BoundCommentObservation, GitHubCommentCreationTransport};
+use crate::provider_comment_transport::{
+    fixed_comment_observer_commitment, BoundCommentObservation, GitHubCommentCreationTransport,
+    StoredGitHubCommentObservation, VerifiedGitHubCommentObservation,
+};
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
     transition_side_effect_to_completed, EventId, EventSequenceNumber,
@@ -56,6 +59,29 @@ struct LiveRecoveryAdmission {
     event: DispatchAdmissionProjectionEvent,
     witness: Option<LiveSandboxReservationWitness>,
     committed_at: Timestamp,
+}
+
+struct ReservedCommentContext {
+    reservation: SpecContentHash,
+    provider: LiveSandboxProviderBinding,
+    marker: String,
+    committed_at: Timestamp,
+    deadline: Timestamp,
+}
+
+impl ReservedCommentContext {
+    fn expected<'a>(&'a self, action: GitHubCommentContinuationAction<'a>) -> ExpectedComment<'a> {
+        ExpectedComment {
+            target: action.target,
+            repository_id: self.provider.repository_id,
+            author_id: self.provider.author_id,
+            known_comment_id: None,
+            body: action.body,
+            reservation_marker: &self.marker,
+            not_before: self.committed_at,
+            not_after: self.deadline,
+        }
+    }
 }
 
 fn live_reservation_commitment(
@@ -266,41 +292,67 @@ impl SqliteStateBackend {
         })
     }
 
-    fn with_reserved_comment_context<T>(
+    pub(super) fn with_reserved_comment_context<T>(
         &self,
         operation: &DispatchReservationOperationId,
         action: GitHubCommentContinuationAction<'_>,
         adapter_commitment: &SpecContentHash,
         observe: impl FnOnce(&SpecContentHash, &ExpectedComment<'_>) -> T,
     ) -> Result<T, WorkflowOsError> {
-        let invocation = action.commitment()?;
         let mut connection = self.existing_read_only_connection()?;
         let tx = connection
             .transaction()
             .map_err(|_| storage_error("begin_failed"))?;
-        let admission = read_live_recovery_admission(&tx, operation, action.run)?;
-        let witness = admission.witness.as_ref().ok_or_else(not_dispatchable)?;
-        let deadline = witness.creation_deadline.ok_or_else(not_dispatchable)?;
-        if admission.event.invocation_commitment() != &invocation
-            || &witness.provider.adapter_commitment != adapter_commitment
-            || admission.committed_at >= deadline
-        {
+        let context = read_reserved_comment_context(&tx, operation, action, adapter_commitment)?;
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(observe(&context.reservation, &context.expected(action)))
+    }
+
+    #[allow(dead_code)] // No live caller is enabled.
+    pub(super) fn persist_reserved_comment_observation(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        witness: VerifiedGitHubCommentObservation,
+    ) -> Result<StoredGitHubCommentObservation, WorkflowOsError> {
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| storage_error("begin_failed"))?;
+        let context = durable_comment_context(&tx, operation, action)?;
+        let record = witness.into_stored();
+        if !record.matches(&context.reservation, &context.expected(action)) {
             return Err(not_dispatchable());
         }
-        verify_live_recovery_state(&tx, &admission, action.run, action.side_effect)?;
-        let marker = live_comment_marker(&invocation, admission.event.reservation_commitment());
-        let expected = ExpectedComment {
-            target: action.target,
-            repository_id: witness.provider.repository_id,
-            author_id: witness.provider.author_id,
-            known_comment_id: None,
-            body: action.body,
-            reservation_marker: &marker,
-            not_before: admission.committed_at,
-            not_after: deadline,
-        };
+        if let Some(existing) = read_comment_observation(&tx, operation, action, &context)? {
+            if existing != record {
+                return Err(not_dispatchable());
+            }
+        } else {
+            let (payload, hash) = comment_observation_payload(operation, &record)?;
+            tx.execute(
+                "INSERT INTO live_comment_observations (operation_id, payload, payload_hash) VALUES (?1,?2,?3)",
+                params![operation.as_str(), payload, hash.as_str()],
+            ).map_err(|_| storage_error("write_failed"))?;
+        }
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
-        Ok(observe(admission.event.reservation_commitment(), &expected))
+        Ok(record)
+    }
+
+    #[allow(dead_code)] // No live caller is enabled.
+    pub(super) fn read_reserved_comment_observation(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+    ) -> Result<Option<StoredGitHubCommentObservation>, WorkflowOsError> {
+        let mut connection = self.existing_read_only_connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|_| storage_error("begin_failed"))?;
+        let context = durable_comment_context(&tx, operation, action)?;
+        let result = read_comment_observation(&tx, operation, action, &context)?;
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(result)
     }
 
     pub(crate) fn reserve_attempt_dispatch_with_lifecycle(
@@ -949,6 +1001,86 @@ impl SqliteStateBackend {
             capability: Box::new(capability),
         })
     }
+}
+
+fn read_reserved_comment_context(
+    tx: &rusqlite::Transaction<'_>,
+    operation: &DispatchReservationOperationId,
+    action: GitHubCommentContinuationAction<'_>,
+    adapter_commitment: &SpecContentHash,
+) -> Result<ReservedCommentContext, WorkflowOsError> {
+    let invocation = action.commitment()?;
+    let admission = read_live_recovery_admission(tx, operation, action.run)?;
+    let witness = admission.witness.as_ref().ok_or_else(not_dispatchable)?;
+    let deadline = witness.creation_deadline.ok_or_else(not_dispatchable)?;
+    if admission.event.invocation_commitment() != &invocation
+        || &witness.provider.adapter_commitment != adapter_commitment
+        || admission.committed_at >= deadline
+    {
+        return Err(not_dispatchable());
+    }
+    verify_live_recovery_state(tx, &admission, action.run, action.side_effect)?;
+    let reservation = admission.event.reservation_commitment().clone();
+    Ok(ReservedCommentContext {
+        marker: live_comment_marker(&invocation, &reservation),
+        reservation,
+        provider: witness.provider.clone(),
+        committed_at: admission.committed_at,
+        deadline,
+    })
+}
+
+fn durable_comment_context(
+    tx: &rusqlite::Transaction<'_>,
+    operation: &DispatchReservationOperationId,
+    action: GitHubCommentContinuationAction<'_>,
+) -> Result<ReservedCommentContext, WorkflowOsError> {
+    if super::validate_operational_schema(tx)? != super::LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION {
+        return Err(not_dispatchable());
+    }
+    read_reserved_comment_context(tx, operation, action, &fixed_comment_observer_commitment())
+}
+
+fn comment_observation_payload(
+    operation: &DispatchReservationOperationId,
+    record: &StoredGitHubCommentObservation,
+) -> Result<(String, SpecContentHash), WorkflowOsError> {
+    let payload = encode_json(record, "provider comment observation")?;
+    let commitment = serde_json::to_vec(&(
+        "workflow-os/sqlite-comment-observation/v1",
+        operation.as_str(),
+        &payload,
+    ))
+    .map_err(|_| corrupt())?;
+    Ok((payload, SpecContentHash::from_bytes(commitment)))
+}
+
+fn read_comment_observation(
+    tx: &rusqlite::Transaction<'_>,
+    operation: &DispatchReservationOperationId,
+    action: GitHubCommentContinuationAction<'_>,
+    context: &ReservedCommentContext,
+) -> Result<Option<StoredGitHubCommentObservation>, WorkflowOsError> {
+    let row: Option<(String, String)> = tx
+        .query_row(
+            "SELECT payload, payload_hash FROM live_comment_observations WHERE operation_id=?1",
+            [operation.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|_| storage_error("read_failed"))?;
+    row.map(|(payload, hash)| {
+        let record = super::decode_json(&payload, "provider comment observation")?;
+        let (canonical, commitment) = comment_observation_payload(operation, &record)?;
+        if payload != canonical
+            || hash != commitment.as_str()
+            || !record.matches(&context.reservation, &context.expected(action))
+        {
+            return Err(corrupt());
+        }
+        Ok(record)
+    })
+    .transpose()
 }
 
 fn read_live_recovery_admission(
