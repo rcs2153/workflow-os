@@ -215,6 +215,26 @@ impl DispatchAdmissionProjectionEvent {
         &self.attempt_id
     }
 
+    pub(crate) const fn window_id(&self) -> &AuthorizedExecutionWindowId {
+        &self.window_id
+    }
+
+    pub(crate) const fn window_revision(&self) -> u64 {
+        self.window_revision
+    }
+
+    pub(crate) const fn attempt_revision(&self) -> u64 {
+        self.attempt_revision
+    }
+
+    pub(crate) const fn authority_commitment(&self) -> &SpecContentHash {
+        &self.authority_commitment
+    }
+
+    pub(crate) const fn governance_commitment(&self) -> &SpecContentHash {
+        &self.governance_commitment
+    }
+
     pub(crate) const fn reservation_commitment(&self) -> &SpecContentHash {
         &self.reservation_commitment
     }
