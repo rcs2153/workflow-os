@@ -6,11 +6,13 @@ use super::{
     decode_json, encode_json, schema_recovery_required, validate_live_authority_schema,
     validate_previous_live_authority_schema, validate_recognized_v12_schema,
     validate_schema_metadata, SqliteStateBackend, ADAPTER_SCHEMA_VERSION,
-    LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION, LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION,
-    LIVE_AUTHORITY_PROOF_SCHEMA_VERSION, LIVE_AUTHORITY_SCHEMA_CHECKSUM,
-    LIVE_COMMENT_OBSERVATION_SCHEMA_CHECKSUM, LIVE_COMMENT_OBSERVATION_SCHEMA_V14,
-    LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION, LIVE_SANDBOX_AUTHORITY_SCHEMA_V11,
-    LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12, LIVE_SANDBOX_TARGET_SCHEMA_V13,
+    INSTALLATION_ISSUANCE_CLAIM_SCHEMA_CHECKSUM, INSTALLATION_ISSUANCE_CLAIM_SCHEMA_V15,
+    INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION, LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
+    LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION, LIVE_AUTHORITY_PROOF_SCHEMA_VERSION,
+    LIVE_AUTHORITY_SCHEMA_CHECKSUM, LIVE_COMMENT_OBSERVATION_SCHEMA_CHECKSUM,
+    LIVE_COMMENT_OBSERVATION_SCHEMA_V14, LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION,
+    LIVE_SANDBOX_AUTHORITY_SCHEMA_V11, LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12,
+    LIVE_SANDBOX_TARGET_SCHEMA_V13,
 };
 use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeAttemptState, AuthoritativeWindowState,
@@ -260,7 +262,9 @@ impl SqliteStateBackend {
                 validate_recognized_v12_schema(&tx)?;
                 true
             }
-            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION => {
+            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION
+            | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
+            | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION => {
                 validate_live_authority_schema(&tx)?;
                 false
             }
@@ -315,6 +319,29 @@ impl SqliteStateBackend {
                 )
             })
             .map_err(|_| schema_recovery_required())?;
+        }
+        validate_live_store(&tx)?;
+        tx.commit().map_err(|_| schema_recovery_required())
+    }
+
+    pub(crate) fn enable_installation_issuance_claim_store(&self) -> Result<(), WorkflowOsError> {
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| schema_recovery_required())?;
+        validate_live_store(&tx)?;
+        match version(&tx)? {
+            LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION => {
+                tx.execute_batch(INSTALLATION_ISSUANCE_CLAIM_SCHEMA_V15)
+                    .and_then(|()| tx.execute(
+                        "UPDATE schema_metadata SET schema_version=?1, checksum=?2 WHERE singleton=1",
+                        params![INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION, INSTALLATION_ISSUANCE_CLAIM_SCHEMA_CHECKSUM],
+                    ))
+                    .and_then(|_| tx.pragma_update(None, "user_version", INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION))
+                    .map_err(|_| schema_recovery_required())?;
+            }
+            INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION => {}
+            _ => return Err(schema_recovery_required()),
         }
         validate_live_store(&tx)?;
         tx.commit().map_err(|_| schema_recovery_required())
@@ -573,6 +600,25 @@ impl AuthenticatedLiveGrant<'_> {
         now: Timestamp,
         window_expiry: Timestamp,
     ) -> Result<(SideEffectRecord, LiveSandboxProviderBinding, Timestamp), WorkflowOsError> {
+        let binding = self.verify_dispatch(tx, request, now, window_expiry)?;
+        tx.execute(
+            "INSERT INTO live_sandbox_grant_uses (grant_id, attempt_id) VALUES (?1,?2)",
+            params![
+                self.grant.grant_id().as_str(),
+                request.capability.attempt_id.as_str()
+            ],
+        )
+        .map_err(|_| denied())?;
+        Ok(binding)
+    }
+
+    pub(super) fn verify_dispatch(
+        &self,
+        tx: &Transaction<'_>,
+        request: &DispatchReservationRequest,
+        now: Timestamp,
+        window_expiry: Timestamp,
+    ) -> Result<(SideEffectRecord, LiveSandboxProviderBinding, Timestamp), WorkflowOsError> {
         let events = SqliteStateBackend::read_events_with_connection(
             tx,
             &request.expected_window_binding.run_id,
@@ -658,11 +704,6 @@ impl AuthenticatedLiveGrant<'_> {
             &effect,
             &request.executor_commitment,
         )?;
-        tx.execute(
-            "INSERT INTO live_sandbox_grant_uses (grant_id, attempt_id) VALUES (?1,?2)",
-            params![self.grant.grant_id().as_str(), facts.attempt.as_str()],
-        )
-        .map_err(|_| denied())?;
         let grant_expiry = self.grant.expires_at().ok_or_else(denied)?;
         Ok((
             record,
@@ -701,6 +742,7 @@ pub(super) fn check_dispatch_lane(
         ADAPTER_SCHEMA_VERSION if !live && !marked => Ok(()),
         version @ (LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION
         | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
+        | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
         | LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION) => {
             if version == LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION {
                 validate_previous_live_authority_schema(tx)?;
@@ -1320,7 +1362,9 @@ fn opening_binding(
 fn validate_live_store(connection: &Connection) -> Result<(), WorkflowOsError> {
     if !matches!(
         version(connection)?,
-        LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
+        LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION
+            | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
+            | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
     ) {
         return Err(denied());
     }

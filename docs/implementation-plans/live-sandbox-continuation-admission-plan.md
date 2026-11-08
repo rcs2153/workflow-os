@@ -1058,6 +1058,80 @@ actual fixture records. These tests are not evidence of a live GitHub creation.
 The trusted issuer, operator route, and independently reviewed live trial remain
 separate admission steps.
 
+### External Signer Admission Review At `85e2533f`
+
+**Accept offline inspection; do not admit a signer, operator, or live trial.**
+The inspector verifies an existing reservation. Missing history is an error,
+not proof that a fresh exchange is safe. The current installation dispatcher
+requires an already verified scope before reserving a send. Its serialized
+reservation and final send check can prevent a duplicate POST, but they cannot
+prevent duplicate App-assertion requests or installation exchanges that
+precede the reservation. Do not move the existing send permit before scope
+verification or catch an inspection error and call the signer.
+
+The first executable step is one **Core-owned pre-issuance claim**, private to
+the existing live comment lane. In one immediate transaction, derive the
+canonical operation from the admitted attempt and immutable action; validate
+the exact current principal, authority, approval evidence, window, cursor,
+grant, target, attempted SideEffect and reviewed App/installation/bot/repo/PR
+binding. Check the reservation, event, grant-use and claim records for that
+attempt, not just the requested operation row. A mismatched key, missing
+counterpart or contradictory record fails closed. Only an exact fresh attempt
+may commit a new claim. Bind it to the existing grant and an exclusive deadline;
+it is an ordering fence, not a parallel grant or permission to POST. Return one
+process-local exchange right only after commit. Do not hold a database
+transaction open across signer or network calls.
+
+On replay, an existing reservation takes precedence: verify and return its
+historical disposition without signer or GitHub calls. A claim without a
+reservation after process loss is an explicit issuance-uncertain wait. A
+replacement must not reacquire by changing IDs, and a timeout is not proof
+that nothing was issued. Until an independently reviewed reconciliation path
+is admitted, keep the wait inspectable and block automatic reissuance. Recheck
+the same claim and current authority before using an assertion or attaching a
+verified scope to the existing atomic send reservation; final pre-POST checks
+remain mandatory. No claim, assertion or scope receipt by itself enables a send.
+
+Use a separately administered signer with a protected channel and a caller
+identity the harness cannot impersonate. The signer verifies the exact admitted
+claim and signs only for the configured App; no raw signing endpoint, shared
+harness identity, or caller-selected executable. The short-lived App assertion
+is more powerful than the eventual installation bearer: it is not scoped by
+the local claim at GitHub. Keep the signing key outside the kernel and both
+harnesses, and deliver the assertion only to the fixed-origin exchange in the
+trusted process. Exclude assertions, bearers and raw responses from durable
+records, arguments, environment, and diagnostics. A deployment that cannot
+isolate the exchange process from the harness must not run the trial.
+
+Test the pre-issuance claim with a counted injected exchange boundary before
+adding a signer channel: fresh exact admission permits one exchange across
+competing callers; wrong binding, stale approval, expired or revoked grant,
+or corrupt or partial records permit zero. Fault before commit, after commit
+before return, and after assertion issuance before reservation. Exact replay
+must distinguish absence, unresolved claim, unresolved reservation and
+verified creation without issuing a second exchange right. Exercise a later
+revocation and a mismatched scope at reservation time. This maintainer review
+does not replace independent review of the signer deployment, provider facts,
+or live trial.
+
+### Fence The First Installation Exchange
+
+The private SQLite lane now requires explicit V15 activation before claiming
+an exchange. Core derives the operation from the exact attempt and immutable
+invocation, and the reviewed App and installation must match the target
+revision already bound into the scoped policy decision. The claim and its
+grant binding commit together without consuming the grant or creating a send
+reservation. Fresh authority is rechecked before invoking the exchange, and
+the process-local result must carry that same claim into the send reservation.
+The transaction does not extend across the exchange or make local revocation
+atomic with a remote request.
+
+After restart, a durable claim without a send reservation means issuance is
+uncertain, even when the claim outlives the grant. An existing reservation is
+classified by the offline inspector. A missing counterpart, changed request,
+or inconsistent evidence is not permission to start over. No public route,
+signer channel, real assertion, or live provider call is enabled by this slice.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

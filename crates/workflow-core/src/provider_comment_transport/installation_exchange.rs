@@ -34,6 +34,36 @@ pub(crate) struct ReviewedInstallation<'a> {
     pub(crate) deadline: Timestamp,
 }
 
+impl ReviewedInstallation<'_> {
+    pub(crate) fn issuance_commitment(self) -> Option<SpecContentHash> {
+        valid_app_slug(self.app_slug)
+            .then(|| scope_commitment(self, &fixed_adapter_commitment()))
+            .flatten()
+    }
+}
+
+pub(crate) fn installation_target_revision(
+    target: &GitHubPullRequestCommentTarget,
+    app_id: NonZeroU64,
+    app_slug: &str,
+    installation_id: NonZeroU64,
+    provider: &crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding,
+) -> Option<SpecContentHash> {
+    if !valid_app_slug(app_slug) {
+        return None;
+    }
+    serde_json::to_vec(&(
+        "workflow-os/github-installation-target-revision/v1",
+        target,
+        app_id,
+        app_slug,
+        installation_id,
+        provider,
+    ))
+    .ok()
+    .map(SpecContentHash::from_bytes)
+}
+
 // No export, conversion to comment auth, or serialization. This is provider
 // scope evidence, not proof of current Core authority.
 pub(crate) struct VerifiedInstallationScope {
@@ -155,6 +185,10 @@ impl InstallationScopeReceipt {
 }
 
 impl VerifiedInstallationScope {
+    pub(crate) const fn verified_at(&self) -> Timestamp {
+        self.receipt.verified_at
+    }
+
     pub(crate) fn admission_binding(
         &self,
         expected: ReviewedInstallation<'_>,
