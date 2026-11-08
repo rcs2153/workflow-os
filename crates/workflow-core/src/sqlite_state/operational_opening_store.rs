@@ -3533,6 +3533,12 @@ mod tests {
             InstallationSendTrial::WrongPull,
             InstallationSendTrial::Expired,
             InstallationSendTrial::Revoked,
+            InstallationSendTrial::WindowClosed,
+            InstallationSendTrial::AttemptEnded,
+            InstallationSendTrial::RevisionDrift,
+            InstallationSendTrial::CursorDrift,
+            InstallationSendTrial::NewRunEvent,
+            InstallationSendTrial::EffectDrift,
         ] {
             exercise_live_grant_reservation(LiveGrantTrial::InstallationSend(trial));
         }
@@ -4318,6 +4324,12 @@ mod tests {
         WrongPull,
         Expired,
         Revoked,
+        WindowClosed,
+        AttemptEnded,
+        RevisionDrift,
+        CursorDrift,
+        NewRunEvent,
+        EffectDrift,
     }
 
     fn exercise_installation_one_shot_send(
@@ -4356,9 +4368,7 @@ mod tests {
             InstallationSendTrial::Created => ReservedExchange::Created,
             InstallationSendTrial::Lost => ReservedExchange::Lost,
             InstallationSendTrial::WrongPull => ReservedExchange::WrongPull,
-            InstallationSendTrial::Expired | InstallationSendTrial::Revoked => {
-                ReservedExchange::PreflightOnly
-            }
+            _ => ReservedExchange::PreflightOnly,
         };
         let completed =
             with_reserved_exchange(reviewed, now, provider_deadline, mode, |transport| {
@@ -4370,7 +4380,8 @@ mod tests {
                     || {
                         installation_fixture_send_time(
                             backend,
-                            action.target,
+                            action,
+                            &request().operation_id,
                             trial,
                             provider_deadline,
                         )
@@ -4422,7 +4433,8 @@ mod tests {
 
     fn installation_fixture_send_time(
         backend: &SqliteStateBackend,
-        target: &crate::GitHubPullRequestCommentTarget,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        operation: &crate::dispatch_reservation::DispatchReservationOperationId,
         trial: InstallationSendTrial,
         deadline: Timestamp,
     ) -> Result<
@@ -4437,9 +4449,10 @@ mod tests {
         );
         if trial == InstallationSendTrial::Revoked {
             backend
-                .revoke_live_sandbox_target(target)
+                .revoke_live_sandbox_target(action.target)
                 .expect("revoke after preflight");
         }
+        inject_installation_execution_drift(backend, action, operation, trial);
         let time = observe_continuity_trusted_time()?;
         if trial == InstallationSendTrial::Expired {
             return Ok(trusted_time_observation(
@@ -4450,6 +4463,92 @@ mod tests {
             ));
         }
         Ok(time)
+    }
+
+    fn inject_installation_execution_drift(
+        backend: &SqliteStateBackend,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        operation: &crate::dispatch_reservation::DispatchReservationOperationId,
+        trial: InstallationSendTrial,
+    ) {
+        use crate::authorized_execution_continuity_state::internal::{
+            AuthoritativeAttemptState, AuthoritativeWindowState,
+        };
+        if !matches!(
+            trial,
+            InstallationSendTrial::WindowClosed
+                | InstallationSendTrial::AttemptEnded
+                | InstallationSendTrial::RevisionDrift
+                | InstallationSendTrial::CursorDrift
+                | InstallationSendTrial::NewRunEvent
+                | InstallationSendTrial::EffectDrift
+        ) {
+            return;
+        }
+        let record = read_fixture_reservation(backend, operation);
+        let mut connection = backend
+            .existing_connection()
+            .expect("disposable fixture store");
+        let tx = connection.transaction().expect("post-preflight mutation");
+        let mut state =
+            super::super::continuity_codec::load_snapshot(&tx).expect("fixture continuity");
+        let window = state
+            .windows
+            .get_mut(&record.window_id)
+            .expect("reserved window");
+        let attempt = state
+            .attempts
+            .get_mut(&record.attempt_id)
+            .expect("reserved attempt");
+        match trial {
+            InstallationSendTrial::WindowClosed => window.state = AuthoritativeWindowState::Closed,
+            InstallationSendTrial::AttemptEnded => {
+                attempt.state = AuthoritativeAttemptState::TerminalFailure;
+            }
+            InstallationSendTrial::RevisionDrift => {
+                window.revision = window.revision.checked_next().expect("successor revision");
+            }
+            InstallationSendTrial::CursorDrift => {
+                window.cursor.event_id =
+                    crate::EventId::new("event/fixture-cursor-drift").expect("other cursor");
+                attempt.cursor = window.cursor.clone();
+            }
+            InstallationSendTrial::NewRunEvent => append_fixture_policy_event(&tx, action.run),
+            InstallationSendTrial::EffectDrift => {
+                let changed = tx.execute(
+                    "UPDATE side_effect_records SET payload=json_set(payload, '$.summary', 'drift after preflight') WHERE side_effect_id=?1",
+                    [action.side_effect.as_str()],
+                ).expect("alter disposable effect");
+                assert_eq!(changed, 1);
+            }
+            _ => unreachable!("only drift cases reach this helper"),
+        }
+        super::super::continuity_store::persist_window(&tx, window).expect("fixture window");
+        super::super::continuity_store::persist_attempt(&tx, attempt).expect("fixture attempt");
+        tx.commit().expect("commit fixture drift");
+    }
+
+    fn append_fixture_policy_event(tx: &rusqlite::Transaction<'_>, run: &crate::WorkflowRunId) {
+        let events =
+            SqliteStateBackend::read_events_with_connection(tx, run).expect("fixture history");
+        let last = events.last().expect("reservation event");
+        let policy = events
+            .iter()
+            .find(|event| matches!(event.kind, WorkflowRunEventKind::PolicyDecisionRecorded(_)))
+            .expect("fixture policy event");
+        append_event_and_project_snapshot(
+            tx,
+            &WorkflowRunEvent {
+                sequence_number: crate::EventSequenceNumber::new(last.sequence_number.get() + 1)
+                    .expect("next sequence"),
+                event_id: crate::EventId::new("event/fixture-newer-policy").expect("event"),
+                timestamp: Timestamp::now_utc(),
+                idempotency_key: None,
+                kind: policy.kind.clone(),
+                ..last.clone()
+            },
+        )
+        .expect("append valid event after reservation");
     }
 
     fn exercise_installation_scope_reservation(
@@ -6224,7 +6323,9 @@ mod tests {
                         + usize::from(matches!(trial, LiveGrantTrial::InstallationScope))
                         + usize::from(matches!(
                             trial,
-                            LiveGrantTrial::InstallationSend(InstallationSendTrial::Created)
+                            LiveGrantTrial::InstallationSend(
+                                InstallationSendTrial::Created | InstallationSendTrial::NewRunEvent
+                            )
                         ))
                         + usize::from(matches!(
                             trial,

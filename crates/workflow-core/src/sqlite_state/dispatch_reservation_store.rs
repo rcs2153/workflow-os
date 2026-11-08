@@ -8,7 +8,7 @@ use std::cell::Cell;
 use crate::authorized_execution_continuity_state::internal::{
     trusted_time_commitment, window_binding_commitment, AuthoritativeAttemptState,
     AuthoritativeWindowState, ContinuityInstanceEligibility, ContinuityRevision,
-    TrustedTimeObservation, TrustedTimePosture,
+    ReferenceContinuityState, TrustedTimeObservation, TrustedTimePosture,
 };
 use crate::dispatch_reservation::{
     admitted_capability, dispatch_admission_event_id, request_commitment, reservation_commitment,
@@ -724,7 +724,8 @@ impl SqliteStateBackend {
         {
             return Err(corrupt());
         }
-        let trusted_time = continuity_codec::load_snapshot(&tx)?.trusted_time;
+        let state = continuity_codec::load_snapshot(&tx)?;
+        let trusted_time = &state.trusted_time;
         let Some(deadline) = witness.creation_deadline else {
             return Ok(None);
         };
@@ -742,6 +743,7 @@ impl SqliteStateBackend {
                 .is_some_and(|watermark| time.observed_at() < watermark)
             && time.observed_at() < deadline;
         if !current_time
+            || !current_comment_execution(&tx, &state, &durable, action, &time, deadline)?
             || admission
                 .verify_current_send(
                     &tx,
@@ -1424,6 +1426,65 @@ impl SqliteStateBackend {
             capability: Box::new(capability),
         })
     }
+}
+
+fn current_comment_execution(
+    tx: &rusqlite::Transaction<'_>,
+    state: &ReferenceContinuityState,
+    durable: &LiveRecoveryAdmission,
+    action: GitHubCommentContinuationAction<'_>,
+    time: &TrustedTimeObservation,
+    deadline: Timestamp,
+) -> Result<bool, WorkflowOsError> {
+    let event = &durable.event;
+    let (Some(window), Some(attempt)) = (
+        state.windows.get(event.window_id()),
+        state.attempts.get(event.attempt_id()),
+    ) else {
+        return Ok(false);
+    };
+    let cursor = event.committed_result_cursor();
+    if window.state != AuthoritativeWindowState::Executing
+        || attempt.state != AuthoritativeAttemptState::Started
+        || window.active_yield.is_some()
+        || window.revision.get() != event.window_revision()
+        || attempt.revision.get() != event.attempt_revision()
+        || window.cursor.sequence_number != cursor.sequence_number()
+        || &window.cursor.event_id != cursor.event_id()
+        || attempt.cursor != window.cursor
+        || &window.window_id != event.window_id()
+        || &attempt.attempt_id != event.attempt_id()
+        || attempt.window_id != window.window_id
+        || &window.run_id != action.run
+        || &window.step_id != action.step
+        || &window.subject_actor_id != action.original_actor
+        || attempt.subject_actor_id != window.subject_actor_id
+        || window.immutable_run_bundle.root_hash() != action.bundle_root
+        || &window.authority_commitment != event.authority_commitment()
+        || attempt.authority_commitment != window.authority_commitment
+        || &window.governance_commitment != event.governance_commitment()
+        || &window.trusted_time_epoch_id != time.epoch_id()
+        || time.observed_at() < window.trusted_time_watermark
+        || deadline > window.expires_at
+    {
+        return Ok(false);
+    }
+    // The historical projection was validated in this same transaction.
+    // A newer run event is not permission to use its old send cursor.
+    let current: (i64, String) = tx
+        .query_row(
+            "SELECT last_sequence_number,last_event_id FROM snapshots WHERE run_id=?1",
+            [action.run.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| corrupt())?;
+    if u64::try_from(current.0).ok() != Some(cursor.sequence_number().get())
+        || current.1 != cursor.event_id().as_str()
+    {
+        return Ok(false);
+    }
+    let effect = read_live_effect_record(tx, action.side_effect)?;
+    Ok(verify_live_comment_attempt(durable, &effect).is_ok())
 }
 
 fn read_reserved_comment_context(

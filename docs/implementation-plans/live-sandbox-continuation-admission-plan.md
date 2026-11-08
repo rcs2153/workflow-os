@@ -980,6 +980,68 @@ without a real provider or live operator route. Revocation and time
 checks are local and not atomic with remote acceptance. The reviewed
 issuer, operator admission, and independent trial remain outstanding.
 
+### Operator Admission Review At `da26a691`
+
+**Accept the loopback composition; do not admit an operator or live
+trial.** The merged path proves local one-shot behavior and exact response
+persistence under the tested conditions. It has no public caller, trusted
+issuer, or independent assurance. Three gaps remain:
+
+1. **Recheck current execution authority before POST.**
+   `checked_comment_send` verifies the historical admission projection and
+   current trusted time, grant, principal, and registered target.
+   `validate_existing_projection` verifies historical events and snapshot
+   consistency; it does not require that the current window and attempt
+   still match the admitted revisions and execution states. The attempted
+   effect commitment is verified when writing completion, after POST.
+   Require the exact current executing window, started attempt, expected
+   post-reservation cursor and revisions, and unchanged attempted effect
+   in the final read transaction. Deny a legitimate closure or supersession
+   if exposed by the supported lifecycle; separately inject state or effect
+   drift in a disposable test. Prove no POST and no resend after reopen.
+   These are missing preconditions, not evidence that a public caller
+   can currently exploit the private route.
+2. **Make historical disposition inspectable before acquiring provider
+   authority.** The private dispatch currently returns no event for both
+   replay and unresolved sends. The synthetic inspector intentionally
+   rejects an installation completion, and provider time remains unproven.
+   Add a read-only, credential-free scoped inspector for exact run,
+   operation, and effect that distinguishes verified creation from an
+   unresolved reservation, and rejects corruption, synthetic proof, and
+   mismatched identities. Reopening and inspection must issue no provider
+   request or new permit, even after local grant revocation or expiry. The
+   future operator must check durable disposition before requesting an
+   App assertion or minting a bearer; no operator retry may substitute a
+   new identity for an unresolved send.
+3. **Bind the operator and issuer to one admitted trial.** Accept only
+   reviewed App, installation, bot, repository, and PR identities bound
+   to the exact immutable run. Use a separately reviewed issuer with
+   signing material outside the harness and Kernel, and keep assertions
+   and installation bearers out of CLI arguments, workflow YAML, durable
+   state, and diagnostics. Require exact prior evidence, an independent
+   reviewer, and separately scoped approval for the live run. Confirm
+   actual issuance, repository scope, and provider attribution before
+   treating any fixture result as representative. A lost acknowledgement
+   stays unresolved unless an independently defensible recovery source
+   is admitted; neither a timestamp guess nor a fresh POST is recovery.
+
+Next, harden the final local execution-state check and reproduce drift
+between preflight and send. Then add credential-free inspection before
+composing an operator entry point. Keep both slices local and preserve the
+one-shot boundary. None of this permits another provider mutation family.
+
+### Recheck Current Execution State Before POST
+
+The final read transaction now requires the admitted window and attempt
+to remain executing and started, at the exact committed revisions and
+cursor, with unchanged authority, governance, immutable bundle, and
+attempted effect. A newer run event also invalidates the send cursor.
+The historical reservation remains consumed; it does not become a new
+send right if current execution state changes. Disposable post-preflight
+drift tests exercise the denial and no-resend boundary without requiring
+a live operator or changing the persisted history contract. This is a
+local precondition, not atomic with provider acceptance.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
