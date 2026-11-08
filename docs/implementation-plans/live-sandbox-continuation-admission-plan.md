@@ -375,7 +375,7 @@ and marker placement; creation bounds; and a bounded complete enumeration.
 It rejects edits, drift and ambiguous observations. Its strongest result is
 `ExactCurrentMatch`, not accepted-payload proof. Equal creation and update
 timestamps alone cannot rule out changes at the provider's clock resolution.
-No transport feeds this verifier, no completion path consumes its result,
+No production transport feeds this verifier, no completion path consumes its result,
 and it cannot authorize a resend. A trusted adapter and independent evidence
 of accepted bytes remain prerequisites for live completion.
 
@@ -396,6 +396,15 @@ new admission but does not erase historical recovery evidence. Removing
 the witness cannot downgrade a new reservation or proof to the older
 synthetic format. Older snapshots retain their original read-only
 inspection posture without gaining provider identity or send authority.
+
+The private SQLite observation path now connects that witness to the offline
+verifier. It validates the exact action and adapter commitment before invoking
+a bounded synthetic lookup, and requires the observed creation time to fall
+between reservation and the exclusive execution-window deadline. Target
+revocation does not erase those historical expectations. A witness without a
+recorded deadline remains readable for synthetic inspection but cannot admit
+this observation path. A current match cannot complete the run or authorize a
+resend; the adapter commitment is not an attestation of a running adapter.
 
 ## Delivery And Tests
 

@@ -3888,6 +3888,7 @@ mod tests {
         request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
         admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
         action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        expiry: Timestamp,
     ) {
         use super::super::dispatch_reservation_store::{
             LiveCommentDispatchPosture, LiveCommentLookup, LiveCommentRecovery,
@@ -3935,6 +3936,13 @@ mod tests {
         reopened
             .revoke_live_sandbox_target(action.target)
             .expect("revoke target after dispatch");
+        assert_current_observation_is_read_only(
+            &reopened,
+            &operation,
+            action,
+            accepted.managed_marker().expect("reserved marker"),
+            expiry,
+        );
 
         let drift = crate::provider_write::GitHubCommentContinuationAction {
             body: "substitution",
@@ -4151,6 +4159,95 @@ mod tests {
         write_test_effect(&original_completed);
     }
 
+    fn assert_current_observation_is_read_only(
+        backend: &SqliteStateBackend,
+        operation: &crate::dispatch_reservation::DispatchReservationOperationId,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        marker: &str,
+        expiry: Timestamp,
+    ) {
+        use crate::provider_comment_observation::{
+            CommentEnumeration, CurrentCommentPosture, ProviderComment,
+        };
+        use std::num::NonZeroU64;
+
+        let inspect = || {
+            backend
+                .inspect_synthetic_sandbox_recovery(
+                    action.run,
+                    operation.as_str(),
+                    action.side_effect,
+                )
+                .expect("inspect recovery before and after observation")
+        };
+        let before = inspect();
+        let events = backend
+            .read_events(action.run)
+            .expect("history before lookup");
+        let adapter = SpecContentHash::from_text("trusted synthetic adapter");
+        assert!(backend
+            .observe_reserved_sandbox_comment(
+                operation,
+                action,
+                &SpecContentHash::from_text("wrong adapter"),
+                |_, _| panic!("adapter mismatch cannot invoke lookup"),
+            )
+            .is_err());
+        let now = Timestamp::now_utc();
+        let raw_body = format!("{}\n\n<!-- {marker} -->", action.body);
+        let comment = ProviderComment {
+            target: action.target,
+            repository_id: NonZeroU64::new(123).expect("repository id"),
+            author_id: NonZeroU64::new(456).expect("author id"),
+            comment_id: NonZeroU64::new(17).expect("comment id"),
+            raw_body: &raw_body,
+            created_at: now,
+            updated_at: now,
+        };
+        for (comment, observed_at, expected) in [
+            (comment, now, CurrentCommentPosture::ExactCurrentMatch),
+            (
+                ProviderComment {
+                    author_id: NonZeroU64::new(457).expect("different author id"),
+                    ..comment
+                },
+                now,
+                CurrentCommentPosture::Unresolved,
+            ),
+            (
+                ProviderComment {
+                    created_at: expiry,
+                    updated_at: expiry,
+                    ..comment
+                },
+                expiry,
+                CurrentCommentPosture::Unresolved,
+            ),
+        ] {
+            let comments = [comment];
+            assert_eq!(
+                backend
+                    .observe_reserved_sandbox_comment(operation, action, &adapter, |target, key| {
+                        assert_eq!(target, action.target);
+                        assert_eq!(key, marker);
+                        CommentEnumeration::Complete {
+                            observed_at,
+                            comments: &comments,
+                        }
+                    })
+                    .expect("reserved comment observation"),
+                expected
+            );
+        }
+        assert_eq!(inspect(), before);
+        assert_eq!(
+            backend
+                .read_events(action.run)
+                .expect("history after lookup"),
+            events
+        );
+    }
+
     fn assert_live_reservation_witness_tamper_denied(
         backend: &SqliteStateBackend,
         operation: &crate::dispatch_reservation::DispatchReservationOperationId,
@@ -4168,6 +4265,8 @@ mod tests {
         assert_eq!(record["live_witness"]["provider"]["author_id"], 456);
         let mut substituted = record.clone();
         substituted["live_witness"]["provider"]["author_id"] = serde_json::json!(457);
+        let mut shortened = record.clone();
+        shortened["live_witness"]["creation_deadline"] = serde_json::json!(Timestamp::now_utc());
         let mut removed = record;
         removed
             .as_object_mut()
@@ -4180,7 +4279,7 @@ mod tests {
             )
             .expect("inject reservation witness change");
         };
-        for malformed in [substituted, removed] {
+        for malformed in [substituted, shortened, removed] {
             update(&malformed.to_string());
             assert!(backend
                 .inspect_synthetic_sandbox_recovery(
@@ -4905,6 +5004,7 @@ mod tests {
                             request,
                             admission,
                             action,
+                            expiry,
                         );
                     }
                     LiveGrantTrial::Contended | LiveGrantTrial::RequiredProof => {

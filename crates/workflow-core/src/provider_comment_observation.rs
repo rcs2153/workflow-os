@@ -76,7 +76,7 @@ pub(crate) fn verify_current_comment(
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
         || expected.body.contains(MARKER_PREFIX)
         || expected.target.validate().is_err()
-        || expected.not_before > expected.not_after
+        || expected.not_before >= expected.not_after
         || observed_at < expected.not_before
         || comments.len() > MAX_COMMENTS
     {
@@ -110,7 +110,7 @@ pub(crate) fn verify_current_comment(
             .known_comment_id
             .is_some_and(|id| id != comment.comment_id)
         || comment.created_at < expected.not_before
-        || comment.created_at > expected.not_after
+        || comment.created_at >= expected.not_after
         || comment.created_at > observed_at
         || comment.updated_at != comment.created_at
         || comment.raw_body.strip_suffix(&suffix) != Some(expected.body)
