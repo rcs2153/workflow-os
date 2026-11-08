@@ -3611,6 +3611,7 @@ mod tests {
     #[test]
     #[ignore = "requires the hosted signer rehearsal launcher"]
     fn rehearsal_replacement_core_process() {
+        use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture;
         use crate::dispatch_reservation::DispatchReservationOperationId;
         use crate::provider_comment_transport::installation_signer_channel::rehearsal::{
             assert_isolated, trial, Trial, POLICY,
@@ -3675,9 +3676,12 @@ mod tests {
         let effect = crate::SideEffectId::new(claim["effect"].as_str().expect("bound effect"))
             .expect("effect");
         let operation = DispatchReservationOperationId::new(operation).expect("operation");
-        assert!(backend
-            .inspect_installation_comment_recovery(&run, &operation, &effect)
-            .is_err());
+        assert_eq!(
+            backend
+                .inspect_installation_comment_recovery(&run, &operation, &effect)
+                .expect("historical issuance disposition"),
+            InstallationCommentRecoveryPosture::IssuanceUncertain,
+        );
     }
 
     #[test]
@@ -5052,6 +5056,14 @@ mod tests {
         }
         let reopened = SqliteStateBackend::open(path).expect("reopen uncertain claim");
         assert_eq!(claim_count(), 1);
+        let operation = request().operation_id;
+        let inspect = |run: &WorkflowRunId, effect: &crate::SideEffectId| {
+            reopened.inspect_installation_comment_recovery(run, &operation, effect)
+        };
+        assert_eq!(
+            inspect(reviewed.run_id, admission.side_effect).expect("historical claim"),
+            super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture::IssuanceUncertain,
+        );
         assert!(matches!(
             reopened
                 .claim_installation_exchange(&request(), admission, reviewed)
@@ -5067,6 +5079,30 @@ mod tests {
         assert!(reopened
             .claim_installation_exchange(&substituted, admission, reviewed)
             .is_err());
+        if matches!(trial, InstallationClaimTrial::CommitLoss) {
+            let wrong_run = WorkflowRunId::new("run/wrong-issuance").expect("different run");
+            let wrong_effect =
+                crate::SideEffectId::new("effect/wrong-issuance").expect("different effect");
+            assert!(inspect(&wrong_run, admission.side_effect).is_err());
+            assert!(inspect(reviewed.run_id, &wrong_effect).is_err());
+            assert!(reopened
+                .inspect_installation_comment_recovery(
+                    reviewed.run_id,
+                    &substituted.operation_id,
+                    admission.side_effect
+                )
+                .is_err());
+            assert_eq!(
+                connection
+                    .execute(
+                        "UPDATE installation_issuance_claims SET payload_hash=?1",
+                        [SpecContentHash::from_text("incorrect claim digest").as_str()],
+                    )
+                    .expect("inject corrupt claim digest"),
+                1,
+            );
+            assert!(inspect(reviewed.run_id, admission.side_effect).is_err());
+        }
         assert_eq!(
             connection
                 .execute("DELETE FROM installation_issuance_claims", [])
@@ -5076,6 +5112,7 @@ mod tests {
         assert!(reopened
             .claim_installation_exchange(&request(), admission, reviewed)
             .is_err());
+        assert!(inspect(reviewed.run_id, admission.side_effect).is_err());
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -5381,6 +5418,33 @@ mod tests {
             )
             .expect("admission metadata");
         assert!(!stored.contains("fixture-signature"));
+        if matches!(trial, InstallationClaimTrial::SignerAdmitted) {
+            assert_eq!(
+                connection
+                    .execute(
+                        "UPDATE installation_issuance_claims SET signer_admission_hash=?1",
+                        [SpecContentHash::from_text("incorrect signer digest").as_str()],
+                    )
+                    .expect("inject corrupt signer admission digest"),
+                1,
+            );
+            assert!(reopened
+                .inspect_installation_comment_recovery(
+                    reviewed.run_id,
+                    &request.operation_id,
+                    admission.side_effect,
+                )
+                .is_err());
+            assert_eq!(
+                connection
+                    .execute(
+                        "UPDATE installation_issuance_claims SET signer_admission_hash=?1",
+                        [SpecContentHash::from_text(&stored).as_str()],
+                    )
+                    .expect("restore exact signer admission digest"),
+                1,
+            );
+        }
     }
 
     fn installation_fixture_send_time(

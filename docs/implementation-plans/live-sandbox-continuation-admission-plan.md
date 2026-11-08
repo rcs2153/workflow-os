@@ -1286,6 +1286,22 @@ a full sandbox claim, or proof on the intended deployment host. CI must pass
 both platform rehearsals on the exact reviewed head. No local account change,
 real signing material, provider traffic, or independent assurance is included.
 
+### Inspect Interrupted Issuance Without Provider Authority
+
+The private read-only installation inspector distinguishes an exact durable
+issuance claim without a send reservation from a reserved send. It returns
+`IssuanceUncertain` only after checking the run and effect, the linked
+window, attempt and grant, the claim and optional signer-admission digests,
+and the absence of contradictory dispatch records or events in the same
+SQLite snapshot. Missing, mismatched, or corrupt history fails closed. The
+reserved-send and verified-creation results retain their existing checks.
+
+Both fresh Core crash observers require this disposition, whether admission
+rolled back or survived. It is historical only: it does not inspect the
+provider, depend on a currently usable grant, issue another permit, or
+establish that no assertion or provider effect occurred. No public operator
+route or retry path is added.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
