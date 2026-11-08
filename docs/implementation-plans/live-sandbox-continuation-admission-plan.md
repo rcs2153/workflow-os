@@ -1320,6 +1320,13 @@ Focused fixtures exercise action drift, pre-admission schema rejection,
 unavailable signer, one synthetic reservation, and historical replay without
 signer access. The coordinator has no public caller or deployed signer.
 
+The hosted Linux and macOS crash rehearsals enter through this same
+coordinator before opening the isolated signer connection. The exchange
+substitute counts the attempt but returns no send scope. If the original
+Core process survives, exact replay must return issuance uncertainty without
+opening a second connection; after abrupt Core exits, a fresh process checks
+the durable result without reissuing. These tests do not send to a provider.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

@@ -4777,6 +4777,11 @@ mod tests {
             );
             return;
         }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if matches!(trial, InstallationClaimTrial::SignerRehearsal) {
+            exercise_hosted_installation_coordinator(backend, request, admission, action, reviewed);
+            return;
+        }
         let InstallationClaimTrial::Reserved { completed } = trial else {
             exercise_installation_claim_denials(backend, path, request, admission, reviewed, trial);
             return;
@@ -4971,6 +4976,142 @@ mod tests {
         assert_eq!(opens.get(), 1);
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn exercise_hosted_installation_coordinator(
+        backend: &SqliteStateBackend,
+        request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        reviewed: crate::provider_comment_transport::installation_exchange::ReviewedInstallation<
+            '_,
+        >,
+    ) {
+        use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture;
+        use crate::provider_comment_transport::installation_signer_channel::decision::InstallationSignerDecisionReceiver;
+        use crate::provider_comment_transport::installation_signer_channel::rehearsal::{
+            accept_socket, bind_socket, connect_socket, fixture_root, trial, Trial, POLICY,
+        };
+        use crate::provider_comment_transport::installation_signer_channel::InstallationSignerChannel;
+        use std::cell::Cell;
+
+        backend
+            .enable_installation_signer_admission_store()
+            .expect("V16");
+        let trial = trial();
+        let root = fixture_root();
+        let probe_path = root.join("core-socket/probe");
+        let probe = bind_socket(&probe_path);
+        let wrong_peer = connect_socket(&probe_path);
+        assert!(
+            InstallationSignerDecisionReceiver::authenticate(accept_socket(&probe), &POLICY)
+                .is_err()
+        );
+        drop(wrong_peer);
+        drop(probe);
+
+        let opens = Cell::new(0);
+        let exchanges = Cell::new(0);
+        let result = backend.coordinate_installation_comment_using(
+            request(),
+            admission,
+            action,
+            reviewed,
+            |request, claim| {
+                opens.set(opens.get() + 1);
+                let listener = bind_socket(&root.join("core-socket/decision"));
+                let channel = InstallationSignerChannel::authenticate(
+                    connect_socket(&root.join("signer-socket/assertion")),
+                    &POLICY,
+                )
+                .expect("signer assertion peer");
+                std::thread::scope(|threads| {
+                    let authority = threads.spawn(|| {
+                        InstallationSignerDecisionReceiver::authenticate(
+                            accept_socket(&listener),
+                            &POLICY,
+                        )
+                        .expect("signer decision peer")
+                        .serve_once(|wire| {
+                            backend.admit_installation_signer_request_with_fault(
+                                request,
+                                admission,
+                                reviewed,
+                                wire,
+                                |committed| match (committed, trial) {
+                                    (false, Trial::BeforeCommit) => std::process::exit(78),
+                                    (true, Trial::AfterCommit) => std::process::exit(79),
+                                    _ => Ok(()),
+                                },
+                            )
+                        })
+                    });
+                    let result = backend.exchange_with_installation_signer_using(
+                        request,
+                        admission,
+                        reviewed,
+                        claim,
+                        channel,
+                        |_, _| {
+                            exchanges.set(exchanges.get() + 1);
+                            None
+                        },
+                    );
+                    authority
+                        .join()
+                        .expect("Core worker")
+                        .expect("Core decision");
+                    result
+                })
+            },
+            |_, _| panic!("synthetic exchange does not produce a send scope"),
+        );
+        assert_eq!(opens.get(), 1);
+        assert_eq!(exchanges.get(), u8::from(trial == Trial::Success));
+        if trial == Trial::Success {
+            assert_eq!(
+                result.expect("historical disposition"),
+                InstallationCommentRecoveryPosture::IssuanceUncertain
+            );
+        } else {
+            assert_eq!(
+                result.expect_err("lost assertion reply").code(),
+                "installation_signer.channel_denied",
+            );
+        }
+        assert_hosted_installation_replay(backend, request(), admission, action, reviewed);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn assert_hosted_installation_replay(
+        backend: &SqliteStateBackend,
+        request: crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        reviewed: crate::provider_comment_transport::installation_exchange::ReviewedInstallation<
+            '_,
+        >,
+    ) {
+        use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture;
+        let admissions: u32 = backend
+            .existing_read_only_connection()
+            .expect("inspect signer admission")
+            .query_row(
+                "SELECT COUNT(*) FROM installation_issuance_claims WHERE signer_admission IS NOT NULL",
+                [], |row| row.get(0),
+            )
+            .expect("one committed signer admission");
+        assert_eq!(admissions, 1);
+        let replay = backend
+            .coordinate_scoped_installation_comment(request, admission, action, reviewed, || {
+                panic!("replay reopened the signer")
+            })
+            .expect("exact hosted replay");
+        assert_eq!(
+            replay,
+            InstallationCommentRecoveryPosture::IssuanceUncertain
+        );
+    }
+
     #[allow(clippy::too_many_lines)]
     fn exercise_installation_claim_denials(
         backend: &SqliteStateBackend,
@@ -5013,17 +5154,6 @@ mod tests {
         };
         assert_eq!(claim_count(), 0);
         match trial {
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
-            InstallationClaimTrial::SignerRehearsal => {
-                exercise_installation_signer_admission(
-                    backend,
-                    path,
-                    &request(),
-                    admission,
-                    reviewed,
-                    trial,
-                );
-            }
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             InstallationClaimTrial::RevokedDuringSigner
             | InstallationClaimTrial::SignerReplyWithoutAdmission => {
@@ -5188,7 +5318,8 @@ mod tests {
                 unreachable!("handled by historical inspection test")
             }
             #[cfg(any(target_os = "linux", target_os = "macos"))]
-            InstallationClaimTrial::Coordinator { .. } => {
+            InstallationClaimTrial::Coordinator { .. }
+            | InstallationClaimTrial::SignerRehearsal => {
                 unreachable!("handled by coordinator test")
             }
         }
@@ -5381,69 +5512,6 @@ mod tests {
         };
         assert_eq!(count(), 0);
         match trial {
-            InstallationClaimTrial::SignerRehearsal => {
-                use crate::provider_comment_transport::installation_signer_channel::rehearsal::{
-                    accept_socket, bind_socket, connect_socket, fixture_root, trial, Trial, POLICY,
-                };
-                let trial = trial();
-                let root = fixture_root();
-                let probe_path = root.join("core-socket/probe");
-                let probe = bind_socket(&probe_path);
-                let wrong_peer = connect_socket(&probe_path);
-                assert!(InstallationSignerDecisionReceiver::authenticate(
-                    accept_socket(&probe),
-                    &POLICY,
-                )
-                .is_err());
-                drop(wrong_peer);
-                drop(probe);
-                let listener = bind_socket(&root.join("core-socket/decision"));
-                let channel = InstallationSignerChannel::authenticate(
-                    connect_socket(&root.join("signer-socket/assertion")),
-                    &POLICY,
-                )
-                .expect("signer assertion peer");
-                std::thread::scope(|threads| {
-                    let authority = threads.spawn(|| {
-                        InstallationSignerDecisionReceiver::authenticate(
-                            accept_socket(&listener),
-                            &POLICY,
-                        )
-                        .expect("signer decision peer")
-                        .serve_once(|wire| {
-                            backend.admit_installation_signer_request_with_fault(
-                                request,
-                                admission,
-                                reviewed,
-                                wire,
-                                |committed| match (committed, trial) {
-                                    (false, Trial::BeforeCommit) => std::process::exit(78),
-                                    (true, Trial::AfterCommit) => std::process::exit(79),
-                                    _ => Ok(()),
-                                },
-                            )
-                        })
-                    });
-                    let mut exchanges = 0;
-                    let exchange = backend.exchange_with_installation_signer_using(
-                        request,
-                        admission,
-                        reviewed,
-                        claim,
-                        channel,
-                        |_, _| {
-                            exchanges += 1;
-                            None
-                        },
-                    );
-                    assert_eq!(exchange.is_ok(), trial == Trial::Success);
-                    authority
-                        .join()
-                        .expect("Core worker")
-                        .expect("Core decision");
-                    assert_eq!(exchanges, u8::from(trial == Trial::Success));
-                });
-            }
             InstallationClaimTrial::SignerAdmitted => {
                 let (client, peer) = UnixStream::pair().expect("fixture pair");
                 let (decision_client, decision_core) = UnixStream::pair().expect("decision pair");
