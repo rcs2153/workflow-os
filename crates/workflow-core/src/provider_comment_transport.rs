@@ -16,8 +16,8 @@ use url::Url;
 use crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding;
 use crate::provider_comment_observation::{
     verify_current_comment_identity, CommentEnumeration, CommentPage, CreatedCommentResponse,
-    CurrentCommentPosture, ExpectedComment, ProviderComment, ProviderTimestampBounds, MAX_COMMENTS,
-    MAX_CREATION_RESPONSE_BYTES, MAX_PAGES, MAX_RAW_BODY_BYTES,
+    CurrentCommentPosture, ExpectedComment, ProviderComment, ProviderTimestampBounds,
+    MARKER_NAMESPACE, MAX_COMMENTS, MAX_CREATION_RESPONSE_BYTES, MAX_PAGES, MAX_RAW_BODY_BYTES,
 };
 use crate::{
     GitHubPullRequestCommentProviderAuth, GitHubPullRequestCommentTarget, SpecContentHash,
@@ -37,6 +37,32 @@ pub(crate) struct GitHubCommentCreationTransport<'a> {
     origin: String,
     agent: ureq::Agent,
     auth: &'a GitHubPullRequestCommentProviderAuth,
+}
+
+struct GetCommentReader<'a> {
+    origin: &'a str,
+    agent: &'a ureq::Agent,
+    bearer: &'a str,
+}
+
+/// Reviewed provider read identity, not the writer's installation authority.
+pub(crate) struct IndependentCommentInventory<'a> {
+    origin: String,
+    agent: ureq::Agent,
+    reader: NonZeroU64,
+    repository: NonZeroU64,
+    writer_scope: &'a SpecContentHash,
+    bearer: &'a str,
+}
+
+pub(crate) struct PreparedCommentInventory<'a> {
+    pub(crate) target: &'a GitHubPullRequestCommentTarget,
+    pub(crate) repository: NonZeroU64,
+    pub(crate) writer: NonZeroU64,
+    pub(crate) writer_scope: &'a SpecContentHash,
+    pub(crate) comment_id: NonZeroU64,
+    pub(crate) body: &'a SpecContentHash,
+    pub(crate) marker: &'a SpecContentHash,
 }
 
 pub(crate) struct PreparedGitHubCommentCreation<'a> {
@@ -206,7 +232,8 @@ impl<'a> GitHubCommentCreationTransport<'a> {
             return None;
         }
         let (repository_id, author_id) =
-            self.verify_target(target, expected.repository_id, expected.author_id)?;
+            self.reader()?
+                .verify_target(target, expected.repository_id, expected.author_id)?;
         Some(PreparedGitHubCommentCreation {
             transport: self,
             path: comment_path(target),
@@ -241,13 +268,33 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         None
     }
 
+    fn reader(&self) -> Option<GetCommentReader<'_>> {
+        self.auth.validate().ok()?;
+        Some(GetCommentReader {
+            origin: &self.origin,
+            agent: &self.agent,
+            bearer: self.auth.secret_for_provider(),
+        })
+    }
+
+    fn request(&self, method: &str, path: &str) -> ureq::Request {
+        github_request(
+            &self.agent,
+            &self.origin,
+            method,
+            path,
+            self.auth.secret_for_provider(),
+        )
+    }
+}
+
+impl GetCommentReader<'_> {
     fn verify_target(
         &self,
         target: &GitHubPullRequestCommentTarget,
         repository_id: NonZeroU64,
-        author_id: NonZeroU64,
+        reader_id: NonZeroU64,
     ) -> Option<(NonZeroU64, NonZeroU64)> {
-        self.auth.validate().ok()?;
         target.validate().ok()?;
         let full_name = format!("{}/{}", target.owner(), target.repository());
         let repo = format!("/repos/{full_name}");
@@ -255,8 +302,8 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         if repository.id != repository_id || repository.full_name != full_name {
             return None;
         }
-        let author: GitHubUserIdentity = self.read_identity("/user")?;
-        if author.id != author_id {
+        let reader: GitHubUserIdentity = self.read_identity("/user")?;
+        if reader.id != reader_id {
             return None;
         }
         // Issue-comment creation also accepts ordinary issues.
@@ -269,9 +316,11 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         {
             return None;
         }
-        Some((repository.id, author.id))
+        Some((repository.id, reader.id))
     }
+}
 
+impl GitHubCommentCreationTransport<'_> {
     /// Reads only the reservation's target. A provider snapshot or acceptance
     /// proof cannot be inferred from a complete traversal.
     #[cfg(test)]
@@ -295,7 +344,14 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         observe_time: impl FnOnce() -> Option<Timestamp>,
     ) -> Result<(NonZeroU64, Timestamp), CurrentCommentPosture> {
         let pages = self
-            .read_comment_pages(expected)
+            .reader()
+            .and_then(|reader| {
+                reader.read_comment_pages(
+                    expected.target,
+                    expected.repository_id,
+                    expected.author_id,
+                )
+            })
             .ok_or(CurrentCommentPosture::Unresolved)?;
         let observed_at = observe_time().ok_or(CurrentCommentPosture::Unresolved)?;
         let normalized = pages
@@ -334,15 +390,21 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         )
         .map(|id| (id, observed_at))
     }
+}
 
-    fn read_comment_pages(&self, expected: &ExpectedComment<'_>) -> Option<Vec<ObservedPage>> {
-        let target = expected.target;
-        self.verify_target(target, expected.repository_id, expected.author_id)?;
-        let origin = Url::parse(&self.origin).ok()?;
+impl GetCommentReader<'_> {
+    fn read_comment_pages(
+        &self,
+        target: &GitHubPullRequestCommentTarget,
+        repository_id: NonZeroU64,
+        reader_id: NonZeroU64,
+    ) -> Option<Vec<ObservedPage>> {
+        self.verify_target(target, repository_id, reader_id)?;
+        let origin = Url::parse(self.origin).ok()?;
         let named = comment_path(target);
         let stable = format!(
             "/repositories/{}/issues/{}/comments",
-            expected.repository_id,
+            repository_id,
             target.pull_request_number()
         );
         let issue = format!(
@@ -363,7 +425,7 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         for page in 1..=page_limit {
             let request_path = format!("{stable}?per_page={COMMENTS_PER_PAGE}&page={page}");
             let response = self
-                .request("GET", &request_path)
+                .get(&request_path)
                 .set("Accept", "application/vnd.github.raw+json")
                 .call()
                 .ok()?;
@@ -423,24 +485,86 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         None
     }
 
-    fn request(&self, method: &str, path: &str) -> ureq::Request {
-        github_request(
-            &self.agent,
-            &self.origin,
-            method,
-            path,
-            self.auth.secret_for_provider(),
-        )
+    fn get(&self, path: &str) -> ureq::Request {
+        github_request(self.agent, self.origin, "GET", path, self.bearer)
     }
 
     fn read_identity<T: serde::de::DeserializeOwned>(&self, path: &str) -> Option<T> {
-        let response = self.request("GET", path).call().ok()?;
+        let response = self.get(path).call().ok()?;
         if response.status() != 200 {
             return None;
         }
         let body = bounded_read(response.into_reader(), MAX_IDENTITY_RESPONSE_BYTES)?;
         serde_json::from_slice(&body).ok()
     }
+}
+
+impl<'a> IndependentCommentInventory<'a> {
+    pub(crate) fn new(
+        reader: NonZeroU64,
+        repository: NonZeroU64,
+        writer_scope: &'a SpecContentHash,
+        bearer: &'a str,
+    ) -> Self {
+        Self {
+            origin: GITHUB_ORIGIN.to_owned(),
+            agent: github_agent(),
+            reader,
+            repository,
+            writer_scope,
+            bearer,
+        }
+    }
+
+    pub(crate) fn observe(&self, expected: &PreparedCommentInventory<'_>) -> CurrentCommentPosture {
+        use CurrentCommentPosture::{Absent, Ambiguous, ExactCurrentMatch, Unresolved};
+        if self.reader == expected.writer
+            || self.repository != expected.repository
+            || self.writer_scope != expected.writer_scope
+            || self.bearer.is_empty()
+            || self.bearer.len() > 4096
+            || !self.bearer.bytes().all(|byte| byte.is_ascii_graphic())
+        {
+            return Unresolved;
+        }
+        let reader = GetCommentReader {
+            origin: &self.origin,
+            agent: &self.agent,
+            bearer: self.bearer,
+        };
+        let Some(pages) =
+            reader.read_comment_pages(expected.target, expected.repository, self.reader)
+        else {
+            return Unresolved;
+        };
+        let mut matches = pages.iter().flat_map(|page| &page.comments).filter(|row| {
+            row.id == expected.comment_id || contains_marker_commitment(&row.body, expected.marker)
+        });
+        let Some(row) = matches.next() else {
+            return Absent;
+        };
+        if matches.next().is_some() {
+            return Ambiguous;
+        }
+        if row.id == expected.comment_id
+            && row.user.id == expected.writer
+            && row.created_at == row.updated_at
+            && SpecContentHash::from_text(&row.body) == *expected.body
+            && contains_marker_commitment(&row.body, expected.marker)
+        {
+            ExactCurrentMatch
+        } else {
+            Unresolved
+        }
+    }
+}
+
+fn contains_marker_commitment(body: &str, commitment: &SpecContentHash) -> bool {
+    let length = MARKER_NAMESPACE.len() + 64;
+    body.match_indices(MARKER_NAMESPACE).any(|(start, _)| {
+        body.get(start..start + length)
+            .is_some_and(|marker| SpecContentHash::from_text(marker) == *commitment)
+    })
 }
 
 fn github_agent() -> ureq::Agent {
@@ -993,6 +1117,125 @@ pub(crate) mod tests {
 
     fn next_link(origin: &str, path: &str, next: usize) -> String {
         format!("Link: <{origin}{path}?per_page={COMMENTS_PER_PAGE}&page={next}>; rel=\"next\"\r\n")
+    }
+
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    pub(crate) enum InventoryTrial {
+        Exact,
+        WrongReader,
+        Duplicate,
+        Edited,
+        Truncated,
+        Absent,
+    }
+
+    pub(crate) fn with_independent_inventory<T>(
+        trial: InventoryTrial,
+        body: &str,
+        writer_scope: &SpecContentHash,
+        exercise: impl FnOnce(&IndependentCommentInventory<'_>) -> T,
+    ) -> T {
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).expect("loopback");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let origin = format!("http://{}", listener.local_addr().expect("address"));
+        let mut reader = IndependentCommentInventory::new(
+            NonZeroU64::new(777).expect("reader id"),
+            NonZeroU64::new(123).expect("repository id"),
+            writer_scope,
+            "synthetic-only",
+        );
+        reader.origin.clone_from(&origin);
+        thread::scope(|scope| {
+            let server =
+                scope.spawn(|| serve_independent_inventory(&listener, &origin, trial, body));
+            let result = exercise(&reader);
+            server.join().expect("independent inventory fixture");
+            assert!(
+                matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+            );
+            result
+        })
+    }
+
+    fn serve_independent_inventory(
+        listener: &TcpListener,
+        origin: &str,
+        trial: InventoryTrial,
+        body: &str,
+    ) {
+        const STABLE: &str = "/repositories/123/issues/7/comments";
+        let repository = br#"{"id":123,"full_name":"example/sandbox"}"#;
+        assert!(serve(listener, &repo(repository)).is_none());
+        if trial == InventoryTrial::WrongReader {
+            assert!(serve(listener, &user(br#"{"id":456}"#)).is_none());
+            return;
+        }
+        assert!(serve(listener, &user(br#"{"id":777}"#)).is_none());
+        assert!(serve(
+            listener,
+            &pull_request(
+                "200 OK",
+                br#"{"number":7,"base":{"repo":{"id":123,"full_name":"example/sandbox"}}}"#
+            )
+        )
+        .is_none());
+        let mut exact = listed_comment(22, body);
+        exact["user"]["id"] = serde_json::json!(456);
+        let replies = match trial {
+            InventoryTrial::Exact => vec![(
+                "200 OK",
+                String::new(),
+                serde_json::to_vec(&[exact]).expect("exact page"),
+            )],
+            InventoryTrial::Absent => vec![("200 OK", String::new(), b"[]".to_vec())],
+            InventoryTrial::Edited => {
+                exact["body"] = serde_json::json!("edited without marker");
+                vec![(
+                    "200 OK",
+                    String::new(),
+                    serde_json::to_vec(&[exact]).expect("edited page"),
+                )]
+            }
+            InventoryTrial::Duplicate | InventoryTrial::Truncated => {
+                let mut rows = (1..COMMENTS_PER_PAGE)
+                    .map(|id| listed_comment(id, "unrelated"))
+                    .collect::<Vec<_>>();
+                rows.push(exact);
+                let mut replies = vec![(
+                    "200 OK",
+                    next_link(origin, STABLE, 2),
+                    serde_json::to_vec(&rows).expect("full first page"),
+                )];
+                if trial == InventoryTrial::Duplicate {
+                    let duplicate = listed_comment(23, &format!("altered copy of {body}"));
+                    replies.push((
+                        "200 OK",
+                        String::new(),
+                        serde_json::to_vec(&[duplicate]).expect("duplicate marker page"),
+                    ));
+                } else {
+                    replies.push(("403 Forbidden", String::new(), Vec::new()));
+                }
+                replies
+            }
+            InventoryTrial::WrongReader => unreachable!("reader identity rejected before pages"),
+        };
+        for (index, (status, headers, body)) in replies.iter().enumerate() {
+            let line = format!(
+                "GET {STABLE}?per_page={COMMENTS_PER_PAGE}&page={} HTTP/1.1",
+                index + 1
+            );
+            assert!(serve(
+                listener,
+                &Reply {
+                    line: &line,
+                    status,
+                    headers,
+                    body
+                }
+            )
+            .is_none());
+        }
     }
 
     #[test]

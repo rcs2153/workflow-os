@@ -77,7 +77,7 @@ struct CheckedCommentSend {
     window: CommentSendWindow,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct InstallationSendPreparationRecord {
     operation: String,
@@ -825,6 +825,63 @@ impl SqliteStateBackend {
         );
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
         Ok(candidate)
+    }
+
+    #[allow(dead_code)] // Private until an independent read identity is provisioned.
+    pub(super) fn observe_prepared_installation_inventory(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        candidate: &crate::provider_comment_transport::installation_notification::CreationCandidate,
+        reader: &crate::provider_comment_transport::IndependentCommentInventory<'_>,
+    ) -> Result<CurrentCommentPosture, WorkflowOsError> {
+        use crate::provider_comment_transport::PreparedCommentInventory;
+        let load_preparation = || {
+            let mut connection = self.existing_read_only_connection()?;
+            let tx = connection
+                .transaction()
+                .map_err(|_| storage_error("begin_failed"))?;
+            if super::validate_operational_schema(&tx)?
+                != super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            {
+                return Ok(None);
+            }
+            let admission = read_live_recovery_admission(&tx, operation, action.run)?;
+            verify_live_recovery_state(&tx, &admission, action.run, action.side_effect)?;
+            let witness = admission.witness.as_ref().ok_or_else(corrupt)?;
+            let record =
+                read_installation_send_preparation_record(&tx, operation, action, &admission)?;
+            tx.commit().map_err(|_| storage_error("commit_failed"))?;
+            Ok::<_, WorkflowOsError>(record.map(|record| (record, witness.provider.clone())))
+        };
+        let Some((record, provider)) = load_preparation()? else {
+            return Ok(CurrentCommentPosture::Unresolved);
+        };
+        let Some(comment_id) = candidate.prepared_comment_id(
+            &record.reservation,
+            &record.body_commitment,
+            &record.marker_commitment,
+        ) else {
+            return Ok(CurrentCommentPosture::Unresolved);
+        };
+        // Do not hold the SQLite transaction open across provider I/O.
+        let result = reader.observe(&PreparedCommentInventory {
+            target: action.target,
+            repository: provider.repository_id,
+            writer: provider.author_id,
+            writer_scope: &record.scope,
+            comment_id,
+            body: &record.body_commitment,
+            marker: &record.marker_commitment,
+        });
+        if load_preparation()?
+            .as_ref()
+            .is_some_and(|(after, binding)| after == &record && binding == &provider)
+        {
+            Ok(result)
+        } else {
+            Ok(CurrentCommentPosture::Unresolved)
+        }
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]

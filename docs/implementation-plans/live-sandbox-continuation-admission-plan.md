@@ -1510,6 +1510,27 @@ signature, target, receipt, clock and body substitution. The reviewed
 receiver input is internal; no receiver is provisioned, and no live provider
 traffic, registration, permission change, or outcome persistence is enabled.
 
+### Independent Bounded Comment Inventory
+
+Core can compare a verified creation candidate with a separate GET-only
+inventory of the exact PR. The reviewed read identity is distinct from the
+writer and bound to the durable repository and writer scope. The fixed reader
+checks repository ID, authenticated read identity, and PR identity before
+following its existing bounded pagination rules. Core reloads the historical
+preparation after the read; no SQLite transaction spans transport I/O.
+
+An exact match requires the candidate comment ID, writer, marked body, and
+marker commitment. A second row carrying the same marker is ambiguous even
+when its body or author differs. An edited or substituted candidate, wrong
+reader, or truncated traversal remains unresolved. Absence in a complete
+traversal is only current absence. The fixture rehearses all of these cases
+with the reopened V17 store and a local GET-only server.
+
+An exact current match establishes one matching row in the bounded traversal,
+not a provider snapshot or the number of historical creations. The reader
+does not infer time of creation from inventory timestamps, persist outcomes,
+or issue a send right. No reader was provisioned or called against GitHub.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
