@@ -19,6 +19,8 @@ pub(crate) const LIVE_CAPABILITY: &str = "live-sandbox/github-pr-comment-continu
 
 /// Exact target selected by the trusted operator, not by a replacement harness.
 /// No public decoder, provider credentials, or repository-wide authorization.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct LiveSandboxPolicyTarget {
     target: GitHubPullRequestCommentTarget,
     operator: ActorId,
@@ -27,6 +29,14 @@ pub(crate) struct LiveSandboxPolicyTarget {
 }
 
 impl LiveSandboxPolicyTarget {
+    pub(crate) const fn target(&self) -> &GitHubPullRequestCommentTarget {
+        &self.target
+    }
+
+    pub(crate) const fn valid_until(&self) -> Timestamp {
+        self.valid_until
+    }
+
     pub(crate) fn provision(
         target: GitHubPullRequestCommentTarget,
         operator: ActorId,
@@ -109,7 +119,6 @@ impl LiveSandboxPrincipalVerifier {
 #[derive(Clone, Copy)]
 pub(crate) struct LiveSandboxContinuationFacts<'a> {
     pub(crate) action: GitHubCommentContinuationAction<'a>,
-    pub(crate) policy_target: &'a LiveSandboxPolicyTarget,
     pub(crate) replacement: &'a ActorId,
     pub(crate) scope: &'a CapabilityGrantScope,
     pub(crate) approval: &'a ApprovalReferenceId,
@@ -134,10 +143,10 @@ impl LiveSandboxContinuationFacts<'_> {
     /// Evaluate only this private capability; the general policy engine is unchanged.
     pub(crate) fn scoped_policy_decision(
         &self,
+        target: &LiveSandboxPolicyTarget,
         now: Timestamp,
     ) -> Result<PolicyDecision, WorkflowOsError> {
         self.verify_exact_approval(now)?;
-        let target = self.policy_target;
         if &target.target != self.action.target
             || target.operator != self.decision.actor
             || self.replacement == self.action.original_actor
@@ -425,16 +434,8 @@ pub(crate) mod tests {
                 .expect("marker"),
             ),
         };
-        let policy_target = LiveSandboxPolicyTarget::provision(
-            action.target.clone(),
-            issuer.clone(),
-            SpecContentHash::from_text("test sandbox target"),
-            window_expiry,
-        )
-        .expect("test sandbox policy target");
         let facts = LiveSandboxContinuationFacts {
             action,
-            policy_target: &policy_target,
             replacement: &replacement,
             scope: &scope,
             approval: &approval,

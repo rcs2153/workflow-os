@@ -44,10 +44,15 @@ use crate::{
 
 const ADAPTER_SCHEMA_VERSION: u32 = 10;
 const LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION: u32 = 11;
-const LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION: u32 = 12;
+const LIVE_AUTHORITY_PROOF_SCHEMA_VERSION: u32 = 12;
+const LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION: u32 = 13;
 const LIVE_AUTHORITY_SCHEMA_DIGEST: &str =
-    "25cf61a4ee86b8b9c52d7f9183316eac648ce9c38e501f11be84008c2028eaac";
+    "4ea3b8b14972f742090a3a3ffbf226f35dacfb0b1dd348a67a368930a5c4f60e";
 const LIVE_AUTHORITY_SCHEMA_CHECKSUM: &str =
+    "sha256:0e643b55bb7bc9b5418a59b35749d3c036c0b9dc7375fee9d79899269b08a4c3";
+const LIVE_AUTHORITY_V12_SCHEMA_DIGEST: &str =
+    "25cf61a4ee86b8b9c52d7f9183316eac648ce9c38e501f11be84008c2028eaac";
+const LIVE_AUTHORITY_SCOPED_V12_CHECKSUM: &str =
     "sha256:ab58c025af006d66886fa5c9f80f664e55420dfa8b55943274fd6e49a734042c";
 const LIVE_AUTHORITY_UNSCOPED_V12_CHECKSUM: &str =
     "sha256:e4538d7416eaf603d866b98ffe0907bd6735cbb3087e53d955cb8339cdde10c8";
@@ -216,6 +221,8 @@ const LIVE_SANDBOX_AUTHORITY_SCHEMA_V11: &str =
     include_str!("sqlite_live_sandbox_authority_schema_v11.sql");
 const LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12: &str =
     include_str!("sqlite_live_check_proof_schema_v12.sql");
+const LIVE_SANDBOX_TARGET_SCHEMA_V13: &str =
+    include_str!("sqlite_live_sandbox_target_schema_v13.sql");
 pub(crate) const CONTINUITY_CLOCK_PROVENANCE: &str =
     "77efdb5ae4c8696d8573d816a52dce594793b1749471a98cc58a85fc8129e50f";
 pub(crate) const CONTINUITY_CLOCK_EPOCH: &str = "epoch/sqlite-local-live-state/1";
@@ -1260,7 +1267,8 @@ impl SqliteStateBackend {
         match version {
             RUN_SCOPE_ADAPTER_SCHEMA_VERSION => validate_v9_upgrade_eligibility(&connection)?,
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(&connection)?,
-            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => validate_recognized_v12_schema(&connection)?,
+            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => validate_live_authority_schema(&connection)?,
+            LIVE_AUTHORITY_PROOF_SCHEMA_VERSION => validate_recognized_v12_schema(&connection)?,
             LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION => {
                 validate_previous_live_authority_schema(&connection)?;
             }
@@ -2348,7 +2356,8 @@ impl SqliteStateBackend {
                 ))
             }
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(connection),
-            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => validate_recognized_v12_schema(connection),
+            LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION => validate_live_authority_schema(connection),
+            LIVE_AUTHORITY_PROOF_SCHEMA_VERSION => validate_recognized_v12_schema(connection),
             LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION => {
                 validate_previous_live_authority_schema(connection)
             }
@@ -4116,14 +4125,20 @@ fn validate_live_authority_schema(connection: &Connection) -> Result<(), Workflo
 fn validate_unscoped_v12_schema(connection: &Connection) -> Result<(), WorkflowOsError> {
     validate_schema_metadata_version(
         connection,
-        LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
+        LIVE_AUTHORITY_PROOF_SCHEMA_VERSION,
         LIVE_AUTHORITY_UNSCOPED_V12_CHECKSUM,
-        LIVE_AUTHORITY_SCHEMA_DIGEST,
+        LIVE_AUTHORITY_V12_SCHEMA_DIGEST,
     )
 }
 
 fn validate_recognized_v12_schema(connection: &Connection) -> Result<(), WorkflowOsError> {
-    validate_live_authority_schema(connection).or_else(|_| validate_unscoped_v12_schema(connection))
+    validate_schema_metadata_version(
+        connection,
+        LIVE_AUTHORITY_PROOF_SCHEMA_VERSION,
+        LIVE_AUTHORITY_SCOPED_V12_CHECKSUM,
+        LIVE_AUTHORITY_V12_SCHEMA_DIGEST,
+    )
+    .or_else(|_| validate_unscoped_v12_schema(connection))
 }
 
 fn validate_previous_live_authority_schema(connection: &Connection) -> Result<(), WorkflowOsError> {

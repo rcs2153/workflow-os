@@ -276,7 +276,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
         .to_string()
         .contains(fixture.path.to_string_lossy().as_ref()));
 
-    for version in [11, 12] {
+    for version in [11, 12, 13] {
         let connection = Connection::open(&fixture.path).expect("open fixture database");
         connection
             .pragma_update(None, "user_version", version)

@@ -3303,15 +3303,7 @@ mod tests {
             invocation_terminal_event_id: terminal.clone(),
         })
         .expect("check");
-        let mut policy = facts
-            .scoped_policy_decision(facts.decision.decided_at)
-            .expect("exact sandbox policy");
-        if matches!(trial, LiveGrantTrial::GenericPolicy) {
-            policy.reason_codes.clear();
-        }
-        let mut later_denial = policy.clone();
-        later_denial.allowed = false;
-        let mut history = vec![
+        let history = [
             (
                 EventId::new("event/live-check").expect("check event"),
                 WorkflowRunEventKind::LocalCheckResultRecorded(Box::new(check)),
@@ -3338,17 +3330,7 @@ mod tests {
                 EventId::new("event/live-run-resumed").expect("resume"),
                 WorkflowRunEventKind::RunResumed,
             ),
-            (
-                EventId::new("event/live-policy").expect("policy"),
-                WorkflowRunEventKind::PolicyDecisionRecorded(Box::new(policy)),
-            ),
         ];
-        if matches!(trial, LiveGrantTrial::DeniedPolicy) {
-            history.push((
-                EventId::new("event/live-policy-denied").expect("later denial"),
-                WorkflowRunEventKind::PolicyDecisionRecorded(Box::new(later_denial)),
-            ));
-        }
         for (id, kind) in history {
             event.event_id = id;
             event.idempotency_key =
@@ -3376,6 +3358,7 @@ mod tests {
         fixture: &Fixture,
         facts: LiveSandboxContinuationFacts<'_>,
         opening_event: &EventId,
+        policy_event: &EventId,
     ) -> crate::SideEffectRecord {
         use crate::{
             RedactionMetadata, SideEffectAuthority, SideEffectAuthorityDecision,
@@ -3401,7 +3384,7 @@ mod tests {
                 SideEffectAuthorityDecision::ApprovedByHuman,
                 vec![reference(
                     SideEffectReferenceKind::PolicyDecision,
-                    "event/live-policy",
+                    policy_event.as_str(),
                 )],
                 vec![reference(
                     SideEffectReferenceKind::ApprovalDecision,
@@ -3451,6 +3434,62 @@ mod tests {
         .expect("attempted effect")
     }
 
+    fn seed_durable_live_policy(
+        fixture: &Fixture,
+        facts: LiveSandboxContinuationFacts<'_>,
+        trial: LiveGrantTrial,
+        provision: &crate::live_sandbox_continuation_authority::LiveSandboxPolicyTarget,
+    ) -> EventId {
+        let synthetic = |id: &str, allowed| {
+            let id = EventId::new(id).expect("policy event ID");
+            let mut event = fixture
+                .backend
+                .read_events(&fixture.run_id)
+                .expect("history")
+                .pop()
+                .expect("last event");
+            let mut policy = facts
+                .scoped_policy_decision(provision, Timestamp::now_utc())
+                .expect("fixture policy");
+            policy.allowed = allowed;
+            policy.reason_codes.clear();
+            event.event_id = id.clone();
+            event.idempotency_key = None;
+            event.timestamp = Timestamp::now_utc();
+            event.sequence_number =
+                EventSequenceNumber::new(event.sequence_number.get() + 1).expect("sequence");
+            event.kind = WorkflowRunEventKind::PolicyDecisionRecorded(Box::new(policy));
+            fixture
+                .backend
+                .append_event(&event)
+                .expect("append synthetic policy");
+            id
+        };
+        if matches!(trial, LiveGrantTrial::GenericPolicy) {
+            return synthetic("event/live-generic-allow", true);
+        }
+        if matches!(trial, LiveGrantTrial::MissingBundle) {
+            assert!(fixture.backend.record_live_sandbox_policy(facts).is_err());
+            return EventId::new("event/no-durable-policy").expect("missing policy");
+        }
+        let id = fixture
+            .backend
+            .record_live_sandbox_policy(facts)
+            .expect("record exact policy");
+        assert_eq!(
+            fixture
+                .backend
+                .record_live_sandbox_policy(facts)
+                .expect("exact retry"),
+            id
+        );
+        if matches!(trial, LiveGrantTrial::DeniedPolicy) {
+            synthetic("event/live-later-denial", false);
+            assert!(fixture.backend.record_live_sandbox_policy(facts).is_err());
+        }
+        id
+    }
+
     #[test]
     fn live_grant_consumption_survives_only_the_committed_reservation() {
         exercise_live_grant_reservation(LiveGrantTrial::AmbiguousCommit);
@@ -3479,6 +3518,11 @@ mod tests {
     #[test]
     fn live_grant_rejects_generic_adapter_policy_allow() {
         exercise_live_grant_reservation(LiveGrantTrial::GenericPolicy);
+    }
+
+    #[test]
+    fn live_grant_target_revocation_survives_reopen() {
+        exercise_live_grant_reservation(LiveGrantTrial::TargetRevoked);
     }
 
     #[test]
@@ -3754,10 +3798,10 @@ mod tests {
         let backend = SqliteStateBackend::open(&fixture.path).expect("read V11");
         backend
             .enable_live_sandbox_grant_store()
-            .expect("upgrade to V12");
+            .expect("upgrade to V13");
         backend
             .enable_live_sandbox_grant_store()
-            .expect("repeat V12");
+            .expect("repeat V13");
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("version");
@@ -3772,7 +3816,7 @@ mod tests {
     fn live_grant_store_requires_explicit_scoped_policy_protocol_upgrade() {
         use super::super::{
             validate_operational_schema, LIVE_AUTHORITY_ADAPTER_SCHEMA_VERSION,
-            LIVE_AUTHORITY_UNSCOPED_V12_CHECKSUM,
+            LIVE_AUTHORITY_PROOF_SCHEMA_VERSION, LIVE_AUTHORITY_UNSCOPED_V12_CHECKSUM,
         };
         let fixture = Fixture::new();
         fixture
@@ -3781,9 +3825,18 @@ mod tests {
             .expect("opt in");
         let connection = fixture.backend.connection().expect("connection");
         connection
+            .execute("DROP TABLE live_sandbox_targets", [])
+            .expect("previous manifest");
+        connection
+            .pragma_update(None, "user_version", LIVE_AUTHORITY_PROOF_SCHEMA_VERSION)
+            .expect("previous version");
+        connection
             .execute(
-                "UPDATE schema_metadata SET checksum=?1 WHERE singleton=1",
-                [LIVE_AUTHORITY_UNSCOPED_V12_CHECKSUM],
+                "UPDATE schema_metadata SET checksum=?1, schema_version=?2 WHERE singleton=1",
+                params![
+                    LIVE_AUTHORITY_UNSCOPED_V12_CHECKSUM,
+                    LIVE_AUTHORITY_PROOF_SCHEMA_VERSION
+                ],
             )
             .expect("previous protocol");
         let reopened = SqliteStateBackend::open(&fixture.path).expect("recognize previous V12");
@@ -3810,6 +3863,7 @@ mod tests {
         Contended,
         Revoked,
         PrincipalRevoked,
+        TargetRevoked,
         DeniedPolicy,
         GenericPolicy,
         FailedCheck,
@@ -4040,7 +4094,7 @@ mod tests {
                 let cursor = persist_live_grant_test_approval(&fixture, facts, trial);
                 let observed = super::super::continuity_store::observe_continuity_trusted_time()
                     .expect("trusted time");
-                let opening = || {
+                let opening = |cursor: &ContinuityCursor, observed: &crate::authorized_execution_continuity_state::internal::TrustedTimeObservation| {
                     let mut request = fixture.request(&authorization, &operation);
                     request.expected_cursor = cursor.clone();
                     request.invocation_binding_commitment = invocation.clone();
@@ -4051,11 +4105,11 @@ mod tests {
                 };
                 assert!(fixture
                     .backend
-                    .open_live_sandbox_attempt(opening(), facts)
+                    .open_live_sandbox_attempt(opening(&cursor, &observed), facts)
                     .is_err());
                 assert!(fixture
                     .backend
-                    .open_window_and_start_attempt_projected(opening())
+                    .open_window_and_start_attempt_projected(opening(&cursor, &observed))
                     .is_err());
                 fixture
                     .backend
@@ -4075,8 +4129,42 @@ mod tests {
                 );
                 assert!(fixture
                     .backend
-                    .open_window_and_start_attempt_projected(opening())
+                    .open_window_and_start_attempt_projected(opening(&cursor, &observed))
                     .is_err());
+                assert!(fixture
+                    .backend
+                    .open_live_sandbox_attempt(opening(&cursor, &observed), facts)
+                    .is_err());
+                assert!(fixture.backend.record_live_sandbox_policy(facts).is_err());
+                let provision =
+                    crate::live_sandbox_continuation_authority::LiveSandboxPolicyTarget::provision(
+                        action.target.clone(),
+                        facts.decision.actor.clone(),
+                        SpecContentHash::from_text("synthetic target revision"),
+                        expiry,
+                    )
+                    .expect("synthetic target");
+                fixture
+                    .backend
+                    .provision_live_sandbox_target(&provision)
+                    .expect("register target");
+                assert!(fixture
+                    .backend
+                    .provision_live_sandbox_target(&provision)
+                    .is_err());
+                let policy_event = seed_durable_live_policy(&fixture, facts, trial, &provision);
+                let last = fixture
+                    .backend
+                    .read_events(&fixture.run_id)
+                    .expect("history")
+                    .pop()
+                    .expect("last event");
+                let cursor = ContinuityCursor {
+                    sequence_number: last.sequence_number,
+                    event_id: last.event_id,
+                };
+                let observed = super::super::continuity_store::observe_continuity_trusted_time()
+                    .expect("post-policy time");
                 let substituted = LiveSandboxContinuationFacts {
                     action: GitHubCommentContinuationAction {
                         body: "different body",
@@ -4086,12 +4174,12 @@ mod tests {
                 };
                 assert!(fixture
                     .backend
-                    .open_live_sandbox_attempt(opening(), substituted)
+                    .open_live_sandbox_attempt(opening(&cursor, &observed), substituted)
                     .is_err());
-                let replay_request = opening();
+                let replay_request = opening(&cursor, &observed);
                 let opened = fixture
                     .backend
-                    .open_live_sandbox_attempt(opening(), facts)
+                    .open_live_sandbox_attempt(opening(&cursor, &observed), facts)
                     .expect("open live-only");
                 let OperationalExecutionWindowOpeningResult::Opened { capability, .. } =
                     opened.result
@@ -4101,7 +4189,7 @@ mod tests {
                 let grant = grant_for(LIVE_CAPABILITY, CapabilityGrantLifecycle::Active);
                 let live_credential = [43; 32];
                 let fixture_credential = [17; 32];
-                let backend = SqliteStateBackend::open(&fixture.path).expect("reopen V12");
+                let backend = SqliteStateBackend::open(&fixture.path).expect("reopen V13");
                 assert!(matches!(
                     backend
                         .open_live_sandbox_attempt(replay_request, facts)
@@ -4129,8 +4217,8 @@ mod tests {
                     )
                     .is_err());
                 let reader =
-                    SqliteStateBackend::open_read_only(&fixture.path).expect("inspect V12");
-                assert!(reader.health_check().expect("V12 health").healthy);
+                    SqliteStateBackend::open_read_only(&fixture.path).expect("inspect V13");
+                assert!(reader.health_check().expect("V13 health").healthy);
                 backend
                     .enable_live_sandbox_grant_store()
                     .expect("exact repeat upgrade");
@@ -4160,7 +4248,8 @@ mod tests {
                     .issue_live_sandbox_grant(facts, &fixture_only)
                     .is_err());
                 assert!(backend.issue_live_sandbox_grant(facts, &grant).is_err());
-                let effect = live_test_effect(&fixture, facts, &capability.cursor.event_id);
+                let effect =
+                    live_test_effect(&fixture, facts, &capability.cursor.event_id, &policy_event);
                 backend
                     .write_side_effect_record(&effect)
                     .expect("persist attempted effect");
@@ -4223,17 +4312,33 @@ mod tests {
                         facts.window_expires_at,
                     )
                     .expect("revised policy");
-                let changed_policy = LiveGrantAdmission {
-                    facts: LiveSandboxContinuationFacts {
-                        policy_target: &revised_policy,
-                        ..facts
-                    },
-                    ..admission
+                let original_target = serde_json::to_string(&provision).expect("target payload");
+                let set_target = |payload: &str| {
+                    connection
+                        .execute("UPDATE live_sandbox_targets SET payload=?1", [payload])
+                        .expect("test target substitution")
                 };
+                set_target(
+                    &serde_json::to_string(&revised_policy).expect("changed target payload"),
+                );
                 assert!(backend
-                    .reserve_live_sandbox_dispatch(request(), changed_policy)
+                    .reserve_live_sandbox_dispatch(request(), admission)
                     .is_err());
+                set_target(&original_target);
                 assert_eq!(counts(), (0, 0));
+                if matches!(trial, LiveGrantTrial::TargetRevoked) {
+                    backend
+                        .revoke_live_sandbox_target(facts.action.target)
+                        .expect("revoke target");
+                    let reopened =
+                        SqliteStateBackend::open(&fixture.path).expect("reopen revocation");
+                    assert!(reopened.provision_live_sandbox_target(&provision).is_err());
+                    assert!(reopened
+                        .reserve_live_sandbox_dispatch(request(), admission)
+                        .is_err());
+                    assert_eq!(counts(), (0, 0));
+                    return;
+                }
                 if matches!(trial, LiveGrantTrial::RequiredProof) {
                     let payload: String = connection
                         .query_row(
@@ -4311,6 +4416,9 @@ mod tests {
                 assert_eq!(counts(), (0, 0));
                 assert_eq!(event_count(), before);
                 match trial {
+                    LiveGrantTrial::TargetRevoked => {
+                        unreachable!("revocation handled before reservation")
+                    }
                     LiveGrantTrial::DeniedPolicy
                     | LiveGrantTrial::GenericPolicy
                     | LiveGrantTrial::FailedCheck
