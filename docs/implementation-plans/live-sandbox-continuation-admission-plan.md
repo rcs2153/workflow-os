@@ -1327,6 +1327,67 @@ Core process survives, exact replay must return issuance uncertainty without
 opening a second connection; after abrupt Core exits, a fresh process checks
 the durable result without reissuing. These tests do not send to a provider.
 
+### Post-Acceptance Recovery Review
+
+Maintainer verdict at `b2cf18dc` (PR #863): accept hosted signer isolation,
+but keep live sandbox admission denied. Linux and macOS each passed the
+success, before-commit, after-commit, and after-callback coordinator cases.
+The injected exchange counts an attempt without returning a send scope. Those
+tests do not establish what happens if the provider accepts the comment but
+Core loses the creation acknowledgement.
+
+The existing installation `Lost` fixture does reach the send path and asserts
+that the SideEffect stays attempted on replay. It does not run through the
+coordinator or independently inspect a committed provider-side effect. Reuse
+that fixture where practical instead of introducing another transport.
+
+The installation path commits the reservation before sending. An exact `201`
+response can produce a typed creation witness, which the outcome transaction
+rebinds to the durable action and installation scope. If the response never
+reaches the verifier, exact replay can inspect the reservation but cannot
+reopen the signer or send again. The disposition is `ReconciliationRequired`,
+not verified failure or permission to retry the write.
+
+Independent evidence must answer two questions: is a single matching comment
+currently present, and was it created by the approved attempt within its
+execution window? The [GitHub issue-comment API](https://docs.github.com/en/rest/issues/comments?apiVersion=2022-11-28)
+exposes comment identity, body, and timestamps. The documented fields do not
+establish a bound from the provider's creation clock to Core's trusted
+timeline. Matching content and timestamps alone cannot justify completion;
+a later response's `Date` does not establish the creation-time bound. Do not
+turn the existing page verifier or synthetic outcome writer into an
+installation creation witness.
+
+Next executable gate: use the private installation coordinator and a fixture
+provider with a separate effect ledger. Have the one-shot POST commit exactly
+one marked comment, drop the response before Core can verify it, and reopen
+Core. Assert that the effect exists and exact replay calls neither signer nor
+POST. Feed the bounded observer the fixture record without and then with
+independently controlled clock bounds to distinguish unresolved timing from
+an exact fixture observation. Exercise identity or body drift, incomplete
+enumeration, and duplicate markers. No observation may use the installation
+creation writer or mint send authority. The fixture clock proves nothing about
+GitHub's clock.
+
+Until trusted evidence establishes provenance and time, retain the original
+operation and reservation for reconciliation. Do not manually complete the
+SideEffect, start a replacement run for the same intent, or infer success from
+presence. Recovering a durably captured exact response would cover loss between
+transport and Core, but not loss before any trusted component received the
+response. The live milestone must distinguish those cases. This review is
+maintainer-conducted, not independent live assurance.
+
+The coordinator rehearsal now commits one marked comment to a separate
+SQLite fixture ledger after the final send check and returns no creation
+witness. After reopening both stores, exact replay does not invoke the
+signer or send callback. The ledger supplies one effect for the observation
+checks: absent clock bounds, changed content or author, and incomplete
+enumeration remain unresolved; duplicate markers are ambiguous. Exact
+fixture observation with controlled clock bounds still leaves the SideEffect
+attempted and the coordinator in `ReconciliationRequired`. The separate
+installation loopback fixture covers loss at the HTTP boundary. Neither test
+supplies live provider time or changes production dispatch and recovery.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

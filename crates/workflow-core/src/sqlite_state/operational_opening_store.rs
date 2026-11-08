@@ -4773,7 +4773,7 @@ mod tests {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let InstallationClaimTrial::Coordinator { reserve } = trial {
             exercise_installation_coordinator(
-                backend, request, admission, action, reviewed, reserve,
+                backend, path, request, admission, action, reviewed, reserve,
             );
             return;
         }
@@ -4884,6 +4884,7 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn exercise_installation_coordinator(
         backend: &SqliteStateBackend,
+        path: &std::path::Path,
         request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
         admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
         action: crate::provider_write::GitHubCommentContinuationAction<'_>,
@@ -4925,7 +4926,13 @@ mod tests {
         assert_eq!(opens.get(), 0);
 
         let expected = if reserve {
-            let reserves = Cell::new(0);
+            let ledger_path = path.with_extension("provider.sqlite3");
+            let ledger = Connection::open(&ledger_path).expect("independent provider ledger");
+            ledger
+                .execute_batch(
+                    "CREATE TABLE accepted (id INTEGER PRIMARY KEY, body TEXT, created_at TEXT)",
+                )
+                .expect("provider ledger schema");
             assert_eq!(
                 backend
                     .coordinate_installation_comment_using(
@@ -4950,19 +4957,29 @@ mod tests {
                             )
                         },
                         |request, exchanged| {
-                            reserves.set(reserves.get() + 1);
-                            assert!(backend
-                                .reserve_installation_exchange_for_test(
-                                    request, admission, reviewed, &exchanged
-                                )?
-                                .is_some());
-                            Ok(None)
+                            backend.dispatch_lost_installation_ack_for_test(
+                                request, admission, action, reviewed, &exchanged, |body| {
+                                    let time = Timestamp::now_utc();
+                                    ledger.execute(
+                                        "INSERT INTO accepted (id, body, created_at) VALUES (22, ?1, ?2)",
+                                        params![body, serde_json::to_string(&time).expect("fixture clock")],
+                                    ).expect("commit the provider effect before losing the response");
+                                },
+                            )
                         },
                     )
                     .expect("synthetic reserved disposition"),
                 InstallationCommentRecoveryPosture::ReconciliationRequired,
             );
-            assert_eq!(reserves.get(), 1);
+            drop(ledger);
+            assert_reopened_installation_ack(
+                path,
+                &ledger_path,
+                &request,
+                admission,
+                action,
+                reviewed,
+            );
             InstallationCommentRecoveryPosture::ReconciliationRequired
         } else {
             assert_eq!(
@@ -4974,6 +4991,152 @@ mod tests {
         assert_eq!(opens.get(), 1);
         assert_eq!(coordinate(action).expect("exact replay"), expected);
         assert_eq!(opens.get(), 1);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn assert_reopened_installation_ack(
+        path: &std::path::Path,
+        ledger_path: &std::path::Path,
+        request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        reviewed: crate::provider_comment_transport::installation_exchange::ReviewedInstallation<
+            '_,
+        >,
+    ) {
+        use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture;
+        let reopened = SqliteStateBackend::open(path).expect("reopen Core after response loss");
+        let assert_no_send = || {
+            assert_eq!(
+                reopened
+                    .coordinate_installation_comment_using(
+                        request(),
+                        admission,
+                        action,
+                        reviewed,
+                        |_, _| panic!("reserved replay must not reopen the signer"),
+                        |_, _| panic!("reserved replay must not POST"),
+                    )
+                    .expect("historical disposition"),
+                InstallationCommentRecoveryPosture::ReconciliationRequired,
+            );
+        };
+        assert_no_send();
+        assert_lost_installation_ack_observation(
+            &reopened,
+            ledger_path,
+            &request(),
+            action,
+            reviewed,
+        );
+        assert_no_send();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn assert_lost_installation_ack_observation(
+        backend: &SqliteStateBackend,
+        ledger_path: &std::path::Path,
+        request: &crate::dispatch_reservation::DispatchReservationRequest,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        reviewed: crate::provider_comment_transport::installation_exchange::ReviewedInstallation<
+            '_,
+        >,
+    ) {
+        use crate::provider_comment_observation::{
+            verify_current_comment, CommentEnumeration, CommentPage,
+            CurrentCommentPosture::{Ambiguous, ExactCurrentMatch, Unresolved},
+            ProviderComment, ProviderTimestampBounds,
+        };
+        use crate::SideEffectRecordStore;
+        use std::num::NonZeroU64;
+        use time::Duration;
+
+        let ledger = Connection::open(ledger_path).expect("reopen independent ledger");
+        let (id, body, created_at, count): (u32, String, String, u32) = ledger
+            .query_row(
+                "SELECT id, body, created_at, (SELECT COUNT(*) FROM accepted) FROM accepted",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("one recorded effect");
+        assert_eq!(count, 1);
+        let created_at = serde_json::from_str(&created_at).expect("recorded fixture time");
+        let target = crate::GitHubPullRequestCommentTarget::new("example", "sandbox", 7)
+            .expect("fixture provider target");
+        let observed = ProviderComment {
+            target: &target,
+            repository_id: NonZeroU64::new(123).expect("fixture provider repository"),
+            author_id: NonZeroU64::new(456).expect("fixture provider author"),
+            comment_id: NonZeroU64::new(u64::from(id)).expect("comment id"),
+            raw_body: &body,
+            created_at,
+            updated_at: created_at,
+        };
+        let observed_at = Timestamp::now_utc();
+        backend
+            .with_reserved_comment_context(
+                &request.operation_id,
+                action,
+                reviewed.comment_adapter,
+                |_, expected| {
+                    let bounds = Some(ProviderTimestampBounds {
+                        earliest_correction: Duration::ZERO,
+                        latest_correction: Duration::ZERO,
+                    });
+                    let observe = |comments: &[ProviderComment<'_>], timestamp_bounds| {
+                        verify_current_comment(
+                            expected,
+                            CommentEnumeration::Complete {
+                                observed_at,
+                                timestamp_bounds,
+                                pages: &[CommentPage::single(comments)],
+                            },
+                        )
+                    };
+                    assert_eq!(observe(&[observed], None), Unresolved);
+                    assert_eq!(observe(&[observed], bounds), ExactCurrentMatch);
+                    assert_eq!(
+                        verify_current_comment(expected, CommentEnumeration::Incomplete),
+                        Unresolved
+                    );
+                    let edited = format!("changed {body}");
+                    let other = NonZeroU64::new(23).expect("different id");
+                    for changed in [
+                        ProviderComment {
+                            raw_body: &edited,
+                            ..observed
+                        },
+                        ProviderComment {
+                            author_id: other,
+                            ..observed
+                        },
+                    ] {
+                        assert_eq!(observe(&[changed], bounds), Unresolved);
+                    }
+                    assert_eq!(
+                        observe(
+                            &[
+                                observed,
+                                ProviderComment {
+                                    comment_id: other,
+                                    ..observed
+                                }
+                            ],
+                            bounds
+                        ),
+                        Ambiguous
+                    );
+                },
+            )
+            .expect("observation uses the exact historical installation reservation");
+        assert_eq!(
+            backend
+                .read_side_effect_record(action.side_effect)
+                .expect("read effect")
+                .expect("attempted effect")
+                .lifecycle_state(),
+            crate::SideEffectLifecycleState::Attempted
+        );
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
