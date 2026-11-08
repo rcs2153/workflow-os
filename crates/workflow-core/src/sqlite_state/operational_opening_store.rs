@@ -3511,6 +3511,11 @@ mod tests {
     }
 
     #[test]
+    fn live_comment_prepared_loopback_loses_response_without_resending() {
+        exercise_live_grant_reservation(LiveGrantTrial::PreparedLoopbackLoss);
+    }
+
+    #[test]
     fn live_comment_grant_expiry_after_reservation_never_sends_or_replays() {
         exercise_live_grant_reservation(LiveGrantTrial::ExpiredBeforeSend);
     }
@@ -3882,6 +3887,7 @@ mod tests {
         AmbiguousCommit,
         Contended,
         LostAcknowledgement,
+        PreparedLoopbackLoss,
         ExpiredBeforeSend,
         VerifiedResponse,
         Revoked,
@@ -3992,6 +3998,82 @@ mod tests {
             export.snapshot(&reopened, "response-completed");
             export.write_manifest(action, operation.as_str(), &["response-completed"]);
         }
+    }
+
+    fn exercise_prepared_loopback_loss(
+        backend: &SqliteStateBackend,
+        path: &std::path::Path,
+        request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        provider: &crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding,
+    ) {
+        use super::super::dispatch_reservation_store::{
+            LiveCommentDispatchPosture, LiveCommentLookup, SyntheticSandboxRecoveryPosture,
+        };
+        use crate::provider_comment_transport::tests::with_lost_acknowledgement_server;
+        use crate::{
+            GitHubPullRequestCommentProviderLookupObservation as Comment,
+            GitHubPullRequestCommentProviderLookupObservationDefinition as CommentDefinition,
+        };
+        let dispatch = |store: &SqliteStateBackend, binding, expect_post| {
+            with_lost_acknowledgement_server(provider, expect_post, |transport| {
+                let prepared = transport
+                    .prepare(action.target, binding)
+                    .expect("preflight");
+                store.dispatch_prepared_loopback_comment(request(), admission, action, prepared)
+            })
+        };
+        let mut substituted = provider.clone();
+        substituted.adapter_commitment = SpecContentHash::from_text("wrong prepared adapter");
+        let (rejected, body) = dispatch(backend, &substituted, false);
+        assert!(rejected.is_err());
+        assert!(body.is_none());
+
+        let operation = request().operation_id;
+        let (lost, body) = dispatch(backend, provider, true);
+        assert_eq!(
+            lost.expect("ambiguous response"),
+            LiveCommentDispatchPosture::RecoveryOnly
+        );
+        let body = body.expect("one POST received before response loss");
+        let reopened = SqliteStateBackend::open(path).expect("restart after response loss");
+        let (retry, second) = dispatch(&reopened, provider, false);
+        assert_eq!(
+            retry.expect("exact retry"),
+            LiveCommentDispatchPosture::RecoveryOnly
+        );
+        assert!(second.is_none());
+        assert_eq!(
+            reopened
+                .inspect_synthetic_sandbox_recovery(
+                    action.run,
+                    operation.as_str(),
+                    action.side_effect
+                )
+                .expect("unresolved without observation"),
+            SyntheticSandboxRecoveryPosture::ReconciliationRequired
+        );
+        let expected_action = action.commitment().expect("action commitment");
+        assert!(reopened
+            .reconcile_live_sandbox_comment(&operation, action, |target, marker| {
+                assert_eq!(
+                    Some(body.as_str()),
+                    crate::provider_comment_observation::encode_marked_comment(action.body, marker)
+                        .as_deref()
+                );
+                LiveCommentLookup::Observed {
+                    comment: Comment::new(CommentDefinition {
+                        target: target.clone(),
+                        provider_comment_reference: Some("github/comment/17".to_owned()),
+                        managed_marker: Some(marker.to_owned()),
+                    })
+                    .expect("synthetic observation of received POST"),
+                    verified_action: expected_action,
+                }
+            })
+            .expect("reconcile accepted test effect")
+            .is_some());
     }
 
     #[allow(clippy::too_many_lines)]
@@ -5200,6 +5282,16 @@ mod tests {
                             expiry,
                         );
                     }
+                    LiveGrantTrial::PreparedLoopbackLoss => {
+                        exercise_prepared_loopback_loss(
+                            &backend,
+                            &fixture.path,
+                            request,
+                            admission,
+                            action,
+                            &provider_binding(),
+                        );
+                    }
                     LiveGrantTrial::ExpiredBeforeSend => {
                         use super::super::dispatch_reservation_store::{
                             LiveCommentDispatchPosture, SyntheticSandboxRecoveryPosture,
@@ -5316,6 +5408,7 @@ mod tests {
                     before
                         + 1
                         + usize::from(matches!(trial, LiveGrantTrial::VerifiedResponse))
+                        + usize::from(matches!(trial, LiveGrantTrial::PreparedLoopbackLoss))
                         + 2 * usize::from(matches!(trial, LiveGrantTrial::LostAcknowledgement))
                 );
                 assert!(backend

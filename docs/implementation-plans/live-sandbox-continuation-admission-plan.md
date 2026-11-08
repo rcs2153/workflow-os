@@ -599,7 +599,16 @@ committed admission, current time provenance, and the strict deadline. An
 unusable observation or elapsed deadline leaves the durable attempt in
 recovery-only posture. An exact retry cannot regain the send right. This is a
 local check, not an atomic deadline at GitHub. The HTTP preflight and adapter
-binding are not connected to this sender, and no live proof is issued.
+binding are not connected to a production sender, and no live proof is issued.
+
+The test-only loopback composition checks the prepared target and provider
+registration inside admission, before consuming the grant, and compares the
+prepared binding again to the committed witness before send. It exercises the
+actual HTTP exchange with a disposable SQLite store: a changed adapter binding
+cannot POST, the matching request sends one reservation-marked body, and a
+dropped acknowledgement followed by restart and exact retry sends nothing
+again. The fixture reconciles the received body using a synthetic observation;
+this is not evidence of live GitHub behavior or a production recovery route.
 
 ## Delivery And Tests
 

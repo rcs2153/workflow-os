@@ -1058,7 +1058,7 @@ fn durable_scoped_policy(
     facts.scoped_policy_decision(&target, now)
 }
 
-fn read_active_live_target(
+pub(super) fn read_active_live_target(
     tx: &Connection,
     reference: &str,
 ) -> Result<LiveSandboxPolicyTarget, WorkflowOsError> {
