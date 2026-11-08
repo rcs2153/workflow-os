@@ -486,9 +486,12 @@ struct Exchange<'a> {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn exchange_installation_scope(
     scope: ReviewedInstallation<'_>,
+    admitted: &super::installation_signer_channel::InstallationSignerRequest<'_>,
     signed_app_assertion: super::installation_signer_channel::InstallationAppAssertion,
 ) -> Option<VerifiedInstallationScope> {
-    let (assertion, expires_at) = signed_app_assertion.into_parts();
+    let reviewed_scope = scope.issuance_commitment()?;
+    let (assertion, expires_at) =
+        signed_app_assertion.into_writer_parts(admitted, &reviewed_scope)?;
     Exchange {
         agent: github_agent(),
         origin: GITHUB_ORIGIN,

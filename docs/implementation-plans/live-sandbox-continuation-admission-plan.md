@@ -1722,6 +1722,20 @@ effect count, and replay without reopening notification or reader inputs.
 This does not deploy a signer or receiver, establish intended-host custody,
 verify live provider permissions, or authorize a live trial.
 
+### Writer Signer Assertion Binding
+
+The private writer exchange now consumes an assertion only for the same
+admitted operation, claim commitment, reviewed writer scope, and request
+deadline. The signer client rejects non-writer operations before opening the
+protocol, and the fixed-origin exchange independently derives the writer
+scope before it can extract the assertion. Offline socket tests substitute
+each binding, including an observer operation, and reject every substitution.
+
+The unused reader entry that accepted a writer assertion is removed. The
+synthetic reader exchange and replacement recovery rehearsal still exercise
+the reviewed reader scope. Live reader issuance requires its own admitted
+assertion source and host custody proof; the writer channel cannot supply it.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
