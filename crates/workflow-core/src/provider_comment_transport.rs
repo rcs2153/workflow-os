@@ -52,7 +52,26 @@ pub(crate) struct IndependentCommentInventory<'a> {
     reader: NonZeroU64,
     repository: NonZeroU64,
     writer_scope: &'a SpecContentHash,
+    access_review: Option<SpecContentHash>,
     bearer: &'a str,
+}
+
+#[derive(Clone, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct InstallationObserverProfile {
+    pub(crate) receiver_installation: NonZeroU64,
+    pub(crate) attestation_key: [u8; 32],
+    pub(crate) webhook_verifier_generation: SpecContentHash,
+    pub(crate) reader: NonZeroU64,
+    pub(crate) reader_access_review: SpecContentHash,
+}
+
+impl InstallationObserverProfile {
+    pub(crate) fn commitment(&self) -> Option<SpecContentHash> {
+        serde_json::to_vec(&("workflow-os/installation-observer-profile/v1", self))
+            .ok()
+            .map(SpecContentHash::from_bytes)
+    }
 }
 
 pub(crate) struct PreparedCommentInventory<'a> {
@@ -63,6 +82,7 @@ pub(crate) struct PreparedCommentInventory<'a> {
     pub(crate) comment_id: NonZeroU64,
     pub(crate) body: &'a SpecContentHash,
     pub(crate) marker: &'a SpecContentHash,
+    pub(crate) observer_profile: Option<&'a InstallationObserverProfile>,
 }
 
 pub(crate) struct VerifiedInventoryTraversal {
@@ -511,6 +531,7 @@ impl<'a> IndependentCommentInventory<'a> {
         repository: NonZeroU64,
         writer_scope: &'a SpecContentHash,
         bearer: &'a str,
+        access_review: Option<SpecContentHash>,
     ) -> Self {
         Self {
             origin: GITHUB_ORIGIN.to_owned(),
@@ -518,6 +539,7 @@ impl<'a> IndependentCommentInventory<'a> {
             reader,
             repository,
             writer_scope,
+            access_review,
             bearer,
         }
     }
@@ -529,6 +551,10 @@ impl<'a> IndependentCommentInventory<'a> {
         if self.reader == expected.writer
             || self.repository != expected.repository
             || self.writer_scope != expected.writer_scope
+            || expected.observer_profile.is_some_and(|profile| {
+                self.reader != profile.reader
+                    || self.access_review.as_ref() != Some(&profile.reader_access_review)
+            })
             || self.bearer.is_empty()
             || self.bearer.len() > 4096
             || !self.bearer.bytes().all(|byte| byte.is_ascii_graphic())
@@ -1175,6 +1201,8 @@ pub(crate) mod tests {
         Edited,
         Truncated,
         Absent,
+        SubstitutedReader,
+        SubstitutedAccessReview,
     }
 
     pub(crate) fn with_independent_inventory<T>(
@@ -1186,18 +1214,33 @@ pub(crate) mod tests {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).expect("loopback");
         listener.set_nonblocking(true).expect("nonblocking");
         let origin = format!("http://{}", listener.local_addr().expect("address"));
+        let profile = super::installation_notification::tests::fixture_observer_profile();
         let mut reader = IndependentCommentInventory::new(
-            NonZeroU64::new(777).expect("reader id"),
+            if trial == InventoryTrial::SubstitutedReader {
+                NonZeroU64::new(778).expect("other non-writer reader")
+            } else {
+                profile.reader
+            },
             NonZeroU64::new(123).expect("repository id"),
             writer_scope,
             "synthetic-only",
+            Some(if trial == InventoryTrial::SubstitutedAccessReview {
+                SpecContentHash::from_text("substituted access review")
+            } else {
+                profile.reader_access_review
+            }),
         );
         reader.origin.clone_from(&origin);
         thread::scope(|scope| {
-            let server =
-                scope.spawn(|| serve_independent_inventory(&listener, &origin, trial, body));
+            let server = (!matches!(
+                trial,
+                InventoryTrial::SubstitutedReader | InventoryTrial::SubstitutedAccessReview
+            ))
+            .then(|| scope.spawn(|| serve_independent_inventory(&listener, &origin, trial, body)));
             let result = exercise(reader);
-            server.join().expect("independent inventory fixture");
+            if let Some(server) = server {
+                server.join().expect("independent inventory fixture");
+            }
             assert!(
                 matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
             );
@@ -1266,7 +1309,11 @@ pub(crate) mod tests {
                 }
                 replies
             }
-            InventoryTrial::WrongReader => unreachable!("reader identity rejected before pages"),
+            InventoryTrial::WrongReader
+            | InventoryTrial::SubstitutedReader
+            | InventoryTrial::SubstitutedAccessReview => {
+                unreachable!("reader identity rejected before pages")
+            }
         };
         for (index, (status, headers, body)) in replies.iter().enumerate() {
             let line = format!(

@@ -1640,6 +1640,32 @@ reviewer. The native Claude Desktop recovery inspection and public live
 operator path remain unverified. This is a maintainer review, not
 independent assurance.
 
+### Private Observer Profile Binding
+
+A reviewed observer profile now changes the installation target revision
+and issuance scope. The exact reservation commits to the receiver
+installation and attestation public key, webhook verifier generation, read
+principal, and read-access review commitment. The profile is bound before
+dispatch, alongside the exact repository and writer scope. Neither webhook
+verification secrets nor the reader bearer enter durable state.
+
+Recovery rejects a changed receiver or key generation before opening the
+reader. It rejects a changed read principal or access review before making
+a GET, then still authenticates the reader at the provider boundary.
+Candidates and journal records carry the pinned profile commitment, and
+the existing observation proof revalidates it during input-free replay.
+A pending legacy reservation without a profile cannot gain completion
+eligibility by upgrading the store. Existing historical proofs remain
+inspectable under their original contract.
+
+The private fixtures substitute a correctly signed notification under a
+different key, change the verifier generation and reader review, and
+attempt to change the reviewed target profile before signer access. This
+binds the reviewed identities; it does not establish real resolver custody
+or prove that a live reader's access is limited to the reviewed repository.
+Provider setup, intended-host verification, native recovery inspection,
+independent review, and separate live approval remain outstanding.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
