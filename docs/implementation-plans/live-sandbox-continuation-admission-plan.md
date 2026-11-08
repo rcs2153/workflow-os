@@ -283,7 +283,19 @@ reservation commitment. A verified observation can atomically complete that
 record and append one proof event referencing its admission. Replay verifies
 the same completed record and event; drift, conflicting observations, or
 older reservations without the attempted-record commitment cannot create
-proof. There is still no public tool or production lookup adapter.
+proof. There is still no Desktop tool or production lookup adapter.
+
+Local reviewers can inspect an existing synthetic reservation:
+
+```sh
+workflow-os --state-dir <state-dir> provider github-pr-comment inspect-synthetic-recovery \
+  --run-id <id> --operation-id <id> --side-effect-id <id>
+```
+
+The command opens the existing continuation SQLite database read-only. Its
+bounded JSON distinguishes verified historical admission from unresolved
+reconciliation or verified completion. It never grants dispatch authority,
+calls a provider, or returns comment bytes, markers, or provider references.
 
 After positive provider observation, bind the remote reference and observation
 to the reservation and attempted record. Persist eligible SideEffect and

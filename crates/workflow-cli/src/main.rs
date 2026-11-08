@@ -130,6 +130,7 @@ fn main() {
     std::process::exit(exit);
 }
 
+#[allow(clippy::too_many_lines)] // Exhaustive top-level command routing.
 fn run(args: &[String]) -> Result<(), WorkflowOsError> {
     let invocation = Invocation::parse(args)?;
     match &invocation.command {
@@ -214,6 +215,7 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         }
         Command::AuthorWorkflowPromote { .. } => author_workflow_promote_dispatch(&invocation),
         Command::ProviderGitHubPrCommentRecoverySummary { .. }
+        | Command::ProviderGitHubPrCommentInspectSyntheticRecovery { .. }
         | Command::ProviderGitHubPrCommentContinueSandbox { .. }
         | Command::ProviderFixtureAuthority(_) => provider_command_dispatch(&invocation),
         Command::DogfoodApprovalPresentationPersist { .. } => {
@@ -440,6 +442,16 @@ fn provider_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsEr
         Command::ProviderGitHubPrCommentRecoverySummary { summary } => {
             provider_github_pr_comment_recovery_summary_command(invocation, summary)
         }
+        Command::ProviderGitHubPrCommentInspectSyntheticRecovery {
+            run_id,
+            operation_id,
+            side_effect_id,
+        } => inspect_synthetic_sandbox_recovery_command(
+            invocation,
+            run_id,
+            operation_id,
+            side_effect_id,
+        ),
         Command::ProviderGitHubPrCommentContinueSandbox { request } => {
             provider_github_pr_comment_continue_sandbox_command(invocation, request)
         }
@@ -448,6 +460,34 @@ fn provider_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsEr
         }
         _ => unreachable!("provider dispatch only handles provider commands"),
     }
+}
+
+fn inspect_synthetic_sandbox_recovery_command(
+    invocation: &Invocation,
+    run_id: &str,
+    operation_id: &str,
+    side_effect_id: &str,
+) -> Result<(), WorkflowOsError> {
+    let posture = SqliteStateBackend::open_read_only(github_pr_comment_continuation_database(invocation))
+        .and_then(|backend| backend.inspect_synthetic_sandbox_recovery(
+            &WorkflowRunId::new(run_id)?,
+            operation_id,
+            &workflow_core::SideEffectId::new(side_effect_id)?,
+        )).map_err(|_| WorkflowOsError::security(
+            "cli.provider.synthetic_recovery_unverified",
+            "synthetic recovery state is missing, unsupported, or does not match the supplied identifiers",
+        ))?;
+    println!(
+        "{}",
+        serde_json::json!({
+            "evidence_source": "synthetic_sandbox",
+            "historical_admission_verified": true,
+            "execution_posture": posture,
+            "dispatch_authorized": false,
+            "provider_called": false
+        })
+    );
+    Ok(())
 }
 
 fn provider_github_pr_comment_continue_sandbox_command(
@@ -12650,6 +12690,11 @@ enum Command {
     ProviderGitHubPrCommentRecoverySummary {
         summary: PathBuf,
     },
+    ProviderGitHubPrCommentInspectSyntheticRecovery {
+        run_id: String,
+        operation_id: String,
+        side_effect_id: String,
+    },
     ProviderGitHubPrCommentContinueSandbox {
         request: PathBuf,
     },
@@ -13066,12 +13111,45 @@ fn parse_provider_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 })?;
             Ok(Command::ProviderGitHubPrCommentContinueSandbox { request })
         }
+        (Some("github-pr-comment"), Some("inspect-synthetic-recovery")) => {
+            parse_synthetic_recovery_inspection(&args[3..])
+        }
         (Some("github-pr-comment"), Some(_)) => {
             fixture_authority_cli::parse(&args[2..]).map(Command::ProviderFixtureAuthority)
         }
         (Some(other), _) => Err(usage(format!("unknown provider subcommand {other}"))),
         (None, _) => Err(usage("provider requires <subcommand>")),
     }
+}
+
+fn parse_synthetic_recovery_inspection(args: &[String]) -> Result<Command, WorkflowOsError> {
+    let invalid = || {
+        usage(
+        "provider github-pr-comment inspect-synthetic-recovery requires exactly --run-id <id> --operation-id <id> --side-effect-id <id>"
+    )
+    };
+    if args.len() != 6 {
+        return Err(invalid());
+    }
+    let mut run_id = None;
+    let mut operation_id = None;
+    let mut side_effect_id = None;
+    for pair in args.chunks_exact(2) {
+        let slot = match pair[0].as_str() {
+            "--run-id" => &mut run_id,
+            "--operation-id" => &mut operation_id,
+            "--side-effect-id" => &mut side_effect_id,
+            _ => return Err(invalid()),
+        };
+        if pair[1].starts_with('-') || slot.replace(pair[1].clone()).is_some() {
+            return Err(invalid());
+        }
+    }
+    Ok(Command::ProviderGitHubPrCommentInspectSyntheticRecovery {
+        run_id: run_id.ok_or_else(invalid)?,
+        operation_id: operation_id.ok_or_else(invalid)?,
+        side_effect_id: side_effect_id.ok_or_else(invalid)?,
+    })
 }
 
 fn parse_author_command(args: &[String]) -> Result<Command, WorkflowOsError> {
@@ -13481,6 +13559,7 @@ fn print_help() {
     );
     println!("  provider github-pr-comment recovery-summary --summary <path>");
     println!("  provider github-pr-comment continue-sandbox --request <path>");
+    println!("  provider github-pr-comment inspect-synthetic-recovery --run-id <id> --operation-id <id> --side-effect-id <id>");
     fixture_authority_cli::print_help();
     println!(
         "      render a bounded local provider lookup recovery summary; performs no provider calls, repair, event append, or artifact writes"
