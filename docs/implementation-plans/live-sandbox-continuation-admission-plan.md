@@ -528,6 +528,25 @@ it is not inferred from the comment body or URL. A real adapter must still
 establish that identity, enforce the byte limit while reading, and disable
 redirects and write retries. The parser does not follow response URLs.
 
+### Private HTTP Exchange
+
+The private transport pins production requests to `https://api.github.com`.
+It compares the reserved stable repository ID and canonical name with
+[repository metadata](https://docs.github.com/en/rest/repos/repos#get-a-repository)
+and the expected author ID with the
+[authenticated user](https://docs.github.com/en/rest/users/users#get-the-authenticated-user)
+before exposing a single-use creation request. Redirects, connection reuse,
+and environment proxy discovery are disabled. Both identity and creation
+responses are capped while reading. A dropped connection, redirect,
+unexpected status, or oversized response is not a successful acknowledgement
+and is never retried by this transport. Loopback tests use fake auth only.
+
+This exchange is not wired to the kernel's dispatch path or any public
+command. Identity preflight is not atomic with the POST and cannot protect
+against a name moving between requests. Live admission still requires a
+provider-side authorization boundary scoped to the disposable repository,
+operator approval, and review of the exact transport-to-reservation binding.
+
 An exact synthetic response now persists a completed SideEffect and a
 distinct creation-response proof event in the same SQLite transaction.
 Reopening the database verifies the proof against the original reservation
