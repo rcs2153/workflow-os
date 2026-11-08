@@ -2,6 +2,7 @@
 //! neither acceptance proof nor a dispatch authorization.
 #![allow(dead_code)] // No trusted production observer is wired yet.
 
+use serde::Deserialize;
 use std::num::NonZeroU64;
 use time::Duration;
 
@@ -11,6 +12,7 @@ use crate::{GitHubPullRequestCommentTarget, Timestamp};
 const MAX_COMMENTS: usize = 128;
 const MAX_PAGES: usize = 8;
 const MAX_RAW_BODY_BYTES: usize = 64 * 1024;
+const MAX_CREATION_RESPONSE_BYTES: usize = 512 * 1024;
 const MARKER_PREFIX: &str = "<!-- workflow-os/live-comment/";
 pub(crate) const MARKER_NAMESPACE: &str = "workflow-os/live-comment/";
 const SUFFIX_START: &str = "\n\n<!-- ";
@@ -43,15 +45,26 @@ pub(crate) fn encode_marked_comment(body: &str, marker: &str) -> Option<String> 
     Some(format!("{body}{suffix}"))
 }
 
-/// Parsed fields from the creation exchange, not a subsequent GET. The
-/// injected sender is synthetic; these fields do not attest its identity.
+/// Bounded input from the creation exchange, not a subsequent GET. The
+/// repository ID must be resolved independently by the trusted adapter.
 pub(crate) struct CreatedCommentResponse {
     pub(crate) status: u16,
-    pub(crate) target: GitHubPullRequestCommentTarget,
     pub(crate) repository_id: NonZeroU64,
-    pub(crate) author_id: NonZeroU64,
-    pub(crate) comment_id: NonZeroU64,
-    pub(crate) raw_body: String,
+    pub(crate) json: Vec<u8>,
+}
+
+#[derive(Deserialize)]
+struct GitHubCreatedComment {
+    id: NonZeroU64,
+    url: String,
+    issue_url: String,
+    user: GitHubCreatedCommentAuthor,
+    body: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubCreatedCommentAuthor {
+    id: NonZeroU64,
 }
 
 pub(crate) fn verify_created_comment_response(
@@ -61,12 +74,25 @@ pub(crate) fn verify_created_comment_response(
     sent_body: &str,
 ) -> Option<NonZeroU64> {
     let response = response?;
-    (response.status == 201
-        && response.target == *target
-        && response.repository_id == provider.repository_id
-        && response.author_id == provider.author_id
-        && response.raw_body == sent_body)
-        .then_some(response.comment_id)
+    if response.status != 201
+        || response.repository_id != provider.repository_id
+        || response.json.len() > MAX_CREATION_RESPONSE_BYTES
+        || sent_body.len() > MAX_RAW_BODY_BYTES
+        || target.validate().is_err()
+    {
+        return None;
+    }
+    let comment: GitHubCreatedComment = serde_json::from_slice(&response.json).ok()?;
+    let issues = format!(
+        "https://api.github.com/repos/{}/{}/issues",
+        target.owner(),
+        target.repository()
+    );
+    (comment.issue_url == format!("{issues}/{}", target.pull_request_number())
+        && comment.url == format!("{issues}/comments/{}", comment.id)
+        && comment.user.id == provider.author_id
+        && comment.body == sent_body)
+        .then_some(comment.id)
 }
 
 pub(crate) struct ExpectedComment<'a> {
@@ -310,13 +336,18 @@ mod tests {
             author_id: id(2),
             adapter_commitment: crate::SpecContentHash::from_text("adapter"),
         };
+        let payload = serde_json::json!({
+            "id": 3,
+            "issue_url": "https://api.github.com/repos/example/sandbox/issues/7",
+            "url": "https://api.github.com/repos/example/sandbox/issues/comments/3",
+            "user": { "id": 2, "login": "ignored" },
+            "body": body,
+        });
+        let encode = |value: &serde_json::Value| serde_json::to_vec(value).expect("response JSON");
         let exact = || CreatedCommentResponse {
             status: 201,
-            target: target.clone(),
             repository_id: id(1),
-            author_id: id(2),
-            comment_id: id(3),
-            raw_body: body.clone(),
+            json: encode(&payload),
         };
         let verify = |response: Option<&CreatedCommentResponse>| {
             verify_created_comment_response(response, &target, &provider, &body)
@@ -333,25 +364,50 @@ mod tests {
                 ..exact()
             },
             CreatedCommentResponse {
-                target: GitHubPullRequestCommentTarget::new("example", "sandbox", 8)
-                    .expect("other target"),
-                ..exact()
-            },
-            CreatedCommentResponse {
                 repository_id: id(4),
-                ..exact()
-            },
-            CreatedCommentResponse {
-                author_id: id(4),
-                ..exact()
-            },
-            CreatedCommentResponse {
-                raw_body: format!("{body}\n"),
                 ..exact()
             },
         ] {
             assert_eq!(verify(Some(&invalid)), None);
         }
+        for (field, substitute) in [
+            (
+                "issue_url",
+                serde_json::json!("https://api.github.com/repos/example/sandbox/issues/8"),
+            ),
+            (
+                "url",
+                serde_json::json!("https://api.github.com/repos/example/sandbox/issues/comments/4"),
+            ),
+            (
+                "url",
+                serde_json::json!("https://example.org/repos/example/sandbox/issues/comments/3"),
+            ),
+            ("user", serde_json::json!({ "id": 4 })),
+            ("user", serde_json::Value::Null),
+            ("body", serde_json::json!(format!("{body}\n"))),
+            ("id", serde_json::json!(0)),
+        ] {
+            let mut changed = payload.clone();
+            changed[field] = substitute;
+            assert_eq!(
+                verify(Some(&CreatedCommentResponse {
+                    json: encode(&changed),
+                    ..exact()
+                })),
+                None
+            );
+        }
+        let mut duplicated = exact();
+        assert_eq!(duplicated.json.pop(), Some(b'}'));
+        duplicated.json.extend_from_slice(br#", "id": 3}"#);
+        assert_eq!(verify(Some(&duplicated)), None);
+        let mut oversized = exact();
+        oversized.json.resize(MAX_CREATION_RESPONSE_BYTES + 1, b' ');
+        assert_eq!(verify(Some(&oversized)), None);
+        let mut malformed = exact();
+        malformed.json.truncate(12);
+        assert_eq!(verify(Some(&malformed)), None);
     }
 
     #[test]
