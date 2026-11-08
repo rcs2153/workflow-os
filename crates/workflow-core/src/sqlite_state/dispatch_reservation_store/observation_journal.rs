@@ -312,6 +312,7 @@ impl SqliteStateBackend {
             admission
                 .witness
                 .and_then(|witness| witness.installation_observer_profile)
+                .filter(|profile| profile.webhook_material_tag.is_some())
         };
         let unresolved = InstallationCommentRecoveryPosture::ReconciliationRequired;
         let Some(profile) = profile else {

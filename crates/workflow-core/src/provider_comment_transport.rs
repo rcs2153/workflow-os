@@ -62,11 +62,35 @@ pub(crate) struct InstallationObserverProfile {
     pub(crate) receiver_installation: NonZeroU64,
     pub(crate) attestation_key: [u8; 32],
     pub(crate) webhook_verifier_generation: SpecContentHash,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) webhook_material_tag: Option<[u8; 32]>,
     pub(crate) reader: NonZeroU64,
     pub(crate) reader_access_review: SpecContentHash,
 }
 
 impl InstallationObserverProfile {
+    pub(crate) fn bind_webhook_material(&mut self, key: &[u8; 32]) {
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, key);
+        let tag = ring::hmac::sign(&key, &self.webhook_material_challenge());
+        let mut bytes = [0; 32];
+        bytes.copy_from_slice(tag.as_ref());
+        self.webhook_material_tag = Some(bytes);
+    }
+
+    fn webhook_material_challenge(&self) -> Vec<u8> {
+        let mut message = b"workflow-os/webhook-verifier-material/v1\0".to_vec();
+        message.extend_from_slice(&self.receiver_installation.get().to_be_bytes());
+        message.extend_from_slice(&self.attestation_key);
+        message.extend_from_slice(self.webhook_verifier_generation.as_str().as_bytes());
+        message
+    }
+
+    fn matches_webhook_material(&self, key: &ring::hmac::Key) -> bool {
+        self.webhook_material_tag.as_ref().is_some_and(|tag| {
+            ring::hmac::verify(key, &self.webhook_material_challenge(), tag).is_ok()
+        })
+    }
+
     pub(crate) fn commitment(&self) -> Option<SpecContentHash> {
         serde_json::to_vec(&("workflow-os/installation-observer-profile/v1", self))
             .ok()
