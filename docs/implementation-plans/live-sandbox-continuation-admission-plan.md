@@ -816,6 +816,76 @@ reservation remains recovery-only after reopening. No production dispatch
 entry point is enabled. This is a local handoff check, not an atomic network
 deadline, provider clock proof, or guarantee of remote cancellation.
 
+### Repository-Scoped Access Review At `a96a241b`
+
+**Do not admit a live trial.** The fixed transport's repository, PR, and
+`GET /user` preflight checks establish target and user identity, not the
+set of repositories reachable by the supplied access token. Use a dedicated
+GitHub App installation on a disposable repository for the first trial.
+Do not accept an arbitrary bearer, an installation-wide default, a human
+account's access, or evidence assembled by a harness.
+
+GitHub documents narrowing installation issuance by numeric
+`repository_ids` and `permissions` and returning granted permissions and
+expiry. Enterprise-level installations do not support the same narrowing.
+For the proposed path, require one selected repository, exactly the
+`pull_requests: write` and `metadata: read` permission set, no account
+permissions, and a fresh expiration. Pull request write is sufficient for
+issue-comment creation but is not comment-only permission. Workflow OS
+must still enforce the exact PR and create action; the provider does not.
+See [installation issuance](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)
+and [comment endpoint permissions](https://docs.github.com/en/rest/issues/comments?apiVersion=2022-11-28#create-an-issue-comment).
+
+Before admitting an operator path:
+
+1. A trusted issuer must bind the reviewed App, installation, numeric
+   repository ID, and explicit permissions to the actual issuance
+   exchange. Require affirmative issuance evidence, then enumerate
+   [installation repositories](https://docs.github.com/en/rest/apps/installations?apiVersion=2022-11-28#list-repositories-accessible-to-the-app-installation)
+   using that exact in-memory bearer. Require one unambiguous complete
+   result with the expected ID and name; extra rows, advertised further
+   pages, missing facts, and substitutions fail closed. This proves the
+   installation repository scope, not inability to read public resources.
+2. Resolve the App and installation independently through the
+   [authenticated App API](https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#get-the-authenticated-app)
+   and require a reviewed mapping to the numeric bot author used in
+   comment evidence. Do not equate the App ID with the author ID or retain
+   a user-authenticated fallback. The documented
+   [authenticated user endpoint](https://docs.github.com/en/rest/users/users?apiVersion=2022-11-28#get-the-authenticated-user)
+   does not list installation access tokens as supported. Confirm the
+   author mapping and response contract before enabling that transport.
+3. Keep the issuer's signing key outside Workflow OS and both harnesses.
+   The verifier and prepared sender must use the same opaque in-memory
+   bearer instance, with no raw-token entry point or silent rotation.
+   Bind a payload-free scope receipt to the immutable run, provider
+   identities, target and adapter; retain the earlier of provider expiry
+   and local deadline. Never persist the bearer, signing material, raw
+   issuance payload, or a reusable credential fingerprint. A replacement
+   bearer must not inherit an existing send right.
+4. First implement and test the verifier on fixtures without provisioning,
+   dispatch, or a public command. Cover broad or omitted grants, wrong
+   installation, author or repository, mismatched bearer continuity,
+   expiry, incomplete enumeration, and redaction. Fixture verification
+   must not admit a live reservation. A distinct live review is required
+   for the issuer trust boundary, exact disposable target, real issuance
+   and author evidence, and the creation and recovery paths.
+
+### Synthetic Installation Scope Verification
+
+The test-only verifier checks the reviewed App, installation, and bot IDs
+against separately supplied fixture observations. It rejects incomplete
+repository enumeration, any grant other than the exact repository and
+permission set, and observations attached to a different in-memory bearer
+even when the bytes match. Its non-serializable receipt is bound to the
+run, immutable inputs, target, and fixture adapter, and expires at the
+earlier of provider expiry and the local deadline. Diagnostics contain
+neither the bearer nor raw provider inputs.
+
+This verifies decision behavior against synthetic facts, not the facts'
+provenance. The fixture module is excluded from production and cannot
+admit live reservations. Issuer integration, authenticated enumeration,
+bot-author mapping, and provider-backed creation proof remain gated.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

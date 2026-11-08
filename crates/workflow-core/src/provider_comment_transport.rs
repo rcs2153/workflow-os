@@ -1,6 +1,9 @@
 //! Private GitHub comment exchange and bounded read-only observation.
 #![allow(dead_code)]
 
+#[cfg(test)]
+mod installation_scope_fixture;
+
 use std::{io::Read, num::NonZeroU64, time::Duration};
 
 use serde::{Deserialize, Serialize};
