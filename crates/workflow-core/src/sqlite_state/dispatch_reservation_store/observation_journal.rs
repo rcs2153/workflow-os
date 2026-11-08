@@ -10,6 +10,7 @@ use crate::authorized_execution_continuity_state::internal::TrustedTimeObservati
 use crate::dispatch_reservation::DispatchReservationOperationId;
 use crate::provider_comment_observation::CurrentCommentPosture;
 use crate::provider_comment_transport::{
+    installation_exchange::reader::VerifiedReadInstallationScope,
     installation_notification::{
         CreationCandidate, CreationNotification, ReviewedCreationReceiver,
     },
@@ -279,7 +280,38 @@ pub(super) fn verify_observed_completion(
 
 impl SqliteStateBackend {
     /// Resolves historical state before asking the trusted host for evidence.
-    pub(in crate::sqlite_state) fn recover_installation_comment<'a, 'b>(
+    pub(in crate::sqlite_state) fn recover_installation_comment<'a>(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        receive: impl FnOnce(
+            &InstallationObserverProfile,
+        )
+            -> Option<(ReviewedCreationReceiver<'a>, CreationNotification<'a>)>,
+        exchange_reader: impl FnOnce(
+            &InstallationObserverProfile,
+        ) -> Option<VerifiedReadInstallationScope>,
+    ) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
+        self.recover_installation_comment_using(
+            operation,
+            action,
+            receive,
+            |profile, writer_scope, candidate| {
+                if let Some(reader) = exchange_reader(profile) {
+                    self.reconcile_prepared_installation_comment(
+                        operation,
+                        action,
+                        candidate,
+                        &reader.inventory(writer_scope),
+                    )?;
+                }
+                Ok(())
+            },
+        )
+    }
+
+    #[cfg(test)]
+    pub(in crate::sqlite_state) fn recover_installation_comment_fixture<'a, 'b>(
         &self,
         operation: &DispatchReservationOperationId,
         action: GitHubCommentContinuationAction<'_>,
@@ -291,7 +323,36 @@ impl SqliteStateBackend {
             &InstallationObserverProfile,
         ) -> Option<IndependentCommentInventory<'b>>,
     ) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
-        let profile = {
+        self.recover_installation_comment_using(
+            operation,
+            action,
+            receive,
+            |profile, _, candidate| {
+                if let Some(reader) = open_reader(profile) {
+                    self.reconcile_prepared_installation_comment(
+                        operation, action, candidate, &reader,
+                    )?;
+                }
+                Ok(())
+            },
+        )
+    }
+
+    fn recover_installation_comment_using<'a>(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        receive: impl FnOnce(
+            &InstallationObserverProfile,
+        )
+            -> Option<(ReviewedCreationReceiver<'a>, CreationNotification<'a>)>,
+        reconcile: impl FnOnce(
+            &InstallationObserverProfile,
+            &SpecContentHash,
+            &CreationCandidate,
+        ) -> Result<(), WorkflowOsError>,
+    ) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
+        let (profile, writer_scope) = {
             let mut connection = self.existing_read_only_connection()?;
             let tx = connection
                 .transaction()
@@ -305,14 +366,19 @@ impl SqliteStateBackend {
             if posture != InstallationCommentRecoveryPosture::ReconciliationRequired
                 || validate_operational_schema(&tx)?
                     != INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION
-                || read_bound_installation_preparation(&tx, operation, &admission)?.is_none()
             {
                 return Ok(posture);
             }
-            admission
+            let Some(preparation) =
+                read_bound_installation_preparation(&tx, operation, &admission)?
+            else {
+                return Ok(posture);
+            };
+            let profile = admission
                 .witness
                 .and_then(|witness| witness.installation_observer_profile)
-                .filter(|profile| profile.webhook_material_tag.is_some())
+                .filter(|profile| profile.webhook_material_tag.is_some());
+            (profile, preparation.scope)
         };
         let unresolved = InstallationCommentRecoveryPosture::ReconciliationRequired;
         let Some(profile) = profile else {
@@ -330,10 +396,7 @@ impl SqliteStateBackend {
         else {
             return Ok(unresolved);
         };
-        let Some(reader) = open_reader(&profile) else {
-            return Ok(unresolved);
-        };
-        self.reconcile_prepared_installation_comment(operation, action, &candidate, &reader)?;
+        reconcile(&profile, &writer_scope, &candidate)?;
         self.inspect_installation_comment_recovery(action.run, operation, action.side_effect)
     }
 

@@ -4821,17 +4821,23 @@ mod tests {
 
     fn installation_fixture_observers(
         trial: InstallationClaimTrial,
+        target: &crate::GitHubPullRequestCommentTarget,
     ) -> Option<crate::provider_comment_transport::InstallationObserverProfile> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         if matches!(
             trial,
-            InstallationClaimTrial::Coordinator(
-                CoordinatorTrial::ObservedRecovery { .. } | CoordinatorTrial::ProcessRecovery
-            )
+            InstallationClaimTrial::Coordinator(CoordinatorTrial::ProcessRecovery)
+        ) {
+            return Some(recovery_process::reader_profile(target));
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if matches!(
+            trial,
+            InstallationClaimTrial::Coordinator(CoordinatorTrial::ObservedRecovery { .. })
         ) {
             return Some(crate::provider_comment_transport::installation_notification::tests::fixture_observer_profile());
         }
-        let _ = trial;
+        let _ = (trial, target);
         None
     }
 
@@ -4865,7 +4871,7 @@ mod tests {
             request.request_commitment = crate::dispatch_reservation::request_commitment(&request);
             request
         };
-        let observer_profile = installation_fixture_observers(trial);
+        let observer_profile = installation_fixture_observers(trial, action.target);
         let reviewed = ReviewedInstallation {
             app_id: std::num::NonZeroU64::new(33).expect("app"),
             app_slug: "offline-contract-fixture",
@@ -5449,7 +5455,7 @@ mod tests {
         assert_installation_receiver_pin(backend, operation, action, receiver, notification);
         let attempt = |trial| {
             with_independent_inventory(trial, body, writer_scope, |reader| {
-                backend.recover_installation_comment(
+                backend.recover_installation_comment_fixture(
                     operation,
                     action,
                     |_| Some((receiver, notification)),
@@ -7853,7 +7859,7 @@ mod tests {
                 };
                 let target_revision = if let LiveGrantTrial::InstallationClaim(claim_trial) = trial
                 {
-                    let observers = installation_fixture_observers(claim_trial);
+                    let observers = installation_fixture_observers(claim_trial, action.target);
                     crate::provider_comment_transport::installation_exchange::installation_target_revision(
                         action.target, std::num::NonZeroU64::new(33).expect("app"), "offline-contract-fixture",
                         std::num::NonZeroU64::new(44).expect("installation"), &provider_binding(), observers.as_ref(),

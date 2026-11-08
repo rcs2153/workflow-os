@@ -970,7 +970,7 @@ pub(crate) mod tests {
     }
 
     fn serve(listener: &TcpListener, reply: Reply<'_>) {
-        serve_request(listener, reply, false, false);
+        serve_request(listener, reply, false, None);
     }
 
     #[test]
@@ -1141,7 +1141,7 @@ pub(crate) mod tests {
         thread::scope(|threads| {
             let server = threads.spawn(|| {
                 for reply in replies {
-                    serve_request(&listener, *reply, false, true);
+                    serve_request(&listener, *reply, false, Some(11));
                 }
             });
             let result = Exchange {
@@ -1193,7 +1193,129 @@ pub(crate) mod tests {
         });
     }
 
-    fn serve_request(listener: &TcpListener, reply: Reply<'_>, echo: bool, reader_scope: bool) {
+    pub(crate) struct RecoveryReaderFixture<'a> {
+        exchange: Exchange<'a>,
+        scope: super::reader::ReviewedReadInstallation<'a>,
+    }
+
+    impl RecoveryReaderFixture<'_> {
+        pub(crate) fn issue(
+            &self,
+            expected: &SpecContentHash,
+        ) -> Option<super::reader::VerifiedReadInstallationScope> {
+            self.exchange.exchange_reader(
+                self.scope,
+                expected,
+                ASSERTION,
+                self.scope.deadline,
+                Timestamp::now_utc,
+            )
+        }
+    }
+
+    pub(crate) fn with_scoped_recovery_reader<T>(
+        scope: super::reader::ReviewedReadInstallation<'_>,
+        comment_body: &str,
+        exercise: impl FnOnce(RecoveryReaderFixture<'_>) -> T,
+    ) -> T {
+        let listener =
+            TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("recovery reader loopback");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let origin = format!("http://{}", listener.local_addr().expect("address"));
+        thread::scope(|threads| {
+            let server = threads.spawn(|| serve_recovery_reader(&listener, scope, comment_body));
+            let result = exercise(RecoveryReaderFixture {
+                exchange: Exchange {
+                    agent: github_agent(),
+                    origin: &origin,
+                },
+                scope,
+            });
+            server.join().expect("reader fixture server");
+            assert!(
+                matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+            );
+            result
+        })
+    }
+
+    fn serve_recovery_reader(
+        listener: &TcpListener,
+        scope: super::reader::ReviewedReadInstallation<'_>,
+        comment_body: &str,
+    ) {
+        let repository = serde_json::json!({"id":scope.repository,"full_name":"example/sandbox"});
+        let permissions = serde_json::json!({"metadata":"read","pull_requests":"read"});
+        let mut installation: serde_json::Value =
+            serde_json::from_str(INSTALLATION.body).expect("fixture installation");
+        installation["id"] = serde_json::json!(scope.installation);
+        installation["app_id"] = serde_json::json!(scope.app_id);
+        installation["permissions"] = permissions.clone();
+        let app = serde_json::json!({"id":scope.app_id,"slug":scope.app_slug});
+        let issued = serde_json::json!({
+            "token":ISSUED,"expires_at":scope.deadline,"permissions":permissions,
+            "repositories":[repository.clone()],
+        });
+        let listing = serde_json::json!({"total_count":1,"repositories":[repository.clone()]});
+        let pull = serde_json::json!({"number":7,"base":{"repo":repository.clone()}});
+        let comments = serde_json::json!([{
+            "id":22,"user":{"id":456},"body":comment_body,
+            "created_at":"1970-01-01T00:00:20Z","updated_at":"1970-01-01T00:00:20Z",
+            "url":"https://api.github.com/repos/example/sandbox/issues/comments/22",
+            "issue_url":"https://api.github.com/repos/example/sandbox/issues/7",
+        }]);
+        for reply in [
+            Reply {
+                body: &app.to_string(),
+                ..APP
+            },
+            Reply {
+                request: &format!("GET /app/installations/{} HTTP/1.1", scope.installation),
+                body: &installation.to_string(),
+                ..INSTALLATION
+            },
+            Reply {
+                request: &format!(
+                    "POST /app/installations/{}/access_tokens HTTP/1.1",
+                    scope.installation
+                ),
+                body: &issued.to_string(),
+                ..ISSUE
+            },
+            Reply {
+                body: &listing.to_string(),
+                ..LIST
+            },
+            BOT,
+            Reply {
+                request: "GET /repos/example/sandbox HTTP/1.1",
+                body: &repository.to_string(),
+                ..LIST
+            },
+            Reply {
+                body: &pull.to_string(),
+                ..PR
+            },
+            Reply {
+                request: &format!(
+                    "GET /repositories/{}/issues/7/comments?per_page={}&page=1 HTTP/1.1",
+                    scope.repository,
+                    super::super::COMMENTS_PER_PAGE
+                ),
+                body: &comments.to_string(),
+                ..LIST
+            },
+        ] {
+            serve_request(listener, reply, false, Some(scope.repository.get()));
+        }
+    }
+
+    fn serve_request(
+        listener: &TcpListener,
+        reply: Reply<'_>,
+        echo: bool,
+        reader_scope: Option<u64>,
+    ) {
         let start = Instant::now();
         let mut stream = loop {
             match listener.accept() {
@@ -1237,7 +1359,7 @@ pub(crate) mod tests {
         }
         let expected_bearer = if [LIST.request, BOT.request, CREATE.request, PR.request]
             .contains(&reply.request)
-            || (reader_scope
+            || (reader_scope.is_some()
                 && (reply.request.starts_with("GET /repos/")
                     || reply.request.starts_with("GET /repositories/")))
         {
@@ -1248,12 +1370,14 @@ pub(crate) mod tests {
         let bearer_matches = auth.as_deref() == Some(format!("Bearer {expected_bearer}").as_str());
         assert!(bearer_matches, "unexpected fixture authorization");
         let mut response_body = reply.body.to_owned();
-        if reply.request == ISSUE.request || reply.request == CREATE.request {
+        let issue_access = reply.request.starts_with("POST /app/installations/")
+            && reply.request.ends_with("/access_tokens HTTP/1.1");
+        if issue_access || reply.request == CREATE.request {
             assert!(length <= 1024);
             let mut body = vec![0; length];
             reader.read_exact(&mut body).expect("issue request");
-            let expected = if reply.request == ISSUE.request {
-                serde_json::json!({"repository_ids":[11],"permissions":{"metadata":"read","pull_requests":if reader_scope { "read" } else { "write" }}})
+            let expected = if issue_access {
+                serde_json::json!({"repository_ids":[reader_scope.unwrap_or(11)],"permissions":{"metadata":"read","pull_requests":if reader_scope.is_some() { "read" } else { "write" }}})
             } else {
                 serde_json::json!({"body": MARKED})
             };
@@ -1320,7 +1444,7 @@ pub(crate) mod tests {
                     serve(&listener, PR);
                     if matches!(mode, ReservedExchange::Created | ReservedExchange::Lost) {
                         let status = if mode == ReservedExchange::Lost { "" } else { CREATE.status };
-                        serve_request(&listener, Reply { status, ..CREATE }, true, false);
+                        serve_request(&listener, Reply { status, ..CREATE }, true, None);
                     }
                 }
             });

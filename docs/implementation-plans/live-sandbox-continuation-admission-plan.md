@@ -1704,6 +1704,24 @@ repository expansion, expired issuance, and bot substitution. This proves
 the local contract, not a live issuance, signer custody, intended-host
 configuration, or permission state. No live path or public tool was enabled.
 
+### Scoped Reader Composition Across Replacement
+
+The private production recovery entry consumes an owned, verified
+installation scope rather than a caller-assembled inventory. Core passes the
+reviewed observer profile to the host exchange only after verifying the
+notification, and derives the inventory's writer-scope binding from the
+durable preparation. The raw-bearer entry remains test-only for adversarial
+fixtures.
+
+The process replacement rehearsal now runs the scoped issuance exchange
+before inventory: the replacement uses a distinct fixture reader App and
+installation, and the loopback server checks the exact repository and
+read-only issuance request before serving bounded GETs for the pinned PR.
+The final observer still proves one recovery event, unchanged provider
+effect count, and replay without reopening notification or reader inputs.
+This does not deploy a signer or receiver, establish intended-host custody,
+verify live provider permissions, or authorize a live trial.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
