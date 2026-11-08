@@ -3,8 +3,10 @@ import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { isAbsolute, join, dirname } from "node:path";
 
 const TOOL = "verify_workflow_os_fixture";
+const RECOVERY_TOOL = "inspect_workflow_os_synthetic_recovery";
 const CASE = /^[a-z][a-z0-9-]{0,63}$/;
 const GRANT = /^grant\/[a-zA-Z0-9._/-]{1,120}$/;
+const LOCATOR = /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,127}$/;
 const VERSIONS = new Set(["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]);
 const MAX_REQUEST = 64 * 1024;
 const MAX_FRAME = 8192;
@@ -18,6 +20,11 @@ const tool = {
     additionalProperties: false,
   },
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+};
+const recoveryTool = {
+  ...tool,
+  name: RECOVERY_TOOL,
+  description: "Inspect one operator-prepared synthetic Workflow OS recovery case. Does not grant dispatch authority.",
 };
 
 function hasKeys(value, keys) {
@@ -49,6 +56,7 @@ function privateFile(path, max) {
 function loadManifest(path) {
   if (!isAbsolute(path)) throw new Error("manifest path must be absolute");
   const value = JSON.parse(privateFile(path, 1024 * 1024).toString("utf8"));
+  if (value?.mode === "synthetic-recovery") return loadRecoveryManifest(value);
   if (!hasKeys(value, ["kernel", "project", "state", "cases"]) ||
       ![value.kernel, value.project, value.state].every((p) => typeof p === "string" && isAbsolute(p)) ||
       !Array.isArray(value.cases) || value.cases.length === 0 || value.cases.length > 32) {
@@ -67,11 +75,56 @@ function loadManifest(path) {
     if (input.length > MAX_REQUEST) throw new Error("case input too large");
     cases.set(entry.id, { grant: entry.grant, principal: join(dirname(path), entry.principal_file), input });
   }
-  return { kernel: value.kernel, project: value.project, state: value.state, cases };
+  return { kernel: value.kernel, project: value.project, state: value.state, cases, tool, inspect: verify };
 }
 
 const MUTATIONS = ["provider_call_performed", "side_effect_mutated", "workflow_event_appended", "report_artifact_written"];
 const rejected = (reason) => ({ status: "rejected", reason });
+
+function loadRecoveryManifest(value) {
+  if (!hasKeys(value, ["mode", "kernel", "cases"]) ||
+      typeof value.kernel !== "string" || !isAbsolute(value.kernel) ||
+      !Array.isArray(value.cases) || value.cases.length === 0 || value.cases.length > 32) {
+    throw new Error("invalid recovery manifest");
+  }
+  const cases = new Map();
+  for (const entry of value.cases) {
+    if (!hasKeys(entry, ["id", "state", "run_id", "operation_id", "side_effect_id"]) ||
+        typeof entry.id !== "string" || !CASE.test(entry.id) || cases.has(entry.id) ||
+        typeof entry.state !== "string" || !isAbsolute(entry.state) ||
+        ![entry.run_id, entry.operation_id, entry.side_effect_id].every(
+          (id) => typeof id === "string" && LOCATOR.test(id))) {
+      throw new Error("invalid recovery case");
+    }
+    cases.set(entry.id, entry);
+  }
+  return { kernel: value.kernel, cases, tool: recoveryTool, inspect: inspectRecovery };
+}
+
+function inspectRecovery(config, entry) {
+  try {
+    const child = spawnSync(config.kernel, [
+      "--state-dir", entry.state, "--json", "provider", "github-pr-comment", "inspect-synthetic-recovery",
+      "--run-id", entry.run_id, "--operation-id", entry.operation_id, "--side-effect-id", entry.side_effect_id,
+    ], { input: "", encoding: "utf8", timeout: 5000, maxBuffer: 16 * 1024, env: {} });
+    if (child.error || child.signal) return rejected("kernel_unavailable");
+    if (child.status !== 0) return rejected("kernel_rejected");
+    const result = JSON.parse(child.stdout);
+    if (result.evidence_source !== "synthetic_sandbox" ||
+        result.historical_admission_verified !== true || result.dispatch_authorized !== false ||
+        result.provider_called !== false ||
+        !["reconciliation_required", "completion_verified"].includes(result.execution_posture)) {
+      return rejected("unexpected_kernel_result");
+    }
+    return {
+      status: "inspected", evidence_source: "synthetic_sandbox",
+      historical_admission_verified: true, execution_posture: result.execution_posture,
+      dispatch_authorized: false, provider_called: false,
+    };
+  } catch {
+    return rejected("recovery_unavailable");
+  }
+}
 
 function verify(config, entry) {
   try {
@@ -139,14 +192,14 @@ async function serve(config) {
     }
     if (message.method === "ping") return ok({});
     if (!ready) return error(-32002, "Session is not initialized");
-    if (message.method === "tools/list") return ok({ tools: [tool] });
+    if (message.method === "tools/list") return ok({ tools: [config.tool] });
     if (message.method !== "tools/call") return error(-32601, "Method not found");
     const args = message.params?.arguments;
-    if (!hasKeys(message.params, ["name", "arguments"]) || message.params.name !== TOOL ||
+    if (!hasKeys(message.params, ["name", "arguments"]) || message.params.name !== config.tool.name ||
         !hasKeys(args, ["case_id"]) || typeof args.case_id !== "string" ||
         !config.cases.has(args.case_id)) return error(-32602, "Expected an allowlisted fixture case_id");
-    const result = verify(config, config.cases.get(args.case_id));
-    return ok({ isError: result.status !== "validated", content: [{ type: "text", text: JSON.stringify(result) }] });
+    const result = config.inspect(config, config.cases.get(args.case_id));
+    return ok({ isError: result.status === "rejected", content: [{ type: "text", text: JSON.stringify(result) }] });
   }
 
   let pending = Buffer.alloc(0);

@@ -58,6 +58,41 @@ govern the experiment.
 
 ## Corpus And Evidence
 
+### Synthetic Recovery Inspection
+
+This is a separate bridge mode, not a delegated fixture grant. Export two
+synthetic snapshots using a reviewed CLI build on Unix:
+
+```sh
+cargo build -p workflow-cli --bin workflow-os
+WORKFLOW_OS_SYNTHETIC_RECOVERY_KERNEL="$PWD/target/debug/workflow-os" \
+  cargo test -p workflow-core --lib live_comment_recovers_lost_acknowledgement_without_resending -- --nocapture
+```
+
+The test prints `synthetic_recovery_mcp_manifest` with the absolute path to a
+mode-0600 manifest in a private temporary directory. Use that path for the
+separate operator-approved Desktop configuration, with the same local
+bridge script. This manifest exposes exactly one tool,
+`inspect_workflow_os_synthetic_recovery`. It cannot validate delegated
+fixture grants or dispatch. The model supplies only `case_id`: use
+`unresolved`, then `completed` twice. Expect `reconciliation_required`
+and two matching `completion_verified` results. No credential, comment,
+marker, target, or provider reference is sent to the model.
+
+Before configuring Desktop, validate the exported manifest through the
+stdio bridge and real CLI:
+
+```sh
+WORKFLOW_OS_SYNTHETIC_RECOVERY_MCP_MANIFEST="<absolute-manifest-path>" \
+  node --test scripts/claude-fixture-mcp.test.mjs
+```
+
+This checks the two snapshot hashes before and after inspection. It is not
+a native Desktop result. For the native trial, use the isolation procedure
+above and remove the temporary configuration and exported directory afterward.
+
+### Delegated Fixture Validation
+
 For a repeatable synthetic starting fixture, the opt-in Unix evaluator export
 uses the existing Core integration test and a locally built CLI:
 

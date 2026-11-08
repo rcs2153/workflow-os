@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,10 +11,22 @@ const bridge = fileURLToPath(new URL("./claude-fixture-mcp.mjs", import.meta.url
 const tool = "verify_workflow_os_fixture";
 const call = (method, params, id = 1) => ({ jsonrpc: "2.0", id, method, params });
 const fixture = (args) => call("tools/call", { name: tool, arguments: args });
+const recoveryTool = "inspect_workflow_os_synthetic_recovery";
+const recovery = (args) => call("tools/call", { name: recoveryTool, arguments: args });
 const handshake = [
   call("initialize", { protocolVersion: "2025-11-25" }),
   { jsonrpc: "2.0", method: "notifications/initialized" },
 ];
+
+function runBridge(path, messages, raw = "") {
+  const input = messages.map((m) => JSON.stringify(m) + "\n").join("") + raw;
+  const child = spawnSync(process.execPath, [bridge, path], {
+    input, encoding: "utf8", timeout: 15000,
+    env: { ...process.env, WORKFLOW_OS_MCP_TEST_SENTINEL: "parent-only" },
+  });
+  assert.ifError(child.error);
+  return { ...child, responses: child.stdout.trim().split("\n").filter(Boolean).map(JSON.parse) };
+}
 
 function rig(t) {
   const dir = mkdtempSync(join(tmpdir(), "workflow-os-fixture-mcp-"));
@@ -29,10 +42,7 @@ function rig(t) {
   const put = (code) => writeFileSync(kernel, `#!${process.execPath}\n${code}\n`, { mode: 0o700 });
   const run = (messages, raw = "") => {
     writeFileSync(path, JSON.stringify(manifest), { mode: 0o600 });
-    const input = messages.map((m) => JSON.stringify(m) + "\n").join("") + raw;
-    const child = spawnSync(process.execPath, [bridge, path], { input, encoding: "utf8", timeout: 10000 });
-    assert.ifError(child.error);
-    return { ...child, responses: child.stdout.trim().split("\n").filter(Boolean).map(JSON.parse) };
+    return runBridge(path, messages, raw);
   };
   return { manifest, principal, put, run };
 }
@@ -97,4 +107,87 @@ test("symlinked principal, manifest traversal, and oversized frames fail closed"
   assert.equal(run(handshake).status, 1);
   manifest.cases[0].principal_file = "principal";
   assert.equal(run(handshake, " ".repeat(8193)).status, 1);
+});
+
+function configureRecovery(manifest) {
+  const state = manifest.state;
+  delete manifest.project;
+  delete manifest.state;
+  manifest.mode = "synthetic-recovery";
+  const entry = {
+    id: "unresolved", state, run_id: "run/hidden", operation_id: "dispatch/hidden", side_effect_id: "effect/hidden",
+  };
+  manifest.cases = [entry];
+  return entry;
+}
+
+test("recovery mode isolates the tool and projects only verified read-only posture", (t) => {
+  const { manifest, put, run } = rig(t);
+  const entry = configureRecovery(manifest);
+  put(`
+    const assert = require("node:assert/strict");
+    assert.deepEqual(process.argv.slice(2), ${JSON.stringify([
+      "--state-dir", entry.state, "--json", "provider", "github-pr-comment", "inspect-synthetic-recovery",
+      "--run-id", entry.run_id, "--operation-id", entry.operation_id, "--side-effect-id", entry.side_effect_id,
+    ])});
+    assert.equal(require("node:fs").readFileSync(0).length, 0);
+    assert.equal(process.env.WORKFLOW_OS_MCP_TEST_SENTINEL, undefined);
+    assert.equal(process.env.GITHUB_TOKEN, undefined);
+    assert.equal(process.env.WORKFLOW_OS_SYNTHETIC_RECOVERY_MCP_MANIFEST, undefined);
+    console.log(JSON.stringify({
+      evidence_source:"synthetic_sandbox", historical_admission_verified:true,
+      dispatch_authorized:false, provider_called:false,
+      execution_posture:"reconciliation_required", provider_reference:"must-not-leak",
+    }));
+  `);
+  const result = run([...handshake, call("tools/list"), fixture({ case_id: "unresolved" }),
+    recovery({ case_id: "unresolved", operation_id: "substitute" }), recovery({ case_id: "other" }),
+    recovery({ case_id: "unresolved" })]);
+  assert.deepEqual(result.responses[1].result.tools.map((item) => item.name), [recoveryTool]);
+  assert.deepEqual(result.responses.slice(2, 5).map((reply) => reply.error?.code), [-32602, -32602, -32602]);
+  assert.equal(result.responses.at(-1).result.isError, false, result.stdout);
+  assert.equal(JSON.parse(result.responses.at(-1).result.content[0].text).execution_posture, "reconciliation_required");
+  assert.doesNotMatch(result.stdout, /must-not-leak|dispatch\/hidden/);
+});
+
+test("recovery mode rejects mixed manifests and fails closed on kernel output", (t) => {
+  const { manifest, put, run } = rig(t);
+  const entry = configureRecovery(manifest);
+  const request = [...handshake, recovery({ case_id: "unresolved" })];
+  put('console.log(JSON.stringify({evidence_source:"synthetic_sandbox",historical_admission_verified:true,execution_posture:"completion_verified",dispatch_authorized:true,provider_called:false}));');
+  assert.match(run(request).stdout, /unexpected_kernel_result/);
+  put('console.error("must-not-leak"); process.exit(2);');
+  const denial = run(request);
+  assert.match(denial.stdout, /kernel_rejected/);
+  assert.doesNotMatch(denial.stdout, /must-not-leak/);
+  entry.grant = "grant/hidden";
+  assert.equal(run(handshake).status, 1);
+  delete entry.grant;
+  entry.run_id = "--json";
+  assert.equal(run(handshake).status, 1);
+});
+
+const exportedManifest = process.env.WORKFLOW_OS_SYNTHETIC_RECOVERY_MCP_MANIFEST;
+test("exported synthetic states reconstruct through the real CLI without database changes", {
+  skip: !exportedManifest,
+}, () => {
+  const manifest = JSON.parse(readFileSync(exportedManifest, "utf8"));
+  const hashes = () => manifest.cases.map(({ state }) =>
+    createHash("sha256").update(readFileSync(join(state, "github-pr-comment-continuation.sqlite3"))).digest("hex"));
+  const before = hashes();
+  const result = runBridge(exportedManifest, [...handshake, call("tools/list"),
+    recovery({ case_id: "unresolved" }), recovery({ case_id: "completed" }), recovery({ case_id: "completed" })]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.responses[1].result.tools.map((item) => item.name), [recoveryTool]);
+  const postures = result.responses.slice(2).map(({ result: reply }) => {
+    assert.equal(reply.isError, false, result.stdout);
+    const output = JSON.parse(reply.content[0].text);
+    assert.deepEqual(Object.keys(output).sort(), [
+      "dispatch_authorized", "evidence_source", "execution_posture",
+      "historical_admission_verified", "provider_called", "status",
+    ]);
+    return output.execution_posture;
+  });
+  assert.deepEqual(postures, ["reconciliation_required", "completion_verified", "completion_verified"]);
+  assert.deepEqual(hashes(), before);
 });

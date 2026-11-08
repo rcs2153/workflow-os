@@ -283,7 +283,11 @@ reservation commitment. A verified observation can atomically complete that
 record and append one proof event referencing its admission. Replay verifies
 the same completed record and event; drift, conflicting observations, or
 older reservations without the attempted-record commitment cannot create
-proof. There is still no Desktop tool or production lookup adapter.
+proof. A separate synthetic-recovery Desktop bridge mode exposes only the
+bounded read-only inspection command through operator-allowlisted cases.
+It does not expose a dispatch tool or a production lookup adapter. See the
+[Desktop fixture guide](../user-guide/claude-desktop-fixture-handoff.md) for
+snapshot export and trial setup.
 
 Local reviewers can inspect an existing synthetic reservation:
 
