@@ -4025,6 +4025,12 @@ mod tests {
             history_before_inspection
         );
         assert_eq!(read_effect(), attempted);
+        #[cfg(unix)]
+        let trial_export = SyntheticRecoveryTrialExport::start(action.run);
+        #[cfg(unix)]
+        if let Some(export) = &trial_export {
+            export.snapshot(&reopened, "unresolved");
+        }
         assert!(reopened
             .inspect_synthetic_sandbox_recovery(
                 action.run,
@@ -4116,6 +4122,11 @@ mod tests {
             .reconcile_live_sandbox_comment(&operation, action, |_, _| { lookup(conflicting) })
             .is_err());
         assert_eq!(read_effect(), completed);
+        #[cfg(unix)]
+        if let Some(export) = &trial_export {
+            export.snapshot(&restarted, "completed");
+            export.write_manifest(action, operation.as_str());
+        }
         let completed_history = restarted.read_events(action.run).expect("history");
         assert_eq!(
             serde_json::to_string(&inspect().expect("proof inspection")).expect("bounded JSON"),
@@ -4133,6 +4144,84 @@ mod tests {
         write_test_effect(&drifted);
         assert!(inspect().is_err());
         write_test_effect(&original_completed);
+    }
+
+    #[cfg(unix)]
+    struct SyntheticRecoveryTrialExport {
+        root: PathBuf,
+        kernel: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl SyntheticRecoveryTrialExport {
+        fn start(run_id: &WorkflowRunId) -> Option<Self> {
+            use std::os::unix::fs::DirBuilderExt;
+
+            let kernel = PathBuf::from(std::env::var_os("WORKFLOW_OS_SYNTHETIC_RECOVERY_KERNEL")?);
+            assert!(
+                kernel.is_absolute() && kernel.is_file(),
+                "reviewed CLI path required"
+            );
+            let root = std::env::temp_dir().join(format!(
+                "workflow-os-recovery-mcp-{}-{run_id}",
+                std::process::id(),
+            ));
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&root)
+                .expect("private export directory");
+            Some(Self { root, kernel })
+        }
+
+        fn snapshot(&self, backend: &SqliteStateBackend, case: &str) {
+            use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+            let state = self.root.join(case);
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&state)
+                .expect("private state directory");
+            let database = state.join("github-pr-comment-continuation.sqlite3");
+            backend
+                .connection()
+                .expect("synthetic connection")
+                .execute(
+                    "VACUUM INTO ?1",
+                    [database.to_str().expect("database path")],
+                )
+                .expect("snapshot synthetic state");
+            std::fs::set_permissions(database, std::fs::Permissions::from_mode(0o600))
+                .expect("private database");
+        }
+
+        fn write_manifest(
+            &self,
+            action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+            operation: &str,
+        ) {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+
+            let cases = ["unresolved", "completed"].map(|id| {
+                serde_json::json!({
+                    "id": id, "state": self.root.join(id), "run_id": action.run,
+                    "operation_id": operation, "side_effect_id": action.side_effect,
+                })
+            });
+            let manifest = serde_json::json!({
+                "mode": "synthetic-recovery", "kernel": self.kernel, "cases": cases,
+            });
+            let path = self.root.join("manifest.json");
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+                .expect("private manifest")
+                .write_all(manifest.to_string().as_bytes())
+                .expect("write manifest");
+            println!("synthetic_recovery_mcp_manifest: {}", path.display());
+        }
     }
 
     impl LiveGrantTrial {
