@@ -903,6 +903,27 @@ This does not implement the trusted issuer, verify the bot author, bind the
 result to an immutable run, or connect it to live reservation and response
 proof. Those remain admission gates.
 
+### Corroborate The Bot And Bind The Scope To The Run
+
+The installation exchange now checks the authenticated App's reviewed ID
+and slug, then looks up the separately reviewed numeric author through
+[GitHub's account-by-ID endpoint](https://docs.github.com/en/rest/users/users?apiVersion=2022-11-28#get-a-user-using-their-id)
+using the same bearer that enumerated the repository. For this sandbox it
+requires both a Bot account and the App's expected `[bot]` login. The login
+convention is a corroboration check, not an independent source for the
+numeric App-to-bot mapping. [GitHub documents bot attribution for installation tokens](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/differences-between-github-apps-and-oauth-apps#token-based-identification).
+The future comment response must still name the exact reviewed author.
+
+The private receipt commits to the reviewed run ID, immutable-run hash,
+target, App, installation, author, repository, local deadline, and
+separately versioned scope adapter. It contains no bearer, raw provider
+payload, or reusable secret fingerprint. Reuse requires exact binding and
+time within the verified interval; loopback evidence uses a distinct
+adapter commitment. This does not establish that the caller obtained the
+run inputs from durable Core state. A trusted issuer and Core-owned
+admission must supply those inputs and enforce the remaining gates before
+any live send. No production dispatch or persistent receipt is enabled.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
