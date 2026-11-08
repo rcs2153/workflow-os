@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ ${GITHUB_ACTIONS:-} != true || ${RUNNER_OS:-} != Linux || ${RUNNER_ENVIRONMENT:-} != github-hosted ]]; then
-  echo "Signer rehearsal requires a disposable GitHub-hosted Linux runner." >&2
+if [[ ${GITHUB_ACTIONS:-} != true || ${RUNNER_ENVIRONMENT:-} != github-hosted ||
+      (${RUNNER_OS:-} != Linux && ${RUNNER_OS:-} != macOS) ]]; then
+  echo "Signer rehearsal requires a disposable GitHub-hosted Linux or macOS runner." >&2
   exit 2
 fi
 if [[ $# != 1 || ! -f $1 || ! -x $1 ]]; then
@@ -14,21 +15,32 @@ core_uid=61021
 signer_uid=61022
 harness_uid=61023
 service_gid=61020
+id_is_assigned() {
+  if [[ $RUNNER_OS == Linux ]]; then
+    getent "$1" "$3" >/dev/null
+  else
+    local entry
+    entry=$(/usr/bin/dscacheutil -q "$2" -a "$4" "$3") || exit 2
+    [[ -n $entry ]]
+  fi
+}
 for uid in "$core_uid" "$signer_uid" "$harness_uid" 61024; do
-  if getent passwd "$uid" >/dev/null; then
+  if id_is_assigned passwd user "$uid" uid; then
     echo "Rehearsal UID is already assigned." >&2
     exit 2
   fi
 done
 for gid in "$service_gid" "$harness_uid"; do
-  if getent group "$gid" >/dev/null; then
+  if id_is_assigned group group "$gid" gid; then
     echo "Rehearsal GID is already assigned." >&2
     exit 2
   fi
 done
 
 umask 077
-root=$(mktemp -d /tmp/workflow-os-signer.XXXXXXXX)
+tmp=/tmp
+if [[ $RUNNER_OS == macOS ]]; then tmp=/private/tmp; fi
+root=$(mktemp -d "$tmp/workflow-os-signer.XXXXXXXX")
 staging=
 cleanup() {
   if [[ -n $staging ]]; then /usr/bin/rm -rf -- "$staging"; fi
@@ -38,8 +50,11 @@ trap cleanup EXIT
 sudo -n /usr/bin/chown 0:0 "$root"
 sudo -n /usr/bin/chmod 0711 "$root"
 sudo -n /usr/bin/install -o 0 -g 0 -m 0555 -- "$1" "$root/worker"
+if [[ $RUNNER_OS == macOS ]]; then
+  sudo -n /usr/bin/install -o 0 -g 0 -m 0444 -- scripts/signer-rehearsal-macos.sb "$root/network.sb"
+fi
 
-staging=$(mktemp -d /tmp/workflow-os-signer-spec.XXXXXXXX)
+staging=$(mktemp -d "$tmp/workflow-os-signer-spec.XXXXXXXX")
 git archive --format=tar HEAD:dogfood/workflow-os-self-governance |
   /usr/bin/tar -xf - -C "$staging"
 if [[ ! -f $staging/workflow-os.yml || -n $(find "$staging" ! -type d ! -type f -print -quit) ]]; then
@@ -52,20 +67,32 @@ sudo -n /usr/bin/chmod -R a=rX "$root/core-fixture/project"
 
 run_worker() {
   local uid=$1 gid=$2 test=$3
-  # Only system launchers run elevated. The test executable starts with no
-  # elevated identity, supplementary groups, capabilities, or host network.
-  sudo -n /usr/bin/unshare --net -- /usr/bin/setpriv \
-    --reuid="$uid" --regid="$gid" --clear-groups --no-new-privs \
-    --inh-caps=-all --ambient-caps=-all --bounding-set=-all \
-    /usr/bin/env -i WORKFLOW_OS_SIGNER_REHEARSAL="$case_root" \
-    WORKFLOW_OS_SIGNER_TRIAL="$trial" TMPDIR="$case_root/core-private" \
-    /usr/bin/timeout --kill-after=2s 35s "$root/worker" --ignored --exact "$test" --test-threads=1
+  local -a fixture_env=(
+    "WORKFLOW_OS_SIGNER_REHEARSAL=$case_root" "WORKFLOW_OS_SIGNER_TRIAL=$trial"
+    "TMPDIR=$case_root/core-private"
+  )
+  local -a args=(--ignored --exact "$test" --test-threads=1)
+  # Only system launchers run elevated. Both variants replace inherited groups
+  # and environment before starting the test executable.
+  if [[ $RUNNER_OS == Linux ]]; then
+    sudo -n /usr/bin/unshare --net -- /usr/bin/setpriv \
+      --reuid="$uid" --regid="$gid" --clear-groups --no-new-privs \
+      --inh-caps=-all --ambient-caps=-all --bounding-set=-all \
+      /usr/bin/env -i "${fixture_env[@]}" \
+      /usr/bin/timeout --kill-after=2s 35s "$root/worker" "${args[@]}"
+  else
+    # Root remains the system root; chroot is used here only to drop identity.
+    sudo -n /usr/sbin/chroot -u "$uid" -g "$gid" -G "$gid" / \
+      /usr/bin/env -i "${fixture_env[@]}" \
+      /usr/bin/sandbox-exec -D "REHEARSAL_ROOT=$case_root" -f "$root/network.sb" \
+      "$root/worker" "${args[@]}"
+  fi
 }
 
-signer_test=provider_comment_transport::installation_signer_channel::linux_rehearsal::linux_rehearsal_signer_process
-core_test=sqlite_state::operational_opening_store::tests::linux_rehearsal_core_process
-replacement_test=sqlite_state::operational_opening_store::tests::linux_rehearsal_replacement_core_process
-harness_test=provider_comment_transport::installation_signer_channel::linux_rehearsal::linux_rehearsal_untrusted_process
+signer_test=provider_comment_transport::installation_signer_channel::rehearsal::rehearsal_signer_process
+core_test=sqlite_state::operational_opening_store::tests::rehearsal_core_process
+replacement_test=sqlite_state::operational_opening_store::tests::rehearsal_replacement_core_process
+harness_test=provider_comment_transport::installation_signer_channel::rehearsal::rehearsal_untrusted_process
 listed=$("$1" --list)
 for test in "$signer_test" "$core_test" "$replacement_test" "$harness_test"; do
   if ! grep -Fqx "$test: test" <<<"$listed"; then

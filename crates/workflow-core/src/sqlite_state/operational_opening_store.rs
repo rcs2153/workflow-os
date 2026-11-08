@@ -820,11 +820,11 @@ mod tests {
                 "workflow-os-operational-opening-{}-{id}.sqlite3",
                 std::process::id()
             ));
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             let path = if matches!(
                 trial,
                 Some(LiveGrantTrial::InstallationClaim(
-                    InstallationClaimTrial::LinuxSignerProcesses
+                    InstallationClaimTrial::SignerRehearsal
                 ))
             ) {
                 let path = std::env::temp_dir().join("rehearsal.sqlite3");
@@ -3591,11 +3591,11 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
-    #[ignore = "requires the isolated Linux signer rehearsal launcher"]
-    fn linux_rehearsal_core_process() {
-        use crate::provider_comment_transport::installation_signer_channel::linux_rehearsal::{
+    #[ignore = "requires the hosted signer rehearsal launcher"]
+    fn rehearsal_core_process() {
+        use crate::provider_comment_transport::installation_signer_channel::rehearsal::{
             assert_file_inaccessible, assert_isolated, fixture_root, POLICY,
         };
         assert_isolated(POLICY.exchange_uid);
@@ -3603,16 +3603,16 @@ mod tests {
         assert_eq!(std::env::temp_dir(), root.join("core-private"));
         assert_file_inaccessible(&root.join("signer-private/custody"));
         exercise_live_grant_reservation(LiveGrantTrial::InstallationClaim(
-            InstallationClaimTrial::LinuxSignerProcesses,
+            InstallationClaimTrial::SignerRehearsal,
         ));
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
-    #[ignore = "requires the isolated Linux signer rehearsal launcher"]
-    fn linux_rehearsal_replacement_core_process() {
+    #[ignore = "requires the hosted signer rehearsal launcher"]
+    fn rehearsal_replacement_core_process() {
         use crate::dispatch_reservation::DispatchReservationOperationId;
-        use crate::provider_comment_transport::installation_signer_channel::linux_rehearsal::{
+        use crate::provider_comment_transport::installation_signer_channel::rehearsal::{
             assert_isolated, trial, Trial, POLICY,
         };
         assert_isolated(POLICY.exchange_uid);
@@ -4702,8 +4702,8 @@ mod tests {
         SignerReplyWithoutAdmission,
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         SignerAdmitted,
-        #[cfg(target_os = "linux")]
-        LinuxSignerProcesses,
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        SignerRehearsal,
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         SignerAdmissionCommitLoss,
         #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -4875,8 +4875,8 @@ mod tests {
         };
         assert_eq!(claim_count(), 0);
         match trial {
-            #[cfg(target_os = "linux")]
-            InstallationClaimTrial::LinuxSignerProcesses => {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            InstallationClaimTrial::SignerRehearsal => {
                 exercise_installation_signer_admission(
                     backend,
                     path,
@@ -5206,9 +5206,8 @@ mod tests {
         };
         assert_eq!(count(), 0);
         match trial {
-            #[cfg(target_os = "linux")]
-            InstallationClaimTrial::LinuxSignerProcesses => {
-                use crate::provider_comment_transport::installation_signer_channel::linux_rehearsal::{
+            InstallationClaimTrial::SignerRehearsal => {
+                use crate::provider_comment_transport::installation_signer_channel::rehearsal::{
                     accept_socket, bind_socket, connect_socket, fixture_root, trial, Trial, POLICY,
                 };
                 let trial = trial();
@@ -6419,15 +6418,16 @@ mod tests {
         };
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../dogfood/workflow-os-self-governance");
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let root = if matches!(
             trial,
-            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::LinuxSignerProcesses)
+            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::SignerRehearsal)
         ) {
-            crate::provider_comment_transport::installation_signer_channel::linux_rehearsal::fixture_root()
-                .parent()
-                .expect("rehearsal root")
-                .join("core-fixture/project")
+            crate::provider_comment_transport::installation_signer_channel::rehearsal::fixture_root(
+            )
+            .parent()
+            .expect("rehearsal root")
+            .join("core-fixture/project")
         } else {
             root
         };
