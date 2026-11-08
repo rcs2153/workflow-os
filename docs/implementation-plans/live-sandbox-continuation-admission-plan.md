@@ -1259,12 +1259,14 @@ The untrusted probe checks that it cannot open private files or connect to or
 remove the socket paths. Both receivers reject a wrong-role peer through the
 production authentication constructors.
 
-The suite runs a success, a rollback before admission commit, a committed
-admission with the decision reply withheld, and a signer process exit after the
-synthetic callback but before assertion delivery. Core checks durable claim and
-admission counts, exchange calls, and exact replay after reopening SQLite. The
-two commit-boundary faults are injected errors that close the decision channel,
-not OS kills of the Core process. The signer callback exit is a process exit.
+The suite runs a success, abrupt Core exits immediately before and after
+admission commit, and a signer exit after the synthetic callback but before
+assertion delivery. All interruption modes require their exact exit status.
+For Core exits, a fresh process reopens the original SQLite file, verifies the
+claim and admission commitments and the absence of a send reservation, and
+confirms that historical inspection cannot report success. The replacement
+has no transport and does not retry the claim. The other scenarios also check
+exchange calls and exact replay after reopening SQLite in the same process.
 The rehearsal uses no live key or provider request and cannot admit a live
 trial or substitute for native macOS verification or independent review.
 
