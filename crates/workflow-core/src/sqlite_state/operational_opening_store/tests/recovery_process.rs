@@ -5,8 +5,11 @@ use std::process::{Command, Output};
 use super::*;
 use crate::authorized_execution_continuity_state::internal::TrustedTimeObservation;
 use crate::dispatch_reservation::DispatchReservationOperationId;
+use crate::provider_comment_transport::installation_exchange::{
+    reader::ReviewedReadInstallation, tests::with_scoped_recovery_reader,
+};
 use crate::provider_comment_transport::installation_notification::tests::exercise_prepared_notification;
-use crate::provider_comment_transport::tests::{with_independent_inventory, InventoryTrial};
+use crate::provider_comment_transport::InstallationObserverProfile;
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::sqlite_state::dispatch_reservation_store::InstallationCommentRecoveryPosture;
 use crate::{
@@ -16,6 +19,33 @@ use crate::{
 
 const ACCEPTED_BEFORE_ACK_EXIT: i32 = 77;
 const TRIAL_ROOT: &str = "WORKFLOW_OS_INSTALLATION_RECOVERY_TRIAL";
+const READER_DEADLINE: &str = "WORKFLOW_OS_INSTALLATION_RECOVERY_READER_DEADLINE";
+
+fn reader_scope(target: &GitHubPullRequestCommentTarget) -> ReviewedReadInstallation<'_> {
+    use std::num::NonZeroU64;
+    ReviewedReadInstallation {
+        app_id: NonZeroU64::new(34).expect("separate read App"),
+        app_slug: "fixture-app",
+        installation: NonZeroU64::new(45).expect("separate read installation"),
+        reader: NonZeroU64::new(22).expect("read bot"),
+        repository: NonZeroU64::new(123).expect("fixture repository"),
+        target,
+        deadline: Timestamp::parse_rfc3339(
+            &std::env::var(READER_DEADLINE).expect("trial deadline"),
+        )
+        .expect("valid fixture deadline"),
+    }
+}
+
+pub(super) fn reader_profile(
+    target: &GitHubPullRequestCommentTarget,
+) -> InstallationObserverProfile {
+    let mut profile = crate::provider_comment_transport::installation_notification::tests::fixture_observer_profile();
+    let scope = reader_scope(target);
+    profile.reader = scope.reader;
+    profile.reader_access_review = scope.access_commitment().expect("scoped recovery reader");
+    profile
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -118,7 +148,7 @@ fn trial_root() -> PathBuf {
     root
 }
 
-fn run_child(root: &Path, test: &str) -> Output {
+fn run_child(root: &Path, test: &str, reader_deadline: Timestamp) -> Output {
     let (_, module) = module_path!().split_once("::").expect("test module");
     Command::new(std::env::current_exe().expect("fixture test binary"))
         .args([
@@ -128,6 +158,7 @@ fn run_child(root: &Path, test: &str) -> Output {
             "--nocapture",
         ])
         .env(TRIAL_ROOT, root)
+        .env(READER_DEADLINE, reader_deadline.to_rfc3339())
         .env("TMPDIR", root)
         .output()
         .expect("run separate Core process")
@@ -145,7 +176,10 @@ fn live_installation_comment_recovers_across_process_replacement() {
         .create(&path)
         .expect("create fixture root");
     let root = TrialRoot(path);
-    let producer = run_child(&root.0, "producer_child");
+    let reader_deadline = Timestamp::from_offset_date_time(
+        Timestamp::now_utc().as_offset_date_time() + time::Duration::minutes(15),
+    );
+    let producer = run_child(&root.0, "producer_child", reader_deadline);
     assert_eq!(
         producer.status.code(),
         Some(ACCEPTED_BEFORE_ACK_EXIT),
@@ -170,7 +204,7 @@ fn live_installation_comment_recovers_across_process_replacement() {
     );
     drop(backend);
 
-    let replacement = run_child(&root.0, "replacement_child");
+    let replacement = run_child(&root.0, "replacement_child", reader_deadline);
     assert!(
         replacement.status.success()
             && String::from_utf8_lossy(&replacement.stdout).contains("1 passed"),
@@ -260,14 +294,14 @@ fn replacement_child() {
                 .expect("fixture notification verification")
         },
         |receiver, notification, _| {
-            with_independent_inventory(InventoryTrial::Exact, &body, &scope, |reader| {
+            with_scoped_recovery_reader(reader_scope(&handoff.target), &body, |reader| {
                 assert_eq!(
                     backend
                         .recover_installation_comment(
                             &handoff.operation,
                             handoff.action(),
                             |_| Some((receiver, notification)),
-                            |_| Some(reader)
+                            |profile| reader.issue(&profile.reader_access_review)
                         )
                         .expect("reconcile replacement"),
                     InstallationCommentRecoveryPosture::ObservationReconciled,
