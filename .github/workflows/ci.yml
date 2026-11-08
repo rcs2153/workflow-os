@@ -46,6 +46,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -60,6 +62,14 @@ jobs:
 
       - name: Rust tests
         run: cargo test --workspace
+
+      - name: Rehearse private signer isolation under separate Linux identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=$(cargo test --locked -p workflow-core --lib --no-run --message-format=json |
+            jq -er 'select(.reason == "compiler-artifact" and .target.name == "workflow_core" and .profile.test and .executable != null) | .executable')
+          bash scripts/rehearse-linux-signer-isolation.sh "$binary"
 
       - name: Rust docs
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
