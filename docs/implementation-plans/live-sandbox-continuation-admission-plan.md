@@ -1595,6 +1595,51 @@ evidence input. The independent fixture ledger still contains one unchanged
 comment. This test does not establish isolation between operating-system
 principals, custody of live credentials, or native harness behavior.
 
+### Live Observer Admission Review
+
+Maintainer review of `5b448985` (PR #872): accept the private process
+replacement rehearsal; **keep live admission denied**. The reviewed Linux
+run exercised the crash-after-acceptance test, and both signer-isolation jobs
+passed. These are separate results: the signer rehearsal does not isolate a
+live receiver or reader, and the recovery test uses synthetic custody and a
+loopback inventory, not a native harness or a provider account.
+
+**Blocker: the original operation does not pin its observers.** The V17
+preparation commits to the exact reservation, invocation, writer scope,
+marked body, clock, and deadline. The later notification verifier trusts the
+receiver installation, HMAC material, and attestation public key supplied
+by trusted composition at recovery time. It checks them against the receipt
+and payload, but no earlier durable admission identifies that receiver or
+key generation. The GET-only inventory similarly authenticates the reader
+identity supplied to its constructor and rejects the writer's identity; it
+does not establish that this reader was approved for the operation or that
+its credential is provider-restricted to read access on that repository.
+The journal records which evidence was used, but a receipt created after
+the attempt cannot establish which identities were authorized before it.
+These private callers assume trusted composition. This is a blocker to
+exposing the path, not evidence that a public caller can reach it today.
+
+Next executable gate: bind a reviewed observer profile to the exact live
+admission before dispatch. Make the immutable binding cover the repository
+and writer scope, receiver installation and attestation public key, a
+versioned protected resolver reference for webhook verification, and the
+reviewed read principal and access posture. Persist commitments or safe
+identifiers, not verification secrets. Check the binding before accepting
+a notification or opening the reader, carry it into the journal and
+completion proof, and verify terminal history without reopening custody.
+Prior preparations must not gain eligibility through backfill. Rotation
+must not silently reinterpret an older operation; an unavailable or
+retired observer leaves an unresolved effect rather than permitting a new
+POST. Exercise substitution of an otherwise valid signed receipt under a
+different key, a different authenticated non-writer reader, old
+preparation replay, and proof replay after provider access is removed.
+
+A live trial still needs separate approval for one disposable target,
+evidence of scoped access and custody on the intended host, and a distinct
+reviewer. The native Claude Desktop recovery inspection and public live
+operator path remain unverified. This is a maintainer review, not
+independent assurance.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
