@@ -39,9 +39,10 @@ pub(crate) fn trial() -> Trial {
 pub(crate) fn assert_isolated(uid: u32) {
     assert_eq!(nix::unistd::geteuid().as_raw(), uid);
     assert_eq!(nix::unistd::getuid().as_raw(), uid);
-    assert!(nix::unistd::getgroups()
-        .expect("supplementary groups")
-        .is_empty());
+    assert_eq!(
+        nix::unistd::getgroups().expect("supplementary groups"),
+        [] as [nix::unistd::Gid; 0]
+    );
     let status = fs::read_to_string("/proc/self/status").expect("process isolation status");
     let field = |name| {
         status
