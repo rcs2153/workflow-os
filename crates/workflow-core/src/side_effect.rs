@@ -1337,6 +1337,10 @@ impl SideEffectRecord {
         self.outcome_reference.as_ref()
     }
 
+    pub(crate) const fn updated_at(&self) -> Option<Timestamp> {
+        self.updated_at
+    }
+
     /// Returns the bounded summary.
     #[must_use]
     pub fn summary(&self) -> Option<&str> {
@@ -1884,7 +1888,7 @@ fn transition_record(
     Ok(SideEffectLifecycleTransitionResult { record, event })
 }
 
-fn transition_event(
+pub(crate) fn transition_event(
     record: &SideEffectRecord,
     evidence_reference_count: u32,
 ) -> Result<SideEffectWorkflowEvent, WorkflowOsError> {
