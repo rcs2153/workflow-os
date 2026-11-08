@@ -406,6 +406,46 @@ recorded deadline remains readable for synthetic inspection but cannot admit
 this observation path. A current match cannot complete the run or authorize a
 resend; the adapter commitment is not an attestation of a running adapter.
 
+### Focused Maintainer Review Of Reservation-Bound Observation
+
+Reviewed the merged observation at `cac2ebd4` under `dg/review` run
+`run-1794110383756795000-2`, with proof-backed approval
+`approval/run-1794110383756795000-2/review-scope-approved`. This is a maintainer
+review, not independent assurance.
+
+- **Blocker before a real provider lookup:** the lost-acknowledgement path has
+  no known comment ID. Candidate selection starts with marker matches, so a
+  complete enumeration containing one exact marked row and a second row with
+  the same provider comment ID but no marker can return `ExactCurrentMatch`.
+  The second row might represent an edit seen on a later page. Count identity
+  conflicts across the entire bounded enumeration, not just across marker
+  matches. A repeated candidate ID must stay unresolved even when only one
+  row has a marker, in either order. Identical repeated rows are not proof of
+  a stable enumeration either. Distinct IDs with the same marker must remain
+  ambiguous; unrelated unique rows must not obscure an exact candidate.
+- **Provider time evidence still needs a contract:** reservation time is
+  recorded at local precision, but a provider creation timestamp can be
+  coarser or come from a different clock. An observation overlapping either
+  bound cannot prove creation within the window. Do not round the reservation
+  down or add a tolerance that silently admits pre-reservation or expired
+  effects. Specify and test the conservative mapping before using live data.
+
+The SQLite path checks the historical binding before lookup, closes the
+read transaction before invoking the callback, and returns only current
+posture. No code path converts that posture to a completion record. The
+legacy synthetic reconciliation writer is separate and must not be fed live
+observations or adapter-asserted digests. Close the duplicate-identity blocker
+with synthetic regression coverage before wiring a transport. Even then,
+bounded enumeration is not a consistent provider snapshot and cannot prove
+the bytes originally accepted. No target selection, live dispatch, or retry
+of an uncertain write is authorized by this review.
+
+Both existing offline verifier tests and the SQLite lost-acknowledgement
+test passed. The conflicting-row case above was found by tracing candidate
+selection; those tests do not exercise it. Repository reads, tests, and
+documentation edits were performed outside the phase runner. No WorkReport
+artifact or provider evidence was generated.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
