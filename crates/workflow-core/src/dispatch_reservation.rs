@@ -218,12 +218,10 @@ impl DispatchAdmissionProjectionEvent {
         &self.reservation_commitment
     }
 
-    #[cfg(feature = "trusted-host-application-spi")]
     pub(crate) const fn invocation_commitment(&self) -> &SpecContentHash {
         &self.invocation_commitment
     }
 
-    #[cfg(feature = "trusted-host-application-spi")]
     pub(crate) const fn executor_commitment(&self) -> &SpecContentHash {
         &self.executor_commitment
     }

@@ -3501,6 +3501,11 @@ mod tests {
     }
 
     #[test]
+    fn live_comment_recovers_lost_acknowledgement_without_resending() {
+        exercise_live_grant_reservation(LiveGrantTrial::LostAcknowledgement);
+    }
+
+    #[test]
     fn live_grant_revocation_blocks_new_reservation_without_fallback() {
         exercise_live_grant_reservation(LiveGrantTrial::Revoked);
     }
@@ -3861,6 +3866,7 @@ mod tests {
     enum LiveGrantTrial {
         AmbiguousCommit,
         Contended,
+        LostAcknowledgement,
         Revoked,
         PrincipalRevoked,
         TargetRevoked,
@@ -3873,6 +3879,119 @@ mod tests {
         RequiredProof,
         StaleProof,
         NoReuseProof,
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn exercise_live_comment_recovery(
+        backend: &SqliteStateBackend,
+        path: &std::path::Path,
+        request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+    ) {
+        use super::super::dispatch_reservation_store::{
+            LiveCommentDispatchPosture, LiveCommentLookup, LiveCommentRecovery,
+        };
+        use crate::{
+            GitHubPullRequestCommentProviderLookupObservation as Comment,
+            GitHubPullRequestCommentProviderLookupObservationDefinition as CommentDefinition,
+        };
+
+        let operation = request().operation_id;
+        assert!(backend
+            .recover_live_sandbox_comment(&operation, action, |_, _| {
+                panic!("no lookup before durable reservation")
+            })
+            .is_err());
+        let mut accepted = None;
+        let dispatch = backend
+            .dispatch_live_sandbox_comment(request(), admission, action, |target, body, marker| {
+                assert_eq!(target, action.target);
+                assert_eq!(body, action.body);
+                accepted = Some(
+                    Comment::new(CommentDefinition {
+                        target: target.clone(),
+                        provider_comment_reference: Some("github/comment/17".to_owned()),
+                        managed_marker: Some(marker.to_owned()),
+                    })
+                    .expect("provider accepted"),
+                );
+                false
+            })
+            .expect("dispatch");
+        assert_eq!(dispatch, LiveCommentDispatchPosture::RecoveryOnly);
+        let accepted = accepted.expect("synthetic effect");
+        let reopened = SqliteStateBackend::open(path).expect("restart");
+        assert_eq!(
+            reopened
+                .dispatch_live_sandbox_comment(request(), admission, action, |_, _, _| {
+                    panic!("replay cannot resend")
+                })
+                .expect("dispatch replay"),
+            LiveCommentDispatchPosture::RecoveryOnly
+        );
+
+        let drift = crate::provider_write::GitHubCommentContinuationAction {
+            body: "substitution",
+            ..action
+        };
+        assert!(reopened
+            .recover_live_sandbox_comment(&operation, drift, |_, _| {
+                panic!("changed action cannot invoke lookup")
+            })
+            .is_err());
+        let wrong_marker = Comment::new(CommentDefinition {
+            target: action.target.clone(),
+            provider_comment_reference: Some("github/comment/17".to_owned()),
+            managed_marker: Some("workflow-os/live-comment/wrong".to_owned()),
+        })
+        .expect("different marker");
+        for (response, expected) in [
+            (LiveCommentLookup::Absent, LiveCommentRecovery::Absent),
+            (LiveCommentLookup::Ambiguous, LiveCommentRecovery::Ambiguous),
+            (
+                LiveCommentLookup::Unauthorized,
+                LiveCommentRecovery::Unauthorized,
+            ),
+            (
+                LiveCommentLookup::Unavailable,
+                LiveCommentRecovery::Unavailable,
+            ),
+            (
+                LiveCommentLookup::Observed {
+                    comment: accepted.clone(),
+                    verified_action: SpecContentHash::from_text("wrong observation"),
+                },
+                LiveCommentRecovery::Mismatch,
+            ),
+            (
+                LiveCommentLookup::Observed {
+                    comment: wrong_marker,
+                    verified_action: action.commitment().expect("observed binding"),
+                },
+                LiveCommentRecovery::Mismatch,
+            ),
+        ] {
+            assert_eq!(
+                reopened
+                    .recover_live_sandbox_comment(&operation, action, |_, _| response)
+                    .expect("lookup posture"),
+                expected
+            );
+        }
+        for _ in 0..2 {
+            let result = reopened
+                .recover_live_sandbox_comment(&operation, action, |target, marker| {
+                    assert_eq!(target, accepted.target());
+                    assert_eq!(Some(marker), accepted.managed_marker());
+                    LiveCommentLookup::Observed {
+                        comment: accepted.clone(),
+                        verified_action: action.commitment().expect("observed binding"),
+                    }
+                })
+                .expect("recover accepted effect");
+            assert_eq!(result, LiveCommentRecovery::Observed(accepted.clone()));
+        }
     }
 
     impl LiveGrantTrial {
@@ -4448,11 +4567,28 @@ mod tests {
                         unreachable!("denied at issuance")
                     }
                     LiveGrantTrial::AmbiguousCommit => {
+                        use super::super::dispatch_reservation_store::LiveCommentDispatchPosture;
                         inject_dispatch_commit_fault(InjectedDispatchCommitFault::After);
-                        assert!(backend
-                            .reserve_live_sandbox_dispatch(request(), admission)
-                            .expect("uncertain")
-                            .is_none());
+                        assert_eq!(
+                            backend
+                                .dispatch_live_sandbox_comment(
+                                    request(),
+                                    admission,
+                                    action,
+                                    |_, _, _| { panic!("uncertain reservation cannot send") }
+                                )
+                                .expect("uncertain"),
+                            LiveCommentDispatchPosture::RecoveryOnly
+                        );
+                    }
+                    LiveGrantTrial::LostAcknowledgement => {
+                        exercise_live_comment_recovery(
+                            &backend,
+                            &fixture.path,
+                            request,
+                            admission,
+                            action,
+                        );
                     }
                     LiveGrantTrial::Contended | LiveGrantTrial::RequiredProof => {
                         let winners = std::thread::scope(|scope| {
