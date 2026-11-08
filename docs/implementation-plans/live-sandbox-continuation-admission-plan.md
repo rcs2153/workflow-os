@@ -309,6 +309,65 @@ public view separating procedure authority, invocation authority, execution
 truth, and unresolved reconciliation. Do not expose payloads, authentication,
 raw tool transcripts, or private database access to the reviewer.
 
+## Focused Maintainer Review: Live Lookup Not Admitted
+
+The synthetic dispatch, atomic proof, read-only CLI, and MCP bridge are
+implemented. [PR #818](https://github.com/rcs2153/workflow-os/pull/818) made
+the real CLI bridge round trip and unchanged snapshot hashes mandatory in
+clean-checkout CI. That is headless synthetic evidence. Native Desktop
+recovery inspection is pending separate operator consent; the earlier
+native delegated fixture validation is not evidence for this recovery mode.
+This is a maintainer review, not independent assurance or live approval.
+
+### Why The Existing Lookup Cannot Establish Completion
+
+- [The legacy lookup classifier](../../crates/workflow-core/src/provider_write.rs)
+  matches the exact target and either the provider reference or the managed
+  marker. It has no raw body commitment or verified author in the observation.
+  A copied marker or a known ID on an edited comment must not qualify.
+- Its absent-result next action can suggest reevaluating retry. That is not
+  allowed for this lane: after a committed or uncertain reservation, all
+  lookup outcomes are recovery-only, including absence and deletion.
+- The new private recovery code checks target, reservation-derived marker,
+  provider reference, and a verified action commitment. Today the trusted
+  synthetic callback supplies that commitment. This verifies the kernel
+  binding, not the origin or accuracy of a real GitHub response.
+
+### Acceptance For A Provider Observer
+
+1. Use a distinct read-only observation boundary. Bind the trusted adapter
+   and expected provider principal to the exact reservation before dispatch.
+   The observer must derive the result from provider data, never from a
+   replacement's asserted digest. A credential, login, author association,
+   or marker alone does not establish the expected stable provider identity.
+2. Verify the exact canonical repository and PR, stable comment ID, stable
+   author identity, exactly one correctly placed reservation marker, and the
+   exact raw payload commitment. Bind the marked payload format before
+   dispatch; do not hash rendered Markdown or tolerate undocumented
+   normalization. Establish that the observed content corresponds to the
+   acceptance boundary. If edits or provider metadata leave that uncertain,
+   do not record completion.
+3. Treat pagination and changes during lookup as evidence limits. Do not
+   classify the first matching page as unique; enforce a bounded enumeration
+   or an independently verified comment reference. Truncation, an incomplete
+   scan, conflicting results, or unsupported response metadata stays
+   unresolved. A verified observation is not a claim of global exactly-once
+   provider delivery.
+4. Exercise copied markers, wrong author with identical bytes, wrong target,
+   changed body with the same ID, edited or deleted comment, duplicate
+   matches across pages, and unavailable, unauthorized or incomplete
+   responses. Each must produce no completion proof and no additional POST.
+   Exact positive replay must preserve one proof. Keep raw body, author and
+   provider response out of reviewer output.
+
+GitHub's [issue comment REST contract](https://docs.github.com/en/rest/issues/comments#list-issue-comments)
+documents the PR conversation endpoint and raw body, comment ID, user ID,
+issue URL and timestamps. Its [pagination contract](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api)
+documents how subsequent pages are advertised. Those fields are inputs to
+an observer, not a guarantee about historical accepted bytes or a consistent
+snapshot. The observer and its failure tests still need implementation and
+review. Do not select a live target or invoke a real write under this review.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
