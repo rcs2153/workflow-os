@@ -435,6 +435,7 @@ pub(super) struct LiveGrantAdmission<'a> {
     pub(crate) side_effect: &'a SideEffectId,
     pub(crate) body: &'a str,
     pub(crate) credential: &'a [u8; 32],
+    pub(crate) adapter_commitment: &'a SpecContentHash,
 }
 
 pub(super) struct AuthenticatedLiveGrant<'a> {
@@ -442,6 +443,7 @@ pub(super) struct AuthenticatedLiveGrant<'a> {
     body: &'a str,
     grant: CapabilityGrant,
     registration: SpecContentHash,
+    adapter_commitment: &'a SpecContentHash,
 }
 
 impl<'a> LiveGrantAdmission<'a> {
@@ -488,6 +490,7 @@ impl<'a> LiveGrantAdmission<'a> {
             body: self.body,
             grant,
             registration,
+            adapter_commitment: self.adapter_commitment,
         })
     }
 }
@@ -534,6 +537,9 @@ impl AuthenticatedLiveGrant<'_> {
         }
         let record = read_live_effect_record(tx, self.side_effect)?;
         let target = read_active_live_target(tx, record.target().reference())?;
+        if &target.provider_binding().adapter_commitment != self.adapter_commitment {
+            return Err(denied());
+        }
         let bundle = identity.immutable_run_bundle.as_ref().ok_or_else(denied)?;
         let facts = LiveSandboxContinuationFacts {
             action: GitHubCommentContinuationAction {

@@ -5,6 +5,7 @@
 use std::num::NonZeroU64;
 use time::Duration;
 
+use crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding;
 use crate::{GitHubPullRequestCommentTarget, Timestamp};
 
 const MAX_COMMENTS: usize = 128;
@@ -40,6 +41,32 @@ fn marked_comment_suffix(body: &str, marker: &str) -> Option<String> {
 pub(crate) fn encode_marked_comment(body: &str, marker: &str) -> Option<String> {
     let suffix = marked_comment_suffix(body, marker)?;
     Some(format!("{body}{suffix}"))
+}
+
+/// Parsed fields from the creation exchange, not a subsequent GET. The
+/// injected sender is synthetic; these fields do not attest its identity.
+pub(crate) struct CreatedCommentResponse {
+    pub(crate) status: u16,
+    pub(crate) target: GitHubPullRequestCommentTarget,
+    pub(crate) repository_id: NonZeroU64,
+    pub(crate) author_id: NonZeroU64,
+    pub(crate) comment_id: NonZeroU64,
+    pub(crate) raw_body: String,
+}
+
+pub(crate) fn verify_created_comment_response(
+    response: Option<&CreatedCommentResponse>,
+    target: &GitHubPullRequestCommentTarget,
+    provider: &LiveSandboxProviderBinding,
+    sent_body: &str,
+) -> Option<NonZeroU64> {
+    let response = response?;
+    (response.status == 201
+        && response.target == *target
+        && response.repository_id == provider.repository_id
+        && response.author_id == provider.author_id
+        && response.raw_body == sent_body)
+        .then_some(response.comment_id)
 }
 
 pub(crate) struct ExpectedComment<'a> {
@@ -271,6 +298,59 @@ mod tests {
             raw_body,
             created_at: time(11),
             updated_at: time(11),
+        }
+    }
+
+    #[test]
+    fn only_exact_created_response_verifies() {
+        let target = GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target");
+        let body = encode_marked_comment("exact body", MARKER).expect("marked body");
+        let provider = LiveSandboxProviderBinding {
+            repository_id: id(1),
+            author_id: id(2),
+            adapter_commitment: crate::SpecContentHash::from_text("adapter"),
+        };
+        let exact = || CreatedCommentResponse {
+            status: 201,
+            target: target.clone(),
+            repository_id: id(1),
+            author_id: id(2),
+            comment_id: id(3),
+            raw_body: body.clone(),
+        };
+        let verify = |response: Option<&CreatedCommentResponse>| {
+            verify_created_comment_response(response, &target, &provider, &body)
+        };
+        assert_eq!(verify(Some(&exact())), Some(id(3)));
+        assert_eq!(verify(None), None);
+        for invalid in [
+            CreatedCommentResponse {
+                status: 200,
+                ..exact()
+            },
+            CreatedCommentResponse {
+                status: 403,
+                ..exact()
+            },
+            CreatedCommentResponse {
+                target: GitHubPullRequestCommentTarget::new("example", "sandbox", 8)
+                    .expect("other target"),
+                ..exact()
+            },
+            CreatedCommentResponse {
+                repository_id: id(4),
+                ..exact()
+            },
+            CreatedCommentResponse {
+                author_id: id(4),
+                ..exact()
+            },
+            CreatedCommentResponse {
+                raw_body: format!("{body}\n"),
+                ..exact()
+            },
+        ] {
+            assert_eq!(verify(Some(&invalid)), None);
         }
     }
 

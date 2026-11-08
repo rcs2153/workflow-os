@@ -3506,6 +3506,11 @@ mod tests {
     }
 
     #[test]
+    fn live_comment_verified_response_does_not_complete_or_allow_resend() {
+        exercise_live_grant_reservation(LiveGrantTrial::VerifiedResponse);
+    }
+
+    #[test]
     fn live_grant_revocation_blocks_new_reservation_without_fallback() {
         exercise_live_grant_reservation(LiveGrantTrial::Revoked);
     }
@@ -3867,6 +3872,7 @@ mod tests {
         AmbiguousCommit,
         Contended,
         LostAcknowledgement,
+        VerifiedResponse,
         Revoked,
         PrincipalRevoked,
         TargetRevoked,
@@ -3931,7 +3937,7 @@ mod tests {
                     .expect("provider accepted"),
                     raw_body.to_owned(),
                 ));
-                false
+                None
             })
             .expect("dispatch");
         assert_eq!(dispatch, LiveCommentDispatchPosture::RecoveryOnly);
@@ -4696,10 +4702,11 @@ mod tests {
                     .open_live_sandbox_attempt(opening(&cursor, &observed), facts)
                     .is_err());
                 assert!(fixture.backend.record_live_sandbox_policy(facts).is_err());
+                let adapter_commitment = SpecContentHash::from_text("trusted synthetic adapter");
                 let provider_binding = || LiveSandboxProviderBinding {
                     repository_id: std::num::NonZeroU64::new(123).expect("provider repository id"),
                     author_id: std::num::NonZeroU64::new(456).expect("provider author id"),
-                    adapter_commitment: SpecContentHash::from_text("trusted synthetic adapter"),
+                    adapter_commitment: adapter_commitment.clone(),
                 };
                 let provision =
                     crate::live_sandbox_continuation_authority::LiveSandboxPolicyTarget::provision(
@@ -4780,6 +4787,7 @@ mod tests {
                             side_effect: action.side_effect,
                             body: action.body,
                             credential: &live_credential,
+                            adapter_commitment: &adapter_commitment,
                         }
                     )
                     .is_err());
@@ -4871,8 +4879,10 @@ mod tests {
                     side_effect: action.side_effect,
                     body: action.body,
                     credential: &live_credential,
+                    adapter_commitment: &adapter_commitment,
                 };
                 let absent_effect = SideEffectId::new("effect/wrong").expect("effect locator");
+                let wrong_adapter = SpecContentHash::from_text("wrong adapter");
                 for wrong in [
                     LiveGrantAdmission {
                         body: "different body",
@@ -4880,6 +4890,10 @@ mod tests {
                     },
                     LiveGrantAdmission {
                         side_effect: &absent_effect,
+                        ..admission
+                    },
+                    LiveGrantAdmission {
+                        adapter_commitment: &wrong_adapter,
                         ..admission
                     },
                 ] {
@@ -5065,6 +5079,59 @@ mod tests {
                             admission,
                             action,
                             expiry,
+                        );
+                    }
+                    LiveGrantTrial::VerifiedResponse => {
+                        use super::super::dispatch_reservation_store::{
+                            LiveCommentDispatchPosture, SyntheticSandboxRecoveryPosture,
+                        };
+                        use crate::provider_comment_observation::CreatedCommentResponse;
+                        let comment_id = std::num::NonZeroU64::new(17).expect("comment id");
+                        let provider = provider_binding();
+                        assert_eq!(
+                            backend
+                                .dispatch_live_sandbox_comment(
+                                    request(),
+                                    admission,
+                                    action,
+                                    |target, raw_body| {
+                                        Some(CreatedCommentResponse {
+                                            status: 201,
+                                            target: target.clone(),
+                                            repository_id: provider.repository_id,
+                                            author_id: provider.author_id,
+                                            comment_id,
+                                            raw_body: raw_body.to_owned(),
+                                        })
+                                    }
+                                )
+                                .expect("creation response"),
+                            LiveCommentDispatchPosture::VerifiedSyntheticResponse { comment_id }
+                        );
+                        assert_eq!(
+                            backend
+                                .inspect_synthetic_sandbox_recovery(
+                                    action.run,
+                                    request().operation_id.as_str(),
+                                    action.side_effect
+                                )
+                                .expect("read-only recovery"),
+                            SyntheticSandboxRecoveryPosture::ReconciliationRequired
+                        );
+                        assert_eq!(
+                            backend
+                                .dispatch_live_sandbox_comment(
+                                    request(),
+                                    admission,
+                                    action,
+                                    |_, _| {
+                                        panic!(
+                                            "a verified creation response cannot authorize resend"
+                                        )
+                                    }
+                                )
+                                .expect("replay"),
+                            LiveCommentDispatchPosture::RecoveryOnly
                         );
                     }
                     LiveGrantTrial::Contended | LiveGrantTrial::RequiredProof => {
