@@ -42,12 +42,13 @@ use crate::provider_comment_transport::{
 };
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
-    transition_side_effect_to_completed, EventId, EventSequenceNumber,
-    GitHubPullRequestCommentProviderLookupObservation, GitHubPullRequestCommentTarget,
-    IdempotencyKey, SideEffectCompleteTransitionInput, SideEffectLifecycleState,
-    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
-    SideEffectReference, SideEffectReferenceKind, SpecContentHash, Timestamp, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunSnapshot,
+    transition_side_effect_to_completed, AuthorizedExecutionAttemptId, AuthorizedExecutionWindowId,
+    EventId, EventSequenceNumber, GitHubPullRequestCommentProviderLookupObservation,
+    GitHubPullRequestCommentTarget, IdempotencyKey, SideEffectCompleteTransitionInput,
+    SideEffectLifecycleState, SideEffectOutcomeReference, SideEffectOutcomeReferenceKind,
+    SideEffectRecord, SideEffectReference, SideEffectReferenceKind, SpecContentHash, Timestamp,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunSnapshot,
 };
 
 use super::continuity_codec::timestamp_parts;
@@ -223,7 +224,6 @@ pub(super) struct InstallationExchangedScope {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) struct InstallationSignerAdmission(SignerAdmissionRecord);
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SignerAdmissionRecord {
@@ -347,6 +347,7 @@ impl SyntheticSandboxRecoveryInspection {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)] // No operator caller is admitted yet.
 pub(super) enum InstallationCommentRecoveryPosture {
+    IssuanceUncertain,
     ReconciliationRequired,
     CreationVerified,
 }
@@ -798,6 +799,9 @@ impl SqliteStateBackend {
         let tx = connection
             .transaction()
             .map_err(|_| storage_error("begin_failed"))?;
+        if read_existing(&tx, operation.as_str())?.is_none() {
+            return inspect_unreserved_installation_claim(&tx, run_id, operation, side_effect_id);
+        }
         let admission = read_live_recovery_admission(&tx, operation, run_id)?;
         installation_disposition(&tx, &admission, run_id, side_effect_id)
     }
@@ -1973,7 +1977,6 @@ fn require_installation_signer_schema(
     Ok(())
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn read_installation_signer_admission(
     tx: &rusqlite::Transaction<'_>,
     claim: &InstallationClaimRecord,
@@ -2041,6 +2044,21 @@ fn existing_installation_disposition(
         let admission = read_live_recovery_admission(tx, &request.operation_id, run)?;
         return installation_disposition(tx, &admission, run, effect).map(Some);
     }
+    require_no_installation_dispatch(
+        tx,
+        run,
+        &request.operation_id,
+        &request.capability.attempt_id,
+    )?;
+    Ok(None)
+}
+
+fn require_no_installation_dispatch(
+    tx: &rusqlite::Transaction<'_>,
+    run: &crate::WorkflowRunId,
+    operation: &DispatchReservationOperationId,
+    attempt: &AuthorizedExecutionAttemptId,
+) -> Result<(), WorkflowOsError> {
     let contradictory: bool = tx
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM dispatch_reservations WHERE attempt_id=?1)
@@ -2048,20 +2066,75 @@ fn existing_installation_disposition(
              OR EXISTS(SELECT 1 FROM live_sandbox_grant_uses WHERE attempt_id=?1)
              OR EXISTS(SELECT 1 FROM events WHERE event_id=?3)",
             params![
-                request.capability.attempt_id.as_str(),
-                request.operation_id.as_str(),
-                dispatch_admission_event_id(&request.operation_id)?.as_str()
+                attempt.as_str(),
+                operation.as_str(),
+                dispatch_admission_event_id(operation)?.as_str()
             ],
             |row| row.get(0),
         )
         .map_err(|_| corrupt())?;
     if contradictory || SqliteStateBackend::read_events_with_connection(tx, run)?.iter().any(|event| {
         matches!(&event.kind, WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(admitted)
-            if admitted.attempt_id() == &request.capability.attempt_id)
+            if admitted.attempt_id() == attempt)
     }) {
         return Err(corrupt());
     }
-    Ok(None)
+    Ok(())
+}
+
+fn inspect_unreserved_installation_claim(
+    tx: &rusqlite::Transaction<'_>,
+    run: &crate::WorkflowRunId,
+    operation: &DispatchReservationOperationId,
+    effect_id: &crate::SideEffectId,
+) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
+    let version = super::validate_operational_schema(tx)?;
+    if !matches!(
+        version,
+        super::INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
+            | super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
+    ) {
+        return Err(not_dispatchable());
+    }
+    let (attempt, window): (String, String) = tx
+        .query_row(
+            "SELECT attempt_id,window_id FROM installation_issuance_claims WHERE operation_id=?1",
+            [operation.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|_| corrupt())?
+        .ok_or_else(not_dispatchable)?;
+    let attempt = AuthorizedExecutionAttemptId::new(attempt).map_err(|_| corrupt())?;
+    let window = AuthorizedExecutionWindowId::new(window).map_err(|_| corrupt())?;
+    check_dispatch_lane(tx, &window, &attempt, true)?;
+    let claim =
+        read_installation_claim_by_key(tx, attempt.as_str(), window.as_str(), operation.as_str())?
+            .ok_or_else(corrupt)?;
+    if &claim.run != run || &claim.effect != effect_id || claim.claimed_at >= claim.deadline {
+        return Err(not_dispatchable());
+    }
+    if version == super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION {
+        read_installation_signer_admission(tx, &claim)?;
+    }
+    require_no_installation_dispatch(tx, run, operation, &attempt)?;
+    let state = continuity_codec::load_snapshot(tx)?;
+    let window = state.windows.get(&window).ok_or_else(corrupt)?;
+    let attempt = state.attempts.get(&attempt).ok_or_else(corrupt)?;
+    let effect = read_live_effect_record(tx, effect_id)?;
+    if &window.run_id != run
+        || attempt.window_id != window.window_id
+        || attempt.subject_actor_id != window.subject_actor_id
+        || attempt.authority_commitment != window.authority_commitment
+        || claim.deadline > window.expires_at
+        || effect.side_effect_id() != effect_id
+        || effect.run_id() != run
+        || effect.step_id() != Some(&window.step_id)
+        || effect.lifecycle_state() != SideEffectLifecycleState::Attempted
+    {
+        return Err(not_dispatchable());
+    }
+    Ok(InstallationCommentRecoveryPosture::IssuanceUncertain)
 }
 
 fn verify_current_installation_exchange(
