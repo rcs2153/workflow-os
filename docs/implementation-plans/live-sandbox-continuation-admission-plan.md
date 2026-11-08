@@ -278,7 +278,12 @@ the action and reservation. A positive synthetic observation requires an
 exact target, marker, action commitment and provider reference. The callback
 is trusted in this test; a real adapter must independently verify the author
 and exact accepted payload, not infer authorship from a copyable marker.
-Recovery does not yet persist outcome proof or expose a public tool.
+Synthetic recovery now binds the exact attempted SideEffect into the
+reservation commitment. A verified observation can atomically complete that
+record and append one proof event referencing its admission. Replay verifies
+the same completed record and event; drift, conflicting observations, or
+older reservations without the attempted-record commitment cannot create
+proof. There is still no public tool or production lookup adapter.
 
 After positive provider observation, bind the remote reference and observation
 to the reservation and attempted record. Persist eligible SideEffect and

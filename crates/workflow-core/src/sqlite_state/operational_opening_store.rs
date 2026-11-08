@@ -3895,6 +3895,7 @@ mod tests {
         use crate::{
             GitHubPullRequestCommentProviderLookupObservation as Comment,
             GitHubPullRequestCommentProviderLookupObservationDefinition as CommentDefinition,
+            SideEffectRecordStore,
         };
 
         let operation = request().operation_id;
@@ -3992,6 +3993,104 @@ mod tests {
                 .expect("recover accepted effect");
             assert_eq!(result, LiveCommentRecovery::Observed(accepted.clone()));
         }
+        let lookup = |comment| LiveCommentLookup::Observed {
+            comment,
+            verified_action: action.commitment().expect("observed binding"),
+        };
+        let finalize = |store: &SqliteStateBackend| {
+            store
+                .reconcile_live_sandbox_comment(&operation, action, |_, _| lookup(accepted.clone()))
+        };
+        let read_effect = || {
+            reopened
+                .read_side_effect_record(action.side_effect)
+                .expect("read effect")
+                .expect("effect")
+        };
+        let attempted = read_effect();
+        let db = reopened.connection().expect("test connection");
+        let write_test_effect = |effect: &serde_json::Value| {
+            db.execute(
+                "UPDATE side_effect_records SET payload=?1 WHERE side_effect_id=?2",
+                rusqlite::params![effect.to_string(), action.side_effect.as_str()],
+            )
+            .expect("change fixture effect");
+        };
+        let original = serde_json::to_value(&attempted).expect("effect JSON");
+        let mut drifted = original.clone();
+        drifted["summary"] = serde_json::json!("post-reservation drift");
+        write_test_effect(&drifted);
+        assert!(finalize(&reopened).is_err());
+        write_test_effect(&original);
+
+        db.execute_batch(
+            "CREATE TRIGGER reject_comment_proof BEFORE INSERT ON events
+          WHEN NEW.event_id LIKE 'live-comment-proof/%'
+          BEGIN SELECT RAISE(ABORT, 'test proof rollback'); END;",
+        )
+        .expect("inject proof write failure");
+        assert!(finalize(&reopened).is_err());
+        assert_eq!(read_effect(), attempted);
+        db.execute_batch("DROP TRIGGER reject_comment_proof")
+            .expect("clear fault");
+        assert!(reopened
+            .reconcile_live_sandbox_comment(&operation, action, |_, _| {
+                LiveCommentLookup::Ambiguous
+            })
+            .expect("ambiguous does not finalize")
+            .is_none());
+        let last = reopened
+            .read_events(action.run)
+            .expect("history")
+            .pop()
+            .expect("admission");
+        reopened
+            .append_event(&WorkflowRunEvent {
+                sequence_number: EventSequenceNumber::new(last.sequence_number.get() + 1)
+                    .expect("sequence"),
+                event_id: EventId::new("event/live-comment-run-completed").expect("terminal event"),
+                timestamp: Timestamp::now_utc(),
+                correlation_id: None,
+                actor: None,
+                idempotency_key: None,
+                kind: WorkflowRunEventKind::RunCompleted,
+                ..last
+            })
+            .expect("complete run before recording provider outcome");
+        let proof = finalize(&reopened)
+            .expect("persist exact lookup")
+            .expect("proof");
+        let completed = read_effect();
+        assert_eq!(
+            completed.lifecycle_state(),
+            crate::SideEffectLifecycleState::Completed
+        );
+        assert_eq!(
+            completed
+                .outcome_reference()
+                .map(crate::SideEffectOutcomeReference::reference),
+            accepted.provider_comment_reference()
+        );
+        let restarted = SqliteStateBackend::open(path).expect("reopen proof");
+        assert_eq!(finalize(&restarted).expect("replay proof"), Some(proof));
+        assert_eq!(
+            restarted
+                .rehydrate_run(action.run)
+                .expect("terminal run")
+                .snapshot
+                .status,
+            crate::WorkflowRunStatus::Completed
+        );
+        let conflicting = Comment::new(CommentDefinition {
+            target: accepted.target().clone(),
+            managed_marker: accepted.managed_marker().map(str::to_owned),
+            provider_comment_reference: Some("github/comment/18".to_owned()),
+        })
+        .expect("conflicting observation");
+        assert!(restarted
+            .reconcile_live_sandbox_comment(&operation, action, |_, _| { lookup(conflicting) })
+            .is_err());
+        assert_eq!(read_effect(), completed);
     }
 
     impl LiveGrantTrial {
@@ -4638,7 +4737,12 @@ mod tests {
                     }
                 }
                 assert_eq!(counts(), (1, 1));
-                assert_eq!(event_count(), before + 1);
+                assert_eq!(
+                    event_count(),
+                    before
+                        + 1
+                        + 2 * usize::from(matches!(trial, LiveGrantTrial::LostAcknowledgement))
+                );
                 assert!(backend
                     .reserve_live_sandbox_dispatch(request(), admission)
                     .expect("replay")

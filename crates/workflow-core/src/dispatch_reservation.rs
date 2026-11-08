@@ -226,6 +226,14 @@ impl DispatchAdmissionProjectionEvent {
         &self.executor_commitment
     }
 
+    pub(crate) const fn request_commitment(&self) -> &SpecContentHash {
+        &self.request_commitment
+    }
+
+    pub(crate) const fn trusted_time_commitment(&self) -> &SpecContentHash {
+        &self.trusted_time_commitment
+    }
+
     pub(crate) const fn projection_commitment(&self) -> &SpecContentHash {
         &self.projection_commitment
     }

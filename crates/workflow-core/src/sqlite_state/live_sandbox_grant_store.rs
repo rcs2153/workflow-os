@@ -499,7 +499,7 @@ impl AuthenticatedLiveGrant<'_> {
         request: &DispatchReservationRequest,
         now: Timestamp,
         window_expiry: Timestamp,
-    ) -> Result<(), WorkflowOsError> {
+    ) -> Result<SideEffectRecord, WorkflowOsError> {
         let events = SqliteStateBackend::read_events_with_connection(
             tx,
             &request.expected_window_binding.run_id,
@@ -587,7 +587,7 @@ impl AuthenticatedLiveGrant<'_> {
             params![self.grant.grant_id().as_str(), facts.attempt.as_str()],
         )
         .map_err(|_| denied())?;
-        Ok(())
+        Ok(record)
     }
 }
 
@@ -745,7 +745,7 @@ fn verify_opening_in_run(
     resolve_live_effect(tx, facts, run, record, &last.event_id, now)
 }
 
-fn read_live_effect_record(
+pub(super) fn read_live_effect_record(
     tx: &Connection,
     id: &SideEffectId,
 ) -> Result<SideEffectRecord, WorkflowOsError> {
