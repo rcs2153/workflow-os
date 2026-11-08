@@ -1197,6 +1197,55 @@ reply after commit does not reopen the consumed admission. Tests use disposable
 local socket pairs and a synthetic callback; they do not establish production
 process separation, key custody, or provider access.
 
+### Focused Signer Deployment Review At `ac8accf8`
+
+**Accept the private protocol; deny live deployment.** This is an owner
+review, not independent assurance. The source separates three boundaries:
+
+- [Peer authentication](../../crates/workflow-core/src/provider_comment_transport/installation_signer_channel.rs)
+  checks effective local UID and the OS-reported peer UID on the assertion
+  socket and on both ends of the
+  [decision socket](../../crates/workflow-core/src/provider_comment_transport/installation_signer_channel/decision.rs).
+  It rejects root and identities shared with either harness as service peers.
+  It does not distinguish two processes with the same allowed UID, authenticate
+  a binary, or attest file, socket, or process permissions.
+- [Core admission](../../crates/workflow-core/src/sqlite_state/dispatch_reservation_store.rs)
+  revalidates the exact claim under an immediate SQLite transaction and
+  commits one compare-and-set admission before the challenge-bound reply.
+  The signer cannot infer permission from an open socket or a lost reply.
+- The exchange rechecks exact current authority before requesting the
+  assertion and after it returns, then uses the existing installation-scope
+  and final send gates. Neither local clock checks nor a committed admission
+  make revocation atomic with signing or provider acceptance. Process loss
+  after commit is issuance-uncertain, not evidence that no assertion exists.
+
+The next executable proof is one **disposable, network-free deployment
+rehearsal** of the actual private protocol with distinct non-root service
+UIDs and a separate untrusted UID. Use a synthetic signing callback and a
+counted exchange substitute; no provider app, key material, live calls, or
+operator command. Run it first in an isolated Linux CI environment. That
+proves only that environment; repeat on the intended macOS host using its
+native peer-credential API before any macOS live trial. In particular, a
+root-created socket pair inherited across a UID switch is not proof of who
+connected: establish listeners and connections under the expected service
+identities and exercise the production authentication constructors.
+
+The deployment candidate must satisfy the following before live admission
+is reconsidered:
+
+| Boundary | Required observation |
+| --- | --- |
+| Process identity | Trusted launch config pins reviewed executables, service identities and socket roles. A process running as the harness, a wrong service role, and an unexpected/root peer cannot reach admission or signing. No harness-writable path, argument, environment override, or inherited descriptor can substitute a service or its connection. |
+| State and custody | The signer cannot read or modify Core's state or principal inputs. Exchange and harness processes cannot read a signer-owned synthetic custody marker. The harness cannot replace or connect to the private endpoints. Check effective groups, directory/socket ownership and permissions, and descriptor inheritance; peer UID checks alone are insufficient. |
+| Exact fresh exchange | The authenticated services produce one durable admission, one synthetic signature callback, and at most one counted exchange for the exact claim. Competing connections and process restart with that claim never produce a second admission or exchange. No assertion, raw response, or custody contents appear in process arguments, environment, logs, or durable evidence. |
+| Interruption and revocation | Interrupt before commit, after commit before the decision reply, and after the callback before assertion delivery. Check durable claim/admission counts, distinguish pre- and post-commit records, and verify no fallback, blind retry, or second exchange. Reject expired, revoked, or changed scope at the existing Core boundaries and record uncertainty rather than declaring no external effect. |
+
+Only the trusted exchange may use the resulting assertion, and only at the
+fixed provider origin in a separately admitted live deployment. Real custody,
+network restrictions, provider scope, exact target and window, and independent
+review are still required. Do not use the rehearsal to authorize provider
+mutation, broaden the action family, or claim live exactly-once behavior.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
