@@ -74,17 +74,47 @@ pub enum SyntheticSandboxRecoveryPosture {
     CompletionVerified,
 }
 
+/// The verified provenance of a synthetic completion, not live provider evidence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyntheticSandboxCompletionProofSource {
+    /// A synthetic lookup reconciled the attempted effect.
+    Lookup,
+    /// The injected creation response was verified and persisted.
+    CreationResponse,
+}
+
+/// Redacted inspection of one durable synthetic reservation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SyntheticSandboxRecoveryInspection {
+    source: Option<SyntheticSandboxCompletionProofSource>,
+}
+
+impl SyntheticSandboxRecoveryInspection {
+    /// Returns the existing synthetic execution posture.
+    #[must_use]
+    pub const fn posture(self) -> SyntheticSandboxRecoveryPosture {
+        if self.source.is_some() {
+            SyntheticSandboxRecoveryPosture::CompletionVerified
+        } else {
+            SyntheticSandboxRecoveryPosture::ReconciliationRequired
+        }
+    }
+
+    /// Returns the verified proof source, or none when completion is unresolved.
+    #[must_use]
+    pub const fn completion_proof_source(self) -> Option<SyntheticSandboxCompletionProofSource> {
+        self.source
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum LiveCommentDispatchPosture {
     PersistedSyntheticResponse { comment_id: std::num::NonZeroU64 },
     RecoveryOnly,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum LiveCommentProofKind {
-    Lookup,
-    CreationResponse,
-}
+use SyntheticSandboxCompletionProofSource as LiveCommentProofKind;
 
 // Only a trusted synthetic lookup may supply this result until a provider
 // adapter can independently verify author and exact accepted payload.
@@ -170,6 +200,21 @@ impl SqliteStateBackend {
         operation_id: &str,
         side_effect_id: &crate::SideEffectId,
     ) -> Result<SyntheticSandboxRecoveryPosture, WorkflowOsError> {
+        self.inspect_synthetic_sandbox_recovery_proof(run_id, operation_id, side_effect_id)
+            .map(SyntheticSandboxRecoveryInspection::posture)
+    }
+
+    /// Inspects synthetic posture and verified provenance in the same read transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for missing, unsupported, or mismatched durable proof.
+    pub fn inspect_synthetic_sandbox_recovery_proof(
+        &self,
+        run_id: &crate::WorkflowRunId,
+        operation_id: &str,
+        side_effect_id: &crate::SideEffectId,
+    ) -> Result<SyntheticSandboxRecoveryInspection, WorkflowOsError> {
         let operation = DispatchReservationOperationId::new(operation_id)?;
         let mut connection = self.existing_read_only_connection()?;
         let tx = connection
@@ -803,7 +848,7 @@ fn verify_live_recovery_state(
     admission: &LiveRecoveryAdmission,
     run_id: &crate::WorkflowRunId,
     side_effect_id: &crate::SideEffectId,
-) -> Result<SyntheticSandboxRecoveryPosture, WorkflowOsError> {
+) -> Result<SyntheticSandboxRecoveryInspection, WorkflowOsError> {
     let history = SqliteStateBackend::read_events_with_connection(tx, run_id)?;
     let effect = read_live_effect_record(tx, side_effect_id)?;
     if effect.side_effect_id() != side_effect_id || effect.run_id() != run_id {
@@ -811,10 +856,10 @@ fn verify_live_recovery_state(
     }
     if let Some((event, kind)) = find_live_comment_proof(&admission.event, &history)? {
         verify_live_comment_proof(admission, &effect, event, kind)?;
-        return Ok(SyntheticSandboxRecoveryPosture::CompletionVerified);
+        return Ok(SyntheticSandboxRecoveryInspection { source: Some(kind) });
     }
     verify_live_comment_attempt(admission, &effect)?;
-    Ok(SyntheticSandboxRecoveryPosture::ReconciliationRequired)
+    Ok(SyntheticSandboxRecoveryInspection { source: None })
 }
 
 fn live_comment_proof_id(

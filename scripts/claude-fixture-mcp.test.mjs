@@ -137,7 +137,8 @@ test("recovery mode isolates the tool and projects only verified read-only postu
     console.log(JSON.stringify({
       evidence_source:"synthetic_sandbox", historical_admission_verified:true,
       dispatch_authorized:false, provider_called:false,
-      execution_posture:"reconciliation_required", provider_reference:"must-not-leak",
+      execution_posture:"reconciliation_required", completion_proof_source:null,
+      provider_reference:"must-not-leak",
     }));
   `);
   const result = run([...handshake, call("tools/list"), fixture({ case_id: "unresolved" }),
@@ -147,6 +148,7 @@ test("recovery mode isolates the tool and projects only verified read-only postu
   assert.deepEqual(result.responses.slice(2, 5).map((reply) => reply.error?.code), [-32602, -32602, -32602]);
   assert.equal(result.responses.at(-1).result.isError, false, result.stdout);
   assert.equal(JSON.parse(result.responses.at(-1).result.content[0].text).execution_posture, "reconciliation_required");
+  assert.equal(JSON.parse(result.responses.at(-1).result.content[0].text).completion_proof_source, null);
   assert.doesNotMatch(result.stdout, /must-not-leak|dispatch\/hidden/);
 });
 
@@ -156,6 +158,15 @@ test("recovery mode rejects mixed manifests and fails closed on kernel output", 
   const request = [...handshake, recovery({ case_id: "unresolved" })];
   put('console.log(JSON.stringify({evidence_source:"synthetic_sandbox",historical_admission_verified:true,execution_posture:"completion_verified",dispatch_authorized:true,provider_called:false}));');
   assert.match(run(request).stdout, /unexpected_kernel_result/);
+  for (const [posture, source] of [["completion_verified", undefined], ["completion_verified", null],
+    ["completion_verified", "untrusted"], ["reconciliation_required", "creation_response"]]) {
+    put(`console.log(${JSON.stringify(JSON.stringify({
+      evidence_source: "synthetic_sandbox", historical_admission_verified: true,
+      execution_posture: posture, completion_proof_source: source,
+      dispatch_authorized: false, provider_called: false,
+    }))});`);
+    assert.match(run(request).stdout, /unexpected_kernel_result/);
+  }
   put('console.error("must-not-leak"); process.exit(2);');
   const denial = run(request);
   assert.match(denial.stdout, /kernel_rejected/);
@@ -167,27 +178,45 @@ test("recovery mode rejects mixed manifests and fails closed on kernel output", 
   assert.equal(run(handshake).status, 1);
 });
 
-const exportedManifest = process.env.WORKFLOW_OS_SYNTHETIC_RECOVERY_MCP_MANIFEST;
-test("exported synthetic states reconstruct through the real CLI without database changes", {
-  skip: !exportedManifest,
-}, () => {
+function checkExportedProofs(exportedManifest, cases) {
   const manifest = JSON.parse(readFileSync(exportedManifest, "utf8"));
   const hashes = () => manifest.cases.map(({ state }) =>
     createHash("sha256").update(readFileSync(join(state, "github-pr-comment-continuation.sqlite3"))).digest("hex"));
   const before = hashes();
   const result = runBridge(exportedManifest, [...handshake, call("tools/list"),
-    recovery({ case_id: "unresolved" }), recovery({ case_id: "completed" }), recovery({ case_id: "completed" })]);
+    ...cases.map(([case_id]) => recovery({ case_id }))]);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(result.responses[1].result.tools.map((item) => item.name), [recoveryTool]);
   const postures = result.responses.slice(2).map(({ result: reply }) => {
     assert.equal(reply.isError, false, result.stdout);
     const output = JSON.parse(reply.content[0].text);
     assert.deepEqual(Object.keys(output).sort(), [
-      "dispatch_authorized", "evidence_source", "execution_posture",
+      "completion_proof_source", "dispatch_authorized", "evidence_source", "execution_posture",
       "historical_admission_verified", "provider_called", "status",
     ]);
-    return output.execution_posture;
+    return [output.execution_posture, output.completion_proof_source];
   });
-  assert.deepEqual(postures, ["reconciliation_required", "completion_verified", "completion_verified"]);
+  assert.deepEqual(postures, cases.map(([, posture, source]) => [posture, source]));
   assert.deepEqual(hashes(), before);
+}
+
+const exportedManifest = process.env.WORKFLOW_OS_SYNTHETIC_RECOVERY_MCP_MANIFEST;
+test("exported lookup states reconstruct through the real CLI without database changes", {
+  skip: !exportedManifest,
+}, () => {
+  checkExportedProofs(exportedManifest, [
+    ["unresolved", "reconciliation_required", null],
+    ["completed", "completion_verified", "lookup"],
+    ["completed", "completion_verified", "lookup"],
+  ]);
+});
+
+const responseManifest = process.env.WORKFLOW_OS_SYNTHETIC_RESPONSE_MCP_MANIFEST;
+test("exported creation proof reconstructs through the real CLI without database changes", {
+  skip: !responseManifest,
+}, () => {
+  checkExportedProofs(responseManifest, [
+    ["response-completed", "completion_verified", "creation_response"],
+    ["response-completed", "completion_verified", "creation_response"],
+  ]);
 });

@@ -110,15 +110,19 @@ function inspectRecovery(config, entry) {
     if (child.error || child.signal) return rejected("kernel_unavailable");
     if (child.status !== 0) return rejected("kernel_rejected");
     const result = JSON.parse(child.stdout);
+    const source = result.completion_proof_source;
+    const validProof = result.execution_posture === "reconciliation_required"
+      ? source === null
+      : result.execution_posture === "completion_verified" && ["lookup", "creation_response"].includes(source);
     if (result.evidence_source !== "synthetic_sandbox" ||
         result.historical_admission_verified !== true || result.dispatch_authorized !== false ||
-        result.provider_called !== false ||
-        !["reconciliation_required", "completion_verified"].includes(result.execution_posture)) {
+        result.provider_called !== false || !validProof) {
       return rejected("unexpected_kernel_result");
     }
     return {
       status: "inspected", evidence_source: "synthetic_sandbox",
       historical_admission_verified: true, execution_posture: result.execution_posture,
+      completion_proof_source: source,
       dispatch_authorized: false, provider_called: false,
     };
   } catch {
