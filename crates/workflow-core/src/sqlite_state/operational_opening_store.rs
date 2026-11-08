@@ -3600,6 +3600,9 @@ mod tests {
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
+    mod recovery_process;
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn live_installation_send_preparation_commit_loss_never_sends() {
         for fault in [
@@ -4779,7 +4782,11 @@ mod tests {
         Unavailable,
         Lost,
         Correlated,
-        ObservedRecovery { contradictory: bool },
+        ObservedRecovery {
+            contradictory: bool,
+        },
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        ProcessRecovery,
         CorrelatedFault(InjectedDispatchCommitFault),
     }
 
@@ -5016,11 +5023,15 @@ mod tests {
             CoordinatorTrial::Correlated
                 | CoordinatorTrial::CorrelatedFault(_)
                 | CoordinatorTrial::ObservedRecovery { .. }
+                | CoordinatorTrial::ProcessRecovery
         ) {
             backend
                 .enable_installation_send_preparation_store()
                 .expect("explicit V17");
-            if matches!(trial, CoordinatorTrial::CorrelatedFault(_)) {
+            if matches!(
+                trial,
+                CoordinatorTrial::CorrelatedFault(_) | CoordinatorTrial::ProcessRecovery
+            ) {
                 backend
                     .enable_installation_observation_journal()
                     .expect("fresh V18 reservation");
@@ -5104,6 +5115,7 @@ mod tests {
                 })
             },
             |request, exchanged| {
+                let operation = request.operation_id.clone();
                 backend.dispatch_lost_installation_ack_for_test(
                     request,
                     admission,
@@ -5119,6 +5131,11 @@ mod tests {
                                 params![body, serde_json::to_string(&time).expect("fixture clock")],
                             )
                             .expect("commit the provider effect before losing the response");
+                        if trial == CoordinatorTrial::ProcessRecovery {
+                            recovery_process::interrupt_after_provider_acceptance(
+                                path, &operation, action,
+                            );
+                        }
                     }),
                 )
             },
