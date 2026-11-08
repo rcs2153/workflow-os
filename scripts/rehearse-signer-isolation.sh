@@ -39,16 +39,26 @@ done
 
 umask 077
 tmp=/tmp
-if [[ $RUNNER_OS == macOS ]]; then tmp=/private/tmp; fi
+chown=/usr/bin/chown
+if [[ $RUNNER_OS == macOS ]]; then
+  tmp=/private/tmp
+  chown=/usr/sbin/chown
+fi
+for utility in "$chown" /bin/chmod /bin/cp /bin/rm /usr/bin/install /usr/bin/tar; do
+  if [[ ! -x $utility ]]; then
+    echo "Required system utility unavailable: $utility" >&2
+    exit 2
+  fi
+done
 root=$(mktemp -d "$tmp/workflow-os-signer.XXXXXXXX")
 staging=
 cleanup() {
-  if [[ -n $staging ]]; then /usr/bin/rm -rf -- "$staging"; fi
-  sudo -n /usr/bin/rm -rf -- "$root"
+  if [[ -n $staging ]]; then /bin/rm -rf -- "$staging"; fi
+  sudo -n /bin/rm -rf -- "$root"
 }
 trap cleanup EXIT
-sudo -n /usr/bin/chown 0:0 "$root"
-sudo -n /usr/bin/chmod 0711 "$root"
+sudo -n "$chown" 0:0 "$root"
+sudo -n /bin/chmod 0711 "$root"
 sudo -n /usr/bin/install -o 0 -g 0 -m 0555 -- "$1" "$root/worker"
 if [[ $RUNNER_OS == macOS ]]; then
   sudo -n /usr/bin/install -o 0 -g 0 -m 0444 -- scripts/signer-rehearsal-macos.sb "$root/network.sb"
@@ -62,8 +72,8 @@ if [[ ! -f $staging/workflow-os.yml || -n $(find "$staging" ! -type d ! -type f 
   exit 2
 fi
 sudo -n /usr/bin/install -d -o 0 -g 0 -m 0555 "$root/core-fixture"
-sudo -n /usr/bin/cp -R -- "$staging" "$root/core-fixture/project"
-sudo -n /usr/bin/chmod -R a=rX "$root/core-fixture/project"
+sudo -n /bin/cp -R -- "$staging" "$root/core-fixture/project"
+sudo -n /bin/chmod -R a=rX "$root/core-fixture/project"
 
 run_worker() {
   local uid=$1 gid=$2 test=$3
