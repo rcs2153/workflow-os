@@ -3511,6 +3511,11 @@ mod tests {
     }
 
     #[test]
+    fn live_comment_grant_expiry_after_reservation_never_sends_or_replays() {
+        exercise_live_grant_reservation(LiveGrantTrial::ExpiredBeforeSend);
+    }
+
+    #[test]
     fn live_comment_verified_response_survives_reopen_without_resend() {
         exercise_live_grant_reservation(LiveGrantTrial::VerifiedResponse);
     }
@@ -3877,6 +3882,7 @@ mod tests {
         AmbiguousCommit,
         Contended,
         LostAcknowledgement,
+        ExpiredBeforeSend,
         VerifiedResponse,
         Revoked,
         PrincipalRevoked,
@@ -4864,7 +4870,15 @@ mod tests {
                 else {
                     panic!("fresh opening");
                 };
-                let grant = grant_for(LIVE_CAPABILITY, CapabilityGrantLifecycle::Active);
+                let mut grant = grant_for(LIVE_CAPABILITY, CapabilityGrantLifecycle::Active);
+                if matches!(trial, LiveGrantTrial::ExpiredBeforeSend) {
+                    let mut definition = serde_json::to_value(&grant).expect("test grant");
+                    let earlier = Timestamp::from_offset_date_time(
+                        expiry.as_offset_date_time() - time::Duration::minutes(1),
+                    );
+                    definition["expires_at"] = serde_json::to_value(earlier).expect("test expiry");
+                    grant = serde_json::from_value(definition).expect("shorter valid grant");
+                }
                 let live_credential = [43; 32];
                 let fixture_credential = [17; 32];
                 let backend = SqliteStateBackend::open(&fixture.path).expect("reopen V13");
@@ -5184,6 +5198,59 @@ mod tests {
                             admission,
                             action,
                             expiry,
+                        );
+                    }
+                    LiveGrantTrial::ExpiredBeforeSend => {
+                        use super::super::dispatch_reservation_store::{
+                            LiveCommentDispatchPosture, SyntheticSandboxRecoveryPosture,
+                        };
+                        use crate::authorized_execution_continuity_state::internal::trusted_time_observation;
+                        let deadline = grant.expires_at().expect("grant deadline");
+                        assert!(deadline < expiry);
+                        let expired = || {
+                            let current =
+                                super::super::continuity_store::observe_continuity_trusted_time()?;
+                            Ok(trusted_time_observation(
+                                deadline,
+                                current.source(),
+                                current.provenance_commitment().clone(),
+                                current.epoch_id().clone(),
+                            ))
+                        };
+                        let operation = request().operation_id;
+                        assert_eq!(
+                            backend
+                                .dispatch_live_sandbox_comment_with_clock(
+                                    request(),
+                                    admission,
+                                    action,
+                                    expired,
+                                    |_, _| panic!("expired send right must not reach adapter"),
+                                )
+                                .expect("expired boundary"),
+                            LiveCommentDispatchPosture::RecoveryOnly
+                        );
+                        let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen");
+                        assert_eq!(
+                            reopened
+                                .dispatch_live_sandbox_comment(
+                                    request(),
+                                    admission,
+                                    action,
+                                    |_, _| panic!("replay must not recreate a send right"),
+                                )
+                                .expect("exact retry"),
+                            LiveCommentDispatchPosture::RecoveryOnly
+                        );
+                        assert_eq!(
+                            reopened
+                                .inspect_synthetic_sandbox_recovery(
+                                    action.run,
+                                    operation.as_str(),
+                                    action.side_effect,
+                                )
+                                .expect("durable attempted effect"),
+                            SyntheticSandboxRecoveryPosture::ReconciliationRequired
                         );
                     }
                     LiveGrantTrial::VerifiedResponse => {

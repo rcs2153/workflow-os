@@ -502,7 +502,7 @@ impl AuthenticatedLiveGrant<'_> {
         request: &DispatchReservationRequest,
         now: Timestamp,
         window_expiry: Timestamp,
-    ) -> Result<(SideEffectRecord, LiveSandboxProviderBinding), WorkflowOsError> {
+    ) -> Result<(SideEffectRecord, LiveSandboxProviderBinding, Timestamp), WorkflowOsError> {
         let events = SqliteStateBackend::read_events_with_connection(
             tx,
             &request.expected_window_binding.run_id,
@@ -593,7 +593,12 @@ impl AuthenticatedLiveGrant<'_> {
             params![self.grant.grant_id().as_str(), facts.attempt.as_str()],
         )
         .map_err(|_| denied())?;
-        Ok((record, target.provider_binding().clone()))
+        let grant_expiry = self.grant.expires_at().ok_or_else(denied)?;
+        Ok((
+            record,
+            target.provider_binding().clone(),
+            grant_expiry.min(window_expiry),
+        ))
     }
 }
 
