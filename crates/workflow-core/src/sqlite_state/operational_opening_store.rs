@@ -3901,32 +3901,45 @@ mod tests {
 
         let operation = request().operation_id;
         assert!(backend
+            .reserve_live_sandbox_dispatch(
+                request(),
+                super::super::live_sandbox_grant_store::LiveGrantAdmission {
+                    body: "<!-- workflow-os/live-comment/injected -->",
+                    ..admission
+                },
+            )
+            .is_err());
+        assert!(backend
             .recover_live_sandbox_comment(&operation, action, |_, _| {
                 panic!("no lookup before durable reservation")
             })
             .is_err());
         let mut accepted = None;
         let dispatch = backend
-            .dispatch_live_sandbox_comment(request(), admission, action, |target, body, marker| {
+            .dispatch_live_sandbox_comment(request(), admission, action, |target, raw_body| {
                 assert_eq!(target, action.target);
-                assert_eq!(body, action.body);
-                accepted = Some(
+                let marker = raw_body
+                    .strip_prefix(&format!("{}\n\n<!-- ", action.body))
+                    .and_then(|suffix| suffix.strip_suffix(" -->"))
+                    .expect("kernel encoded exactly the reserved body and marker");
+                accepted = Some((
                     Comment::new(CommentDefinition {
                         target: target.clone(),
                         provider_comment_reference: Some("github/comment/17".to_owned()),
                         managed_marker: Some(marker.to_owned()),
                     })
                     .expect("provider accepted"),
-                );
+                    raw_body.to_owned(),
+                ));
                 false
             })
             .expect("dispatch");
         assert_eq!(dispatch, LiveCommentDispatchPosture::RecoveryOnly);
-        let accepted = accepted.expect("synthetic effect");
+        let (accepted, sent_body) = accepted.expect("synthetic effect");
         let reopened = SqliteStateBackend::open(path).expect("restart");
         assert_eq!(
             reopened
-                .dispatch_live_sandbox_comment(request(), admission, action, |_, _, _| {
+                .dispatch_live_sandbox_comment(request(), admission, action, |_, _| {
                     panic!("replay cannot resend")
                 })
                 .expect("dispatch replay"),
@@ -3941,6 +3954,7 @@ mod tests {
             &operation,
             action,
             accepted.managed_marker().expect("reserved marker"),
+            &sent_body,
             expiry,
         );
 
@@ -4164,6 +4178,7 @@ mod tests {
         operation: &crate::dispatch_reservation::DispatchReservationOperationId,
         action: crate::provider_write::GitHubCommentContinuationAction<'_>,
         marker: &str,
+        raw_body: &str,
         expiry: Timestamp,
     ) {
         use crate::provider_comment_observation::{
@@ -4195,13 +4210,12 @@ mod tests {
             )
             .is_err());
         let now = Timestamp::now_utc();
-        let raw_body = format!("{}\n\n<!-- {marker} -->", action.body);
         let comment = ProviderComment {
             target: action.target,
             repository_id: NonZeroU64::new(123).expect("repository id"),
             author_id: NonZeroU64::new(456).expect("author id"),
             comment_id: NonZeroU64::new(17).expect("comment id"),
-            raw_body: &raw_body,
+            raw_body,
             created_at: now,
             updated_at: now,
         };
@@ -5037,7 +5051,7 @@ mod tests {
                                     request(),
                                     admission,
                                     action,
-                                    |_, _, _| { panic!("uncertain reservation cannot send") }
+                                    |_, _| { panic!("uncertain reservation cannot send") }
                                 )
                                 .expect("uncertain"),
                             LiveCommentDispatchPosture::RecoveryOnly
