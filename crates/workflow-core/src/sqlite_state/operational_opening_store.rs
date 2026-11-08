@@ -4204,6 +4204,18 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
+        let observe = |observed_at, comments: &[ProviderComment<'_>]| {
+            backend
+                .observe_reserved_sandbox_comment(operation, action, &adapter, |target, key| {
+                    assert_eq!(target, action.target);
+                    assert_eq!(key, marker);
+                    CommentEnumeration::Complete {
+                        observed_at,
+                        comments,
+                    }
+                })
+                .expect("reserved comment observation")
+        };
         for (comment, observed_at, expected) in [
             (comment, now, CurrentCommentPosture::ExactCurrentMatch),
             (
@@ -4224,20 +4236,17 @@ mod tests {
                 CurrentCommentPosture::Unresolved,
             ),
         ] {
-            let comments = [comment];
             assert_eq!(
-                backend
-                    .observe_reserved_sandbox_comment(operation, action, &adapter, |target, key| {
-                        assert_eq!(target, action.target);
-                        assert_eq!(key, marker);
-                        CommentEnumeration::Complete {
-                            observed_at,
-                            comments: &comments,
-                        }
-                    })
-                    .expect("reserved comment observation"),
+                observe(observed_at, std::slice::from_ref(&comment)),
                 expected
             );
+        }
+        let edited = ProviderComment {
+            raw_body: "edited without marker",
+            ..comment
+        };
+        for comments in [[comment, edited], [edited, comment]] {
+            assert_eq!(observe(now, &comments), CurrentCommentPosture::Unresolved);
         }
         assert_eq!(inspect(), before);
         assert_eq!(

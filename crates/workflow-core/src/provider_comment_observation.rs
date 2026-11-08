@@ -100,7 +100,21 @@ pub(crate) fn verify_current_comment(
     let Some(comment) = candidates.next() else {
         return Absent;
     };
-    if candidates.next().is_some() {
+    let mut ambiguous = false;
+    for candidate in std::iter::once(comment).chain(candidates) {
+        // A later page can repeat the same ID after an edit removes the marker.
+        if comments
+            .iter()
+            .filter(|row| row.comment_id == candidate.comment_id)
+            .take(2)
+            .count()
+            == 2
+        {
+            return Unresolved;
+        }
+        ambiguous |= candidate.comment_id != comment.comment_id;
+    }
+    if ambiguous {
         return Ambiguous;
     }
     if comment.target != expected.target
@@ -267,6 +281,47 @@ mod tests {
                 CurrentCommentPosture::Unresolved
             );
         }
+    }
+
+    #[test]
+    fn rejects_repeated_candidate_identity_across_the_full_enumeration() {
+        use CurrentCommentPosture::{Ambiguous, ExactCurrentMatch, Unresolved};
+
+        let target = GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target");
+        let expected = ExpectedComment {
+            known_comment_id: None,
+            ..expected(&target)
+        };
+        let raw = format!("exact body\n\n<!-- {MARKER} -->");
+        let marked = comment(&target, &raw);
+        let edited = ProviderComment {
+            raw_body: "edited without marker",
+            ..marked
+        };
+        let second = ProviderComment {
+            comment_id: id(4),
+            ..marked
+        };
+        let unrelated = ProviderComment {
+            comment_id: id(5),
+            ..edited
+        };
+        let inspect = |comments: &[ProviderComment<'_>]| {
+            verify_current_comment(
+                &expected,
+                CommentEnumeration::Complete {
+                    observed_at: time(30),
+                    comments,
+                },
+            )
+        };
+
+        assert_eq!(inspect(&[marked, edited]), Unresolved);
+        assert_eq!(inspect(&[edited, marked]), Unresolved);
+        assert_eq!(inspect(&[marked, marked]), Unresolved);
+        assert_eq!(inspect(&[second, marked, edited]), Unresolved);
+        assert_eq!(inspect(&[marked, second]), Ambiguous);
+        assert_eq!(inspect(&[unrelated, marked]), ExactCurrentMatch);
     }
 
     #[test]
