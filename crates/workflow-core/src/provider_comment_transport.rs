@@ -1,7 +1,7 @@
 //! Private GitHub comment exchange and bounded read-only observation.
 #![allow(dead_code)]
 
-mod installation_exchange;
+pub(crate) mod installation_exchange;
 #[cfg(test)]
 mod installation_scope_fixture;
 

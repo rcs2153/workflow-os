@@ -3521,6 +3521,11 @@ mod tests {
     }
 
     #[test]
+    fn live_comment_installation_scope_binds_durable_admission_without_dispatch() {
+        exercise_live_grant_reservation(LiveGrantTrial::InstallationScope);
+    }
+
+    #[test]
     fn live_comment_observation_reopens_without_completing_or_reauthorizing() {
         exercise_live_grant_reservation(LiveGrantTrial::DurableObservation);
         exercise_live_grant_reservation(LiveGrantTrial::SuiteObservation);
@@ -3970,6 +3975,7 @@ mod tests {
         Contended,
         LostAcknowledgement,
         PreparedLoopback { expired: bool },
+        InstallationScope,
         DurableObservation,
         SuiteObservation,
         ExpiredBeforeSend,
@@ -4289,6 +4295,125 @@ mod tests {
                 .expect("accepted-witness test stand-in")
             })
             .expect("historical context")
+    }
+
+    fn exercise_installation_scope_reservation(
+        backend: &SqliteStateBackend,
+        path: &std::path::Path,
+        request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        provider: &crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding,
+        deadline: Timestamp,
+    ) {
+        use super::super::dispatch_reservation_store::{
+            LiveCommentDispatchPosture, SyntheticSandboxRecoveryPosture,
+        };
+        use crate::provider_comment_transport::installation_exchange::{
+            ReviewedInstallation, VerifiedInstallationScope,
+        };
+        let now = Timestamp::now_utc();
+        let provider_deadline = Timestamp::from_offset_date_time(
+            now.as_offset_date_time() + time::Duration::minutes(1),
+        );
+        assert!(provider_deadline < deadline);
+        let reviewed = ReviewedInstallation {
+            app_id: std::num::NonZeroU64::new(33).expect("app"),
+            app_slug: "scope-fixture",
+            bot_id: provider.author_id,
+            installation_id: std::num::NonZeroU64::new(44).expect("installation"),
+            repository_id: provider.repository_id,
+            target: action.target,
+            run_id: action.run,
+            immutable_run: action.bundle_root,
+            comment_adapter: &provider.adapter_commitment,
+            deadline,
+        };
+        let reserve = |scope, proof| {
+            backend.reserve_fixture_installation_scope(request(), admission, scope, proof)
+        };
+        let valid = VerifiedInstallationScope::test_receipt(reviewed, now, provider_deadline);
+        let expired = VerifiedInstallationScope::test_receipt(reviewed, now, now);
+        let drifted_hash = SpecContentHash::from_text("different durable run bundle");
+        let drifted = ReviewedInstallation {
+            immutable_run: &drifted_hash,
+            ..reviewed
+        };
+        let drifted_proof =
+            VerifiedInstallationScope::test_receipt(drifted, now, provider_deadline);
+        let before = backend
+            .read_events(action.run)
+            .expect("history before checks");
+        assert!(backend
+            .reserve_scoped_live_sandbox_dispatch(request(), admission, reviewed, &valid)
+            .is_err());
+        assert!(backend
+            .reserve_live_sandbox_dispatch(request(), admission)
+            .is_err());
+        assert!(reserve(reviewed, &expired).is_err());
+        assert!(reserve(reviewed, &drifted_proof).is_err());
+        assert!(reserve(drifted, &drifted_proof).is_err());
+        inject_dispatch_commit_fault(InjectedDispatchCommitFault::Before);
+        let Err(error) = reserve(reviewed, &valid) else {
+            panic!("scoped fault before commit must reject reservation");
+        };
+        assert_eq!(error.code(), "dispatch_reservation.write_failed");
+        assert_eq!(
+            backend.read_events(action.run).expect("unchanged history"),
+            before
+        );
+        assert!(reserve(reviewed, &valid)
+            .expect("scoped reservation")
+            .is_some());
+
+        let operation = request().operation_id;
+        let reopened = SqliteStateBackend::open(path).expect("reopen scoped reservation");
+        let witness = read_fixture_reservation_witness(&reopened, &operation);
+        assert_eq!(witness.creation_deadline, Some(provider_deadline));
+        let (expected, _) = valid
+            .admission_binding(reviewed, now, true)
+            .expect("exact receipt");
+        assert_eq!(witness.installation_scope_commitment, Some(expected));
+        assert_eq!(
+            reopened
+                .inspect_synthetic_sandbox_recovery(
+                    action.run,
+                    operation.as_str(),
+                    action.side_effect
+                )
+                .expect("no provider result"),
+            SyntheticSandboxRecoveryPosture::ReconciliationRequired,
+        );
+        assert!(reopened
+            .reserve_fixture_installation_scope(request(), admission, reviewed, &valid)
+            .expect("exact replay")
+            .is_none());
+        assert_eq!(
+            reopened
+                .dispatch_live_sandbox_comment(request(), admission, action, |_, _| {
+                    panic!("scoped replay cannot invoke synthetic sender")
+                })
+                .expect("recovery only"),
+            LiveCommentDispatchPosture::RecoveryOnly,
+        );
+    }
+
+    fn read_fixture_reservation_witness(
+        backend: &SqliteStateBackend,
+        operation: &crate::dispatch_reservation::DispatchReservationOperationId,
+    ) -> crate::dispatch_reservation::LiveSandboxReservationWitness {
+        let record: String = backend
+            .existing_connection()
+            .expect("fixture connection")
+            .query_row(
+                "SELECT record_json FROM dispatch_reservations WHERE operation_id=?1",
+                [operation.as_str()],
+                |row| row.get(0),
+            )
+            .expect("read reservation");
+        let record: crate::dispatch_reservation::DispatchReservationRecord =
+            serde_json::from_str(&record).expect("decode reservation");
+        record.live_witness.expect("scoped reservation witness")
     }
 
     fn exercise_prepared_loopback(
@@ -5215,6 +5340,9 @@ mod tests {
                     LiveGrantTrial::PreparedLoopback { .. } => {
                         crate::provider_comment_transport::loopback_comment_exchange_commitment()
                     }
+                    LiveGrantTrial::InstallationScope => {
+                        crate::provider_comment_transport::installation_exchange::fixture_installation_comment_adapter_commitment()
+                    }
                     _ => SpecContentHash::from_text("trusted synthetic adapter"),
                 };
                 let provider_binding = || LiveSandboxProviderBinding {
@@ -5558,10 +5686,12 @@ mod tests {
                 );
                 assert_eq!(counts(), (0, 0));
                 assert_eq!(event_count(), before);
-                inject_dispatch_commit_fault(InjectedDispatchCommitFault::Before);
-                assert!(backend
-                    .reserve_live_sandbox_dispatch(request(), admission)
-                    .is_err());
+                if !matches!(trial, LiveGrantTrial::InstallationScope) {
+                    inject_dispatch_commit_fault(InjectedDispatchCommitFault::Before);
+                    assert!(backend
+                        .reserve_live_sandbox_dispatch(request(), admission)
+                        .is_err());
+                }
                 assert_eq!(counts(), (0, 0));
                 assert_eq!(event_count(), before);
                 match trial {
@@ -5601,6 +5731,17 @@ mod tests {
                             admission,
                             action,
                             expiry,
+                        );
+                    }
+                    LiveGrantTrial::InstallationScope => {
+                        exercise_installation_scope_reservation(
+                            &backend,
+                            &fixture.path,
+                            request,
+                            admission,
+                            action,
+                            &provider_binding(),
+                            grant.expires_at().expect("grant deadline").min(expiry),
                         );
                     }
                     LiveGrantTrial::PreparedLoopback { expired } => {

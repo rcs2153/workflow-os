@@ -344,6 +344,8 @@ pub(crate) struct LiveSandboxReservationWitness {
     pub(crate) attempted_record_commitment: SpecContentHash,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) creation_deadline: Option<Timestamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) installation_scope_commitment: Option<SpecContentHash>,
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]

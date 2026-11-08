@@ -24,6 +24,9 @@ use crate::provider_comment_observation::{
     verify_current_comment, CommentEnumeration, CreatedCommentResponse, CurrentCommentPosture,
     ExpectedComment, MARKER_NAMESPACE,
 };
+use crate::provider_comment_transport::installation_exchange::{
+    installation_comment_adapter_commitment, ReviewedInstallation, VerifiedInstallationScope,
+};
 #[cfg(test)]
 use crate::provider_comment_transport::PreparedGitHubCommentCreation;
 use crate::provider_comment_transport::{
@@ -59,6 +62,54 @@ struct LiveRecoveryAdmission {
     event: DispatchAdmissionProjectionEvent,
     witness: Option<LiveSandboxReservationWitness>,
     committed_at: Timestamp,
+}
+
+struct LiveInstallationScopeAdmission<'a> {
+    reviewed: ReviewedInstallation<'a>,
+    verified: &'a VerifiedInstallationScope,
+    fixture: bool,
+}
+
+impl LiveInstallationScopeAdmission<'_> {
+    fn validate(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        request: &DispatchReservationRequest,
+        effect: &crate::SideEffectRecord,
+        provider: &LiveSandboxProviderBinding,
+        now: Timestamp,
+        deadline: Timestamp,
+    ) -> Result<(SpecContentHash, Timestamp), WorkflowOsError> {
+        let registered = read_active_live_target(tx, effect.target().reference())?;
+        let scope = self.reviewed;
+        let binding = &request.expected_window_binding;
+        if !is_installation_comment_adapter(&provider.adapter_commitment, self.fixture)
+            || scope.run_id != &binding.run_id
+            || scope.immutable_run != binding.immutable_run_bundle.root_hash()
+            || scope.target != registered.target()
+            || scope.repository_id != provider.repository_id
+            || scope.bot_id != provider.author_id
+            || scope.comment_adapter != &provider.adapter_commitment
+            || scope.deadline != deadline
+        {
+            return Err(not_dispatchable());
+        }
+        self.verified
+            .admission_binding(scope, now, self.fixture)
+            .filter(|(_, expires)| now < *expires && *expires <= deadline)
+            .ok_or_else(not_dispatchable)
+    }
+}
+
+fn is_installation_comment_adapter(adapter: &SpecContentHash, fixture: bool) -> bool {
+    if fixture {
+        #[cfg(test)]
+        return adapter
+            == &crate::provider_comment_transport::installation_exchange::fixture_installation_comment_adapter_commitment();
+        #[cfg(not(test))]
+        return false;
+    }
+    adapter == &installation_comment_adapter_commitment()
 }
 
 struct ReservedCommentContext {
@@ -394,7 +445,7 @@ impl SqliteStateBackend {
             Timestamp,
         ) -> Result<(), WorkflowOsError>,
     ) -> Result<DispatchReservationOutcome, WorkflowOsError> {
-        self.reserve_dispatch(request, lifecycle, None, check_admission)
+        self.reserve_dispatch(request, lifecycle, None, None, check_admission)
     }
 
     /// Live-only admission. Exact replays and ambiguous commits yield no
@@ -405,7 +456,47 @@ impl SqliteStateBackend {
         request: DispatchReservationRequest,
         admission: LiveGrantAdmission<'_>,
     ) -> Result<Option<Box<ReservedAttemptDispatchCapability>>, WorkflowOsError> {
-        self.reserve_live_sandbox_dispatch_with_binding(request, admission, None)
+        self.reserve_live_sandbox_dispatch_with_binding(request, admission, None, None)
+    }
+
+    #[allow(dead_code)] // No operator path or sender is connected.
+    pub(super) fn reserve_scoped_live_sandbox_dispatch(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        verified: &VerifiedInstallationScope,
+    ) -> Result<Option<Box<ReservedAttemptDispatchCapability>>, WorkflowOsError> {
+        self.reserve_live_sandbox_dispatch_with_binding(
+            request,
+            admission,
+            None,
+            Some(LiveInstallationScopeAdmission {
+                reviewed,
+                verified,
+                fixture: false,
+            }),
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn reserve_fixture_installation_scope(
+        &self,
+        request: DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        verified: &VerifiedInstallationScope,
+    ) -> Result<Option<Box<ReservedAttemptDispatchCapability>>, WorkflowOsError> {
+        self.reserve_live_sandbox_dispatch_with_binding(
+            request,
+            admission,
+            None,
+            Some(LiveInstallationScopeAdmission {
+                reviewed,
+                verified,
+                fixture: true,
+            }),
+        )
     }
 
     fn reserve_live_sandbox_dispatch_with_binding(
@@ -413,18 +504,22 @@ impl SqliteStateBackend {
         request: DispatchReservationRequest,
         admission: LiveGrantAdmission<'_>,
         prepared: Option<(&GitHubPullRequestCommentTarget, &LiveSandboxProviderBinding)>,
+        scope: Option<LiveInstallationScopeAdmission<'_>>,
     ) -> Result<Option<Box<ReservedAttemptDispatchCapability>>, WorkflowOsError> {
         if !can_encode_marked_comment(admission.body) {
             return Err(not_dispatchable());
         }
-        let outcome = self.reserve_dispatch(request, None, Some(admission), |tx, _, _| {
-            if let Some((target, binding)) = prepared {
-                if read_active_live_target(tx, &target.reference())?.provider_binding() != binding {
-                    return Err(not_dispatchable());
+        let outcome =
+            self.reserve_dispatch(request, None, Some(admission), scope, |tx, _, _| {
+                if let Some((target, binding)) = prepared {
+                    if read_active_live_target(tx, &target.reference())?.provider_binding()
+                        != binding
+                    {
+                        return Err(not_dispatchable());
+                    }
                 }
-            }
-            Ok(())
-        })?;
+                Ok(())
+            })?;
         Ok(match outcome {
             DispatchReservationOutcome::Admitted { capability } => Some(capability),
             DispatchReservationOutcome::AlreadyAdmitted { .. }
@@ -520,6 +615,7 @@ impl SqliteStateBackend {
             request,
             admission,
             prepared.map(|binding| (action.target, binding)),
+            None,
         )?
         else {
             return Ok(LiveCommentDispatchPosture::RecoveryOnly);
@@ -721,6 +817,7 @@ impl SqliteStateBackend {
             &crate::trusted_host_workflow_lifecycle::TrustedHostWorkflowLifecycleContext,
         >,
         live: Option<LiveGrantAdmission<'_>>,
+        scope: Option<LiveInstallationScopeAdmission<'_>>,
         check_admission: impl FnOnce(
             &rusqlite::Transaction<'_>,
             Timestamp,
@@ -877,6 +974,24 @@ impl SqliteStateBackend {
         let trusted_commitment = trusted_time_commitment(&observation);
         let next_revision = request.capability.window_revision.checked_next()?;
         let live_witness = if let Some((effect, provider, deadline)) = attempted_effect {
+            let (scope_commitment, deadline) = if let Some(scope) = scope {
+                let (commitment, effective_deadline) = scope.validate(
+                    &transaction,
+                    &request,
+                    &effect,
+                    &provider,
+                    observation.observed_at(),
+                    deadline,
+                )?;
+                (Some(commitment), effective_deadline)
+            } else {
+                if is_installation_comment_adapter(&provider.adapter_commitment, false)
+                    || is_installation_comment_adapter(&provider.adapter_commitment, true)
+                {
+                    return Err(not_dispatchable());
+                }
+                (None, deadline)
+            };
             Some(LiveSandboxReservationWitness {
                 attempted_record_commitment: live_effect_commitment(
                     b"workflow-os/live-comment-attempt/v1\0",
@@ -886,6 +1001,7 @@ impl SqliteStateBackend {
                 )?,
                 provider,
                 creation_deadline: Some(deadline),
+                installation_scope_commitment: scope_commitment,
             })
         } else {
             None
@@ -1298,6 +1414,14 @@ fn persist_live_comment_outcome(
     outcome: SideEffectOutcomeReference,
     kind: LiveCommentProofKind,
 ) -> Result<EventId, WorkflowOsError> {
+    if admission
+        .witness
+        .as_ref()
+        .is_some_and(|witness| witness.installation_scope_commitment.is_some())
+    {
+        // Scoped reservations need a provider-backed proof path, not this synthetic writer.
+        return Err(not_dispatchable());
+    }
     let history = SqliteStateBackend::read_events_with_connection(tx, action.run)?;
     let run = WorkflowRun::rehydrate(&history)?;
     let identity = &run.snapshot.identity;
