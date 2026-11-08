@@ -1466,6 +1466,26 @@ signer or send call. This is not a GitHub webhook parser, independently
 attested receiver, or production mechanism for minting and protecting a
 correlation value. Those boundaries remain unimplemented and unadmitted.
 
+### Private Installation Send Preparation
+
+An explicit private SQLite V17 upgrade admits a create-only preparation row
+for a new installation reservation. Its witness commits to the preparation
+protocol at reservation time; an older reservation gains no correlation or
+send right when its store upgrades. The final send check and preparation
+insert share one transaction. Only the caller holding the fresh process-local
+dispatch capability can receive the marked body after commit. Core stores the
+marker and body commitments, exact reservation, action and installation scope,
+and the trusted clock observation and deadline, not the raw marker or body.
+The transport still checks the deadline before starting the POST.
+
+After interruption, the preparation is evidence of a committed pre-send check,
+not of transport entry or provider acceptance. Tests cover rollback before
+commit, loss of acknowledgement after commit, private payload readback, and
+exact replay without opening the signer or send path. A direct creation
+witness must match the committed marked body for V17; old direct witnesses
+still use their original deterministic marker. No notification, read-only
+observer endpoint, or provider-derived outcome was admitted by this slice.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

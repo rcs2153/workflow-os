@@ -154,13 +154,35 @@ pub(crate) struct VerifiedInstallationCreation {
 }
 
 impl VerifiedInstallationCreation {
+    #[cfg(test)]
     pub(crate) fn matches(
         &self,
         expected: InstallationCreationContext<'_>,
         fixture: bool,
     ) -> Option<NonZeroU64> {
-        (self.fixture == fixture && creation_binding(expected).as_ref() == Some(&self.binding))
-            .then_some(self.comment_id)
+        self.matches_committed_body(
+            expected.reservation,
+            expected.scope,
+            expected.target,
+            expected.provider,
+            &SpecContentHash::from_text(expected.marked_body),
+            fixture,
+        )
+    }
+
+    pub(crate) fn matches_committed_body(
+        &self,
+        reservation: &SpecContentHash,
+        scope: &SpecContentHash,
+        target: &GitHubPullRequestCommentTarget,
+        provider: &LiveSandboxProviderBinding,
+        body: &SpecContentHash,
+        fixture: bool,
+    ) -> Option<NonZeroU64> {
+        (self.fixture == fixture
+            && creation_binding(reservation, scope, target, provider, body).as_ref()
+                == Some(&self.binding))
+        .then_some(self.comment_id)
     }
 }
 
@@ -322,14 +344,20 @@ impl VerifiedInstallationScope {
     }
 }
 
-fn creation_binding(context: InstallationCreationContext<'_>) -> Option<SpecContentHash> {
+fn creation_binding(
+    reservation: &SpecContentHash,
+    scope: &SpecContentHash,
+    target: &GitHubPullRequestCommentTarget,
+    provider: &LiveSandboxProviderBinding,
+    body: &SpecContentHash,
+) -> Option<SpecContentHash> {
     serde_json::to_vec(&(
         "workflow-os/github-installation-comment-creation/v1",
-        context.reservation,
-        context.scope,
-        context.target,
-        context.provider,
-        SpecContentHash::from_text(context.marked_body),
+        reservation,
+        scope,
+        target,
+        provider,
+        body,
     ))
     .ok()
     .map(SpecContentHash::from_bytes)
@@ -347,7 +375,13 @@ fn capture_creation(
         context.marked_body,
     )?;
     Some(VerifiedInstallationCreation {
-        binding: creation_binding(context)?,
+        binding: creation_binding(
+            context.reservation,
+            context.scope,
+            context.target,
+            context.provider,
+            &SpecContentHash::from_text(context.marked_body),
+        )?,
         comment_id,
         fixture,
     })
