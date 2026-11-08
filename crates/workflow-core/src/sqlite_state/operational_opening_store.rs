@@ -3565,6 +3565,14 @@ mod tests {
             InstallationClaimTrial::MissingApprovalProof,
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             InstallationClaimTrial::RevokedDuringSigner,
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            InstallationClaimTrial::SignerReplyWithoutAdmission,
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            InstallationClaimTrial::SignerAdmitted,
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            InstallationClaimTrial::SignerAdmissionCommitLoss,
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            InstallationClaimTrial::SignerAdmissionContended,
         ] {
             exercise_live_grant_reservation(LiveGrantTrial::InstallationClaim(trial));
         }
@@ -4063,6 +4071,63 @@ mod tests {
         );
     }
 
+    #[test]
+    fn live_installation_signer_admission_schema_requires_explicit_activation() {
+        use super::super::{
+            schema_manifest_digest, INSTALLATION_SIGNER_ADMISSION_SCHEMA_DIGEST,
+            INSTALLATION_SIGNER_ADMISSION_SCHEMA_V16,
+        };
+        let fixture = Fixture::new();
+        let history = fixture
+            .backend
+            .read_events(&fixture.run_id)
+            .expect("history");
+        assert!(fixture
+            .backend
+            .enable_installation_signer_admission_store()
+            .is_err());
+        fixture
+            .backend
+            .enable_live_sandbox_grant_store()
+            .expect("V13");
+        fixture
+            .backend
+            .enable_live_comment_observation_store()
+            .expect("V14");
+        fixture
+            .backend
+            .enable_installation_issuance_claim_store()
+            .expect("V15");
+        let mut connection = fixture.backend.existing_connection().expect("connection");
+        let tx = connection.transaction().expect("test manifest transaction");
+        tx.execute_batch(INSTALLATION_SIGNER_ADMISSION_SCHEMA_V16)
+            .expect("V16 DDL");
+        assert_eq!(
+            schema_manifest_digest(&tx).expect("manifest"),
+            INSTALLATION_SIGNER_ADMISSION_SCHEMA_DIGEST
+        );
+        tx.rollback().expect("discard test manifest transaction");
+        fixture
+            .backend
+            .enable_installation_signer_admission_store()
+            .expect("explicit V16");
+        fixture
+            .backend
+            .enable_installation_signer_admission_store()
+            .expect("exact upgrade retry");
+        fixture
+            .backend
+            .enable_installation_issuance_claim_store()
+            .expect("no downgrade");
+        let reopened = SqliteStateBackend::open(&fixture.path).expect("open V16");
+        assert_eq!(
+            reopened
+                .read_events(&fixture.run_id)
+                .expect("unchanged history"),
+            history
+        );
+    }
+
     #[derive(Clone, Copy)]
     enum LiveGrantTrial {
         AmbiguousCommit,
@@ -4531,6 +4596,14 @@ mod tests {
         MissingApprovalProof,
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         RevokedDuringSigner,
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        SignerReplyWithoutAdmission,
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        SignerAdmitted,
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        SignerAdmissionCommitLoss,
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        SignerAdmissionContended,
     }
 
     #[allow(clippy::too_many_lines)]
@@ -4699,12 +4772,27 @@ mod tests {
         assert_eq!(claim_count(), 0);
         match trial {
             #[cfg(any(target_os = "linux", target_os = "macos"))]
-            InstallationClaimTrial::RevokedDuringSigner => {
-                exercise_revocation_during_installation_signer(
+            InstallationClaimTrial::RevokedDuringSigner
+            | InstallationClaimTrial::SignerReplyWithoutAdmission => {
+                exercise_installation_signer_reply_denial(
                     backend,
                     &request(),
                     admission,
                     reviewed,
+                    matches!(trial, InstallationClaimTrial::RevokedDuringSigner),
+                );
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            InstallationClaimTrial::SignerAdmitted
+            | InstallationClaimTrial::SignerAdmissionCommitLoss
+            | InstallationClaimTrial::SignerAdmissionContended => {
+                exercise_installation_signer_admission(
+                    backend,
+                    path,
+                    &request(),
+                    admission,
+                    reviewed,
+                    trial,
                 );
             }
             InstallationClaimTrial::MissingApprovalProof => {
@@ -4876,18 +4964,22 @@ mod tests {
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    fn exercise_revocation_during_installation_signer(
+    fn exercise_installation_signer_reply_denial(
         backend: &SqliteStateBackend,
         request: &crate::dispatch_reservation::DispatchReservationRequest,
         admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
         reviewed: crate::provider_comment_transport::installation_exchange::ReviewedInstallation<
             '_,
         >,
+        revoke: bool,
     ) {
         use super::super::dispatch_reservation_store::InstallationIssuanceDisposition::Fresh;
         use crate::provider_comment_transport::installation_signer_channel::InstallationSignerChannel;
         use std::io::{Read, Write};
         use std::os::unix::net::UnixStream;
+        backend
+            .enable_installation_signer_admission_store()
+            .expect("V16");
         let Fresh(claim) = backend
             .claim_installation_exchange(request, admission, reviewed)
             .expect("fresh claim")
@@ -4900,7 +4992,7 @@ mod tests {
                 let mut request = Vec::new();
                 peer.read_to_end(&mut request).expect("one claim frame");
                 let frame: serde_json::Value = serde_json::from_slice(&request[4..]).expect("claim payload");
-                backend.revoke_live_sandbox_grant(admission.grant_id).expect("revoke while peer is responding");
+                if revoke { backend.revoke_live_sandbox_grant(admission.grant_id).expect("revoke while peer is responding"); }
                 let now = Timestamp::now_utc();
                 let response = serde_json::to_vec(&serde_json::json!({
                     "version": 1, "claim": frame["claim"], "scope": frame["scope"],
@@ -4917,14 +5009,188 @@ mod tests {
                 reviewed,
                 claim,
                 InstallationSignerChannel::from_fixture_stream(client),
-                |_, _| panic!("revoked grant must stop before provider exchange"),
+                |_, _| panic!("unadmitted assertion must stop before provider exchange"),
             );
             worker.join().expect("fixture signer");
             let Err(error) = result else {
                 panic!("revocation must reject the exchange");
             };
-            assert_eq!(error.code(), "live_sandbox_continuation.storage_denied");
+            assert_eq!(
+                error.code(),
+                if revoke {
+                    "live_sandbox_continuation.storage_denied"
+                } else {
+                    "dispatch_reservation.attempt_not_dispatchable"
+                }
+            );
         });
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[allow(clippy::too_many_lines)]
+    fn exercise_installation_signer_admission(
+        backend: &SqliteStateBackend,
+        path: &std::path::Path,
+        request: &crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        reviewed: crate::provider_comment_transport::installation_exchange::ReviewedInstallation<
+            '_,
+        >,
+        trial: InstallationClaimTrial,
+    ) {
+        use super::super::dispatch_reservation_store::InstallationIssuanceDisposition::Fresh;
+        use crate::provider_comment_transport::installation_signer_channel::{
+            InstallationSignerChannel, InstallationSignerReceiver,
+            ReceivedInstallationSignerRequest,
+        };
+        use std::os::unix::net::UnixStream;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        backend
+            .enable_installation_signer_admission_store()
+            .expect("V16");
+        let Fresh(claim) = backend
+            .claim_installation_exchange(request, admission, reviewed)
+            .expect("fresh claim")
+        else {
+            panic!("missing right");
+        };
+        let connection = backend.existing_connection().expect("fixture connection");
+        let (payload, claim_hash): (String, String) = connection.query_row(
+            "SELECT payload,payload_hash FROM installation_issuance_claims WHERE operation_id=?1",
+            [request.operation_id.as_str()], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).expect("exact fixture claim");
+        let payload: serde_json::Value = serde_json::from_str(&payload).expect("claim payload");
+        let wire = serde_json::json!({"version":1,"operation":request.operation_id.as_str(),"claim":claim_hash,"scope":payload["scope"],"deadline":reviewed.deadline});
+        let received: ReceivedInstallationSignerRequest =
+            serde_json::from_value(wire.clone()).expect("wire request");
+        for (field, value) in [
+            (
+                "scope",
+                serde_json::json!(SpecContentHash::from_text("wrong scope")),
+            ),
+            (
+                "claim",
+                serde_json::json!(SpecContentHash::from_text("wrong claim")),
+            ),
+            ("version", serde_json::json!(2)),
+        ] {
+            let mut altered = wire.clone();
+            altered[field] = value;
+            let altered = serde_json::from_value(altered).expect("altered request");
+            assert!(backend
+                .admit_installation_signer_request(request, admission, reviewed, &altered)
+                .is_err());
+        }
+        let count = || {
+            connection.query_row(
+            "SELECT COUNT(*) FROM installation_issuance_claims WHERE signer_admission IS NOT NULL", [], |row| row.get::<_, u32>(0),
+        ).expect("admission count")
+        };
+        assert_eq!(count(), 0);
+        match trial {
+            InstallationClaimTrial::SignerAdmitted => {
+                let (client, peer) = UnixStream::pair().expect("fixture pair");
+                let signs = AtomicUsize::new(0);
+                std::thread::scope(|threads| {
+                    let worker = threads.spawn(|| {
+                        InstallationSignerReceiver::from_fixture_stream(peer).serve_once(
+                            |wire| {
+                                backend.admit_installation_signer_request(
+                                    request, admission, reviewed, wire,
+                                )
+                            },
+                            |_| {
+                                signs.fetch_add(1, Ordering::Relaxed);
+                                Some((
+                                    "fixture-header.fixture-payload.fixture-signature".to_owned(),
+                                    Timestamp::from_offset_date_time(
+                                        Timestamp::now_utc().as_offset_date_time()
+                                            + time::Duration::seconds(30),
+                                    ),
+                                ))
+                            },
+                        )
+                    });
+                    let mut exchanges = 0;
+                    assert!(backend
+                        .exchange_with_installation_signer_using(
+                            request,
+                            admission,
+                            reviewed,
+                            claim,
+                            InstallationSignerChannel::from_fixture_stream(client),
+                            |_, _| {
+                                exchanges += 1;
+                                None
+                            },
+                        )
+                        .expect("fixture exchange")
+                        .is_none());
+                    worker
+                        .join()
+                        .expect("receiver worker")
+                        .expect("fixture reply");
+                    assert_eq!(exchanges, 1);
+                });
+                assert_eq!(signs.load(Ordering::Relaxed), 1);
+            }
+            InstallationClaimTrial::SignerAdmissionCommitLoss => {
+                for fail_after_commit in [false, true] {
+                    assert!(backend
+                        .admit_installation_signer_request_with_fault(
+                            request,
+                            admission,
+                            reviewed,
+                            &received,
+                            |committed| {
+                                if committed == fail_after_commit {
+                                    Err(WorkflowOsError::security(
+                                        "test.signer_interrupted",
+                                        "signer interrupted",
+                                    ))
+                                } else {
+                                    Ok(())
+                                }
+                            }
+                        )
+                        .is_err());
+                    assert_eq!(count(), u32::from(fail_after_commit));
+                }
+            }
+            InstallationClaimTrial::SignerAdmissionContended => {
+                std::thread::scope(|threads| {
+                    let one = threads.spawn(|| {
+                        backend.admit_installation_signer_request(
+                            request, admission, reviewed, &received,
+                        )
+                    });
+                    let two = threads.spawn(|| {
+                        backend.admit_installation_signer_request(
+                            request, admission, reviewed, &received,
+                        )
+                    });
+                    assert_eq!(
+                        u8::from(one.join().expect("first signer").is_ok())
+                            + u8::from(two.join().expect("second signer").is_ok()),
+                        1
+                    );
+                });
+            }
+            _ => unreachable!("only signer admission trials use this helper"),
+        }
+        assert_eq!(count(), 1);
+        let reopened = SqliteStateBackend::open(path).expect("reopen admission");
+        assert!(reopened
+            .admit_installation_signer_request(request, admission, reviewed, &received)
+            .is_err());
+        let stored: String = connection
+            .query_row(
+                "SELECT signer_admission FROM installation_issuance_claims",
+                [],
+                |row| row.get(0),
+            )
+            .expect("admission metadata");
+        assert!(!stored.contains("fixture-signature"));
     }
 
     fn installation_fixture_send_time(

@@ -1158,6 +1158,29 @@ independently validate the exact claim, and keep the key outside Workflow OS
 and both harnesses. No service, account, public route or live trial is admitted
 by this client implementation.
 
+### Consume Signer Admission Before A Reply
+
+The private receiver checks its own and the exchange peer's configured UIDs
+before reading a frame. It accepts one bounded request and passes only the
+operation, claim and scope commitments, and deadline to the admission check.
+The fixture composes that check with trusted Core inputs, not values or
+principal secrets supplied on the socket. Core revalidates current authority
+and commits a payload-free admission in explicitly enabled SQLite V16 before
+the callback receives its one-shot permit.
+
+Concurrent or restarted receivers cannot acquire a second permit. Failure
+after admission commit leaves the claim uncertain even if no assertion was
+returned. A matching socket response cannot enter the provider exchange unless
+Core also reads the exact durable admission and verifies that the assertion's
+reported issuance follows it. No assertion is stored in the admission.
+
+Fixtures exercise the reciprocal protocol and its durable gate without a key
+or provider access. They do not prove deployed account isolation, a custody
+boundary for the signer key, or a live provider result. A deployment still
+requires a protected way for the isolated signer to obtain the exact Core
+decision without sharing harness authority or giving the signer general access
+to kernel state.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
