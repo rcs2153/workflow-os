@@ -27,8 +27,9 @@ use crate::provider_comment_observation::{
 #[cfg(test)]
 use crate::provider_comment_transport::PreparedGitHubCommentCreation;
 use crate::provider_comment_transport::{
-    fixed_comment_observer_commitment, BoundCommentObservation, GitHubCommentCreationTransport,
-    StoredGitHubCommentObservation, VerifiedGitHubCommentObservation,
+    fixed_comment_exchange_commitment, fixed_comment_observer_commitment, BoundCommentObservation,
+    GitHubCommentCreationTransport, StoredGitHubCommentObservation,
+    VerifiedGitHubCommentObservation,
 };
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
@@ -283,13 +284,18 @@ impl SqliteStateBackend {
         let adapter = transport
             .observation_adapter_commitment()
             .ok_or_else(not_dispatchable)?;
-        self.with_reserved_comment_context(operation, action, &adapter, |reservation, expected| {
-            transport.observe_bound_comment(reservation, expected, timestamp_bounds, || {
-                continuity_store::observe_continuity_trusted_time()
-                    .ok()
-                    .map(|time| time.observed_at())
-            })
-        })
+        self.with_reserved_comment_context_for_adapters(
+            operation,
+            action,
+            &[adapter, fixed_comment_exchange_commitment()],
+            |reservation, expected| {
+                transport.observe_bound_comment(reservation, expected, timestamp_bounds, || {
+                    continuity_store::observe_continuity_trusted_time()
+                        .ok()
+                        .map(|time| time.observed_at())
+                })
+            },
+        )
     }
 
     pub(super) fn with_reserved_comment_context<T>(
@@ -299,11 +305,26 @@ impl SqliteStateBackend {
         adapter_commitment: &SpecContentHash,
         observe: impl FnOnce(&SpecContentHash, &ExpectedComment<'_>) -> T,
     ) -> Result<T, WorkflowOsError> {
+        self.with_reserved_comment_context_for_adapters(
+            operation,
+            action,
+            std::slice::from_ref(adapter_commitment),
+            observe,
+        )
+    }
+
+    fn with_reserved_comment_context_for_adapters<T>(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        allowed_adapters: &[SpecContentHash],
+        observe: impl FnOnce(&SpecContentHash, &ExpectedComment<'_>) -> T,
+    ) -> Result<T, WorkflowOsError> {
         let mut connection = self.existing_read_only_connection()?;
         let tx = connection
             .transaction()
             .map_err(|_| storage_error("begin_failed"))?;
-        let context = read_reserved_comment_context(&tx, operation, action, adapter_commitment)?;
+        let context = read_reserved_comment_context(&tx, operation, action, allowed_adapters)?;
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
         Ok(observe(&context.reservation, &context.expected(action)))
     }
@@ -1007,14 +1028,14 @@ fn read_reserved_comment_context(
     tx: &rusqlite::Transaction<'_>,
     operation: &DispatchReservationOperationId,
     action: GitHubCommentContinuationAction<'_>,
-    adapter_commitment: &SpecContentHash,
+    allowed_adapters: &[SpecContentHash],
 ) -> Result<ReservedCommentContext, WorkflowOsError> {
     let invocation = action.commitment()?;
     let admission = read_live_recovery_admission(tx, operation, action.run)?;
     let witness = admission.witness.as_ref().ok_or_else(not_dispatchable)?;
     let deadline = witness.creation_deadline.ok_or_else(not_dispatchable)?;
     if admission.event.invocation_commitment() != &invocation
-        || &witness.provider.adapter_commitment != adapter_commitment
+        || !allowed_adapters.contains(&witness.provider.adapter_commitment)
         || admission.committed_at >= deadline
     {
         return Err(not_dispatchable());
@@ -1038,7 +1059,15 @@ fn durable_comment_context(
     if super::validate_operational_schema(tx)? != super::LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION {
         return Err(not_dispatchable());
     }
-    read_reserved_comment_context(tx, operation, action, &fixed_comment_observer_commitment())
+    read_reserved_comment_context(
+        tx,
+        operation,
+        action,
+        &[
+            fixed_comment_observer_commitment(),
+            fixed_comment_exchange_commitment(),
+        ],
+    )
 }
 
 fn comment_observation_payload(

@@ -18,6 +18,9 @@ use crate::{
 };
 
 const GITHUB_ORIGIN: &str = "https://api.github.com";
+const GITHUB_API_VERSION: &str = "2022-11-28";
+const CONNECT_SECONDS: u64 = 5;
+const REQUEST_SECONDS: u64 = 15;
 const MAX_IDENTITY_RESPONSE_BYTES: usize = 128 * 1024;
 const MAX_COMMENT_PAGE_BYTES: usize = 512 * 1024;
 const COMMENTS_PER_PAGE: usize = MAX_COMMENTS / MAX_PAGES;
@@ -153,6 +156,18 @@ pub(crate) fn fixed_comment_observer_commitment() -> SpecContentHash {
     )
 }
 
+pub(crate) fn fixed_comment_exchange_commitment() -> SpecContentHash {
+    SpecContentHash::from_text(&format!(
+        "workflow-os/github-comment-exchange/v1\0{GITHUB_ORIGIN}\0{GITHUB_API_VERSION}\0{}\0POST:issue-comment:raw-json\0connect={CONNECT_SECONDS}\0request={REQUEST_SECONDS}\0response={MAX_CREATION_RESPONSE_BYTES}\0no-redirect-proxy-reuse",
+        fixed_comment_observer_commitment(),
+    ))
+}
+
+#[cfg(test)]
+pub(crate) fn loopback_comment_exchange_commitment() -> SpecContentHash {
+    SpecContentHash::from_text("workflow-os/github-comment-exchange/loopback-fixture/v1")
+}
+
 fn comment_observation_context(expected: &ExpectedComment<'_>) -> Option<SpecContentHash> {
     serde_json::to_vec(&(
         "workflow-os/github-comment-observation-context/v1",
@@ -178,8 +193,8 @@ impl<'a> GitHubCommentCreationTransport<'a> {
                 .redirects(0)
                 .max_idle_connections(0)
                 .max_idle_connections_per_host(0)
-                .timeout_connect(Duration::from_secs(5))
-                .timeout(Duration::from_secs(15))
+                .timeout_connect(Duration::from_secs(CONNECT_SECONDS))
+                .timeout(Duration::from_secs(REQUEST_SECONDS))
                 .build(),
             auth,
         }
@@ -190,13 +205,44 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         target: &GitHubPullRequestCommentTarget,
         expected: &LiveSandboxProviderBinding,
     ) -> Option<PreparedGitHubCommentCreation<'a>> {
-        self.verify_target(target, expected.repository_id, expected.author_id)?;
+        let adapter_commitment = self.creation_adapter_commitment()?;
+        if adapter_commitment != expected.adapter_commitment {
+            return None;
+        }
+        let (repository_id, author_id) =
+            self.verify_target(target, expected.repository_id, expected.author_id)?;
         Some(PreparedGitHubCommentCreation {
             transport: self,
             path: comment_path(target),
             target: target.clone(),
-            binding: expected.clone(),
+            binding: LiveSandboxProviderBinding {
+                repository_id,
+                author_id,
+                adapter_commitment,
+            },
         })
+    }
+
+    fn creation_adapter_commitment(&self) -> Option<SpecContentHash> {
+        if self.origin == GITHUB_ORIGIN {
+            return Some(fixed_comment_exchange_commitment());
+        }
+        #[cfg(test)]
+        {
+            let origin = Url::parse(&self.origin).ok()?;
+            if origin.scheme() == "http"
+                && origin.host_str() == Some("127.0.0.1")
+                && origin.port().is_some()
+                && origin.username().is_empty()
+                && origin.password().is_none()
+                && origin.path() == "/"
+                && origin.query().is_none()
+                && origin.fragment().is_none()
+            {
+                return Some(loopback_comment_exchange_commitment());
+            }
+        }
+        None
     }
 
     fn verify_target(
@@ -204,7 +250,7 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         target: &GitHubPullRequestCommentTarget,
         repository_id: NonZeroU64,
         author_id: NonZeroU64,
-    ) -> Option<()> {
+    ) -> Option<(NonZeroU64, NonZeroU64)> {
         self.auth.validate().ok()?;
         target.validate().ok()?;
         let full_name = format!("{}/{}", target.owner(), target.repository());
@@ -227,7 +273,7 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         {
             return None;
         }
-        Some(())
+        Some((repository.id, author.id))
     }
 
     /// Reads only the reservation's target. A provider snapshot or acceptance
@@ -426,7 +472,7 @@ impl<'a> GitHubCommentCreationTransport<'a> {
             )
             .set("Accept", "application/vnd.github+json")
             .set("User-Agent", "workflow-os-comment-sandbox")
-            .set("X-GitHub-Api-Version", "2022-11-28")
+            .set("X-GitHub-Api-Version", GITHUB_API_VERSION)
     }
 
     fn read_identity<T: serde::de::DeserializeOwned>(&self, path: &str) -> Option<T> {
@@ -579,6 +625,13 @@ pub(crate) mod tests {
     }
 
     fn exchange(replies: &[Reply<'_>]) -> Option<CreatedCommentResponse> {
+        exchange_with_binding(replies, loopback_comment_exchange_commitment())
+    }
+
+    fn exchange_with_binding(
+        replies: &[Reply<'_>],
+        adapter_commitment: SpecContentHash,
+    ) -> Option<CreatedCommentResponse> {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).expect("loopback");
         listener
             .set_nonblocking(true)
@@ -588,14 +641,12 @@ pub(crate) mod tests {
             listener.local_addr().expect("loopback address")
         );
         thread::scope(|scope| {
-            let server = scope.spawn(move || {
+            let server = scope.spawn(|| {
                 for reply in replies {
                     if let Some(body) = serve(&listener, reply) {
                         assert_eq!(body, MARKED_BODY);
                     }
                 }
-                thread::sleep(Duration::from_millis(100));
-                assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock), "unexpected extra HTTP request");
             });
             let auth = GitHubPullRequestCommentProviderAuth::new("synthetic-only", None)
                 .expect("fixture auth");
@@ -604,7 +655,7 @@ pub(crate) mod tests {
             let binding = LiveSandboxProviderBinding {
                 repository_id: NonZeroU64::new(11).expect("repository id"),
                 author_id: NonZeroU64::new(22).expect("author id"),
-                adapter_commitment: crate::SpecContentHash::from_text("loopback fixture"),
+                adapter_commitment,
             };
             let result = GitHubCommentCreationTransport {
                 origin,
@@ -613,6 +664,10 @@ pub(crate) mod tests {
             .prepare(&target, &binding)
             .and_then(|prepared| prepared.send(MARKED_BODY));
             server.join().expect("fixture server");
+            assert!(
+                matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+                "unexpected extra HTTP request"
+            );
             result
         })
     }
@@ -1043,6 +1098,21 @@ pub(crate) mod tests {
         assert_eq!(result.status, 201);
         assert_eq!(result.repository_id.get(), 11);
         assert_eq!(result.json, body);
+    }
+
+    #[test]
+    fn comment_creation_adapter_substitution_rejects_before_http() {
+        let creation = fixed_comment_exchange_commitment();
+        let read_only = fixed_comment_observer_commitment();
+        assert_ne!(creation, read_only);
+        assert_ne!(creation, loopback_comment_exchange_commitment());
+        for wrong in [
+            creation,
+            read_only,
+            SpecContentHash::from_text("other adapter"),
+        ] {
+            assert!(exchange_with_binding(&[], wrong).is_none());
+        }
     }
 
     #[test]

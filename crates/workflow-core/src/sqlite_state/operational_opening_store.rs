@@ -3518,6 +3518,7 @@ mod tests {
     #[test]
     fn live_comment_observation_reopens_without_completing_or_reauthorizing() {
         exercise_live_grant_reservation(LiveGrantTrial::DurableObservation);
+        exercise_live_grant_reservation(LiveGrantTrial::SuiteObservation);
     }
 
     #[test]
@@ -3965,6 +3966,7 @@ mod tests {
         LostAcknowledgement,
         PreparedLoopbackLoss,
         DurableObservation,
+        SuiteObservation,
         ExpiredBeforeSend,
         RevokedBeforeSend(SendRevocation),
         VerifiedResponse,
@@ -4101,6 +4103,7 @@ mod tests {
                 observed_at,
                 id,
                 replacement,
+                admission.adapter_commitment,
             )
         };
         assert!(backend
@@ -4208,25 +4211,19 @@ mod tests {
         observed_at: Timestamp,
         id: u64,
         replacement: Option<SpecContentHash>,
+        adapter: &SpecContentHash,
     ) -> crate::provider_comment_transport::VerifiedGitHubCommentObservation {
-        use crate::provider_comment_transport::{
-            fixed_comment_observer_commitment, VerifiedGitHubCommentObservation,
-        };
+        use crate::provider_comment_transport::VerifiedGitHubCommentObservation;
         backend
-            .with_reserved_comment_context(
-                operation,
-                action,
-                &fixed_comment_observer_commitment(),
-                |reservation, expected| {
-                    VerifiedGitHubCommentObservation::test_witness(
-                        replacement.unwrap_or_else(|| reservation.clone()),
-                        expected,
-                        std::num::NonZeroU64::new(id).expect("comment ID"),
-                        observed_at,
-                    )
-                    .expect("accepted-witness test stand-in")
-                },
-            )
+            .with_reserved_comment_context(operation, action, adapter, |reservation, expected| {
+                VerifiedGitHubCommentObservation::test_witness(
+                    replacement.unwrap_or_else(|| reservation.clone()),
+                    expected,
+                    std::num::NonZeroU64::new(id).expect("comment ID"),
+                    observed_at,
+                )
+                .expect("accepted-witness test stand-in")
+            })
             .expect("historical context")
     }
 
@@ -4246,29 +4243,36 @@ mod tests {
             GitHubPullRequestCommentProviderLookupObservation as Comment,
             GitHubPullRequestCommentProviderLookupObservationDefinition as CommentDefinition,
         };
-        let dispatch = |store: &SqliteStateBackend, binding, expect_post| {
+        let dispatch = |store: &SqliteStateBackend, proposed, expect_post| {
             with_lost_acknowledgement_server(provider, expect_post, |transport| {
                 let prepared = transport
-                    .prepare(action.target, binding)
+                    .prepare(action.target, provider)
                     .expect("preflight");
-                store.dispatch_prepared_loopback_comment(request(), admission, action, prepared)
+                store.dispatch_prepared_loopback_comment(request(), admission, proposed, prepared)
             })
         };
-        let mut substituted = provider.clone();
-        substituted.adapter_commitment = SpecContentHash::from_text("wrong prepared adapter");
-        let (rejected, body) = dispatch(backend, &substituted, false);
+        let other_target = crate::GitHubPullRequestCommentTarget::new("example", "sandbox", 8)
+            .expect("other target");
+        let (rejected, body) = dispatch(
+            backend,
+            crate::provider_write::GitHubCommentContinuationAction {
+                target: &other_target,
+                ..action
+            },
+            false,
+        );
         assert!(rejected.is_err());
         assert!(body.is_none());
 
         let operation = request().operation_id;
-        let (lost, body) = dispatch(backend, provider, true);
+        let (lost, body) = dispatch(backend, action, true);
         assert_eq!(
             lost.expect("ambiguous response"),
             LiveCommentDispatchPosture::RecoveryOnly
         );
         let body = body.expect("one POST received before response loss");
         let reopened = SqliteStateBackend::open(path).expect("restart after response loss");
-        let (retry, second) = dispatch(&reopened, provider, false);
+        let (retry, second) = dispatch(&reopened, action, false);
         assert_eq!(
             retry.expect("exact retry"),
             LiveCommentDispatchPosture::RecoveryOnly
@@ -5125,10 +5129,17 @@ mod tests {
                     .open_live_sandbox_attempt(opening(&cursor, &observed), facts)
                     .is_err());
                 assert!(fixture.backend.record_live_sandbox_policy(facts).is_err());
-                let adapter_commitment = if matches!(trial, LiveGrantTrial::DurableObservation) {
-                    crate::provider_comment_transport::fixed_comment_observer_commitment()
-                } else {
-                    SpecContentHash::from_text("trusted synthetic adapter")
+                let adapter_commitment = match trial {
+                    LiveGrantTrial::DurableObservation => {
+                        crate::provider_comment_transport::fixed_comment_observer_commitment()
+                    }
+                    LiveGrantTrial::SuiteObservation => {
+                        crate::provider_comment_transport::fixed_comment_exchange_commitment()
+                    }
+                    LiveGrantTrial::PreparedLoopbackLoss => {
+                        crate::provider_comment_transport::loopback_comment_exchange_commitment()
+                    }
+                    _ => SpecContentHash::from_text("trusted synthetic adapter"),
                 };
                 let provider_binding = || LiveSandboxProviderBinding {
                     repository_id: std::num::NonZeroU64::new(123).expect("provider repository id"),
@@ -5526,7 +5537,7 @@ mod tests {
                             &provider_binding(),
                         );
                     }
-                    LiveGrantTrial::DurableObservation => {
+                    LiveGrantTrial::DurableObservation | LiveGrantTrial::SuiteObservation => {
                         exercise_durable_comment_observation(
                             &backend,
                             &fixture.path,

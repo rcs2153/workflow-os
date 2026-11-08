@@ -705,6 +705,58 @@ decoded back into a verifier witness. It records a historical current match,
 not provider creation or ongoing presence. It does not complete the SideEffect,
 append a completion event, or permit a resend. No live caller is enabled.
 
+### Maintainer Admission Recheck At `d5bb32f8`
+
+**Accept the merged local safeguards; do not admit a live trial.** The final
+SQLite check rejects visible revocation before the injected sender. The
+bounded reader, private witness, and opt-in V14 store preserve the distinction
+between a current match and a completed external effect. Their tests establish
+local behavior, not live transport behavior or independent assurance.
+
+1. **The write adapter still has no independently derived identity.** The
+   prepared creation path carries a copy of the expected binding, while the
+   HTTP reader derives its own versioned commitment. The registry and witness
+   currently carry one adapter commitment. Before composing production
+   dispatch, bind the read and creation configurations explicitly and prove
+   that a substituted implementation, target, or fixture origin cannot reach
+   POST. The production path must consume an exact reservation, not promote
+   the test-only callback that routes responses into synthetic proof.
+2. **Observation time inputs still need a trusted source.** The private reader
+   accepts supplied correction bounds; a caller's zero-uncertainty value is
+   not evidence of provider clock behavior. Bind reviewed bounds and their
+   provenance to the exact operator run. Missing or contradictory bounds must
+   leave the result unresolved. Similarly, the local revocation read is not
+   atomic with HTTP; carry the approved deadline to the transport handoff and
+   do not claim provider-side deadline or cancellation enforcement.
+3. **A real trial still needs a separately approved operating boundary.**
+   Verify repository-limited provider access for the exact disposable target,
+   not just account identity or a declared scope summary. Review the bounded
+   operator entry point, the distinction between creation acknowledgement and
+   historical observation, and the no-resend behavior after interruption.
+   Require a distinct reviewer and explicit trial approval before any live
+   provider request. A persisted current observation alone must never advance
+   the run as if a creation acknowledgement had been verified.
+
+Next, derive and compare the creation transport identity against the
+registration and reservation, retaining the fixed reader's separate
+provenance. Prove substitutions on loopback before adding an operator entry
+point. Do not enable live dispatch as part of that change.
+
+### Bind The Creation Adapter To The Reservation
+
+The private creation transport derives a versioned adapter commitment from
+the fixed GitHub origin and creation configuration, together with the fixed
+reader's commitment. Preparation compares that identity against the reserved
+binding before HTTP and rebuilds the prepared binding from verified target
+and author identities. Existing reader-only reservations remain valid for
+observation and its durable evidence, but do not authorize creation. The
+test-only loopback transport derives a distinct commitment and cannot produce
+a production provider witness.
+
+This does not add an operator command, grant GitHub access, or enable live
+dispatch. Trusted observation bounds, the final transport deadline, and
+independent trial approval remain separate requirements.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
