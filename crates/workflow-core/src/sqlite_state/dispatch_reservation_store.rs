@@ -24,6 +24,16 @@ use crate::provider_comment_observation::{
     verify_current_comment, CommentEnumeration, CreatedCommentResponse, CurrentCommentPosture,
     ExpectedComment, MARKER_NAMESPACE,
 };
+
+mod observation_journal;
+
+const fn installation_preparation_schema(version: u32) -> bool {
+    matches!(
+        version,
+        super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | super::INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION
+    )
+}
 use crate::provider_comment_transport::installation_exchange::{
     installation_comment_adapter_commitment, installation_target_revision,
     InstallationCommentTransport, InstallationCreationContext, ReviewedInstallation,
@@ -88,6 +98,41 @@ struct InstallationSendPreparationRecord {
     body_commitment: SpecContentHash,
     clock: TrustedTimeObservation,
     deadline: Timestamp,
+}
+
+#[derive(Eq, PartialEq)]
+struct InstallationInventoryContext {
+    record: InstallationSendPreparationRecord,
+    provider: LiveSandboxProviderBinding,
+}
+
+type CollectedInstallationInventory = (
+    InstallationInventoryContext,
+    crate::provider_comment_transport::VerifiedInventoryTraversal,
+    std::num::NonZeroU64,
+);
+
+fn installation_inventory_context(
+    tx: &rusqlite::Transaction<'_>,
+    operation: &DispatchReservationOperationId,
+    action: GitHubCommentContinuationAction<'_>,
+    historical: bool,
+) -> Result<Option<InstallationInventoryContext>, WorkflowOsError> {
+    if !installation_preparation_schema(super::validate_operational_schema(tx)?) {
+        return Ok(None);
+    }
+    let admission = read_live_recovery_admission(tx, operation, action.run)?;
+    match verify_comment_disposition(tx, &admission, action.run, action.side_effect)? {
+        None => {}
+        Some(LiveCommentProofKind::InstallationCreation) if historical => {}
+        Some(_) => return Err(not_dispatchable()),
+    }
+    let witness = admission.witness.as_ref().ok_or_else(corrupt)?;
+    let record = read_installation_send_preparation_record(tx, operation, action, &admission)?;
+    Ok(record.map(|record| InstallationInventoryContext {
+        record,
+        provider: witness.provider.clone(),
+    }))
 }
 
 fn installation_send_preparation_payload(
@@ -792,9 +837,7 @@ impl SqliteStateBackend {
         let tx = connection
             .transaction()
             .map_err(|_| storage_error("begin_failed"))?;
-        if super::validate_operational_schema(&tx)?
-            != super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
-        {
+        if !installation_preparation_schema(super::validate_operational_schema(&tx)?) {
             return Ok(None);
         }
         let admission = read_live_recovery_admission(&tx, operation, action.run)?;
@@ -835,37 +878,57 @@ impl SqliteStateBackend {
         candidate: &crate::provider_comment_transport::installation_notification::CreationCandidate,
         reader: &crate::provider_comment_transport::IndependentCommentInventory<'_>,
     ) -> Result<CurrentCommentPosture, WorkflowOsError> {
-        use crate::provider_comment_transport::PreparedCommentInventory;
-        let load_preparation = || {
-            let mut connection = self.existing_read_only_connection()?;
-            let tx = connection
-                .transaction()
-                .map_err(|_| storage_error("begin_failed"))?;
-            if super::validate_operational_schema(&tx)?
-                != super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
-            {
-                return Ok(None);
-            }
-            let admission = read_live_recovery_admission(&tx, operation, action.run)?;
-            verify_live_recovery_state(&tx, &admission, action.run, action.side_effect)?;
-            let witness = admission.witness.as_ref().ok_or_else(corrupt)?;
-            let record =
-                read_installation_send_preparation_record(&tx, operation, action, &admission)?;
-            tx.commit().map_err(|_| storage_error("commit_failed"))?;
-            Ok::<_, WorkflowOsError>(record.map(|record| (record, witness.provider.clone())))
-        };
-        let Some((record, provider)) = load_preparation()? else {
+        let Some((before, traversal, _)) =
+            self.collect_prepared_installation_inventory(operation, action, candidate, reader)?
+        else {
             return Ok(CurrentCommentPosture::Unresolved);
         };
+        if self
+            .read_installation_inventory_context(operation, action)?
+            .as_ref()
+            == Some(&before)
+        {
+            Ok(traversal.posture)
+        } else {
+            Ok(CurrentCommentPosture::Unresolved)
+        }
+    }
+
+    fn read_installation_inventory_context(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+    ) -> Result<Option<InstallationInventoryContext>, WorkflowOsError> {
+        let mut connection = self.existing_read_only_connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|_| storage_error("begin_failed"))?;
+        let context = installation_inventory_context(&tx, operation, action, false)?;
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(context)
+    }
+
+    fn collect_prepared_installation_inventory(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        candidate: &crate::provider_comment_transport::installation_notification::CreationCandidate,
+        reader: &crate::provider_comment_transport::IndependentCommentInventory<'_>,
+    ) -> Result<Option<CollectedInstallationInventory>, WorkflowOsError> {
+        use crate::provider_comment_transport::PreparedCommentInventory;
+        let Some(context) = self.read_installation_inventory_context(operation, action)? else {
+            return Ok(None);
+        };
+        let InstallationInventoryContext { record, provider } = &context;
         let Some(comment_id) = candidate.prepared_comment_id(
             &record.reservation,
             &record.body_commitment,
             &record.marker_commitment,
         ) else {
-            return Ok(CurrentCommentPosture::Unresolved);
+            return Ok(None);
         };
         // Do not hold the SQLite transaction open across provider I/O.
-        let result = reader.observe(&PreparedCommentInventory {
+        let traversal = reader.observe(&PreparedCommentInventory {
             target: action.target,
             repository: provider.repository_id,
             writer: provider.author_id,
@@ -874,14 +937,7 @@ impl SqliteStateBackend {
             body: &record.body_commitment,
             marker: &record.marker_commitment,
         });
-        if load_preparation()?
-            .as_ref()
-            .is_some_and(|(after, binding)| after == &record && binding == &provider)
-        {
-            Ok(result)
-        } else {
-            Ok(CurrentCommentPosture::Unresolved)
-        }
+        Ok(traversal.map(|value| (context, value, comment_id)))
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1603,8 +1659,9 @@ impl SqliteStateBackend {
             .ok_or_else(corrupt)?;
         let reservation = &binding.reservation_commitment;
         if fixture
-            || super::validate_operational_schema(&self.existing_read_only_connection()?)?
-                != super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            || !installation_preparation_schema(super::validate_operational_schema(
+                &self.existing_read_only_connection()?,
+            )?)
         {
             return self
                 .checked_comment_send(operation, action, admission, reservation, observe)?
@@ -1624,9 +1681,7 @@ impl SqliteStateBackend {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| storage_error("begin_failed"))?;
-        if super::validate_operational_schema(&tx)?
-            != super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
-        {
+        if !installation_preparation_schema(super::validate_operational_schema(&tx)?) {
             return Err(not_dispatchable());
         }
         let time = observe()?;
@@ -2130,7 +2185,7 @@ impl SqliteStateBackend {
                 let version: u32 = transaction
                     .pragma_query_value(None, "user_version", |row| row.get(0))
                     .map_err(|_| corrupt())?;
-                (version == super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION).then_some(1)
+                installation_preparation_schema(version).then_some(1)
             } else {
                 None
             };
@@ -2371,6 +2426,7 @@ fn read_installation_claim_by_key(
         super::INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
             | super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
             | super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | super::INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION
     ) {
         return Err(not_dispatchable());
     }
@@ -2429,6 +2485,7 @@ const fn installation_signer_schema(version: u32) -> bool {
         version,
         super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
             | super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | super::INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION
     )
 }
 
@@ -2549,6 +2606,7 @@ fn inspect_unreserved_installation_claim(
         super::INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
             | super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
             | super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | super::INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION
     ) {
         return Err(not_dispatchable());
     }
@@ -2800,6 +2858,7 @@ fn durable_comment_context(
             | super::INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
             | super::INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
             | super::INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | super::INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION
     ) {
         return Err(not_dispatchable());
     }

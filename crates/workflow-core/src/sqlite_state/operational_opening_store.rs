@@ -4282,7 +4282,24 @@ mod tests {
         reopened
             .enable_installation_send_preparation_store()
             .expect("exact V17 retry");
-        let reopened = SqliteStateBackend::open_read_only(&fixture.path).expect("read-only V17");
+        let mut connection = reopened.existing_connection().expect("V17 connection");
+        let tx = connection
+            .transaction()
+            .expect("test V18 manifest transaction");
+        tx.execute_batch(super::super::INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_V18)
+            .expect("V18 DDL");
+        assert_eq!(
+            schema_manifest_digest(&tx).expect("V18 manifest"),
+            super::super::INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_DIGEST
+        );
+        tx.rollback().expect("discard manifest transaction");
+        reopened
+            .enable_installation_observation_journal()
+            .expect("explicit V18");
+        reopened
+            .enable_installation_observation_journal()
+            .expect("exact V18 retry");
+        let reopened = SqliteStateBackend::open_read_only(&fixture.path).expect("read-only V18");
         assert_eq!(
             reopened
                 .read_events(&fixture.run_id)
@@ -4977,6 +4994,11 @@ mod tests {
             backend
                 .enable_installation_send_preparation_store()
                 .expect("explicit V17");
+            if matches!(trial, CoordinatorTrial::CorrelatedFault(_)) {
+                backend
+                    .enable_installation_observation_journal()
+                    .expect("fresh V18 reservation");
+            }
         }
         let wrong = crate::provider_write::GitHubCommentContinuationAction {
             body: "changed action",
@@ -5233,6 +5255,14 @@ mod tests {
             &body,
             &writer_scope,
         );
+        assert_installation_observation_journal(
+            backend,
+            request,
+            action,
+            &candidate,
+            &body,
+            &writer_scope,
+        );
         connection
             .execute(
                 "UPDATE installation_send_preparations SET payload_hash=?1 WHERE operation_id=?2",
@@ -5244,6 +5274,74 @@ mod tests {
             .expect("fault in disposable state");
         assert!(backend
             .inspect_prepared_installation_send_for_test(&request.operation_id, action)
+            .is_err());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn assert_installation_observation_journal(
+        backend: &SqliteStateBackend,
+        request: &crate::dispatch_reservation::DispatchReservationRequest,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        candidate: &crate::provider_comment_transport::installation_notification::CreationCandidate,
+        body: &str,
+        writer_scope: &SpecContentHash,
+    ) {
+        use crate::provider_comment_observation::CurrentCommentPosture;
+        use crate::provider_comment_transport::tests::{
+            with_independent_inventory, InventoryTrial,
+        };
+        assert!(backend
+            .inspect_installation_observation_journal(&request.operation_id, action)
+            .is_err());
+        backend
+            .enable_installation_observation_journal()
+            .expect("explicit V18 journal");
+        let reopened = SqliteStateBackend::open(&backend.database_path).expect("reopen journal");
+        let record = |trial| {
+            with_independent_inventory(trial, body, writer_scope, |reader| {
+                reopened
+                    .record_prepared_installation_inventory(
+                        &request.operation_id,
+                        action,
+                        candidate,
+                        reader,
+                    )
+                    .expect("record validated inventory")
+            })
+        };
+        let exact = record(InventoryTrial::Exact).expect("exact inventory receipt");
+        assert_eq!(record(InventoryTrial::Exact), Some(exact.clone()));
+        let conflict = record(InventoryTrial::Duplicate).expect("contradiction receipt");
+        assert_ne!(conflict, exact);
+        assert!(record(InventoryTrial::Truncated).is_none());
+        let reopened =
+            SqliteStateBackend::open_read_only(&backend.database_path).expect("read-only journal");
+        let observed = reopened
+            .inspect_installation_observation_journal(&request.operation_id, action)
+            .expect("retained observation records");
+        assert_eq!(observed.len(), 2);
+        assert!(observed.contains(&(exact, CurrentCommentPosture::ExactCurrentMatch)));
+        assert!(observed.contains(&(conflict, CurrentCommentPosture::Ambiguous)));
+        let connection = backend
+            .existing_connection()
+            .expect("disposable journal store");
+        let raw: String = connection.query_row(
+            "SELECT group_concat(payload) FROM installation_observation_journal WHERE operation_id=?1",
+            [request.operation_id.as_str()], |row| row.get(0),
+        ).expect("journal rows");
+        assert!(!raw.contains(action.body));
+        assert!(!raw.contains(crate::provider_comment_observation::MARKER_NAMESPACE));
+        connection
+            .execute(
+                "UPDATE installation_observation_journal SET payload_hash=?1 WHERE operation_id=?2",
+                params![
+                    SpecContentHash::from_text("damaged journal").as_str(),
+                    request.operation_id.as_str()
+                ],
+            )
+            .expect("inject disposable corruption");
+        assert!(reopened
+            .inspect_installation_observation_journal(&request.operation_id, action)
             .is_err());
     }
 

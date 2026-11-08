@@ -72,9 +72,17 @@ pub(crate) struct CreationCandidate {
     comment_id: NonZeroU64,
     body_commitment: SpecContentHash,
     marker_commitment: SpecContentHash,
+    receipt_commitment: SpecContentHash,
+    received_latest: Timestamp,
 }
 
 impl CreationCandidate {
+    pub(crate) const fn received_latest(&self) -> Timestamp {
+        self.received_latest
+    }
+    pub(crate) fn commitments(&self) -> (&SpecContentHash, &SpecContentHash) {
+        (&self.payload_digest, &self.receipt_commitment)
+    }
     pub(crate) fn prepared_comment_id(
         &self,
         reservation: &SpecContentHash,
@@ -149,9 +157,18 @@ pub(crate) fn verify_creation_notification(
     {
         return None;
     }
+    let receipt_bytes = receipt.signing_bytes()?;
     signature::UnparsedPublicKey::new(&signature::ED25519, receiver.attestation_key)
-        .verify(&receipt.signing_bytes()?, input.receipt_signature)
+        .verify(&receipt_bytes, input.receipt_signature)
         .ok()?;
+    let receipt_commitment = SpecContentHash::from_bytes(
+        serde_json::to_vec(&(
+            "workflow-os/verified-receiver-receipt/v1",
+            receiver.attestation_key,
+            &receipt_bytes,
+        ))
+        .ok()?,
+    );
     let mac = hmac::Key::new(hmac::HMAC_SHA256, receiver.github_hmac);
     hmac::verify(&mac, input.body, &decode_signature(input.github_signature)?).ok()?;
     let event: Notification<'_> = serde_json::from_slice(input.body).ok()?;
@@ -175,6 +192,8 @@ pub(crate) fn verify_creation_notification(
         comment_id: event.comment.id,
         body_commitment: expected.body_commitment.clone(),
         marker_commitment: expected.marker_commitment.clone(),
+        receipt_commitment,
+        received_latest: receipt.latest.observed_at(),
     })
 }
 

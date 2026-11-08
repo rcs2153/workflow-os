@@ -50,6 +50,11 @@ const LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION: u32 = 14;
 const INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION: u32 = 15;
 const INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION: u32 = 16;
 const INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION: u32 = 17;
+const INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION: u32 = 18;
+const INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_DIGEST: &str =
+    "b61aa173be395d92d7dceb783391a6e8e9a193c3043ea4196e4917f0bed8e33f";
+const INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_CHECKSUM: &str =
+    "sha256:b61aa173be395d92d7dceb783391a6e8e9a193c3043ea4196e4917f0bed8e33f";
 const INSTALLATION_SEND_PREPARATION_SCHEMA_DIGEST: &str =
     "2348391064634d590e1c61af97b2d829293db9be593efb218a677b9fdbe64824";
 const INSTALLATION_SEND_PREPARATION_SCHEMA_CHECKSUM: &str =
@@ -251,6 +256,8 @@ const INSTALLATION_SIGNER_ADMISSION_SCHEMA_V16: &str =
     include_str!("sqlite_installation_signer_admission_schema_v16.sql");
 const INSTALLATION_SEND_PREPARATION_SCHEMA_V17: &str =
     include_str!("sqlite_installation_send_preparation_schema_v17.sql");
+const INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_V18: &str =
+    include_str!("sqlite_installation_observation_journal_schema_v18.sql");
 pub(crate) const CONTINUITY_CLOCK_PROVENANCE: &str =
     "77efdb5ae4c8696d8573d816a52dce594793b1749471a98cc58a85fc8129e50f";
 pub(crate) const CONTINUITY_CLOCK_EPOCH: &str = "epoch/sqlite-local-live-state/1";
@@ -1306,7 +1313,8 @@ impl SqliteStateBackend {
             | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
             | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
             | INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
-            | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION => {
+            | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION => {
                 validate_live_authority_schema(&connection)?;
             }
             LIVE_AUTHORITY_PROOF_SCHEMA_VERSION => validate_recognized_v12_schema(&connection)?,
@@ -2401,7 +2409,8 @@ impl SqliteStateBackend {
             | LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
             | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
             | INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
-            | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION => {
+            | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION => {
                 validate_live_authority_schema(connection)
             }
             LIVE_AUTHORITY_PROOF_SCHEMA_VERSION => validate_recognized_v12_schema(connection),
@@ -4155,6 +4164,7 @@ fn validate_operational_schema(connection: &Connection) -> Result<u32, WorkflowO
             | INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
             | INSTALLATION_SIGNER_ADMISSION_SCHEMA_VERSION
             | INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION
+            | INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION
     ) {
         validate_live_authority_schema(connection)?;
     } else if version == LIVE_AUTHORITY_PREVIOUS_SCHEMA_VERSION {
@@ -4171,6 +4181,14 @@ fn validate_live_authority_schema(connection: &Connection) -> Result<(), Workflo
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|_| schema_recovery_required())?;
+    if version == INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION {
+        return validate_schema_metadata_version(
+            connection,
+            version,
+            INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_CHECKSUM,
+            INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_DIGEST,
+        );
+    }
     if version == INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION {
         return validate_schema_metadata_version(
             connection,
@@ -4283,7 +4301,7 @@ fn validate_schema_metadata_version(
             validate_continuity_security_state(connection)?;
             validate_time_window_wait_binding_columns(connection)
         }
-        Some((version, _, _)) if version > INSTALLATION_SEND_PREPARATION_SCHEMA_VERSION => {
+        Some((version, _, _)) if version > INSTALLATION_OBSERVATION_JOURNAL_SCHEMA_VERSION => {
             Err(sqlite_state_error(
                 "schema.incompatible",
                 "SQLite state schema version is not supported",
