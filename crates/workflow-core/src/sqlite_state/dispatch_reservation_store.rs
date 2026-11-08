@@ -19,8 +19,9 @@ use crate::dispatch_reservation::{
     LiveSandboxReservationWitness, ReservedAttemptDispatchCapability,
 };
 use crate::provider_comment_observation::{
-    can_encode_marked_comment, encode_marked_comment, verify_current_comment, CommentEnumeration,
-    CurrentCommentPosture, ExpectedComment, MARKER_NAMESPACE,
+    can_encode_marked_comment, encode_marked_comment, verify_created_comment_response,
+    verify_current_comment, CommentEnumeration, CreatedCommentResponse, CurrentCommentPosture,
+    ExpectedComment, MARKER_NAMESPACE,
 };
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
@@ -75,7 +76,7 @@ pub enum SyntheticSandboxRecoveryPosture {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum LiveCommentDispatchPosture {
-    Acknowledged,
+    VerifiedSyntheticResponse { comment_id: std::num::NonZeroU64 },
     RecoveryOnly,
 }
 
@@ -270,7 +271,7 @@ impl SqliteStateBackend {
         request: DispatchReservationRequest,
         admission: LiveGrantAdmission<'_>,
         action: GitHubCommentContinuationAction<'_>,
-        send: impl FnOnce(&GitHubPullRequestCommentTarget, &str) -> bool,
+        send: impl FnOnce(&GitHubPullRequestCommentTarget, &str) -> Option<CreatedCommentResponse>,
     ) -> Result<LiveCommentDispatchPosture, WorkflowOsError> {
         let invocation = action.commitment()?;
         if invocation != request.invocation_commitment
@@ -279,6 +280,7 @@ impl SqliteStateBackend {
         {
             return Err(not_dispatchable());
         }
+        let operation = request.operation_id.clone();
         let Some(capability) = self.reserve_live_sandbox_dispatch(request, admission)? else {
             return Ok(LiveCommentDispatchPosture::RecoveryOnly);
         };
@@ -289,11 +291,30 @@ impl SqliteStateBackend {
             .ok_or_else(corrupt)?;
         let marker = live_comment_marker(&invocation, &binding.reservation_commitment);
         let raw_body = encode_marked_comment(action.body, &marker).ok_or_else(corrupt)?;
-        Ok(if send(action.target, &raw_body) {
-            LiveCommentDispatchPosture::Acknowledged
-        } else {
-            LiveCommentDispatchPosture::RecoveryOnly
-        })
+        let mut connection = self.existing_read_only_connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|_| storage_error("begin_failed"))?;
+        let durable = read_live_recovery_admission(&tx, &operation, action.run)?;
+        let witness = durable.witness.ok_or_else(corrupt)?;
+        if durable.event.reservation_commitment() != &binding.reservation_commitment
+            || durable.event.invocation_commitment() != &invocation
+            || &witness.provider.adapter_commitment != admission.adapter_commitment
+        {
+            return Err(corrupt());
+        }
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+
+        let response = send(action.target, &raw_body);
+        Ok(verify_created_comment_response(
+            response.as_ref(),
+            action.target,
+            &witness.provider,
+            &raw_body,
+        )
+        .map_or(LiveCommentDispatchPosture::RecoveryOnly, |comment_id| {
+            LiveCommentDispatchPosture::VerifiedSyntheticResponse { comment_id }
+        }))
     }
 
     /// Operator-only lookup. This validates historical admission, not current

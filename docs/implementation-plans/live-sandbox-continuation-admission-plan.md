@@ -505,6 +505,20 @@ feeds the exact bytes received by the sender into the observer after reopening
 the database. This binds the attempted bytes in the synthetic path, not what
 a real external service originally accepted.
 
+### Exact Synthetic Creation Response
+
+The private dispatch no longer accepts a boolean acknowledgement. Before
+consuming a fresh grant, reservation checks the adapter commitment against
+the active registered target. Dispatch then reopens the committed witness
+read-only and checks the exact reservation and invocation before handing
+bytes to the injected sender. A synthetic response verifies only when it
+matches the [creation response contract](https://docs.github.com/en/rest/issues/comments#create-an-issue-comment):
+status `201`, a positive comment ID, exact raw body, and the expected target,
+stable repository and author. Missing or substituted responses remain
+recovery-only. Even a verified response is transient: it cannot complete a
+SideEffect, authorize a resend, or resolve a lost HTTP response. The injected
+sender and its claimed adapter commitment are not authenticated live evidence.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
