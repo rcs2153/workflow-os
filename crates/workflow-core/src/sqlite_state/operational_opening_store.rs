@@ -4368,12 +4368,19 @@ mod tests {
 
         let operation = request().operation_id;
         let reopened = SqliteStateBackend::open(path).expect("reopen scoped reservation");
-        let witness = read_fixture_reservation_witness(&reopened, &operation);
+        let record = read_fixture_reservation(&reopened, &operation);
+        let witness = record
+            .live_witness
+            .as_ref()
+            .expect("scoped reservation witness");
         assert_eq!(witness.creation_deadline, Some(provider_deadline));
         let (expected, _) = valid
             .admission_binding(reviewed, now, true)
             .expect("exact receipt");
-        assert_eq!(witness.installation_scope_commitment, Some(expected));
+        assert_eq!(
+            witness.installation_scope_commitment.as_ref(),
+            Some(&expected)
+        );
         assert_eq!(
             reopened
                 .inspect_synthetic_sandbox_recovery(
@@ -4396,12 +4403,13 @@ mod tests {
                 .expect("recovery only"),
             LiveCommentDispatchPosture::RecoveryOnly,
         );
+        assert_scoped_creation_response(path, &reopened, &operation, action, &record);
     }
 
-    fn read_fixture_reservation_witness(
+    fn read_fixture_reservation(
         backend: &SqliteStateBackend,
         operation: &crate::dispatch_reservation::DispatchReservationOperationId,
-    ) -> crate::dispatch_reservation::LiveSandboxReservationWitness {
+    ) -> crate::dispatch_reservation::DispatchReservationRecord {
         let record: String = backend
             .existing_connection()
             .expect("fixture connection")
@@ -4411,9 +4419,107 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("read reservation");
-        let record: crate::dispatch_reservation::DispatchReservationRecord =
-            serde_json::from_str(&record).expect("decode reservation");
-        record.live_witness.expect("scoped reservation witness")
+        serde_json::from_str(&record).expect("decode reservation")
+    }
+
+    fn assert_scoped_creation_response(
+        path: &std::path::Path,
+        backend: &SqliteStateBackend,
+        operation: &crate::dispatch_reservation::DispatchReservationOperationId,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+        record: &crate::dispatch_reservation::DispatchReservationRecord,
+    ) {
+        use super::super::dispatch_reservation_store::live_comment_marker;
+        use crate::provider_comment_observation::{encode_marked_comment, CreatedCommentResponse};
+        use crate::provider_comment_transport::installation_exchange::{
+            fixture_creation_proof, InstallationCreationContext,
+        };
+        use crate::SideEffectRecordStore;
+        let witness = record.live_witness.as_ref().expect("scope witness");
+        let scope = witness
+            .installation_scope_commitment
+            .as_ref()
+            .expect("scope commitment");
+        let reservation = &record.reservation_commitment;
+        let invocation = action.commitment().expect("action");
+        let marker = live_comment_marker(&invocation, reservation);
+        let body = encode_marked_comment(action.body, &marker).expect("marked comment");
+        let context = InstallationCreationContext {
+            reservation,
+            scope,
+            target: action.target,
+            provider: &witness.provider,
+            marked_body: &body,
+        };
+        let issues = format!(
+            "https://api.github.com/repos/{}/{}/issues",
+            action.target.owner(),
+            action.target.repository()
+        );
+        let response = |id| CreatedCommentResponse {
+            status: 201,
+            repository_id: witness.provider.repository_id,
+            json: serde_json::to_vec(&serde_json::json!({
+                "id": id, "body": body, "user": {"id": witness.provider.author_id},
+                "issue_url": format!("{issues}/{}", action.target.pull_request_number()),
+                "url": format!("{issues}/comments/{id}"),
+            }))
+            .expect("fixture response"),
+        };
+        let exact = fixture_creation_proof(context, &response(17)).expect("exact fixture response");
+        assert!(backend
+            .persist_installation_creation(operation, action, &exact)
+            .is_err());
+        for changed in [
+            InstallationCreationContext {
+                reservation: &SpecContentHash::from_text("other reservation"),
+                ..context
+            },
+            InstallationCreationContext {
+                scope: &SpecContentHash::from_text("other scope"),
+                ..context
+            },
+        ] {
+            let proof =
+                fixture_creation_proof(changed, &response(17)).expect("substituted fixture proof");
+            assert!(backend
+                .persist_fixture_installation_creation(operation, action, &proof)
+                .is_err());
+        }
+        let history = backend.read_events(action.run).expect("unresolved history");
+        let event = backend
+            .persist_fixture_installation_creation(operation, action, &exact)
+            .expect("persist exact fixture response");
+        let reopened = SqliteStateBackend::open(path).expect("reopen completed fixture");
+        assert_eq!(
+            reopened
+                .persist_fixture_installation_creation(operation, action, &exact)
+                .expect("replay creation proof"),
+            event
+        );
+        let conflicting =
+            fixture_creation_proof(context, &response(18)).expect("different fixture response");
+        assert!(reopened
+            .persist_fixture_installation_creation(operation, action, &conflicting)
+            .is_err());
+        assert!(reopened
+            .inspect_synthetic_sandbox_recovery(action.run, operation.as_str(), action.side_effect)
+            .is_err());
+        assert_eq!(
+            reopened
+                .read_events(action.run)
+                .expect("completed history")
+                .len(),
+            history.len() + 1
+        );
+        let effect = reopened
+            .read_side_effect_record(action.side_effect)
+            .expect("read effect")
+            .expect("effect");
+        assert_eq!(
+            effect.lifecycle_state(),
+            crate::SideEffectLifecycleState::Completed
+        );
     }
 
     fn exercise_prepared_loopback(
@@ -5943,6 +6049,7 @@ mod tests {
                     before
                         + 1
                         + usize::from(matches!(trial, LiveGrantTrial::VerifiedResponse))
+                        + usize::from(matches!(trial, LiveGrantTrial::InstallationScope))
                         + usize::from(matches!(
                             trial,
                             LiveGrantTrial::PreparedLoopback { expired: false }

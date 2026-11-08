@@ -25,7 +25,8 @@ use crate::provider_comment_observation::{
     ExpectedComment, MARKER_NAMESPACE,
 };
 use crate::provider_comment_transport::installation_exchange::{
-    installation_comment_adapter_commitment, ReviewedInstallation, VerifiedInstallationScope,
+    installation_comment_adapter_commitment, InstallationCreationContext, ReviewedInstallation,
+    VerifiedInstallationCreation, VerifiedInstallationScope,
 };
 #[cfg(test)]
 use crate::provider_comment_transport::PreparedGitHubCommentCreation;
@@ -195,7 +196,34 @@ pub(super) enum LiveCommentDispatchPosture {
     RecoveryOnly,
 }
 
-use SyntheticSandboxCompletionProofSource as LiveCommentProofKind;
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LiveCommentProofKind {
+    Lookup,
+    CreationResponse,
+    InstallationCreation,
+    #[cfg(test)]
+    InstallationFixtureCreation,
+}
+
+impl LiveCommentProofKind {
+    const fn synthetic(self) -> Option<SyntheticSandboxCompletionProofSource> {
+        match self {
+            Self::Lookup => Some(SyntheticSandboxCompletionProofSource::Lookup),
+            Self::CreationResponse => Some(SyntheticSandboxCompletionProofSource::CreationResponse),
+            Self::InstallationCreation => None,
+            #[cfg(test)]
+            Self::InstallationFixtureCreation => None,
+        }
+    }
+
+    const fn fixture(self) -> bool {
+        match self {
+            Self::Lookup | Self::CreationResponse | Self::InstallationCreation => false,
+            #[cfg(test)]
+            Self::InstallationFixtureCreation => true,
+        }
+    }
+}
 
 // Only a trusted synthetic lookup may supply this result until a provider
 // adapter can independently verify author and exact accepted payload.
@@ -221,7 +249,10 @@ pub(super) enum LiveCommentRecovery {
     Observed(GitHubPullRequestCommentProviderLookupObservation),
 }
 
-fn live_comment_marker(action: &SpecContentHash, reservation: &SpecContentHash) -> String {
+pub(super) fn live_comment_marker(
+    action: &SpecContentHash,
+    reservation: &SpecContentHash,
+) -> String {
     let mut hash = Sha256::new();
     hash.update(b"workflow-os/live-comment-recovery/v1\0");
     hash.update(action.as_str().as_bytes());
@@ -721,6 +752,84 @@ impl SqliteStateBackend {
         )?;
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
         Ok(LiveCommentDispatchPosture::PersistedSyntheticResponse { comment_id })
+    }
+
+    #[allow(dead_code)] // No live operator or sender is connected.
+    pub(super) fn persist_installation_creation(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        proof: &VerifiedInstallationCreation,
+    ) -> Result<EventId, WorkflowOsError> {
+        self.persist_installation_creation_with_kind(
+            operation,
+            action,
+            proof,
+            LiveCommentProofKind::InstallationCreation,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn persist_fixture_installation_creation(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        proof: &VerifiedInstallationCreation,
+    ) -> Result<EventId, WorkflowOsError> {
+        self.persist_installation_creation_with_kind(
+            operation,
+            action,
+            proof,
+            LiveCommentProofKind::InstallationFixtureCreation,
+        )
+    }
+
+    fn persist_installation_creation_with_kind(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        proof: &VerifiedInstallationCreation,
+        kind: LiveCommentProofKind,
+    ) -> Result<EventId, WorkflowOsError> {
+        let fixture = kind.fixture();
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| storage_error("begin_failed"))?;
+        let durable = read_live_recovery_admission(&tx, operation, action.run)?;
+        let witness = durable.witness.as_ref().ok_or_else(not_dispatchable)?;
+        let scope = witness
+            .installation_scope_commitment
+            .as_ref()
+            .ok_or_else(not_dispatchable)?;
+        let invocation = action.commitment()?;
+        if durable.event.invocation_commitment() != &invocation
+            || !is_installation_comment_adapter(&witness.provider.adapter_commitment, fixture)
+        {
+            return Err(not_dispatchable());
+        }
+        let reservation = durable.event.reservation_commitment();
+        let marker = live_comment_marker(&invocation, reservation);
+        let body = encode_marked_comment(action.body, &marker).ok_or_else(not_dispatchable)?;
+        let comment = proof
+            .matches(
+                InstallationCreationContext {
+                    reservation,
+                    scope,
+                    target: action.target,
+                    provider: &witness.provider,
+                    marked_body: &body,
+                },
+                fixture,
+            )
+            .ok_or_else(not_dispatchable)?;
+        let outcome = SideEffectOutcomeReference::new(
+            SideEffectOutcomeReferenceKind::Outcome,
+            format!("github/comment/{comment}"),
+        )?;
+        let event = persist_live_comment_outcome(&tx, action, &durable, outcome, kind)?;
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(event)
     }
 
     /// Operator-only lookup. This validates historical admission, not current
@@ -1299,7 +1408,9 @@ fn verify_live_recovery_state(
     }
     if let Some((event, kind)) = find_live_comment_proof(&admission.event, &history)? {
         verify_live_comment_proof(admission, &effect, event, kind)?;
-        return Ok(SyntheticSandboxRecoveryInspection { source: Some(kind) });
+        return Ok(SyntheticSandboxRecoveryInspection {
+            source: Some(kind.synthetic().ok_or_else(not_dispatchable)?),
+        });
     }
     verify_live_comment_attempt(admission, &effect)?;
     Ok(SyntheticSandboxRecoveryInspection { source: None })
@@ -1312,6 +1423,9 @@ fn live_comment_proof_id(
     let prefix = match kind {
         LiveCommentProofKind::Lookup => "live-comment-proof",
         LiveCommentProofKind::CreationResponse => "live-comment-response-proof",
+        LiveCommentProofKind::InstallationCreation => "installation-comment-created",
+        #[cfg(test)]
+        LiveCommentProofKind::InstallationFixtureCreation => "fixture-installation-comment-created",
     };
     EventId::new(format!("{prefix}/{}", admission.reservation_commitment()))
 }
@@ -1324,6 +1438,9 @@ fn find_live_comment_proof<'a>(
     for kind in [
         LiveCommentProofKind::Lookup,
         LiveCommentProofKind::CreationResponse,
+        LiveCommentProofKind::InstallationCreation,
+        #[cfg(test)]
+        LiveCommentProofKind::InstallationFixtureCreation,
     ] {
         let id = live_comment_proof_id(admission, kind)?;
         if history
@@ -1367,7 +1484,8 @@ fn verify_live_comment_proof(
 ) -> Result<(), WorkflowOsError> {
     let expected = crate::side_effect::transition_event(effect, 0)?;
     let admission_event = admission.event.committed_result_cursor();
-    if effect.lifecycle_state() != SideEffectLifecycleState::Completed
+    if !comment_proof_source_matches(admission, kind)
+        || effect.lifecycle_state() != SideEffectLifecycleState::Completed
         || !effect
             .outcome_reference()
             .is_some_and(|outcome| outcome.kind() == SideEffectOutcomeReferenceKind::Outcome)
@@ -1397,6 +1515,14 @@ fn live_comment_proof_key(
             b"workflow-os/live-comment-response-proof/v1\0"
         }
         (LiveCommentProofKind::CreationResponse, false) => return Err(corrupt()),
+        (LiveCommentProofKind::InstallationCreation, true) => {
+            b"workflow-os/github-installation-comment-created/v1\0"
+        }
+        #[cfg(test)]
+        (LiveCommentProofKind::InstallationFixtureCreation, true) => {
+            b"workflow-os/fixture-installation-comment-created/v1\0"
+        }
+        _ => return Err(corrupt()),
     };
     let proof = live_effect_commitment(
         domain,
@@ -1407,6 +1533,23 @@ fn live_comment_proof_key(
     IdempotencyKey::new(format!("live-comment-proof/{proof}"))
 }
 
+fn comment_proof_source_matches(
+    admission: &LiveRecoveryAdmission,
+    kind: LiveCommentProofKind,
+) -> bool {
+    let scoped = admission
+        .witness
+        .as_ref()
+        .filter(|witness| witness.installation_scope_commitment.is_some());
+    if kind.synthetic().is_some() {
+        scoped.is_none()
+    } else {
+        scoped.is_some_and(|witness| {
+            is_installation_comment_adapter(&witness.provider.adapter_commitment, kind.fixture())
+        })
+    }
+}
+
 fn persist_live_comment_outcome(
     tx: &rusqlite::Transaction<'_>,
     action: GitHubCommentContinuationAction<'_>,
@@ -1414,12 +1557,7 @@ fn persist_live_comment_outcome(
     outcome: SideEffectOutcomeReference,
     kind: LiveCommentProofKind,
 ) -> Result<EventId, WorkflowOsError> {
-    if admission
-        .witness
-        .as_ref()
-        .is_some_and(|witness| witness.installation_scope_commitment.is_some())
-    {
-        // Scoped reservations need a provider-backed proof path, not this synthetic writer.
+    if !comment_proof_source_matches(admission, kind) {
         return Err(not_dispatchable());
     }
     let history = SqliteStateBackend::read_events_with_connection(tx, action.run)?;
@@ -1442,7 +1580,7 @@ fn persist_live_comment_outcome(
     }
     if let Some((event, existing_kind)) = find_live_comment_proof(&admission.event, &history)? {
         if effect.outcome_reference() != Some(&outcome)
-            || (kind == LiveCommentProofKind::CreationResponse && existing_kind != kind)
+            || (kind != LiveCommentProofKind::Lookup && existing_kind != kind)
         {
             return Err(not_dispatchable());
         }
