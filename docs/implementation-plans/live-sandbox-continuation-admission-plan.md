@@ -924,6 +924,25 @@ run inputs from durable Core state. A trusted issuer and Core-owned
 admission must supply those inputs and enforce the remaining gates before
 any live send. No production dispatch or persistent receipt is enabled.
 
+### Bind The Verified Scope Inside Core Admission
+
+The private SQLite reservation lane for the installation comment adapter
+requires its verified scope receipt. It matches the run and immutable
+bundle already verified against the durable window, the registered exact
+target and provider identities, the adapter commitment, and the Core
+grant/window deadline in the reservation transaction. Any mismatch or
+expiry rolls back the grant use and reservation together. Production
+admission rejects loopback provenance, and the unscoped reservation path
+cannot admit either installation adapter identity.
+
+The reservation witness commits to the payload-free scope receipt and
+shortens its deadline to the earlier verified expiry. This does not
+persist the bearer, full receipt, or raw provider payload. Existing
+unscoped witness encodings are unchanged. Reopen and exact replay cannot
+issue a new send right, and the synthetic proof writer cannot complete
+an installation-scoped reservation. The trusted issuer, provider-backed
+completion path, and operator entry point are not connected.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

@@ -14,21 +14,22 @@ use crate::{
 };
 
 #[derive(Clone, Copy)]
-pub(super) struct ReviewedInstallation<'a> {
-    pub(super) app_id: NonZeroU64,
-    pub(super) app_slug: &'a str,
-    pub(super) bot_id: NonZeroU64,
-    pub(super) installation_id: NonZeroU64,
-    pub(super) repository_id: NonZeroU64,
-    pub(super) target: &'a GitHubPullRequestCommentTarget,
-    pub(super) run_id: &'a WorkflowRunId,
-    pub(super) immutable_run: &'a SpecContentHash,
-    pub(super) deadline: Timestamp,
+pub(crate) struct ReviewedInstallation<'a> {
+    pub(crate) app_id: NonZeroU64,
+    pub(crate) app_slug: &'a str,
+    pub(crate) bot_id: NonZeroU64,
+    pub(crate) installation_id: NonZeroU64,
+    pub(crate) repository_id: NonZeroU64,
+    pub(crate) target: &'a GitHubPullRequestCommentTarget,
+    pub(crate) run_id: &'a WorkflowRunId,
+    pub(crate) immutable_run: &'a SpecContentHash,
+    pub(crate) comment_adapter: &'a SpecContentHash,
+    pub(crate) deadline: Timestamp,
 }
 
 // No export, conversion to comment auth, or serialization. This is provider
 // scope evidence, not proof of current Core authority.
-pub(super) struct VerifiedInstallationScope {
+pub(crate) struct VerifiedInstallationScope {
     bearer: GitHubPullRequestCommentProviderAuth,
     receipt: InstallationScopeReceipt,
 }
@@ -50,6 +51,59 @@ impl InstallationScopeReceipt {
         self.verified_at <= now
             && now < self.effective_deadline
             && scope_commitment(expected, adapter).as_ref() == Some(&self.scope_commitment)
+    }
+}
+
+impl VerifiedInstallationScope {
+    pub(crate) fn admission_binding(
+        &self,
+        expected: ReviewedInstallation<'_>,
+        now: Timestamp,
+        fixture: bool,
+    ) -> Option<(SpecContentHash, Timestamp)> {
+        let adapter = if fixture {
+            #[cfg(test)]
+            {
+                fixture_adapter_commitment()
+            }
+            #[cfg(not(test))]
+            {
+                return None;
+            }
+        } else {
+            fixed_adapter_commitment()
+        };
+        if !self.receipt.matches(expected, &adapter, now) {
+            return None;
+        }
+        let commitment = serde_json::to_vec(&(
+            "workflow-os/github-installation-scope-admission/v1",
+            &self.receipt.scope_commitment,
+            self.receipt.verified_at,
+            self.receipt.effective_deadline,
+        ))
+        .ok()
+        .map(SpecContentHash::from_bytes)?;
+        Some((commitment, self.receipt.effective_deadline))
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::expect_used)]
+    pub(crate) fn test_receipt(
+        scope: ReviewedInstallation<'_>,
+        verified_at: Timestamp,
+        effective_deadline: Timestamp,
+    ) -> Self {
+        Self {
+            bearer: GitHubPullRequestCommentProviderAuth::new("synthetic-admission-fixture", None)
+                .expect("fixture bearer"),
+            receipt: InstallationScopeReceipt {
+                scope_commitment: scope_commitment(scope, &fixture_adapter_commitment())
+                    .expect("fixture scope"),
+                verified_at,
+                effective_deadline,
+            },
+        }
     }
 }
 
@@ -274,15 +328,11 @@ impl Exchange<'_> {
 
     fn adapter_commitment(&self) -> Option<SpecContentHash> {
         if self.origin == GITHUB_ORIGIN {
-            return Some(SpecContentHash::from_text(
-                "workflow-os/github-installation-scope/github.com/2022-11-28/v1",
-            ));
+            return Some(fixed_adapter_commitment());
         }
         #[cfg(test)]
         if self.origin.starts_with("http://127.0.0.1:") {
-            return Some(SpecContentHash::from_text(
-                "workflow-os/github-installation-scope/loopback-fixture/v1",
-            ));
+            return Some(fixture_adapter_commitment());
         }
         None
     }
@@ -293,6 +343,24 @@ impl Exchange<'_> {
             .ok()?;
         decode(response, 200)
     }
+}
+
+fn fixed_adapter_commitment() -> SpecContentHash {
+    SpecContentHash::from_text("workflow-os/github-installation-scope/github.com/2022-11-28/v1")
+}
+
+pub(crate) fn installation_comment_adapter_commitment() -> SpecContentHash {
+    SpecContentHash::from_text("workflow-os/github-installation-comment/github.com/v1")
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_installation_comment_adapter_commitment() -> SpecContentHash {
+    SpecContentHash::from_text("workflow-os/github-installation-comment/loopback-fixture/v1")
+}
+
+#[cfg(test)]
+fn fixture_adapter_commitment() -> SpecContentHash {
+    SpecContentHash::from_text("workflow-os/github-installation-scope/loopback-fixture/v1")
 }
 
 fn scope_commitment(
@@ -309,6 +377,7 @@ fn scope_commitment(
         scope.bot_id,
         scope.installation_id,
         scope.repository_id,
+        scope.comment_adapter,
         scope.deadline,
         adapter,
     ))
@@ -420,6 +489,7 @@ mod tests {
         let target = GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target");
         let run = WorkflowRunId::new("run-installation-fixture").expect("run");
         let immutable_run = SpecContentHash::from_text("immutable fixture");
+        let comment_adapter = super::super::loopback_comment_exchange_commitment();
         let scope = ReviewedInstallation {
             app_id: NonZeroU64::new(33).expect("app"),
             app_slug: "fixture-app",
@@ -429,6 +499,7 @@ mod tests {
             target: &target,
             run_id: &run,
             immutable_run: &immutable_run,
+            comment_adapter: &comment_adapter,
             deadline: at(50),
         };
         thread::scope(|threads| {
