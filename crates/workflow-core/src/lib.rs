@@ -106,6 +106,7 @@ mod proportional_governance_binding;
 mod proportional_governance_immutable_bundle;
 mod proportional_governance_runtime_fact_source;
 mod proportional_governance_workflow_derivation;
+mod provider_comment_observation;
 mod provider_write;
 mod redaction;
 mod required_context;

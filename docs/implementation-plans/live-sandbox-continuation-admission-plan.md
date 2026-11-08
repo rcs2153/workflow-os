@@ -365,8 +365,19 @@ documents the PR conversation endpoint and raw body, comment ID, user ID,
 issue URL and timestamps. Its [pagination contract](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api)
 documents how subsequent pages are advertised. Those fields are inputs to
 an observer, not a guarantee about historical accepted bytes or a consistent
-snapshot. The observer and its failure tests still need implementation and
-review. Do not select a live target or invoke a real write under this review.
+snapshot. A production observer and its failure tests still need
+implementation and review. Do not select a live target or invoke a real
+write under this review.
+
+The private offline verifier now checks synthetic current observations
+against stable repository, PR, author and comment identity; exact raw body
+and marker placement; creation bounds; and a bounded complete enumeration.
+It rejects edits, drift and ambiguous observations. Its strongest result is
+`ExactCurrentMatch`, not accepted-payload proof. Equal creation and update
+timestamps alone cannot rule out changes at the provider's clock resolution.
+No transport feeds this verifier, no completion path consumes its result,
+and it cannot authorize a resend. A trusted adapter and independent evidence
+of accepted bytes remain prerequisites for live completion.
 
 ## Delivery And Tests
 
