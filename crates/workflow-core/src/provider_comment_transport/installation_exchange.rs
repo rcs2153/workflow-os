@@ -20,6 +20,8 @@ use crate::{
     Timestamp, WorkflowRunId,
 };
 
+pub(crate) mod reader;
+
 #[derive(Clone, Copy)]
 pub(crate) struct ReviewedInstallation<'a> {
     pub(crate) app_id: NonZeroU64,
@@ -968,10 +970,230 @@ pub(crate) mod tests {
     }
 
     fn serve(listener: &TcpListener, reply: Reply<'_>) {
-        serve_with_echo(listener, reply, false);
+        serve_request(listener, reply, false, false);
     }
 
-    fn serve_with_echo(listener: &TcpListener, reply: Reply<'_>, echo: bool) {
+    #[test]
+    fn comment_reader_installation_requires_exact_read_scope_and_review() {
+        let now = Timestamp::now_utc();
+        let expiry = Timestamp::from_offset_date_time(
+            now.as_offset_date_time() + time::Duration::minutes(5),
+        );
+        let mut issued: serde_json::Value =
+            serde_json::from_str(ISSUE.body).expect("issued fixture");
+        issued["expires_at"] = serde_json::json!(expiry);
+        issued["permissions"]["pull_requests"] = serde_json::json!("read");
+        let exact = issued.to_string();
+        let issue = Reply {
+            body: &exact,
+            ..ISSUE
+        };
+        let mut installation: serde_json::Value =
+            serde_json::from_str(INSTALLATION.body).expect("installation fixture");
+        installation["permissions"] = issued["permissions"].clone();
+        let selected = installation.to_string();
+        let install = Reply {
+            body: &selected,
+            ..INSTALLATION
+        };
+        exercise_reader(&[], now, false, false);
+        installation["permissions"]["pull_requests"] = serde_json::json!("write");
+        exercise_reader(
+            &[
+                APP,
+                Reply {
+                    body: &installation.to_string(),
+                    ..INSTALLATION
+                },
+            ],
+            now,
+            true,
+            false,
+        );
+        assert_reader_rejects_expanded_issuance(&issued, install, now);
+        exercise_reader(
+            &[
+                APP,
+                install,
+                issue,
+                Reply {
+                    body: r#"{"total_count":2,"repositories":[{"id":11,"full_name":"example/sandbox"}]}"#,
+                    ..LIST
+                },
+            ],
+            now,
+            true,
+            false,
+        );
+        exercise_reader(
+            &[
+                APP,
+                install,
+                issue,
+                LIST,
+                Reply {
+                    body: r#"{"id":22,"login":"wrong-app[bot]","type":"Bot"}"#,
+                    ..BOT
+                },
+            ],
+            now,
+            true,
+            false,
+        );
+        exercise_reader(
+            &[
+                APP,
+                install,
+                issue,
+                LIST,
+                BOT,
+                Reply {
+                    request: "GET /repos/example/sandbox HTTP/1.1",
+                    status: "200 OK",
+                    header: "",
+                    body: r#"{"id":11,"full_name":"example/sandbox"}"#,
+                },
+                Reply {
+                    body: r#"{"number":7,"base":{"repo":{"id":11,"full_name":"example/sandbox"}}}"#,
+                    ..PR
+                },
+                Reply {
+                    request: &format!(
+                        "GET /repositories/11/issues/7/comments?per_page={}&page=1 HTTP/1.1",
+                        super::super::COMMENTS_PER_PAGE
+                    ),
+                    status: "200 OK",
+                    header: "",
+                    body: "[]",
+                },
+            ],
+            now,
+            true,
+            true,
+        );
+    }
+
+    fn assert_reader_rejects_expanded_issuance(
+        issued: &serde_json::Value,
+        install: Reply<'_>,
+        now: Timestamp,
+    ) {
+        for (field, value) in [
+            (
+                "permissions",
+                serde_json::json!({"metadata":"read","pull_requests":"write"}),
+            ),
+            (
+                "permissions",
+                serde_json::json!({"metadata":"read","pull_requests":"read","contents":"read"}),
+            ),
+            (
+                "repositories",
+                serde_json::json!([{"id":12,"full_name":"example/sandbox"}]),
+            ),
+            (
+                "repositories",
+                serde_json::json!([{"id":11,"full_name":"example/sandbox"},{"id":12,"full_name":"example/other"}]),
+            ),
+            ("expires_at", serde_json::json!(now)),
+        ] {
+            let mut changed = issued.clone();
+            changed[field] = value;
+            exercise_reader(
+                &[
+                    APP,
+                    install,
+                    Reply {
+                        body: &changed.to_string(),
+                        ..ISSUE
+                    },
+                ],
+                now,
+                true,
+                false,
+            );
+        }
+    }
+
+    fn exercise_reader(replies: &[Reply<'_>], now: Timestamp, reviewed: bool, inventory: bool) {
+        use super::super::{CurrentCommentPosture, PreparedCommentInventory};
+        use super::reader::ReviewedReadInstallation;
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("reader loopback");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let origin = format!("http://{}", listener.local_addr().expect("address"));
+        let target = GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target");
+        let scope = ReviewedReadInstallation {
+            app_id: NonZeroU64::new(33).expect("app"),
+            app_slug: "fixture-app",
+            installation: NonZeroU64::new(44).expect("installation"),
+            reader: NonZeroU64::new(22).expect("reader"),
+            repository: NonZeroU64::new(11).expect("repository"),
+            target: &target,
+            deadline: Timestamp::from_offset_date_time(
+                now.as_offset_date_time() + time::Duration::minutes(4),
+            ),
+        };
+        let access = if reviewed {
+            scope.access_commitment().expect("reviewed access")
+        } else {
+            SpecContentHash::from_text("substituted review")
+        };
+        thread::scope(|threads| {
+            let server = threads.spawn(|| {
+                for reply in replies {
+                    serve_request(&listener, *reply, false, true);
+                }
+            });
+            let result = Exchange {
+                agent: github_agent(),
+                origin: &origin,
+            }
+            .exchange_reader(scope, &access, ASSERTION, scope.deadline, || now);
+            if inventory {
+                let verified = result.expect("scoped bearer");
+                let mut profile =
+                    super::super::installation_notification::tests::fixture_observer_profile();
+                profile.reader = scope.reader;
+                profile.reader_access_review = access;
+                let body = SpecContentHash::from_text("unobserved fixture comment");
+                let writer_scope = SpecContentHash::from_text("unrelated fixture writer");
+                let request = PreparedCommentInventory {
+                    target: &target,
+                    repository: scope.repository,
+                    writer: NonZeroU64::new(456).expect("writer"),
+                    writer_scope: &writer_scope,
+                    comment_id: NonZeroU64::MIN,
+                    body: &body,
+                    marker: &body,
+                    observer_profile: Some(&profile),
+                };
+                let reader = verified.inventory(&writer_scope);
+                assert_eq!(
+                    reader
+                        .observe(&request)
+                        .expect("complete scoped inventory")
+                        .posture,
+                    CurrentCommentPosture::Absent,
+                );
+                let wrong_target =
+                    GitHubPullRequestCommentTarget::new("example", "sandbox", 8).expect("target");
+                assert!(reader
+                    .observe(&PreparedCommentInventory {
+                        target: &wrong_target,
+                        ..request
+                    })
+                    .is_none());
+            } else {
+                assert!(result.is_none());
+            }
+            server.join().expect("reader fixture server");
+            assert!(
+                matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+            );
+        });
+    }
+
+    fn serve_request(listener: &TcpListener, reply: Reply<'_>, echo: bool, reader_scope: bool) {
         let start = Instant::now();
         let mut stream = loop {
             match listener.accept() {
@@ -1013,12 +1235,16 @@ pub(crate) mod tests {
                 length = value.trim().parse().expect("body length");
             }
         }
-        let expected_bearer =
-            if [LIST.request, BOT.request, CREATE.request, PR.request].contains(&reply.request) {
-                ISSUED
-            } else {
-                ASSERTION
-            };
+        let expected_bearer = if [LIST.request, BOT.request, CREATE.request, PR.request]
+            .contains(&reply.request)
+            || (reader_scope
+                && (reply.request.starts_with("GET /repos/")
+                    || reply.request.starts_with("GET /repositories/")))
+        {
+            ISSUED
+        } else {
+            ASSERTION
+        };
         let bearer_matches = auth.as_deref() == Some(format!("Bearer {expected_bearer}").as_str());
         assert!(bearer_matches, "unexpected fixture authorization");
         let mut response_body = reply.body.to_owned();
@@ -1027,7 +1253,7 @@ pub(crate) mod tests {
             let mut body = vec![0; length];
             reader.read_exact(&mut body).expect("issue request");
             let expected = if reply.request == ISSUE.request {
-                serde_json::json!({"repository_ids":[11],"permissions":{"metadata":"read","pull_requests":"write"}})
+                serde_json::json!({"repository_ids":[11],"permissions":{"metadata":"read","pull_requests":if reader_scope { "read" } else { "write" }}})
             } else {
                 serde_json::json!({"body": MARKED})
             };
@@ -1094,7 +1320,7 @@ pub(crate) mod tests {
                     serve(&listener, PR);
                     if matches!(mode, ReservedExchange::Created | ReservedExchange::Lost) {
                         let status = if mode == ReservedExchange::Lost { "" } else { CREATE.status };
-                        serve_with_echo(&listener, Reply { status, ..CREATE }, true);
+                        serve_request(&listener, Reply { status, ..CREATE }, true, false);
                     }
                 }
             });

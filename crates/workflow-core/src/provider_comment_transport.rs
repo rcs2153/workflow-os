@@ -43,6 +43,7 @@ struct GetCommentReader<'a> {
     origin: &'a str,
     agent: &'a ureq::Agent,
     bearer: &'a str,
+    lease: Option<(Timestamp, Timestamp)>,
 }
 
 /// Reviewed provider read identity, not the writer's installation authority.
@@ -54,6 +55,7 @@ pub(crate) struct IndependentCommentInventory<'a> {
     writer_scope: &'a SpecContentHash,
     access_review: Option<SpecContentHash>,
     bearer: &'a str,
+    verified_installation: Option<(&'a GitHubPullRequestCommentTarget, Timestamp, Timestamp)>,
 }
 
 #[derive(Clone, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -324,6 +326,7 @@ impl<'a> GitHubCommentCreationTransport<'a> {
             origin: &self.origin,
             agent: &self.agent,
             bearer: self.auth.secret_for_provider(),
+            lease: None,
         })
     }
 
@@ -345,6 +348,16 @@ impl GetCommentReader<'_> {
         repository_id: NonZeroU64,
         reader_id: NonZeroU64,
     ) -> Option<(NonZeroU64, NonZeroU64)> {
+        self.verify_target_identity(target, repository_id, Some(reader_id))?;
+        Some((repository_id, reader_id))
+    }
+
+    fn verify_target_identity(
+        &self,
+        target: &GitHubPullRequestCommentTarget,
+        repository_id: NonZeroU64,
+        user_reader: Option<NonZeroU64>,
+    ) -> Option<()> {
         target.validate().ok()?;
         let full_name = format!("{}/{}", target.owner(), target.repository());
         let repo = format!("/repos/{full_name}");
@@ -352,9 +365,11 @@ impl GetCommentReader<'_> {
         if repository.id != repository_id || repository.full_name != full_name {
             return None;
         }
-        let reader: GitHubUserIdentity = self.read_identity("/user")?;
-        if reader.id != reader_id {
-            return None;
+        if let Some(reader_id) = user_reader {
+            let reader: GitHubUserIdentity = self.read_identity("/user")?;
+            if reader.id != reader_id {
+                return None;
+            }
         }
         // Issue-comment creation also accepts ordinary issues.
         let number = target.pull_request_number();
@@ -366,7 +381,7 @@ impl GetCommentReader<'_> {
         {
             return None;
         }
-        Some((repository.id, reader.id))
+        Some(())
     }
 }
 
@@ -399,7 +414,7 @@ impl GitHubCommentCreationTransport<'_> {
                 reader.read_comment_pages(
                     expected.target,
                     expected.repository_id,
-                    expected.author_id,
+                    Some(expected.author_id),
                 )
             })
             .ok_or(CurrentCommentPosture::Unresolved)?;
@@ -447,9 +462,9 @@ impl GetCommentReader<'_> {
         &self,
         target: &GitHubPullRequestCommentTarget,
         repository_id: NonZeroU64,
-        reader_id: NonZeroU64,
+        user_reader: Option<NonZeroU64>,
     ) -> Option<Vec<ObservedPage>> {
-        self.verify_target(target, repository_id, reader_id)?;
+        self.verify_target_identity(target, repository_id, user_reader)?;
         let origin = Url::parse(self.origin).ok()?;
         let named = comment_path(target);
         let stable = format!(
@@ -475,7 +490,7 @@ impl GetCommentReader<'_> {
         for page in 1..=page_limit {
             let request_path = format!("{stable}?per_page={COMMENTS_PER_PAGE}&page={page}");
             let response = self
-                .get(&request_path)
+                .get(&request_path)?
                 .set("Accept", "application/vnd.github.raw+json")
                 .call()
                 .ok()?;
@@ -529,18 +544,27 @@ impl GetCommentReader<'_> {
                 comments: rows,
             });
             if next.is_none() {
-                return Some(pages);
+                return self.lease_current().then_some(pages);
             }
         }
         None
     }
 
-    fn get(&self, path: &str) -> ureq::Request {
-        github_request(self.agent, self.origin, "GET", path, self.bearer)
+    fn lease_current(&self) -> bool {
+        let Some((start, deadline)) = self.lease else {
+            return true;
+        };
+        let now = Timestamp::now_utc();
+        start <= now && now < deadline
+    }
+
+    fn get(&self, path: &str) -> Option<ureq::Request> {
+        self.lease_current()
+            .then(|| github_request(self.agent, self.origin, "GET", path, self.bearer))
     }
 
     fn read_identity<T: serde::de::DeserializeOwned>(&self, path: &str) -> Option<T> {
-        let response = self.get(path).call().ok()?;
+        let response = self.get(path)?.call().ok()?;
         if response.status() != 200 {
             return None;
         }
@@ -549,6 +573,7 @@ impl GetCommentReader<'_> {
     }
 }
 
+#[cfg(test)]
 impl<'a> IndependentCommentInventory<'a> {
     pub(crate) fn new(
         reader: NonZeroU64,
@@ -565,9 +590,12 @@ impl<'a> IndependentCommentInventory<'a> {
             writer_scope,
             access_review,
             bearer,
+            verified_installation: None,
         }
     }
+}
 
+impl IndependentCommentInventory<'_> {
     pub(crate) fn observe(
         &self,
         expected: &PreparedCommentInventory<'_>,
@@ -589,8 +617,19 @@ impl<'a> IndependentCommentInventory<'a> {
             origin: &self.origin,
             agent: &self.agent,
             bearer: self.bearer,
+            lease: self
+                .verified_installation
+                .map(|(_, start, deadline)| (start, deadline)),
         };
-        let pages = reader.read_comment_pages(expected.target, expected.repository, self.reader)?;
+        let user_reader = if let Some((target, _, _)) = self.verified_installation {
+            if target != expected.target || expected.observer_profile.is_none() {
+                return None;
+            }
+            None
+        } else {
+            Some(self.reader)
+        };
+        let pages = reader.read_comment_pages(expected.target, expected.repository, user_reader)?;
         let transcript = pages
             .iter()
             .map(|page| {
