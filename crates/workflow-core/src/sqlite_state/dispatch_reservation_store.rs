@@ -208,6 +208,13 @@ impl SyntheticSandboxRecoveryInspection {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)] // No operator caller is admitted yet.
+pub(super) enum InstallationCommentRecoveryPosture {
+    ReconciliationRequired,
+    CreationVerified,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum LiveCommentDispatchPosture {
     PersistedSyntheticResponse { comment_id: std::num::NonZeroU64 },
     RecoveryOnly,
@@ -218,7 +225,6 @@ enum LiveCommentProofKind {
     Lookup,
     CreationResponse,
     InstallationCreation,
-    #[cfg(test)]
     InstallationFixtureCreation,
 }
 
@@ -227,16 +233,13 @@ impl LiveCommentProofKind {
         match self {
             Self::Lookup => Some(SyntheticSandboxCompletionProofSource::Lookup),
             Self::CreationResponse => Some(SyntheticSandboxCompletionProofSource::CreationResponse),
-            Self::InstallationCreation => None,
-            #[cfg(test)]
-            Self::InstallationFixtureCreation => None,
+            Self::InstallationCreation | Self::InstallationFixtureCreation => None,
         }
     }
 
     const fn fixture(self) -> bool {
         match self {
             Self::Lookup | Self::CreationResponse | Self::InstallationCreation => false,
-            #[cfg(test)]
             Self::InstallationFixtureCreation => true,
         }
     }
@@ -351,6 +354,82 @@ impl SqliteStateBackend {
             .map_err(|_| storage_error("begin_failed"))?;
         let admission = read_live_recovery_admission(&tx, &operation, run_id)?;
         verify_live_recovery_state(&tx, &admission, run_id, side_effect_id)
+    }
+
+    // Historical disposition is not current write authority. No current grant,
+    // clock, provider transport, or send permit participates in this read.
+    #[allow(dead_code)] // No operator caller is admitted yet.
+    pub(super) fn inspect_installation_comment_recovery(
+        &self,
+        run_id: &crate::WorkflowRunId,
+        operation: &DispatchReservationOperationId,
+        side_effect_id: &crate::SideEffectId,
+    ) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
+        let mut connection = self.existing_read_only_connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|_| storage_error("begin_failed"))?;
+        let admission = read_live_recovery_admission(&tx, operation, run_id)?;
+        if !comment_proof_source_matches(&admission, LiveCommentProofKind::InstallationCreation)
+            || !admission
+                .witness
+                .as_ref()
+                .and_then(|witness| witness.creation_deadline)
+                .is_some_and(|deadline| admission.committed_at < deadline)
+        {
+            return Err(not_dispatchable());
+        }
+        match verify_comment_disposition(&tx, &admission, run_id, side_effect_id)? {
+            Some(LiveCommentProofKind::InstallationCreation) => {
+                Ok(InstallationCommentRecoveryPosture::CreationVerified)
+            }
+            None => Ok(InstallationCommentRecoveryPosture::ReconciliationRequired),
+            Some(_) => Err(not_dispatchable()),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn seed_installation_recovery_for_test(
+        &self,
+        request: DispatchReservationRequest,
+        grant: LiveGrantAdmission<'_>,
+        action: GitHubCommentContinuationAction<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        verified: &VerifiedInstallationScope,
+        completed: bool,
+    ) -> Result<(), WorkflowOsError> {
+        let operation = request.operation_id.clone();
+        self.reserve_live_sandbox_dispatch_with_binding(
+            request,
+            grant,
+            None,
+            Some(LiveInstallationScopeAdmission {
+                reviewed,
+                verified,
+                fixture: false,
+            }),
+        )?
+        .ok_or_else(not_dispatchable)?;
+        if completed {
+            // Seed only the durable contract. This is not a provider receipt.
+            let mut connection = self.existing_connection()?;
+            let tx = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| storage_error("begin_failed"))?;
+            let admission = read_live_recovery_admission(&tx, &operation, action.run)?;
+            persist_live_comment_outcome(
+                &tx,
+                action,
+                &admission,
+                SideEffectOutcomeReference::new(
+                    SideEffectOutcomeReferenceKind::Outcome,
+                    "github/comment/22",
+                )?,
+                LiveCommentProofKind::InstallationCreation,
+            )?;
+            tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        }
+        Ok(())
     }
 
     /// Uses a historical reservation to check a current observation. This
@@ -1615,6 +1694,18 @@ fn verify_live_recovery_state(
     run_id: &crate::WorkflowRunId,
     side_effect_id: &crate::SideEffectId,
 ) -> Result<SyntheticSandboxRecoveryInspection, WorkflowOsError> {
+    let source = verify_comment_disposition(tx, admission, run_id, side_effect_id)?
+        .map(|kind| kind.synthetic().ok_or_else(not_dispatchable))
+        .transpose()?;
+    Ok(SyntheticSandboxRecoveryInspection { source })
+}
+
+fn verify_comment_disposition(
+    tx: &rusqlite::Transaction<'_>,
+    admission: &LiveRecoveryAdmission,
+    run_id: &crate::WorkflowRunId,
+    side_effect_id: &crate::SideEffectId,
+) -> Result<Option<LiveCommentProofKind>, WorkflowOsError> {
     let history = SqliteStateBackend::read_events_with_connection(tx, run_id)?;
     let effect = read_live_effect_record(tx, side_effect_id)?;
     if effect.side_effect_id() != side_effect_id || effect.run_id() != run_id {
@@ -1622,12 +1713,10 @@ fn verify_live_recovery_state(
     }
     if let Some((event, kind)) = find_live_comment_proof(&admission.event, &history)? {
         verify_live_comment_proof(admission, &effect, event, kind)?;
-        return Ok(SyntheticSandboxRecoveryInspection {
-            source: Some(kind.synthetic().ok_or_else(not_dispatchable)?),
-        });
+        return Ok(Some(kind));
     }
     verify_live_comment_attempt(admission, &effect)?;
-    Ok(SyntheticSandboxRecoveryInspection { source: None })
+    Ok(None)
 }
 
 fn live_comment_proof_id(
@@ -1638,7 +1727,6 @@ fn live_comment_proof_id(
         LiveCommentProofKind::Lookup => "live-comment-proof",
         LiveCommentProofKind::CreationResponse => "live-comment-response-proof",
         LiveCommentProofKind::InstallationCreation => "installation-comment-created",
-        #[cfg(test)]
         LiveCommentProofKind::InstallationFixtureCreation => "fixture-installation-comment-created",
     };
     EventId::new(format!("{prefix}/{}", admission.reservation_commitment()))
@@ -1653,7 +1741,6 @@ fn find_live_comment_proof<'a>(
         LiveCommentProofKind::Lookup,
         LiveCommentProofKind::CreationResponse,
         LiveCommentProofKind::InstallationCreation,
-        #[cfg(test)]
         LiveCommentProofKind::InstallationFixtureCreation,
     ] {
         let id = live_comment_proof_id(admission, kind)?;
@@ -1728,15 +1815,18 @@ fn live_comment_proof_key(
         (LiveCommentProofKind::CreationResponse, true) => {
             b"workflow-os/live-comment-response-proof/v1\0"
         }
-        (LiveCommentProofKind::CreationResponse, false) => return Err(corrupt()),
         (LiveCommentProofKind::InstallationCreation, true) => {
             b"workflow-os/github-installation-comment-created/v1\0"
         }
-        #[cfg(test)]
         (LiveCommentProofKind::InstallationFixtureCreation, true) => {
             b"workflow-os/fixture-installation-comment-created/v1\0"
         }
-        _ => return Err(corrupt()),
+        (
+            LiveCommentProofKind::CreationResponse
+            | LiveCommentProofKind::InstallationCreation
+            | LiveCommentProofKind::InstallationFixtureCreation,
+            false,
+        ) => return Err(corrupt()),
     };
     let proof = live_effect_commitment(
         domain,
