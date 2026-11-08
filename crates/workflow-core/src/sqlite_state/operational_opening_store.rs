@@ -3931,6 +3931,10 @@ mod tests {
                 .expect("dispatch replay"),
             LiveCommentDispatchPosture::RecoveryOnly
         );
+        assert_live_reservation_witness_tamper_denied(&reopened, &operation, action);
+        reopened
+            .revoke_live_sandbox_target(action.target)
+            .expect("revoke target after dispatch");
 
         let drift = crate::provider_write::GitHubCommentContinuationAction {
             body: "substitution",
@@ -4122,6 +4126,7 @@ mod tests {
             .reconcile_live_sandbox_comment(&operation, action, |_, _| { lookup(conflicting) })
             .is_err());
         assert_eq!(read_effect(), completed);
+        assert_live_reservation_witness_tamper_denied(&restarted, &operation, action);
         #[cfg(unix)]
         if let Some(export) = &trial_export {
             export.snapshot(&restarted, "completed");
@@ -4144,6 +4149,53 @@ mod tests {
         write_test_effect(&drifted);
         assert!(inspect().is_err());
         write_test_effect(&original_completed);
+    }
+
+    fn assert_live_reservation_witness_tamper_denied(
+        backend: &SqliteStateBackend,
+        operation: &crate::dispatch_reservation::DispatchReservationOperationId,
+        action: crate::provider_write::GitHubCommentContinuationAction<'_>,
+    ) {
+        let db = backend.connection().expect("test connection");
+        let original: String = db
+            .query_row(
+                "SELECT record_json FROM dispatch_reservations WHERE operation_id=?1",
+                [operation.as_str()],
+                |row| row.get(0),
+            )
+            .expect("reservation");
+        let record: serde_json::Value = serde_json::from_str(&original).expect("record JSON");
+        assert_eq!(record["live_witness"]["provider"]["author_id"], 456);
+        let mut substituted = record.clone();
+        substituted["live_witness"]["provider"]["author_id"] = serde_json::json!(457);
+        let mut removed = record;
+        removed
+            .as_object_mut()
+            .expect("record object")
+            .remove("live_witness");
+        let update = |value: &str| {
+            db.execute(
+                "UPDATE dispatch_reservations SET record_json=?1 WHERE operation_id=?2",
+                rusqlite::params![value, operation.as_str()],
+            )
+            .expect("inject reservation witness change");
+        };
+        for malformed in [substituted, removed] {
+            update(&malformed.to_string());
+            assert!(backend
+                .inspect_synthetic_sandbox_recovery(
+                    action.run,
+                    operation.as_str(),
+                    action.side_effect,
+                )
+                .is_err());
+            assert!(backend
+                .recover_live_sandbox_comment(operation, action, |_, _| {
+                    panic!("invalid witness must be rejected before lookup")
+                })
+                .is_err());
+        }
+        update(&original);
     }
 
     #[cfg(unix)]
