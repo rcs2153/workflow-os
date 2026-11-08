@@ -43,6 +43,17 @@ struct ProjectionBinding {
     snapshot_commitment: crate::SpecContentHash,
 }
 
+/// Verified, reference-free execution posture of a synthetic sandbox reservation.
+/// Neither variant grants permission to dispatch or retry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyntheticSandboxRecoveryPosture {
+    /// A matching attempted record exists; no completion has been established.
+    ReconciliationRequired,
+    /// The completed record and its proof event match the exact admission.
+    CompletionVerified,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum LiveCommentDispatchPosture {
     Acknowledged,
@@ -121,6 +132,38 @@ impl DispatchReservationStore for SqliteStateBackend {
 }
 
 impl SqliteStateBackend {
+    /// Inspects an existing synthetic reservation without granting authority,
+    /// making provider calls, or mutating the database.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for missing, unsupported, or mismatched durable proof.
+    pub fn inspect_synthetic_sandbox_recovery(
+        &self,
+        run_id: &crate::WorkflowRunId,
+        operation_id: &str,
+        side_effect_id: &crate::SideEffectId,
+    ) -> Result<SyntheticSandboxRecoveryPosture, WorkflowOsError> {
+        let operation = DispatchReservationOperationId::new(operation_id)?;
+        let mut connection = self.existing_read_only_connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|_| storage_error("begin_failed"))?;
+        let admission = read_live_recovery_admission(&tx, &operation, run_id)?;
+        let history = Self::read_events_with_connection(&tx, run_id)?;
+        let effect = read_live_effect_record(&tx, side_effect_id)?;
+        if effect.side_effect_id() != side_effect_id || effect.run_id() != run_id {
+            return Err(not_dispatchable());
+        }
+        let proof_id = live_comment_proof_id(&admission)?;
+        if let Some(event) = history.iter().find(|event| event.event_id == proof_id) {
+            verify_live_comment_proof(&admission, &effect, event)?;
+            return Ok(SyntheticSandboxRecoveryPosture::CompletionVerified);
+        }
+        verify_live_comment_attempt(&admission, &effect)?;
+        Ok(SyntheticSandboxRecoveryPosture::ReconciliationRequired)
+    }
+
     pub(crate) fn reserve_attempt_dispatch_with_lifecycle(
         &self,
         request: DispatchReservationRequest,
@@ -212,7 +255,10 @@ impl SqliteStateBackend {
         let tx = connection
             .transaction()
             .map_err(|_| storage_error("begin_failed"))?;
-        let admission = read_live_recovery_admission(&tx, operation, action, &invocation)?;
+        let admission = read_live_recovery_admission(&tx, operation, action.run)?;
+        if admission.invocation_commitment() != &invocation {
+            return Err(not_dispatchable());
+        }
         let marker = live_comment_marker(&invocation, admission.reservation_commitment());
         tx.commit().map_err(|_| storage_error("commit_failed"))?;
         Ok(match lookup(action.target, &marker) {
@@ -253,9 +299,12 @@ impl SqliteStateBackend {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| storage_error("begin_failed"))?;
-        let admission = read_live_recovery_admission(&tx, operation, action, &invocation)?;
-        if comment.managed_marker()
-            != Some(live_comment_marker(&invocation, admission.reservation_commitment()).as_str())
+        let admission = read_live_recovery_admission(&tx, operation, action.run)?;
+        if admission.invocation_commitment() != &invocation
+            || comment.managed_marker()
+                != Some(
+                    live_comment_marker(&invocation, admission.reservation_commitment()).as_str(),
+                )
         {
             return Err(not_dispatchable());
         }
@@ -598,8 +647,7 @@ impl SqliteStateBackend {
 fn read_live_recovery_admission(
     tx: &rusqlite::Transaction<'_>,
     operation: &DispatchReservationOperationId,
-    action: GitHubCommentContinuationAction<'_>,
-    invocation: &SpecContentHash,
+    run_id: &crate::WorkflowRunId,
 ) -> Result<DispatchAdmissionProjectionEvent, WorkflowOsError> {
     let (record, binding) = read_existing(tx, operation.as_str())?.ok_or_else(not_dispatchable)?;
     check_dispatch_lane(tx, &record.window_id, &record.attempt_id, true)?;
@@ -613,17 +661,69 @@ fn read_live_recovery_admission(
          )",
             params![
                 binding.event.committed_result_cursor().event_id().as_str(),
-                action.run.as_str(),
+                run_id.as_str(),
                 record.attempt_id.as_str(),
                 binding.event.executor_commitment().as_str(),
             ],
             |row| row.get(0),
         )
         .map_err(|_| corrupt())?;
-    if !has_exact_live_use || binding.event.invocation_commitment() != invocation {
+    if !has_exact_live_use {
         return Err(not_dispatchable());
     }
     Ok(binding.event)
+}
+
+fn live_comment_proof_id(
+    admission: &DispatchAdmissionProjectionEvent,
+) -> Result<EventId, WorkflowOsError> {
+    EventId::new(format!(
+        "live-comment-proof/{}",
+        admission.reservation_commitment()
+    ))
+}
+
+fn verify_live_comment_attempt(
+    admission: &DispatchAdmissionProjectionEvent,
+    effect: &SideEffectRecord,
+) -> Result<(), WorkflowOsError> {
+    let attempted = live_effect_commitment(
+        b"workflow-os/live-comment-attempt/v1\0",
+        admission.request_commitment(),
+        admission.trusted_time_commitment(),
+        effect,
+    )?;
+    if effect.lifecycle_state() != SideEffectLifecycleState::Attempted
+        || &attempted != admission.reservation_commitment()
+    {
+        return Err(not_dispatchable());
+    }
+    Ok(())
+}
+
+fn verify_live_comment_proof(
+    admission: &DispatchAdmissionProjectionEvent,
+    effect: &SideEffectRecord,
+    event: &WorkflowRunEvent,
+) -> Result<(), WorkflowOsError> {
+    let expected = crate::side_effect::transition_event(effect, 0)?;
+    let admission_event = admission.committed_result_cursor();
+    if effect.lifecycle_state() != SideEffectLifecycleState::Completed
+        || !effect
+            .outcome_reference()
+            .is_some_and(|outcome| outcome.kind() == SideEffectOutcomeReferenceKind::Outcome)
+        || event.sequence_number <= admission_event.sequence_number()
+        || Some(event.timestamp) != effect.updated_at()
+        || event.idempotency_key.as_ref() != Some(&live_comment_proof_key(admission, effect)?)
+        || !effect.references().iter().any(|reference| {
+            reference.kind() == SideEffectReferenceKind::WorkflowEvent
+                && reference.reference() == admission_event.event_id().as_str()
+        })
+        || !matches!(&event.kind, WorkflowRunEventKind::SideEffectCompleted(payload) if payload.as_ref() == &expected)
+    {
+        return Err(not_dispatchable());
+    }
+    Ok(())
 }
 
 fn live_comment_proof_key(
@@ -649,10 +749,7 @@ fn persist_live_comment_outcome(
     let run = WorkflowRun::rehydrate(&history)?;
     let identity = &run.snapshot.identity;
     let effect = read_live_effect_record(tx, action.side_effect)?;
-    let id = EventId::new(format!(
-        "live-comment-proof/{}",
-        admission.reservation_commitment()
-    ))?;
+    let id = live_comment_proof_id(admission)?;
     let admission_event = admission.committed_result_cursor().event_id();
     if effect.side_effect_id() != action.side_effect
         || effect.run_id() != action.run
@@ -668,28 +765,13 @@ fn persist_live_comment_outcome(
         return Err(not_dispatchable());
     }
     if let Some(event) = history.iter().find(|event| event.event_id == id) {
-        let expected = crate::side_effect::transition_event(&effect, 0)?;
-        if effect.lifecycle_state() != SideEffectLifecycleState::Completed
-            || effect.outcome_reference() != Some(&outcome)
-            || event.sequence_number <= admission.committed_result_cursor().sequence_number()
-            || Some(event.timestamp) != effect.updated_at()
-            || event.idempotency_key.as_ref() != Some(&live_comment_proof_key(admission, &effect)?)
-            || !matches!(&event.kind, WorkflowRunEventKind::SideEffectCompleted(payload)
-                if payload.as_ref() == &expected)
-        {
+        if effect.outcome_reference() != Some(&outcome) {
             return Err(not_dispatchable());
         }
+        verify_live_comment_proof(admission, &effect, event)?;
         return Ok(id);
     }
-    let attempted = live_effect_commitment(
-        b"workflow-os/live-comment-attempt/v1\0",
-        admission.request_commitment(),
-        admission.trusted_time_commitment(),
-        &effect,
-    )?;
-    if &attempted != admission.reservation_commitment() {
-        return Err(not_dispatchable());
-    }
+    verify_live_comment_attempt(admission, &effect)?;
     let last = history.last().ok_or_else(corrupt)?;
     let now = continuity_store::observe_continuity_trusted_time()?.observed_at();
     if now < last.timestamp {

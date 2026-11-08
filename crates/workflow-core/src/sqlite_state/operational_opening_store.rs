@@ -4008,6 +4008,30 @@ mod tests {
                 .expect("effect")
         };
         let attempted = read_effect();
+        let inspect = || {
+            reopened.inspect_synthetic_sandbox_recovery(
+                action.run,
+                operation.as_str(),
+                action.side_effect,
+            )
+        };
+        let history_before_inspection = reopened.read_events(action.run).expect("history");
+        assert_eq!(
+            serde_json::to_string(&inspect().expect("attempt inspection")).expect("bounded JSON"),
+            "\"reconciliation_required\""
+        );
+        assert_eq!(
+            reopened.read_events(action.run).expect("unchanged history"),
+            history_before_inspection
+        );
+        assert_eq!(read_effect(), attempted);
+        assert!(reopened
+            .inspect_synthetic_sandbox_recovery(
+                action.run,
+                operation.as_str(),
+                &crate::SideEffectId::new("effect/other").expect("locator"),
+            )
+            .is_err());
         let db = reopened.connection().expect("test connection");
         let write_test_effect = |effect: &serde_json::Value| {
             db.execute(
@@ -4021,6 +4045,7 @@ mod tests {
         drifted["summary"] = serde_json::json!("post-reservation drift");
         write_test_effect(&drifted);
         assert!(finalize(&reopened).is_err());
+        assert!(inspect().is_err());
         write_test_effect(&original);
 
         db.execute_batch(
@@ -4091,6 +4116,23 @@ mod tests {
             .reconcile_live_sandbox_comment(&operation, action, |_, _| { lookup(conflicting) })
             .is_err());
         assert_eq!(read_effect(), completed);
+        let completed_history = restarted.read_events(action.run).expect("history");
+        assert_eq!(
+            serde_json::to_string(&inspect().expect("proof inspection")).expect("bounded JSON"),
+            "\"completion_verified\""
+        );
+        assert_eq!(
+            restarted
+                .read_events(action.run)
+                .expect("unchanged history"),
+            completed_history
+        );
+        let original_completed = serde_json::to_value(&completed).expect("completed JSON");
+        let mut drifted = original_completed.clone();
+        drifted["summary"] = serde_json::json!("drift after completion");
+        write_test_effect(&drifted);
+        assert!(inspect().is_err());
+        write_test_effect(&original_completed);
     }
 
     impl LiveGrantTrial {

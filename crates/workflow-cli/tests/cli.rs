@@ -832,6 +832,39 @@ fn provider_lookup_operator_recovery_summary_missing_input_is_non_leaking() {
 }
 
 #[test]
+fn synthetic_recovery_inspection_rejects_extra_inputs_without_creating_state() {
+    let project = TestProject::new("synthetic-recovery-inspection");
+    let args = [
+        "provider",
+        "github-pr-comment",
+        "inspect-synthetic-recovery",
+        "--run-id",
+        "run/example",
+        "--operation-id",
+        "dispatch/example",
+        "--side-effect-id",
+        "effect/example",
+    ];
+    let output = workflow_os(&project, &args);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.provider.synthetic_recovery_unverified"));
+    assert!(!stderr(&output).contains("dispatch/example"));
+    assert_eq!(stdout(&output), "");
+    let mut extra = args.to_vec();
+    extra.extend(["--body", "not-a-permitted-input"]);
+    let output = workflow_os(&project, &extra);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("requires exactly"));
+    assert!(!stderr(&output).contains("not-a-permitted-input"));
+    let mut duplicate = args;
+    duplicate[7] = "--run-id";
+    let output = workflow_os(&project, &duplicate);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("requires exactly"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn provider_fixture_continuation_requires_explicit_request_path() {
     let project = TestProject::new("provider-fixture-continuation-request-required");
 

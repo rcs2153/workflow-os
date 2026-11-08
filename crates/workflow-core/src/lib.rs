@@ -725,6 +725,7 @@ pub use side_effect_discovery::{
 };
 pub use sqlite_state::{
     FilesystemToSqliteMigrationInput, SqliteStateBackend, StateMigrationVerificationReceipt,
+    SyntheticSandboxRecoveryPosture,
 };
 #[cfg(feature = "trusted-host-application-spi")]
 pub use sqlite_state::{
