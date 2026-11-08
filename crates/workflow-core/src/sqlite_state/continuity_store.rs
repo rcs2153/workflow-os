@@ -4683,6 +4683,51 @@ mod conformance_backend {
         }
 
         #[test]
+        fn trusted_host_time_window_readiness_rejects_already_satisfied_wait() {
+            let fixture = fixture(false, false);
+            let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");
+            register_time_window_wait(&fixture, deadline);
+            let locator = time_window_locator(&fixture);
+            let scheduling = observe_trusted_host_time_window_scheduling_with_time(
+                &fixture.backend.store.backend,
+                &locator,
+                handoff_observation_time(),
+            )
+            .expect("initial scheduling ticket");
+            fixture.backend.conformance_set_time(deadline);
+            apply_trusted_host_time_window_wake_with_verifier(
+                time_window_caller_input(
+                    &fixture,
+                    "operation/trusted-host-competing-wake",
+                    "receipt/trusted-host-competing-wake",
+                ),
+                |request| fixture.backend.store.transition_time_window_wait(request),
+            )
+            .expect("competing wake commits");
+            let before = fixture.backend.conformance_snapshot();
+            let error = assess_trusted_host_time_window_readiness_with_time(
+                &TrustedHostTimeWindowReadinessInput {
+                    backend: &fixture.backend.store.backend,
+                    locator: &locator,
+                    handoff: scheduling.handoff.as_ref().expect("handoff"),
+                    ticket: scheduling.ticket.as_ref().expect("ticket"),
+                },
+                trusted_time_observation(
+                    deadline,
+                    TrustedTimeSourceKind::CoreInjectedClockV1,
+                    expected_provenance().expect("provenance"),
+                    expected_epoch().expect("epoch"),
+                ),
+            )
+            .expect_err("an already-satisfied wait cannot produce a second wake");
+            assert_eq!(
+                error.code(),
+                "trusted_host_time_window_scheduling.posture_ineligible"
+            );
+            assert!(before == fixture.backend.conformance_snapshot());
+        }
+
+        #[test]
         fn trusted_host_time_window_caller_derives_current_binding_and_transitions() {
             let fixture = fixture(false, false);
             let deadline = Timestamp::parse_rfc3339("2026-08-15T12:30:00Z").expect("deadline");

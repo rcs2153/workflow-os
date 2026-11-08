@@ -4,9 +4,9 @@ use sha2::{Digest, Sha256};
 
 use crate::authorized_execution_continuity_state::internal::{
     AuthoritativeContinuationDisposition, AuthoritativeWaitDependencyBinding,
-    AuthoritativeWaitState, AuthoritativeWindowState, AuthorizedExecutionContinuityStore,
-    ContinuityInstanceEligibility, ContinuityOperationId, ContinuityReceiptId, ContinuityRevision,
-    ReferenceContinuityState, TrustedTimeObservation, TrustedTimePosture, TrustedTimeSourceKind,
+    AuthoritativeWaitState, AuthorizedExecutionContinuityStore, ContinuityInstanceEligibility,
+    ContinuityOperationId, ContinuityReceiptId, ContinuityRevision, ReferenceContinuityState,
+    TrustedTimeObservation, TrustedTimePosture, TrustedTimeSourceKind,
 };
 use crate::trusted_host_supervisor::TrustedHostAttemptExecutor;
 use crate::{
@@ -22,9 +22,7 @@ use super::trusted_host_time_window_reinvocation::{
     reinvoke_after_time_window_wait, TrustedHostTimeWindowReinvocationInput,
     TrustedHostTimeWindowReinvocationOutcome,
 };
-use super::trusted_host_wait_handoff::{
-    derive_handoff, derive_observation, validate_locator, TrustedHostWaitHandoff,
-};
+use super::trusted_host_wait_handoff::{derive_observation, TrustedHostWaitHandoff};
 use super::{continuity_codec, SqliteStateBackend};
 
 const TICKET_COMMITMENT_DOMAIN: &str = "workflow-os/trusted-host-time-window-schedule-ticket/v1";
@@ -526,50 +524,24 @@ fn assess_readiness_with(
         .map_err(|_| scheduling_corrupt())?;
     let state = continuity_codec::load_snapshot(&transaction)?;
     let observation = observe_time()?;
-    validate_time_observation(&state, &observation)?;
-
-    let window = state
-        .windows
-        .get(&input.locator.window_id)
-        .ok_or_else(scheduling_corrupt)?;
-    validate_locator(input.locator, window)?;
-    if window.state != AuthoritativeWindowState::Yielded {
+    let current = derive_scheduling_observation(&state, input.locator, &observation)?;
+    if current.disposition != AuthoritativeContinuationDisposition::AwaitCondition {
         return Err(scheduling_ineligible());
     }
-    let active_yield = state
-        .yields
-        .get(
-            window
-                .active_yield
-                .as_ref()
-                .ok_or_else(scheduling_corrupt)?,
-        )
-        .ok_or_else(scheduling_corrupt)?;
-    let current_handoff = derive_handoff(&state, window, active_yield)?;
-    let current_ticket = derive_ticket(&state, window, active_yield, &current_handoff)?;
+    let current_handoff = current.handoff.as_ref().ok_or_else(scheduling_corrupt)?;
+    let current_ticket = current.ticket.as_ref().ok_or_else(scheduling_corrupt)?;
     if current_handoff.commitment() != input.handoff.commitment()
         || current_ticket.ticket_commitment != input.ticket.ticket_commitment
     {
         return Err(scheduling_stale());
     }
 
-    let current = derive_observation(&state, input.locator, &observation)?;
     let assessment = if observation.observed_at() < current_ticket.schedule_at {
-        if current.disposition != AuthoritativeContinuationDisposition::AwaitCondition {
-            return Err(scheduling_ineligible());
-        }
         TrustedHostTimeWindowReadinessAssessment {
             status: TrustedHostTimeWindowReadinessStatus::NotYetEligible,
-            refreshed_scheduling: Some(TrustedHostTimeWindowSchedulingObservation {
-                disposition: current.disposition,
-                handoff: Some(current_handoff),
-                ticket: Some(current_ticket),
-            }),
+            refreshed_scheduling: Some(current),
         }
     } else {
-        if current.disposition != AuthoritativeContinuationDisposition::AwaitCondition {
-            return Err(scheduling_ineligible());
-        }
         TrustedHostTimeWindowReadinessAssessment {
             status: TrustedHostTimeWindowReadinessStatus::Eligible,
             refreshed_scheduling: None,

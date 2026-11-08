@@ -90,8 +90,29 @@ pub(super) fn timestamp_from_parts(seconds: i64, nanos: i64) -> Result<Timestamp
         .map_err(|_| corrupt())
 }
 
-#[allow(clippy::too_many_lines)]
 pub(super) fn load_snapshot(
+    connection: &Connection,
+) -> Result<ReferenceContinuityState, WorkflowOsError> {
+    read_snapshot_consistently(connection, load_snapshot_rows)
+}
+
+pub(super) fn read_snapshot_consistently<T>(
+    connection: &Connection,
+    read: impl FnOnce(&Connection) -> Result<T, WorkflowOsError>,
+) -> Result<T, WorkflowOsError> {
+    if !connection.is_autocommit() {
+        return read(connection);
+    }
+    // The snapshot spans multiple tables. Never combine rows from before
+    // and after a concurrent commit when called outside a write transaction.
+    let transaction = connection.unchecked_transaction().map_err(|_| corrupt())?;
+    let snapshot = read(&transaction)?;
+    transaction.commit().map_err(|_| corrupt())?;
+    Ok(snapshot)
+}
+
+#[allow(clippy::too_many_lines)]
+fn load_snapshot_rows(
     connection: &Connection,
 ) -> Result<ReferenceContinuityState, WorkflowOsError> {
     let trusted_time = load_trusted_time(connection)?;
