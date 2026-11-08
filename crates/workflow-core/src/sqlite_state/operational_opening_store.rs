@@ -2250,6 +2250,11 @@ mod tests {
             self.calls.fetch_add(1, Ordering::Relaxed);
             assert_eq!(schedule_at, self.expected_deadline);
             self.barrier.wait();
+            let remaining =
+                schedule_at.as_offset_date_time() - Timestamp::now_utc().as_offset_date_time();
+            if let Ok(duration) = std::time::Duration::try_from(remaining) {
+                std::thread::sleep(duration);
+            }
             Ok(TrustedHostDeadlineWaitOutcome::Woke)
         }
     }
@@ -7820,15 +7825,41 @@ mod tests {
     }
 
     #[test]
+    fn continuity_snapshot_read_remains_pinned_across_a_concurrent_commit() {
+        let fixture = Fixture::new();
+        let writer = fixture.backend.connection().expect("writer");
+        writer.execute_batch("CREATE TABLE snapshot_probe (value INTEGER NOT NULL); INSERT INTO snapshot_probe VALUES (1);")
+            .expect("initialize isolated probe");
+        let reader = fixture
+            .backend
+            .existing_read_only_connection()
+            .expect("reader");
+        let value = |db: &rusqlite::Connection| -> i64 {
+            db.query_row("SELECT value FROM snapshot_probe", [], |row| row.get(0))
+                .expect("read probe")
+        };
+        let (before, during) =
+            super::super::continuity_codec::read_snapshot_consistently(&reader, |snapshot| {
+                let before = value(snapshot);
+                writer
+                    .execute("UPDATE snapshot_probe SET value=2", [])
+                    .expect("commit concurrent update");
+                Ok((before, value(snapshot)))
+            })
+            .expect("consistent snapshot");
+        assert_eq!((before, during, value(&reader)), (1, 1, 2));
+    }
+
+    #[test]
     #[allow(clippy::too_many_lines)]
     fn concurrent_schedule_once_callbacks_enter_executor_at_most_once() {
         let fixture = Fixture::new();
+        // Persist the wait before its deadline even when other tests contend for CPU.
         let deadline = Timestamp::from_offset_date_time(
-            Timestamp::now_utc().as_offset_date_time() + time::Duration::milliseconds(500),
+            Timestamp::now_utc().as_offset_date_time() + time::Duration::seconds(3),
         );
         let locator =
             register_supervisor_time_window_wait(&fixture, "schedule-once-concurrent", deadline);
-        std::thread::sleep(std::time::Duration::from_millis(600));
         let waiter_calls = Arc::new(AtomicUsize::new(0));
         let executor_calls = Arc::new(AtomicUsize::new(0));
         let barrier = Arc::new(Barrier::new(2));
@@ -7893,23 +7924,39 @@ mod tests {
                 .sum::<u32>(),
             1
         );
-        assert!(outcomes.iter().all(|outcome| match outcome {
-            Ok(TrustedHostScheduleOnceOutcome::Reinvoked(outcome)) => {
-                outcome.execution.stop_reason == TrustedHostRedispatchStopReason::Terminal
-                    && outcome.execution.executor_entries <= 1
-            }
-            Err(error) => matches!(
-                error.code(),
-                "trusted_host_time_window_scheduling.ticket_stale"
-                    | "trusted_host_time_window_scheduling.posture_ineligible"
-                    | "trusted_host_redispatch.directive_replayed"
-                    | "trusted_host_redispatch.attempt_limit_inconsistent"
-            ),
-            Ok(
-                TrustedHostScheduleOnceOutcome::Canceled
-                | TrustedHostScheduleOnceOutcome::NotYetEligible { .. },
-            ) => false,
-        }));
+        assert!(
+            outcomes.iter().all(|outcome| match outcome {
+                Ok(TrustedHostScheduleOnceOutcome::Reinvoked(outcome)) => {
+                    outcome.execution.stop_reason == TrustedHostRedispatchStopReason::Terminal
+                        && outcome.execution.executor_entries <= 1
+                }
+                Err(error) => matches!(
+                    error.code(),
+                    "trusted_host_time_window_scheduling.ticket_stale"
+                        | "trusted_host_time_window_scheduling.posture_ineligible"
+                        | "trusted_host_redispatch.directive_replayed"
+                        | "trusted_host_redispatch.attempt_limit_inconsistent"
+                ),
+                Ok(
+                    TrustedHostScheduleOnceOutcome::Canceled
+                    | TrustedHostScheduleOnceOutcome::NotYetEligible { .. },
+                ) => false,
+            }),
+            "unexpected concurrent scheduler outcomes: {:?}",
+            outcomes
+                .iter()
+                .map(|outcome| match outcome {
+                    Ok(TrustedHostScheduleOnceOutcome::Reinvoked(outcome)) => format!(
+                        "reinvoked: {:?}, entries: {}",
+                        outcome.execution.stop_reason, outcome.execution.executor_entries
+                    ),
+                    Ok(TrustedHostScheduleOnceOutcome::Canceled) => "canceled".to_owned(),
+                    Ok(TrustedHostScheduleOnceOutcome::NotYetEligible { .. }) =>
+                        "not yet eligible".to_owned(),
+                    Err(error) => error.code().to_owned(),
+                })
+                .collect::<Vec<_>>()
+        );
         assert_eq!(
             fixture
                 .backend

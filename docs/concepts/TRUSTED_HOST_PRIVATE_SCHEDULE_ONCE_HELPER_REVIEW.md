@@ -166,3 +166,37 @@ workflow scheduler in that planning phase.
   workspace clippy, full workspace tests, docs checks, and diff checks passed
 - out-of-kernel work: source inspection, security analysis, review authoring,
   validation, and later git and pull-request actions
+
+## Concurrent Fixture Follow-Up
+
+The first Rust check for [PR #831](https://github.com/rcs2153/workflow-os/pull/831)
+failed the concurrent worker outcome assertion, after the test had already
+verified exactly one executor entry. The same CI head passed on rerun. The
+first log did not identify the unexpected worker outcome. A local stress
+rerun with bounded diagnostics reproduced the same assertion failure and
+identified the loser as `trusted_host_redispatch.directive_missing` while
+the winner entered once and reached terminal state.
+
+The continuity snapshot is loaded from multiple tables. In autocommit mode,
+the worker could read the pre-commit window and the post-commit directive
+state. The loader now pins its multi-query read in a SQLite transaction
+when the caller does not already own one. Existing writer transactions and
+directive consumption checks are unchanged. A deterministic test commits
+an update between two reader queries and verifies that only a fresh read
+sees the committed value.
+
+With coherent reads in place, another stress run exposed
+`trusted_host_wait_handoff.state_corrupt`. A deterministic regression confirmed
+that readiness tried to derive a new handoff after another worker had already
+satisfied the wait. It now derives the current scheduling posture first and
+rejects an ineligible ticket before constructing a handoff. The regression
+checks that this read-only rejection does not change the durable snapshot.
+
+Local contention testing separately reproduced a setup failure: the short
+fixture deadline elapsed before the initial wait committed. SQLite correctly
+rejected that wait. The fixture now allows three seconds for setup and waits
+for the actual persisted deadline from inside its two-worker barrier, rather
+than sleeping for a fixed offset before starting the workers. Failure output
+now shows only the two bounded worker postures, entry counts, or error codes.
+The accepted outcomes, one-entry assertion, and durable terminal check
+are unchanged. No error allowlist was broadened.
