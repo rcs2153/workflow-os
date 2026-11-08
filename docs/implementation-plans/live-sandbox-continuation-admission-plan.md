@@ -1114,6 +1114,24 @@ revocation and a mismatched scope at reservation time. This maintainer review
 does not replace independent review of the signer deployment, provider facts,
 or live trial.
 
+### Fence The First Installation Exchange
+
+The private SQLite lane now requires explicit V15 activation before claiming
+an exchange. Core derives the operation from the exact attempt and immutable
+invocation, and the reviewed App and installation must match the target
+revision already bound into the scoped policy decision. The claim and its
+grant binding commit together without consuming the grant or creating a send
+reservation. Fresh authority is rechecked before invoking the exchange, and
+the process-local result must carry that same claim into the send reservation.
+The transaction does not extend across the exchange or make local revocation
+atomic with a remote request.
+
+After restart, a durable claim without a send reservation means issuance is
+uncertain, even when the claim outlives the grant. An existing reservation is
+classified by the offline inspector. A missing counterpart, changed request,
+or inconsistent evidence is not permission to start over. No public route,
+signer channel, real assertion, or live provider call is enabled by this slice.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

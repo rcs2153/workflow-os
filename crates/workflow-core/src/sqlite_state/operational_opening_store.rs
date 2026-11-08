@@ -3547,7 +3547,24 @@ mod tests {
     #[test]
     fn live_comment_installation_offline_inspection_is_exact_after_reopen() {
         for completed in [false, true] {
-            exercise_live_grant_reservation(LiveGrantTrial::InstallationInspection { completed });
+            exercise_live_grant_reservation(LiveGrantTrial::InstallationClaim(
+                InstallationClaimTrial::Reserved { completed },
+            ));
+        }
+    }
+
+    #[test]
+    fn live_installation_claim_fences_exchange_and_preserves_uncertainty() {
+        for trial in [
+            InstallationClaimTrial::CommitLoss,
+            InstallationClaimTrial::Contended,
+            InstallationClaimTrial::RevokedBeforeExchange,
+            InstallationClaimTrial::RevokedAfterExchange,
+            InstallationClaimTrial::SubstitutedScope,
+            InstallationClaimTrial::StaleScope,
+            InstallationClaimTrial::MissingApprovalProof,
+        ] {
+            exercise_live_grant_reservation(LiveGrantTrial::InstallationClaim(trial));
         }
     }
 
@@ -3995,6 +4012,55 @@ mod tests {
         );
     }
 
+    #[test]
+    fn live_installation_claim_schema_upgrades_only_by_explicit_opt_in() {
+        use super::super::{
+            schema_manifest_digest, INSTALLATION_ISSUANCE_CLAIM_SCHEMA_DIGEST,
+            INSTALLATION_ISSUANCE_CLAIM_SCHEMA_V15,
+        };
+        let fixture = Fixture::new();
+        let history = fixture
+            .backend
+            .read_events(&fixture.run_id)
+            .expect("history");
+        fixture
+            .backend
+            .enable_live_sandbox_grant_store()
+            .expect("V13");
+        assert!(fixture
+            .backend
+            .enable_installation_issuance_claim_store()
+            .is_err());
+        fixture
+            .backend
+            .enable_live_comment_observation_store()
+            .expect("V14");
+        let mut connection = fixture.backend.existing_connection().expect("connection");
+        let tx = connection.transaction().expect("test manifest transaction");
+        tx.execute_batch(INSTALLATION_ISSUANCE_CLAIM_SCHEMA_V15)
+            .expect("V15 DDL");
+        assert_eq!(
+            schema_manifest_digest(&tx).expect("manifest"),
+            INSTALLATION_ISSUANCE_CLAIM_SCHEMA_DIGEST
+        );
+        tx.rollback().expect("discard test manifest transaction");
+        fixture
+            .backend
+            .enable_installation_issuance_claim_store()
+            .expect("explicit V15");
+        fixture
+            .backend
+            .enable_installation_issuance_claim_store()
+            .expect("exact upgrade retry");
+        let reopened = SqliteStateBackend::open(&fixture.path).expect("open V15");
+        assert_eq!(
+            reopened
+                .read_events(&fixture.run_id)
+                .expect("unchanged history"),
+            history
+        );
+    }
+
     #[derive(Clone, Copy)]
     enum LiveGrantTrial {
         AmbiguousCommit,
@@ -4003,7 +4069,7 @@ mod tests {
         PreparedLoopback { expired: bool },
         InstallationScope,
         InstallationSend(InstallationSendTrial),
-        InstallationInspection { completed: bool },
+        InstallationClaim(InstallationClaimTrial),
         DurableObservation,
         SuiteObservation,
         ExpiredBeforeSend,
@@ -4449,22 +4515,48 @@ mod tests {
         }
     }
 
-    fn exercise_installation_offline_inspection(
+    #[derive(Clone, Copy)]
+    enum InstallationClaimTrial {
+        Reserved { completed: bool },
+        CommitLoss,
+        Contended,
+        RevokedBeforeExchange,
+        RevokedAfterExchange,
+        SubstitutedScope,
+        StaleScope,
+        MissingApprovalProof,
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn exercise_installation_claim(
         backend: &SqliteStateBackend,
         path: &std::path::Path,
-        request: crate::dispatch_reservation::DispatchReservationRequest,
+        request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
         admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
         action: crate::provider_write::GitHubCommentContinuationAction<'_>,
         provider: &crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding,
-        case: (bool, Timestamp),
+        case: (InstallationClaimTrial, Timestamp),
     ) {
-        use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture;
-        use crate::provider_comment_transport::installation_exchange::{
-            ReviewedInstallation, VerifiedInstallationScope,
+        use super::super::dispatch_reservation_store::{
+            installation_dispatch_operation, InstallationCommentRecoveryPosture,
         };
+        use crate::provider_comment_transport::installation_exchange::ReviewedInstallation;
         use crate::SideEffectRecordStore;
 
-        let (completed, deadline) = case;
+        let (trial, deadline) = case;
+        backend
+            .enable_live_comment_observation_store()
+            .expect("V14");
+        backend
+            .enable_installation_issuance_claim_store()
+            .expect("V15");
+        let request = || {
+            let mut request = request();
+            request.operation_id =
+                installation_dispatch_operation(&request).expect("canonical operation");
+            request.request_commitment = crate::dispatch_reservation::request_commitment(&request);
+            request
+        };
         let reviewed = ReviewedInstallation {
             app_id: std::num::NonZeroU64::new(33).expect("app"),
             app_slug: "offline-contract-fixture",
@@ -4477,18 +4569,14 @@ mod tests {
             comment_adapter: &provider.adapter_commitment,
             deadline,
         };
-        let verified = VerifiedInstallationScope::test_receipt_with_live_shape(
-            reviewed,
-            Timestamp::now_utc(),
-            deadline,
-        );
-        let operation = request.operation_id.clone();
+        let InstallationClaimTrial::Reserved { completed } = trial else {
+            exercise_installation_claim_denials(backend, path, request, admission, reviewed, trial);
+            return;
+        };
+        let operation = request().operation_id;
         backend
-            .seed_installation_recovery_for_test(
-                request, admission, action, reviewed, &verified, completed,
-            )
+            .seed_installation_recovery_for_test(request(), admission, action, reviewed, completed)
             .expect("seed disposable production-shaped state without transport");
-        drop(verified);
         let connection = backend.existing_connection().expect("fixture connection");
         let mut time = super::super::continuity_codec::load_snapshot(&connection)
             .expect("fixture continuity")
@@ -4521,6 +4609,10 @@ mod tests {
             .revoke_live_sandbox_grant(admission.grant_id)
             .expect("revoke consumed grant");
         assert_eq!(inspect().expect("repeat read"), expected);
+        assert!(
+            matches!(reopened.claim_installation_exchange(&request(), admission, reviewed).expect("historical replay"),
+            super::super::dispatch_reservation_store::InstallationIssuanceDisposition::Reserved(posture) if posture == expected)
+        );
         let wrong_run = crate::WorkflowRunId::new("wrong-run").expect("run id");
         let wrong_effect = crate::SideEffectId::new("wrong-effect").expect("effect id");
         let wrong_operation =
@@ -4556,6 +4648,216 @@ mod tests {
             )
             .expect("inject corruption in disposable state");
         assert!(inspect().is_err());
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn exercise_installation_claim_denials(
+        backend: &SqliteStateBackend,
+        path: &std::path::Path,
+        request: impl Fn() -> crate::dispatch_reservation::DispatchReservationRequest,
+        admission: super::super::live_sandbox_grant_store::LiveGrantAdmission<'_>,
+        reviewed: crate::provider_comment_transport::installation_exchange::ReviewedInstallation<
+            '_,
+        >,
+        trial: InstallationClaimTrial,
+    ) {
+        use super::super::dispatch_reservation_store::InstallationIssuanceDisposition::{
+            Fresh, IssuanceUncertain,
+        };
+        use crate::provider_comment_transport::installation_exchange::VerifiedInstallationScope;
+        let wrong =
+            crate::provider_comment_transport::installation_exchange::ReviewedInstallation {
+                installation_id: std::num::NonZeroU64::new(45).expect("wrong installation"),
+                ..reviewed
+            };
+        assert!(backend
+            .claim_installation_exchange(&request(), admission, wrong)
+            .is_err());
+        let wrong_principal = super::super::live_sandbox_grant_store::LiveGrantAdmission {
+            credential: &[0; 32],
+            ..admission
+        };
+        assert!(backend
+            .claim_installation_exchange(&request(), wrong_principal, reviewed)
+            .is_err());
+        let connection = backend.existing_connection().expect("fixture connection");
+        let claim_count = || {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM installation_issuance_claims",
+                    [],
+                    |row| row.get::<_, u32>(0),
+                )
+                .expect("claim count")
+        };
+        assert_eq!(claim_count(), 0);
+        match trial {
+            InstallationClaimTrial::MissingApprovalProof => {
+                assert_eq!(
+                    connection
+                        .execute("DELETE FROM approval_presentations", [])
+                        .expect("remove proof in disposable state"),
+                    1
+                );
+                assert!(backend
+                    .claim_installation_exchange(&request(), admission, reviewed)
+                    .is_err());
+                assert_eq!(claim_count(), 0);
+                return;
+            }
+            InstallationClaimTrial::CommitLoss => {
+                for fail_after_commit in [false, true] {
+                    assert!(backend
+                        .claim_installation_exchange_with_fault(
+                            &request(),
+                            admission,
+                            reviewed,
+                            |committed| {
+                                if committed == fail_after_commit {
+                                    Err(WorkflowOsError::security(
+                                        "test.claim_interrupted",
+                                        "claim interrupted",
+                                    ))
+                                } else {
+                                    Ok(())
+                                }
+                            }
+                        )
+                        .is_err());
+                    assert_eq!(claim_count(), u32::from(fail_after_commit));
+                }
+            }
+            InstallationClaimTrial::Contended => {
+                let first = request();
+                let second = request();
+                let (one, two) = std::thread::scope(|scope| {
+                    let one = scope
+                        .spawn(|| backend.claim_installation_exchange(&first, admission, reviewed));
+                    let two = scope.spawn(|| {
+                        backend.claim_installation_exchange(&second, admission, reviewed)
+                    });
+                    (
+                        one.join().expect("first caller").expect("first result"),
+                        two.join().expect("second caller").expect("second result"),
+                    )
+                });
+                let claim = match (one, two) {
+                    (Fresh(claim), IssuanceUncertain) | (IssuanceUncertain, Fresh(claim)) => claim,
+                    _ => panic!("exactly one caller gets an exchange right"),
+                };
+                let calls = std::cell::Cell::new(0);
+                assert!(backend
+                    .use_installation_exchange_claim(&request(), admission, reviewed, claim, || {
+                        calls.set(calls.get() + 1);
+                        None // Response lost after the exchange starts.
+                    })
+                    .expect("uncertain exchange")
+                    .is_none());
+                assert_eq!(calls.get(), 1);
+            }
+            InstallationClaimTrial::RevokedBeforeExchange => {
+                let Fresh(claim) = backend
+                    .claim_installation_exchange(&request(), admission, reviewed)
+                    .expect("fresh claim")
+                else {
+                    panic!("missing right");
+                };
+                backend
+                    .revoke_live_sandbox_grant(admission.grant_id)
+                    .expect("revoke before exchange");
+                assert!(backend
+                    .use_installation_exchange_claim(
+                        &request(),
+                        admission,
+                        reviewed,
+                        claim,
+                        || panic!("revoked exchange must not run")
+                    )
+                    .is_err());
+            }
+            InstallationClaimTrial::StaleScope => {
+                let stale = VerifiedInstallationScope::test_receipt_with_live_shape(
+                    reviewed,
+                    Timestamp::from_offset_date_time(
+                        Timestamp::now_utc().as_offset_date_time() - time::Duration::seconds(1),
+                    ),
+                    reviewed.deadline,
+                );
+                let Fresh(claim) = backend
+                    .claim_installation_exchange(&request(), admission, reviewed)
+                    .expect("fresh claim")
+                else {
+                    panic!("missing right");
+                };
+                assert!(backend
+                    .use_installation_exchange_claim(&request(), admission, reviewed, claim, || {
+                        Some(stale)
+                    })
+                    .is_err());
+            }
+            InstallationClaimTrial::RevokedAfterExchange
+            | InstallationClaimTrial::SubstitutedScope => {
+                let Fresh(claim) = backend
+                    .claim_installation_exchange(&request(), admission, reviewed)
+                    .expect("fresh claim")
+                else {
+                    panic!("missing right");
+                };
+                let substituted = matches!(trial, InstallationClaimTrial::SubstitutedScope);
+                let exchanged = backend
+                    .use_installation_exchange_claim(&request(), admission, reviewed, claim, || {
+                        Some(VerifiedInstallationScope::test_receipt_with_live_shape(
+                            if substituted { wrong } else { reviewed },
+                            Timestamp::now_utc(),
+                            reviewed.deadline,
+                        ))
+                    })
+                    .expect("injected exchange")
+                    .expect("response");
+                if !substituted {
+                    backend
+                        .revoke_live_sandbox_grant(admission.grant_id)
+                        .expect("revoke before reservation");
+                }
+                assert!(backend
+                    .reserve_installation_exchange_for_test(
+                        request(),
+                        admission,
+                        reviewed,
+                        &exchanged
+                    )
+                    .is_err());
+            }
+            InstallationClaimTrial::Reserved { .. } => {
+                unreachable!("handled by historical inspection test")
+            }
+        }
+        let reopened = SqliteStateBackend::open(path).expect("reopen uncertain claim");
+        assert_eq!(claim_count(), 1);
+        assert!(matches!(
+            reopened
+                .claim_installation_exchange(&request(), admission, reviewed)
+                .expect("uncertain replay"),
+            IssuanceUncertain
+        ));
+        let mut substituted = request();
+        substituted.operation_id =
+            crate::dispatch_reservation::DispatchReservationOperationId::new("different-operation")
+                .expect("operation");
+        substituted.request_commitment =
+            crate::dispatch_reservation::request_commitment(&substituted);
+        assert!(reopened
+            .claim_installation_exchange(&substituted, admission, reviewed)
+            .is_err());
+        assert_eq!(
+            connection
+                .execute("DELETE FROM installation_issuance_claims", [])
+                .expect("inject missing claim in disposable state"),
+            1
+        );
+        assert!(reopened
+            .claim_installation_exchange(&request(), admission, reviewed)
+            .is_err());
     }
 
     fn installation_fixture_send_time(
@@ -4726,7 +5028,7 @@ mod tests {
             .read_events(action.run)
             .expect("history before checks");
         assert!(backend
-            .reserve_scoped_live_sandbox_dispatch(request(), admission, reviewed, &valid)
+            .claim_installation_exchange(&request(), admission, reviewed)
             .is_err());
         assert!(backend
             .reserve_live_sandbox_dispatch(request(), admission)
@@ -5830,7 +6132,7 @@ mod tests {
                     LiveGrantTrial::InstallationScope | LiveGrantTrial::InstallationSend(_) => {
                         crate::provider_comment_transport::installation_exchange::fixture_installation_comment_adapter_commitment()
                     }
-                    LiveGrantTrial::InstallationInspection { .. } => {
+                    LiveGrantTrial::InstallationClaim(_) => {
                         crate::provider_comment_transport::installation_exchange::installation_comment_adapter_commitment()
                     }
                     _ => SpecContentHash::from_text("trusted synthetic adapter"),
@@ -5840,11 +6142,19 @@ mod tests {
                     author_id: std::num::NonZeroU64::new(456).expect("provider author id"),
                     adapter_commitment: adapter_commitment.clone(),
                 };
+                let target_revision = if matches!(trial, LiveGrantTrial::InstallationClaim(_)) {
+                    crate::provider_comment_transport::installation_exchange::installation_target_revision(
+                        action.target, std::num::NonZeroU64::new(33).expect("app"), "offline-contract-fixture",
+                        std::num::NonZeroU64::new(44).expect("installation"), &provider_binding(),
+                    ).expect("installation target revision")
+                } else {
+                    SpecContentHash::from_text("synthetic target revision")
+                };
                 let provision =
                     crate::live_sandbox_continuation_authority::LiveSandboxPolicyTarget::provision(
                         action.target.clone(),
                         facts.decision.actor.clone(),
-                        SpecContentHash::from_text("synthetic target revision"),
+                        target_revision,
                         expiry,
                         provider_binding(),
                     )
@@ -6180,7 +6490,7 @@ mod tests {
                     trial,
                     LiveGrantTrial::InstallationScope
                         | LiveGrantTrial::InstallationSend(_)
-                        | LiveGrantTrial::InstallationInspection { .. }
+                        | LiveGrantTrial::InstallationClaim(_)
                 ) {
                     inject_dispatch_commit_fault(InjectedDispatchCommitFault::Before);
                     assert!(backend
@@ -6253,21 +6563,26 @@ mod tests {
                             grant.expires_at().expect("grant deadline").min(expiry),
                         );
                     }
-                    LiveGrantTrial::InstallationInspection { completed } => {
-                        exercise_installation_offline_inspection(
+                    LiveGrantTrial::InstallationClaim(claim_trial) => {
+                        exercise_installation_claim(
                             &backend,
                             &fixture.path,
-                            request(),
+                            request,
                             admission,
                             action,
                             &provider_binding(),
                             (
-                                completed,
+                                claim_trial,
                                 grant.expires_at().expect("grant deadline").min(expiry),
                             ),
                         );
-                        assert_eq!(counts(), (1, 1));
-                        assert_eq!(event_count(), before + 1 + usize::from(completed));
+                        if let InstallationClaimTrial::Reserved { completed } = claim_trial {
+                            assert_eq!(counts(), (1, 1));
+                            assert_eq!(event_count(), before + 1 + usize::from(completed));
+                        } else {
+                            assert_eq!(counts(), (0, 0));
+                            assert_eq!(event_count(), before);
+                        }
                         return;
                     }
                     LiveGrantTrial::PreparedLoopback { expired } => {

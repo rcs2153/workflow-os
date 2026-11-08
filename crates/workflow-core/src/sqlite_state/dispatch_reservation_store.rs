@@ -25,9 +25,9 @@ use crate::provider_comment_observation::{
     ExpectedComment, MARKER_NAMESPACE,
 };
 use crate::provider_comment_transport::installation_exchange::{
-    installation_comment_adapter_commitment, InstallationCommentTransport,
-    InstallationCreationContext, ReviewedInstallation, VerifiedInstallationCreation,
-    VerifiedInstallationScope,
+    installation_comment_adapter_commitment, installation_target_revision,
+    InstallationCommentTransport, InstallationCreationContext, ReviewedInstallation,
+    VerifiedInstallationCreation, VerifiedInstallationScope,
 };
 #[cfg(test)]
 use crate::provider_comment_transport::PreparedGitHubCommentCreation;
@@ -86,6 +86,7 @@ struct LiveInstallationScopeAdmission<'a> {
     reviewed: ReviewedInstallation<'a>,
     verified: &'a VerifiedInstallationScope,
     fixture: bool,
+    claim: Option<&'a InstallationIssuanceClaim>,
 }
 
 impl LiveInstallationScopeAdmission<'_> {
@@ -98,25 +99,127 @@ impl LiveInstallationScopeAdmission<'_> {
         now: Timestamp,
         deadline: Timestamp,
     ) -> Result<(SpecContentHash, Timestamp), WorkflowOsError> {
-        let registered = read_active_live_target(tx, effect.target().reference())?;
-        let scope = self.reviewed;
-        let binding = &request.expected_window_binding;
-        if !is_installation_comment_adapter(&provider.adapter_commitment, self.fixture)
-            || scope.run_id != &binding.run_id
-            || scope.immutable_run != binding.immutable_run_bundle.root_hash()
-            || scope.target != registered.target()
-            || scope.repository_id != provider.repository_id
-            || scope.bot_id != provider.author_id
-            || scope.comment_adapter != &provider.adapter_commitment
-            || scope.deadline != deadline
-        {
-            return Err(not_dispatchable());
+        verify_reviewed_installation(
+            tx,
+            request,
+            effect,
+            provider,
+            deadline,
+            self.reviewed,
+            self.fixture,
+        )?;
+        if !self.fixture {
+            let claim = self.claim.ok_or_else(not_dispatchable)?;
+            if *claim.record != read_installation_claim(tx, request)?.ok_or_else(not_dispatchable)?
+                || !claim.record.matches(request, effect.side_effect_id(), self.reviewed)
+                || now < claim.record.claimed_at || now >= claim.record.deadline
+                || self.verified.verified_at() < claim.record.claimed_at
+                || !tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM live_sandbox_grant_uses WHERE attempt_id=?1 AND grant_id=?2)",
+                    params![claim.record.attempt, claim.record.grant], |row| row.get::<_, bool>(0),
+                ).map_err(|_| corrupt())?
+            {
+                return Err(not_dispatchable());
+            }
         }
         self.verified
-            .admission_binding(scope, now, self.fixture)
+            .admission_binding(self.reviewed, now, self.fixture)
             .filter(|(_, expires)| now < *expires && *expires <= deadline)
             .ok_or_else(not_dispatchable)
     }
+}
+
+fn verify_reviewed_installation(
+    tx: &rusqlite::Transaction<'_>,
+    request: &DispatchReservationRequest,
+    effect: &SideEffectRecord,
+    provider: &LiveSandboxProviderBinding,
+    deadline: Timestamp,
+    scope: ReviewedInstallation<'_>,
+    fixture: bool,
+) -> Result<(), WorkflowOsError> {
+    let registered = read_active_live_target(tx, effect.target().reference())?;
+    let binding = &request.expected_window_binding;
+    if !is_installation_comment_adapter(&provider.adapter_commitment, fixture)
+        || scope.run_id != &binding.run_id
+        || scope.immutable_run != binding.immutable_run_bundle.root_hash()
+        || scope.target != registered.target()
+        || scope.repository_id != provider.repository_id
+        || scope.bot_id != provider.author_id
+        || scope.comment_adapter != &provider.adapter_commitment
+        || scope.deadline != deadline
+        || (!fixture
+            && installation_target_revision(
+                scope.target,
+                scope.app_id,
+                scope.app_slug,
+                scope.installation_id,
+                provider,
+            )
+            .as_ref()
+                != Some(registered.revision()))
+    {
+        return Err(not_dispatchable());
+    }
+    Ok(())
+}
+
+#[derive(Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallationClaimRecord {
+    attempt: String,
+    window: String,
+    operation: String,
+    run: crate::WorkflowRunId,
+    effect: crate::SideEffectId,
+    grant: String,
+    request: SpecContentHash,
+    scope: SpecContentHash,
+    claimed_at: Timestamp,
+    deadline: Timestamp,
+}
+
+impl InstallationClaimRecord {
+    fn commitment(&self) -> Result<SpecContentHash, WorkflowOsError> {
+        Ok(SpecContentHash::from_text(&encode_json(
+            self,
+            "installation issuance claim",
+        )?))
+    }
+
+    fn matches(
+        &self,
+        request: &DispatchReservationRequest,
+        effect: &crate::SideEffectId,
+        reviewed: ReviewedInstallation<'_>,
+    ) -> bool {
+        self.attempt == request.capability.attempt_id.as_str()
+            && self.window == request.capability.window_id.as_str()
+            && self.operation == request.operation_id.as_str()
+            && self.run == request.expected_window_binding.run_id
+            && &self.effect == effect
+            && self.request == request.request_commitment
+            && reviewed.issuance_commitment().as_ref() == Some(&self.scope)
+            && self.deadline == reviewed.deadline
+            && self.claimed_at < self.deadline
+    }
+}
+
+// The right is process-local and deliberately cannot be cloned or reconstructed.
+pub(super) struct InstallationIssuanceClaim {
+    record: Box<InstallationClaimRecord>,
+}
+
+pub(super) struct InstallationExchangedScope {
+    claim: InstallationIssuanceClaim,
+    verified: VerifiedInstallationScope,
+}
+
+#[allow(dead_code)] // No signer or operator caller is admitted yet.
+pub(super) enum InstallationIssuanceDisposition {
+    Fresh(InstallationIssuanceClaim),
+    IssuanceUncertain,
+    Reserved(InstallationCommentRecoveryPosture),
 }
 
 fn is_installation_comment_adapter(adapter: &SpecContentHash, fixture: bool) -> bool {
@@ -320,6 +423,153 @@ impl DispatchReservationStore for SqliteStateBackend {
 }
 
 impl SqliteStateBackend {
+    #[allow(dead_code)] // Private until a reviewed signer caller exists.
+    pub(super) fn claim_installation_exchange(
+        &self,
+        request: &DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+    ) -> Result<InstallationIssuanceDisposition, WorkflowOsError> {
+        self.claim_installation_exchange_with_fault(request, admission, reviewed, |_| Ok(()))
+    }
+
+    pub(super) fn claim_installation_exchange_with_fault(
+        &self,
+        request: &DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        mut commit_boundary: impl FnMut(bool) -> Result<(), WorkflowOsError>,
+    ) -> Result<InstallationIssuanceDisposition, WorkflowOsError> {
+        if request.request_commitment != request_commitment(request)
+            || request.operation_id != installation_dispatch_operation(request)?
+            || request.workflow_lifecycle_commitment.is_some()
+            || reviewed.run_id != &request.expected_window_binding.run_id
+            || reviewed.immutable_run
+                != request
+                    .expected_window_binding
+                    .immutable_run_bundle
+                    .root_hash()
+            || !can_encode_marked_comment(admission.body)
+        {
+            return Err(not_dispatchable());
+        }
+        let run = reviewed.run_id;
+        let mut connection = self.existing_connection()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| storage_error("begin_failed"))?;
+        super::validate_operational_schema(&tx)?;
+        let claim = read_installation_claim(&tx, request)?;
+        if claim.as_ref().is_some_and(|prior| {
+            prior.grant != admission.grant_id.as_str()
+                || !prior.matches(request, admission.side_effect, reviewed)
+        }) {
+            return Err(not_dispatchable());
+        }
+        if let Some(posture) =
+            existing_installation_disposition(&tx, request, admission.side_effect)?
+        {
+            return Ok(InstallationIssuanceDisposition::Reserved(posture));
+        }
+        if claim.is_some() {
+            return Ok(InstallationIssuanceDisposition::IssuanceUncertain);
+        }
+        let now = verify_current_installation_exchange(&tx, request, admission, reviewed)?;
+        let record = InstallationClaimRecord {
+            attempt: request.capability.attempt_id.as_str().to_owned(),
+            window: request.capability.window_id.as_str().to_owned(),
+            operation: request.operation_id.as_str().to_owned(),
+            run: run.clone(),
+            effect: admission.side_effect.clone(),
+            grant: admission.grant_id.as_str().to_owned(),
+            request: request.request_commitment.clone(),
+            scope: reviewed
+                .issuance_commitment()
+                .ok_or_else(not_dispatchable)?,
+            claimed_at: now,
+            deadline: reviewed.deadline,
+        };
+        let payload = encode_json(&record, "installation issuance claim")?;
+        let hash = SpecContentHash::from_text(&payload);
+        tx.execute(
+            "INSERT INTO installation_issuance_claims (attempt_id, window_id, operation_id, payload, payload_hash) VALUES (?1,?2,?3,?4,?5)",
+            params![record.attempt, record.window, record.operation, payload, hash.as_str()],
+        ).map_err(|_| storage_error("write_failed"))?;
+        let bound = tx.execute(
+            "UPDATE live_sandbox_grants SET issuance_claim_hash=?1 WHERE grant_id=?2 AND attempt_id=?3 AND issuance_claim_hash IS NULL",
+            params![hash.as_str(), record.grant, record.attempt],
+        ).map_err(|_| storage_error("write_failed"))?;
+        if bound != 1 {
+            return Err(corrupt());
+        }
+        commit_boundary(false)?;
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        commit_boundary(true)?;
+        Ok(InstallationIssuanceDisposition::Fresh(
+            InstallationIssuanceClaim {
+                record: Box::new(record),
+            },
+        ))
+    }
+
+    #[cfg(test)]
+    pub(super) fn reserve_installation_exchange_for_test(
+        &self,
+        request: DispatchReservationRequest,
+        grant: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        exchanged: &InstallationExchangedScope,
+    ) -> Result<Option<Box<ReservedAttemptDispatchCapability>>, WorkflowOsError> {
+        self.reserve_live_sandbox_dispatch_with_binding(
+            request,
+            grant,
+            None,
+            Some(LiveInstallationScopeAdmission {
+                reviewed,
+                verified: &exchanged.verified,
+                fixture: false,
+                claim: Some(&exchanged.claim),
+            }),
+        )
+    }
+
+    #[allow(dead_code)] // No real signer or provider call is connected here.
+    pub(super) fn use_installation_exchange_claim(
+        &self,
+        request: &DispatchReservationRequest,
+        admission: LiveGrantAdmission<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        claim: InstallationIssuanceClaim,
+        exchange: impl FnOnce() -> Option<VerifiedInstallationScope>,
+    ) -> Result<Option<InstallationExchangedScope>, WorkflowOsError> {
+        let mut connection = self.existing_read_only_connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|_| storage_error("begin_failed"))?;
+        super::validate_operational_schema(&tx)?;
+        let record = read_installation_claim(&tx, request)?.ok_or_else(not_dispatchable)?;
+        if record != *claim.record
+            || !record.matches(request, admission.side_effect, reviewed)
+            || record.grant != admission.grant_id.as_str()
+            || request.request_commitment != request_commitment(request)
+            || existing_installation_disposition(&tx, request, admission.side_effect)?.is_some()
+        {
+            return Err(not_dispatchable());
+        }
+        let now = verify_current_installation_exchange(&tx, request, admission, reviewed)?;
+        if now < record.claimed_at {
+            return Err(not_dispatchable());
+        }
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        let Some(verified) = exchange() else {
+            return Ok(None);
+        };
+        if verified.verified_at() < now {
+            return Err(not_dispatchable());
+        }
+        Ok(Some(InstallationExchangedScope { claim, verified }))
+    }
+
     /// Inspects an existing synthetic reservation without granting authority,
     /// making provider calls, or mutating the database.
     ///
@@ -370,22 +620,7 @@ impl SqliteStateBackend {
             .transaction()
             .map_err(|_| storage_error("begin_failed"))?;
         let admission = read_live_recovery_admission(&tx, operation, run_id)?;
-        if !comment_proof_source_matches(&admission, LiveCommentProofKind::InstallationCreation)
-            || !admission
-                .witness
-                .as_ref()
-                .and_then(|witness| witness.creation_deadline)
-                .is_some_and(|deadline| admission.committed_at < deadline)
-        {
-            return Err(not_dispatchable());
-        }
-        match verify_comment_disposition(&tx, &admission, run_id, side_effect_id)? {
-            Some(LiveCommentProofKind::InstallationCreation) => {
-                Ok(InstallationCommentRecoveryPosture::CreationVerified)
-            }
-            None => Ok(InstallationCommentRecoveryPosture::ReconciliationRequired),
-            Some(_) => Err(not_dispatchable()),
-        }
+        installation_disposition(&tx, &admission, run_id, side_effect_id)
     }
 
     #[cfg(test)]
@@ -395,18 +630,32 @@ impl SqliteStateBackend {
         grant: LiveGrantAdmission<'_>,
         action: GitHubCommentContinuationAction<'_>,
         reviewed: ReviewedInstallation<'_>,
-        verified: &VerifiedInstallationScope,
         completed: bool,
     ) -> Result<(), WorkflowOsError> {
         let operation = request.operation_id.clone();
+        let InstallationIssuanceDisposition::Fresh(claim) =
+            self.claim_installation_exchange(&request, grant, reviewed)?
+        else {
+            return Err(not_dispatchable());
+        };
+        let exchanged = self
+            .use_installation_exchange_claim(&request, grant, reviewed, claim, || {
+                Some(VerifiedInstallationScope::test_receipt_with_live_shape(
+                    reviewed,
+                    Timestamp::now_utc(),
+                    reviewed.deadline,
+                ))
+            })?
+            .ok_or_else(not_dispatchable)?;
         self.reserve_live_sandbox_dispatch_with_binding(
             request,
             grant,
             None,
             Some(LiveInstallationScopeAdmission {
                 reviewed,
-                verified,
+                verified: &exchanged.verified,
                 fixture: false,
+                claim: Some(&exchanged.claim),
             }),
         )?
         .ok_or_else(not_dispatchable)?;
@@ -586,26 +835,6 @@ impl SqliteStateBackend {
         self.reserve_live_sandbox_dispatch_with_binding(request, admission, None, None)
     }
 
-    #[allow(dead_code)] // No operator path or sender is connected.
-    pub(super) fn reserve_scoped_live_sandbox_dispatch(
-        &self,
-        request: DispatchReservationRequest,
-        admission: LiveGrantAdmission<'_>,
-        reviewed: ReviewedInstallation<'_>,
-        verified: &VerifiedInstallationScope,
-    ) -> Result<Option<Box<ReservedAttemptDispatchCapability>>, WorkflowOsError> {
-        self.reserve_live_sandbox_dispatch_with_binding(
-            request,
-            admission,
-            None,
-            Some(LiveInstallationScopeAdmission {
-                reviewed,
-                verified,
-                fixture: false,
-            }),
-        )
-    }
-
     #[cfg(test)]
     pub(super) fn reserve_fixture_installation_scope(
         &self,
@@ -622,6 +851,7 @@ impl SqliteStateBackend {
                 reviewed,
                 verified,
                 fixture: true,
+                claim: None,
             }),
         )
     }
@@ -851,16 +1081,17 @@ impl SqliteStateBackend {
         request: DispatchReservationRequest,
         admission: LiveGrantAdmission<'_>,
         action: GitHubCommentContinuationAction<'_>,
-        transport: InstallationCommentTransport<'_>,
+        reviewed: ReviewedInstallation<'_>,
+        exchanged: InstallationExchangedScope,
     ) -> Result<Option<EventId>, WorkflowOsError> {
-        if transport.is_fixture() {
-            return Err(not_dispatchable());
-        }
+        let InstallationExchangedScope { claim, verified } = exchanged;
+        let transport = InstallationCommentTransport::new(verified, reviewed);
         self.dispatch_installation_comment_with_clock(
             request,
             admission,
             action,
             transport,
+            Some(&claim),
             continuity_store::observe_continuity_trusted_time,
         )
     }
@@ -878,7 +1109,7 @@ impl SqliteStateBackend {
             return Err(not_dispatchable());
         }
         self.dispatch_installation_comment_with_clock(
-            request, admission, action, transport, observe,
+            request, admission, action, transport, None, observe,
         )
     }
 
@@ -888,6 +1119,7 @@ impl SqliteStateBackend {
         admission: LiveGrantAdmission<'_>,
         action: GitHubCommentContinuationAction<'_>,
         transport: InstallationCommentTransport<'_>,
+        claim: Option<&InstallationIssuanceClaim>,
         observe: impl FnOnce() -> Result<TrustedTimeObservation, WorkflowOsError>,
     ) -> Result<Option<EventId>, WorkflowOsError> {
         let invocation = action.commitment()?;
@@ -909,6 +1141,7 @@ impl SqliteStateBackend {
                 reviewed,
                 verified: transport.verified(),
                 fixture,
+                claim,
             }),
         )?
         else {
@@ -1216,6 +1449,13 @@ impl SqliteStateBackend {
         }
 
         let mut state = continuity_codec::load_snapshot(&transaction)?;
+        let last = verify_fresh_dispatch_state(
+            &transaction,
+            &state,
+            &request,
+            &observation,
+            live.is_some(),
+        )?;
         let window = state
             .windows
             .get_mut(&request.capability.window_id)
@@ -1224,64 +1464,6 @@ impl SqliteStateBackend {
             .attempts
             .get_mut(&request.capability.attempt_id)
             .ok_or_else(not_dispatchable)?;
-        if state.trusted_time.eligibility != ContinuityInstanceEligibility::LiveStateEligible
-            || state.trusted_time.posture == TrustedTimePosture::Quarantined
-            || observation.source() != state.trusted_time.source
-            || observation.provenance_commitment() != &state.trusted_time.provenance_commitment
-            || observation.epoch_id() != &state.trusted_time.epoch_id
-            || state
-                .trusted_time
-                .last_observed_at
-                .is_some_and(|prior| observation.observed_at() < prior)
-            || (live.is_some()
-                && (observation.epoch_id() != &window.trusted_time_epoch_id
-                    || observation.observed_at() < window.trusted_time_watermark))
-            || observation.observed_at() >= window.expires_at
-            || window.state != AuthoritativeWindowState::Executing
-            || attempt.state != AuthoritativeAttemptState::Started
-            || window.revision != request.capability.window_revision
-            || attempt.revision != ContinuityRevision::new(1)?
-            || window.cursor != request.capability.cursor
-            || attempt.cursor != request.capability.cursor
-            || window.workflow_id != request.expected_window_binding.workflow_id
-            || window.run_id != request.expected_window_binding.run_id
-            || window.step_id != request.expected_window_binding.step_id
-            || window.subject_actor_id != request.expected_window_binding.subject_actor_id
-            || window.immutable_run_bundle != request.expected_window_binding.immutable_run_bundle
-            || window.governance_commitment != request.expected_window_binding.governance_commitment
-            || window.authority_commitment != request.expected_window_binding.authority_commitment
-            || request.capability.subject_actor_id != window.subject_actor_id
-            || request.capability.authority_commitment != window.authority_commitment
-            || request.capability.window_binding_commitment
-                != window_binding_commitment(&request.expected_window_binding)
-            || attempt.window_id != window.window_id
-            || attempt.subject_actor_id != window.subject_actor_id
-            || attempt.authority_commitment != window.authority_commitment
-            || attempt.consume_operation_id != request.capability.consume_operation_id
-        {
-            return Err(not_dispatchable());
-        }
-        let conflicting: i64 = transaction
-            .query_row(
-                "SELECT COUNT(*) FROM dispatch_reservations WHERE attempt_id=?1",
-                params![request.capability.attempt_id.as_str()],
-                |row| row.get(0),
-            )
-            .map_err(|_| storage_error("read_failed"))?;
-        if conflicting != 0 {
-            return Err(not_dispatchable());
-        }
-
-        let history = SqliteStateBackend::read_events_with_connection(
-            &transaction,
-            &request.expected_window_binding.run_id,
-        )?;
-        let last = history.last().ok_or_else(corrupt)?;
-        if last.sequence_number != request.capability.cursor.sequence_number
-            || last.event_id != request.capability.cursor.event_id
-        {
-            return Err(not_dispatchable());
-        }
         check_admission(&transaction, observation.observed_at(), window.expires_at)?;
         let attempted_effect = if let Some(admission) = live {
             Some(admission.consume(
@@ -1317,6 +1499,11 @@ impl SqliteStateBackend {
         let trusted_commitment = trusted_time_commitment(&observation);
         let next_revision = request.capability.window_revision.checked_next()?;
         let live_witness = if let Some((effect, provider, deadline)) = attempted_effect {
+            let claim_commitment = scope
+                .as_ref()
+                .and_then(|scope| scope.claim)
+                .map(|claim| claim.record.commitment())
+                .transpose()?;
             let (scope_commitment, deadline) = if let Some(scope) = scope {
                 let (commitment, effective_deadline) = scope.validate(
                     &transaction,
@@ -1345,6 +1532,7 @@ impl SqliteStateBackend {
                 provider,
                 creation_deadline: Some(deadline),
                 installation_scope_commitment: scope_commitment,
+                installation_issuance_claim_commitment: claim_commitment,
             })
         } else {
             None
@@ -1507,6 +1695,239 @@ impl SqliteStateBackend {
     }
 }
 
+pub(super) fn installation_dispatch_operation(
+    request: &DispatchReservationRequest,
+) -> Result<DispatchReservationOperationId, WorkflowOsError> {
+    let identity = encode_json(
+        &(
+            "workflow-os/installation-dispatch-operation/v1",
+            &request.capability.attempt_id,
+            &request.invocation_commitment,
+        ),
+        "installation operation",
+    )?;
+    DispatchReservationOperationId::new(format!(
+        "dispatch/installation/{}",
+        SpecContentHash::from_text(&identity)
+    ))
+}
+
+fn read_installation_claim(
+    tx: &rusqlite::Transaction<'_>,
+    request: &DispatchReservationRequest,
+) -> Result<Option<InstallationClaimRecord>, WorkflowOsError> {
+    read_installation_claim_by_key(
+        tx,
+        request.capability.attempt_id.as_str(),
+        request.capability.window_id.as_str(),
+        request.operation_id.as_str(),
+    )
+}
+
+fn read_installation_claim_by_key(
+    tx: &rusqlite::Transaction<'_>,
+    expected_attempt: &str,
+    expected_window: &str,
+    expected_operation: &str,
+) -> Result<Option<InstallationClaimRecord>, WorkflowOsError> {
+    // Callers validate the full schema before writes. Reservation consumption
+    // temporarily has a deferred grant-use foreign key until the send row is inserted.
+    let version: u32 = tx
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|_| corrupt())?;
+    if version != super::INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION {
+        return Err(not_dispatchable());
+    }
+    let row = tx.query_row(
+        "SELECT attempt_id,window_id,operation_id,payload,payload_hash FROM installation_issuance_claims WHERE attempt_id=?1 OR operation_id=?2",
+        params![expected_attempt, expected_operation],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?)),
+    ).optional().map_err(|_| corrupt())?;
+    let mut statement = tx.prepare(
+        "SELECT grant_id,issuance_claim_hash FROM live_sandbox_grants WHERE attempt_id=?1 AND issuance_claim_hash IS NOT NULL",
+    ).map_err(|_| corrupt())?;
+    let mut grants = statement.query([expected_attempt]).map_err(|_| corrupt())?;
+    let grant = grants
+        .next()
+        .map_err(|_| corrupt())?
+        .map(|row| Ok::<_, rusqlite::Error>((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .transpose()
+        .map_err(|_| corrupt())?;
+    if grants.next().map_err(|_| corrupt())?.is_some() {
+        return Err(corrupt());
+    }
+    let Some((attempt, window, operation, payload, hash)) = row else {
+        if grant.is_some() {
+            return Err(corrupt());
+        }
+        return Ok(None);
+    };
+    let record: InstallationClaimRecord =
+        super::decode_json(&payload, "installation issuance claim").map_err(|_| corrupt())?;
+    if record.attempt != attempt
+        || record.window != window
+        || record.operation != operation
+        || attempt != expected_attempt
+        || window != expected_window
+        || operation != expected_operation
+        || hash != SpecContentHash::from_text(&payload).as_str()
+        || grant.as_ref() != Some(&(record.grant.clone(), hash))
+    {
+        return Err(corrupt());
+    }
+    Ok(Some(record))
+}
+
+fn existing_installation_disposition(
+    tx: &rusqlite::Transaction<'_>,
+    request: &DispatchReservationRequest,
+    effect: &crate::SideEffectId,
+) -> Result<Option<InstallationCommentRecoveryPosture>, WorkflowOsError> {
+    let run = &request.expected_window_binding.run_id;
+    if let Some((record, _)) = read_existing(tx, request.operation_id.as_str())? {
+        if record.request_commitment != request.request_commitment
+            || record.receipt_id != request.receipt_id
+            || record.window_id != request.capability.window_id
+            || record.attempt_id != request.capability.attempt_id
+        {
+            return Err(not_dispatchable());
+        }
+        let admission = read_live_recovery_admission(tx, &request.operation_id, run)?;
+        return installation_disposition(tx, &admission, run, effect).map(Some);
+    }
+    let contradictory: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM dispatch_reservations WHERE attempt_id=?1)
+             OR EXISTS(SELECT 1 FROM dispatch_reservation_projection_bindings WHERE operation_id=?2)
+             OR EXISTS(SELECT 1 FROM live_sandbox_grant_uses WHERE attempt_id=?1)
+             OR EXISTS(SELECT 1 FROM events WHERE event_id=?3)",
+            params![
+                request.capability.attempt_id.as_str(),
+                request.operation_id.as_str(),
+                dispatch_admission_event_id(&request.operation_id)?.as_str()
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|_| corrupt())?;
+    if contradictory || SqliteStateBackend::read_events_with_connection(tx, run)?.iter().any(|event| {
+        matches!(&event.kind, WorkflowRunEventKind::AuthorizedExecutionAttemptDispatchAdmitted(admitted)
+            if admitted.attempt_id() == &request.capability.attempt_id)
+    }) {
+        return Err(corrupt());
+    }
+    Ok(None)
+}
+
+fn verify_current_installation_exchange(
+    tx: &rusqlite::Transaction<'_>,
+    request: &DispatchReservationRequest,
+    admission: LiveGrantAdmission<'_>,
+    reviewed: ReviewedInstallation<'_>,
+) -> Result<Timestamp, WorkflowOsError> {
+    check_dispatch_lane(
+        tx,
+        &request.capability.window_id,
+        &request.capability.attempt_id,
+        true,
+    )?;
+    let observation = continuity_store::observe_continuity_trusted_time()?;
+    let now = observation.observed_at();
+    let state = continuity_codec::load_snapshot(tx)?;
+    verify_fresh_dispatch_state(tx, &state, request, &observation, true)?;
+    let window = state
+        .windows
+        .get(&request.capability.window_id)
+        .ok_or_else(not_dispatchable)?;
+    let (effect, provider, deadline) = admission.authenticate(tx, request, now)?.verify_dispatch(
+        tx,
+        request,
+        now,
+        window.expires_at,
+    )?;
+    verify_reviewed_installation(tx, request, &effect, &provider, deadline, reviewed, false)?;
+    if now >= deadline {
+        return Err(not_dispatchable());
+    }
+    Ok(now)
+}
+
+fn verify_fresh_dispatch_state(
+    tx: &rusqlite::Transaction<'_>,
+    state: &ReferenceContinuityState,
+    request: &DispatchReservationRequest,
+    observation: &TrustedTimeObservation,
+    live: bool,
+) -> Result<WorkflowRunEvent, WorkflowOsError> {
+    let window = state
+        .windows
+        .get(&request.capability.window_id)
+        .ok_or_else(not_dispatchable)?;
+    let attempt = state
+        .attempts
+        .get(&request.capability.attempt_id)
+        .ok_or_else(not_dispatchable)?;
+    if state.trusted_time.eligibility != ContinuityInstanceEligibility::LiveStateEligible
+        || state.trusted_time.posture == TrustedTimePosture::Quarantined
+        || observation.source() != state.trusted_time.source
+        || observation.provenance_commitment() != &state.trusted_time.provenance_commitment
+        || observation.epoch_id() != &state.trusted_time.epoch_id
+        || state
+            .trusted_time
+            .last_observed_at
+            .is_some_and(|prior| observation.observed_at() < prior)
+        || (live
+            && (observation.epoch_id() != &window.trusted_time_epoch_id
+                || observation.observed_at() < window.trusted_time_watermark))
+        || observation.observed_at() >= window.expires_at
+        || window.state != AuthoritativeWindowState::Executing
+        || (live && window.active_yield.is_some())
+        || attempt.state != AuthoritativeAttemptState::Started
+        || window.revision != request.capability.window_revision
+        || attempt.revision != ContinuityRevision::new(1)?
+        || window.cursor != request.capability.cursor
+        || attempt.cursor != request.capability.cursor
+        || window.workflow_id != request.expected_window_binding.workflow_id
+        || window.run_id != request.expected_window_binding.run_id
+        || window.step_id != request.expected_window_binding.step_id
+        || window.subject_actor_id != request.expected_window_binding.subject_actor_id
+        || window.immutable_run_bundle != request.expected_window_binding.immutable_run_bundle
+        || window.governance_commitment != request.expected_window_binding.governance_commitment
+        || window.authority_commitment != request.expected_window_binding.authority_commitment
+        || request.capability.subject_actor_id != window.subject_actor_id
+        || request.capability.authority_commitment != window.authority_commitment
+        || request.capability.window_binding_commitment
+            != window_binding_commitment(&request.expected_window_binding)
+        || attempt.window_id != window.window_id
+        || attempt.subject_actor_id != window.subject_actor_id
+        || attempt.authority_commitment != window.authority_commitment
+        || attempt.consume_operation_id != request.capability.consume_operation_id
+    {
+        return Err(not_dispatchable());
+    }
+    let conflicting: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM dispatch_reservations WHERE attempt_id=?1",
+            [request.capability.attempt_id.as_str()],
+            |row| row.get(0),
+        )
+        .map_err(|_| storage_error("read_failed"))?;
+    if conflicting != 0 {
+        return Err(not_dispatchable());
+    }
+    let last = SqliteStateBackend::read_events_with_connection(
+        tx,
+        &request.expected_window_binding.run_id,
+    )?
+    .pop()
+    .ok_or_else(corrupt)?;
+    if last.sequence_number != request.capability.cursor.sequence_number
+        || last.event_id != request.capability.cursor.event_id
+    {
+        return Err(not_dispatchable());
+    }
+    Ok(last)
+}
+
 fn current_comment_execution(
     tx: &rusqlite::Transaction<'_>,
     state: &ReferenceContinuityState,
@@ -1598,7 +2019,11 @@ fn durable_comment_context(
     operation: &DispatchReservationOperationId,
     action: GitHubCommentContinuationAction<'_>,
 ) -> Result<ReservedCommentContext, WorkflowOsError> {
-    if super::validate_operational_schema(tx)? != super::LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION {
+    if !matches!(
+        super::validate_operational_schema(tx)?,
+        super::LIVE_COMMENT_OBSERVATION_SCHEMA_VERSION
+            | super::INSTALLATION_ISSUANCE_CLAIM_SCHEMA_VERSION
+    ) {
         return Err(not_dispatchable());
     }
     read_reserved_comment_context(
@@ -1681,11 +2106,58 @@ fn read_live_recovery_admission(
     if !has_exact_live_use {
         return Err(not_dispatchable());
     }
+    if let Some(commitment) = record
+        .live_witness
+        .as_ref()
+        .and_then(|witness| witness.installation_issuance_claim_commitment.as_ref())
+    {
+        let claim = read_installation_claim_by_key(
+            tx,
+            record.attempt_id.as_str(),
+            record.window_id.as_str(),
+            operation.as_str(),
+        )?
+        .ok_or_else(corrupt)?;
+        if &claim.commitment()? != commitment || &claim.run != run_id
+            || claim.request != record.request_commitment || claim.claimed_at > record.committed_at
+            || record.committed_at >= claim.deadline
+            || !tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM live_sandbox_grant_uses WHERE attempt_id=?1 AND grant_id=?2)",
+                params![claim.attempt, claim.grant], |row| row.get::<_, bool>(0),
+            ).map_err(|_| corrupt())?
+        {
+            return Err(corrupt());
+        }
+    }
     Ok(LiveRecoveryAdmission {
         event: binding.event,
         witness: record.live_witness,
         committed_at: record.committed_at,
     })
+}
+
+fn installation_disposition(
+    tx: &rusqlite::Transaction<'_>,
+    admission: &LiveRecoveryAdmission,
+    run: &crate::WorkflowRunId,
+    effect: &crate::SideEffectId,
+) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
+    if !comment_proof_source_matches(admission, LiveCommentProofKind::InstallationCreation)
+        || !admission
+            .witness
+            .as_ref()
+            .and_then(|witness| witness.creation_deadline)
+            .is_some_and(|deadline| admission.committed_at < deadline)
+    {
+        return Err(not_dispatchable());
+    }
+    match verify_comment_disposition(tx, admission, run, effect)? {
+        Some(LiveCommentProofKind::InstallationCreation) => {
+            Ok(InstallationCommentRecoveryPosture::CreationVerified)
+        }
+        None => Ok(InstallationCommentRecoveryPosture::ReconciliationRequired),
+        Some(_) => Err(not_dispatchable()),
+    }
 }
 
 fn verify_live_recovery_state(

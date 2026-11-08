@@ -53,6 +53,10 @@ impl LiveSandboxPolicyTarget {
         self.valid_until
     }
 
+    pub(crate) const fn revision(&self) -> &SpecContentHash {
+        &self.revision
+    }
+
     pub(crate) fn provision(
         target: GitHubPullRequestCommentTarget,
         operator: ActorId,
