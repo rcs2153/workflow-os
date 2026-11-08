@@ -11,8 +11,8 @@ use crate::{GitHubPullRequestCommentTarget, Timestamp};
 
 const MAX_COMMENTS: usize = 128;
 const MAX_PAGES: usize = 8;
-const MAX_RAW_BODY_BYTES: usize = 64 * 1024;
-const MAX_CREATION_RESPONSE_BYTES: usize = 512 * 1024;
+pub(crate) const MAX_RAW_BODY_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_CREATION_RESPONSE_BYTES: usize = 512 * 1024;
 const MARKER_PREFIX: &str = "<!-- workflow-os/live-comment/";
 pub(crate) const MARKER_NAMESPACE: &str = "workflow-os/live-comment/";
 const SUFFIX_START: &str = "\n\n<!-- ";
