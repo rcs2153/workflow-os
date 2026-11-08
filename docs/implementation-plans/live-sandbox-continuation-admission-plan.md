@@ -610,6 +610,61 @@ dropped acknowledgement followed by restart and exact retry sends nothing
 again. The fixture reconciles the received body using a synthetic observation;
 this is not evidence of live GitHub behavior or a production recovery route.
 
+### Live Admission Review After Loopback Composition
+
+**Verdict: accept the loopback evidence at `07c46c16`; do not admit a live
+trial.** This is a maintainer review, not independent assurance. The fixture
+demonstrates that binding mismatch does not consume the grant, that the
+successful local exchange sends the reservation-marked bytes once, and that
+response loss and restart do not mint another send right. The following gaps
+must close before requesting live approval:
+
+1. **Resolve the adapter and provider scope independently.** The prepared
+   exchange currently copies the expected adapter commitment. The fixture
+   proves comparison with the registry, not independent identification of the
+   selected implementation or provider authorization. Derive a versioned,
+   payload-free binding from the trusted adapter and its reviewed configuration;
+   compare that binding with the registry and reservation. Verify provider-side
+   access is restricted to the disposable repository. A caller-provided scope
+   summary, a matching user ID, or a successful repository GET is not proof
+   of that restriction.
+2. **Define the last local authority check before POST.** The send path rereads
+   the reservation witness and checks time but does not re-resolve grant,
+   principal, or target revocation after reservation. A production caller must
+   reject changes visible at a final consistent local read and preserve the
+   consumed reservation for recovery. Test revocation between reservation and
+   send and a prepared exchange that expires before dispatch. Do not hold a
+   SQLite transaction across HTTP or claim atomicity with provider acceptance.
+3. **Use a real read-only recovery source and distinct evidence provenance.**
+   The current observation verifier receives injected pages, and the loopback
+   recovery writer receives a synthetic observation of the captured body.
+   Implement a bounded provider reader that proves the complete page chain
+   and exact identity without inventing timestamps or turning an incomplete
+   read into absence. Persist live creation or recovery evidence through a
+   distinct verified path; do not route HTTP results into the synthetic
+   proof writer. Verify response loss, restart, read-only recovery, and no
+   resend as one scenario. Keep a separately approved exact target and an
+   independent reviewer as trial prerequisites.
+
+Start with the bounded read-only provider observer and its adverse-page tests.
+It can be verified on loopback without enabling any real write. Do not promote
+the test-only dispatch wrapper or broaden the roadmap to another mutation family.
+
+### Bounded Read-Only HTTP Observation
+
+The private observer verifies the repository, authenticated actor, and pull
+request before listing comments against the stable repository ID and exact
+number. It validates [GitHub pagination links](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api)
+and constructs each request itself. Only sequential same-origin links for
+the exact named or stable-ID target are accepted. It bounds the scan to eight
+pages of sixteen comments and 512 KiB per page, validates row identity and
+ascending IDs, and rejects malformed, unauthorized, oversized, or incomplete
+responses without inferring absence. Complete observations use the existing
+current-comment verifier and require separately supplied trusted time bounds.
+Page traversal is not a snapshot, a live acceptance proof, or permission
+to retry. Loopback exercises the HTTP boundary; no production caller, writer,
+or provider request is enabled.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

@@ -1,18 +1,24 @@
-//! Private, single-use GitHub comment exchange. Not connected to dispatch.
+//! Private GitHub comment exchange and bounded read-only observation.
 #![allow(dead_code)]
 
 use std::{io::Read, num::NonZeroU64, time::Duration};
 
 use serde::Deserialize;
+use url::Url;
 
 use crate::live_sandbox_continuation_authority::LiveSandboxProviderBinding;
 use crate::provider_comment_observation::{
-    CreatedCommentResponse, MAX_CREATION_RESPONSE_BYTES, MAX_RAW_BODY_BYTES,
+    verify_current_comment, CommentEnumeration, CommentPage, CreatedCommentResponse,
+    CurrentCommentPosture, ExpectedComment, ProviderComment, ProviderTimestampBounds, MAX_COMMENTS,
+    MAX_CREATION_RESPONSE_BYTES, MAX_PAGES, MAX_RAW_BODY_BYTES,
 };
-use crate::{GitHubPullRequestCommentProviderAuth, GitHubPullRequestCommentTarget};
+use crate::{GitHubPullRequestCommentProviderAuth, GitHubPullRequestCommentTarget, Timestamp};
 
 const GITHUB_ORIGIN: &str = "https://api.github.com";
 const MAX_IDENTITY_RESPONSE_BYTES: usize = 128 * 1024;
+const MAX_COMMENT_PAGE_BYTES: usize = 512 * 1024;
+const COMMENTS_PER_PAGE: usize = MAX_COMMENTS / MAX_PAGES;
+const MAX_LINK_BYTES: usize = 4096;
 
 pub(crate) struct GitHubCommentCreationTransport<'a> {
     origin: String,
@@ -49,6 +55,28 @@ struct GitHubPullRequestBase {
     repo: GitHubRepositoryIdentity,
 }
 
+#[derive(Deserialize)]
+struct GitHubListedComment {
+    id: NonZeroU64,
+    url: String,
+    issue_url: String,
+    user: GitHubUserIdentity,
+    body: String,
+    created_at: Timestamp,
+    updated_at: Timestamp,
+}
+
+struct ObservedPage {
+    cursor: Option<NonZeroU64>,
+    next: Option<NonZeroU64>,
+    comments: Vec<GitHubListedComment>,
+}
+
+struct PageLinks {
+    next: Option<NonZeroU64>,
+    last: Option<NonZeroU64>,
+}
+
 impl<'a> GitHubCommentCreationTransport<'a> {
     pub(crate) fn new(auth: &'a GitHubPullRequestCommentProviderAuth) -> Self {
         Self {
@@ -70,16 +98,31 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         target: &GitHubPullRequestCommentTarget,
         expected: &LiveSandboxProviderBinding,
     ) -> Option<PreparedGitHubCommentCreation<'a>> {
+        self.verify_target(target, expected.repository_id, expected.author_id)?;
+        Some(PreparedGitHubCommentCreation {
+            transport: self,
+            path: comment_path(target),
+            target: target.clone(),
+            binding: expected.clone(),
+        })
+    }
+
+    fn verify_target(
+        &self,
+        target: &GitHubPullRequestCommentTarget,
+        repository_id: NonZeroU64,
+        author_id: NonZeroU64,
+    ) -> Option<()> {
         self.auth.validate().ok()?;
         target.validate().ok()?;
         let full_name = format!("{}/{}", target.owner(), target.repository());
         let repo = format!("/repos/{full_name}");
         let repository: GitHubRepositoryIdentity = self.read_identity(&repo)?;
-        if repository.id != expected.repository_id || repository.full_name != full_name {
+        if repository.id != repository_id || repository.full_name != full_name {
             return None;
         }
         let author: GitHubUserIdentity = self.read_identity("/user")?;
-        if author.id != expected.author_id {
+        if author.id != author_id {
             return None;
         }
         // Issue-comment creation also accepts ordinary issues.
@@ -92,12 +135,145 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         {
             return None;
         }
-        Some(PreparedGitHubCommentCreation {
-            transport: self,
-            path: format!("{repo}/issues/{number}/comments"),
-            target: target.clone(),
-            binding: expected.clone(),
-        })
+        Some(())
+    }
+
+    /// Reads only the reservation's target. A provider snapshot or acceptance
+    /// proof cannot be inferred from a complete traversal.
+    pub(crate) fn observe_comment(
+        self,
+        expected: &ExpectedComment<'_>,
+        timestamp_bounds: Option<ProviderTimestampBounds>,
+        observe_time: impl FnOnce() -> Option<Timestamp>,
+    ) -> CurrentCommentPosture {
+        let Some(pages) = self.read_comment_pages(expected) else {
+            return CurrentCommentPosture::Unresolved;
+        };
+        let Some(observed_at) = observe_time() else {
+            return CurrentCommentPosture::Unresolved;
+        };
+        let normalized = pages
+            .iter()
+            .map(|page| {
+                page.comments
+                    .iter()
+                    .map(|row| ProviderComment {
+                        target: expected.target,
+                        repository_id: expected.repository_id,
+                        author_id: row.user.id,
+                        comment_id: row.id,
+                        raw_body: &row.body,
+                        created_at: row.created_at,
+                        updated_at: row.updated_at,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let borrowed = pages
+            .iter()
+            .zip(&normalized)
+            .map(|(page, comments)| CommentPage {
+                request_cursor: page.cursor,
+                next_cursor: page.next,
+                comments,
+            })
+            .collect::<Vec<_>>();
+        verify_current_comment(
+            expected,
+            CommentEnumeration::Complete {
+                observed_at,
+                timestamp_bounds,
+                pages: &borrowed,
+            },
+        )
+    }
+
+    fn read_comment_pages(&self, expected: &ExpectedComment<'_>) -> Option<Vec<ObservedPage>> {
+        let target = expected.target;
+        self.verify_target(target, expected.repository_id, expected.author_id)?;
+        let origin = Url::parse(&self.origin).ok()?;
+        let named = comment_path(target);
+        let stable = format!(
+            "/repositories/{}/issues/{}/comments",
+            expected.repository_id,
+            target.pull_request_number()
+        );
+        let issue = format!(
+            "{GITHUB_ORIGIN}/repos/{}/{}/issues/{}",
+            target.owner(),
+            target.repository(),
+            target.pull_request_number()
+        );
+        let comments = format!(
+            "{GITHUB_ORIGIN}/repos/{}/{}/issues/comments",
+            target.owner(),
+            target.repository()
+        );
+        let mut pages = Vec::new();
+        let mut previous_id = None;
+        let mut advertised_last = None;
+        let page_limit = u64::try_from(MAX_PAGES).ok()?;
+        for page in 1..=page_limit {
+            let request_path = format!("{stable}?per_page={COMMENTS_PER_PAGE}&page={page}");
+            let response = self
+                .request("GET", &request_path)
+                .set("Accept", "application/vnd.github.raw+json")
+                .call()
+                .ok()?;
+            if response.status() != 200 {
+                return None;
+            }
+            let links = response.all("Link");
+            if response
+                .headers_names()
+                .iter()
+                .filter(|name| name.eq_ignore_ascii_case("Link"))
+                .count()
+                != links.len()
+            {
+                return None;
+            }
+            let PageLinks { next, last } =
+                comment_page_links(&links, &origin, &named, &stable, page)?;
+            if let Some(last) = last {
+                if last.get() > page_limit || advertised_last.is_some_and(|prior| prior != last) {
+                    return None;
+                }
+                advertised_last = Some(last);
+            }
+            if advertised_last
+                .is_some_and(|last| last.get() < page || (last.get() > page) != next.is_some())
+            {
+                return None;
+            }
+            let bytes = bounded_read(response.into_reader(), MAX_COMMENT_PAGE_BYTES)?;
+            let rows: Vec<GitHubListedComment> = serde_json::from_slice(&bytes).ok()?;
+            if rows.len() > COMMENTS_PER_PAGE
+                || (next.is_some() && rows.len() != COMMENTS_PER_PAGE)
+                || (page > 1 && rows.is_empty())
+            {
+                return None;
+            }
+            for row in &rows {
+                if row.issue_url != issue
+                    || row.url != format!("{comments}/{}", row.id)
+                    || row.body.len() > MAX_RAW_BODY_BYTES
+                    || previous_id.is_some_and(|prior| row.id <= prior)
+                {
+                    return None;
+                }
+                previous_id = Some(row.id);
+            }
+            pages.push(ObservedPage {
+                cursor: (page > 1).then(|| NonZeroU64::new(page)).flatten(),
+                next,
+                comments: rows,
+            });
+            if next.is_none() {
+                return Some(pages);
+            }
+        }
+        None
     }
 
     fn request(&self, method: &str, path: &str) -> ureq::Request {
@@ -120,6 +296,81 @@ impl<'a> GitHubCommentCreationTransport<'a> {
         let body = bounded_read(response.into_reader(), MAX_IDENTITY_RESPONSE_BYTES)?;
         serde_json::from_slice(&body).ok()
     }
+}
+
+fn comment_path(target: &GitHubPullRequestCommentTarget) -> String {
+    format!(
+        "/repos/{}/{}/issues/{}/comments",
+        target.owner(),
+        target.repository(),
+        target.pull_request_number()
+    )
+}
+
+// Accept only GitHub's simple pagination links. Rebuild the request from
+// the validated page number instead of following any supplied URL.
+fn comment_page_links(
+    headers: &[&str],
+    origin: &Url,
+    named: &str,
+    stable: &str,
+    page: u64,
+) -> Option<PageLinks> {
+    let mut budget = MAX_LINK_BYTES;
+    let mut seen = 0u8;
+    let mut next = None;
+    let mut last = None;
+    for header in headers {
+        budget = budget.checked_sub(header.len())?;
+        for link in header.split(',') {
+            let (url, relation) = link.trim().strip_prefix('<')?.split_once('>')?;
+            let relation = relation.trim().strip_prefix(';')?.trim();
+            let url = Url::parse(url).ok()?;
+            if url.origin() != origin.origin()
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || url.fragment().is_some()
+                || (url.path() != named && url.path() != stable)
+            {
+                return None;
+            }
+            let mut number = None;
+            let mut per_page = false;
+            for (key, value) in url.query_pairs() {
+                match key.as_ref() {
+                    "page" if number.is_none() => number = Some(value.parse::<NonZeroU64>().ok()?),
+                    "per_page"
+                        if !per_page && value.parse::<usize>().ok()? == COMMENTS_PER_PAGE =>
+                    {
+                        per_page = true;
+                    }
+                    _ => return None,
+                }
+            }
+            let number = number.filter(|_| per_page)?;
+            let bit = match relation {
+                "rel=\"next\"" if number.get() == page.checked_add(1)? => {
+                    next = Some(number);
+                    1
+                }
+                "rel=\"last\"" if number.get() >= page => {
+                    last = Some(number);
+                    2
+                }
+                "rel=\"first\"" if number.get() == 1 => 4,
+                "rel=\"prev\"" if number.get().checked_add(1)? == page => 8,
+                _ => return None,
+            };
+            if seen & bit != 0 {
+                return None;
+            }
+            seen |= bit;
+        }
+    }
+    if last.is_some_and(|last| (last.get() > page) != next.is_some()) {
+        return None;
+    }
+    Some(PageLinks { next, last })
 }
 
 impl PreparedGitHubCommentCreation<'_> {
@@ -368,6 +619,217 @@ pub(crate) mod tests {
             headers: "",
             body,
         }
+    }
+
+    const MARKER: &str =
+        "workflow-os/live-comment/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const STABLE_PATH: &str = "/repositories/11/issues/7/comments";
+    type ObservationReply = (&'static str, String, Vec<u8>);
+
+    fn observation_time(seconds: i64) -> Timestamp {
+        Timestamp::from_offset_date_time(
+            time::OffsetDateTime::from_unix_timestamp(seconds).expect("test clock"),
+        )
+    }
+
+    fn observation_exchange(
+        replies: impl FnOnce(&str) -> Vec<ObservationReply>,
+        bounds: Option<ProviderTimestampBounds>,
+    ) -> CurrentCommentPosture {
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).expect("loopback");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let origin = format!("http://{}", listener.local_addr().expect("address"));
+        let replies = replies(&origin);
+        let auth = GitHubPullRequestCommentProviderAuth::new("synthetic-only", None)
+            .expect("fixture auth");
+        let target = GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target");
+        let expected = ExpectedComment {
+            target: &target,
+            repository_id: NonZeroU64::new(11).expect("repository ID"),
+            author_id: NonZeroU64::new(22).expect("author ID"),
+            known_comment_id: None,
+            body: "approved",
+            reservation_marker: MARKER,
+            not_before: observation_time(10),
+            not_after: observation_time(20),
+        };
+        thread::scope(|scope| {
+            let server = scope.spawn(|| {
+                assert!(serve(&listener, &repo(REPO)).is_none());
+                assert!(serve(&listener, &user(USER)).is_none());
+                assert!(serve(&listener, &pull_request("200 OK", PR)).is_none());
+                for (index, (status, headers, body)) in replies.iter().enumerate() {
+                    let line = format!(
+                        "GET {STABLE_PATH}?per_page={COMMENTS_PER_PAGE}&page={} HTTP/1.1",
+                        index + 1,
+                    );
+                    assert!(serve(
+                        &listener,
+                        &Reply {
+                            line: &line,
+                            status,
+                            headers,
+                            body,
+                        }
+                    )
+                    .is_none());
+                }
+            });
+            let observed = GitHubCommentCreationTransport {
+                origin,
+                ..GitHubCommentCreationTransport::new(&auth)
+            }
+            .observe_comment(&expected, bounds, || Some(observation_time(21)));
+            server.join().expect("read-only fixture");
+            assert!(
+                matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+            );
+            observed
+        })
+    }
+
+    const EXACT_TEST_CLOCK: Option<ProviderTimestampBounds> = Some(ProviderTimestampBounds {
+        earliest_correction: time::Duration::ZERO,
+        latest_correction: time::Duration::ZERO,
+    });
+
+    fn listed_comment(id: usize, body: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "url": format!("{GITHUB_ORIGIN}/repos/example/sandbox/issues/comments/{id}"),
+            "issue_url": format!("{GITHUB_ORIGIN}/repos/example/sandbox/issues/7"),
+            "user": {"id": 22},
+            "body": body,
+            "created_at": "1970-01-01T00:00:15Z",
+            "updated_at": "1970-01-01T00:00:15Z",
+        })
+    }
+
+    fn full_page(first: usize) -> Vec<u8> {
+        let records = (first..first + COMMENTS_PER_PAGE)
+            .map(|id| listed_comment(id, "unrelated"))
+            .collect::<Vec<_>>();
+        serde_json::to_vec(&records).expect("page")
+    }
+
+    fn next_link(origin: &str, path: &str, next: usize) -> String {
+        format!("Link: <{origin}{path}?per_page={COMMENTS_PER_PAGE}&page={next}>; rel=\"next\"\r\n")
+    }
+
+    #[test]
+    fn comment_observer_requires_complete_pages_and_a_trusted_time_bound() {
+        let first = |origin: &str| ("200 OK", next_link(origin, STABLE_PATH, 2), full_page(1));
+        let exact = crate::provider_comment_observation::encode_marked_comment("approved", MARKER)
+            .expect("marked body");
+        let candidate = serde_json::to_vec(&[listed_comment(COMMENTS_PER_PAGE + 1, &exact)])
+            .expect("last page");
+        for (bounds, posture) in [
+            (EXACT_TEST_CLOCK, CurrentCommentPosture::ExactCurrentMatch),
+            (None, CurrentCommentPosture::Unresolved),
+        ] {
+            assert_eq!(
+                observation_exchange(
+                    |origin| vec![first(origin), ("200 OK", String::new(), candidate.clone()),],
+                    bounds
+                ),
+                posture
+            );
+        }
+        assert_eq!(
+            observation_exchange(
+                |origin| vec![first(origin), ("403 Forbidden", String::new(), Vec::new()),],
+                EXACT_TEST_CLOCK
+            ),
+            CurrentCommentPosture::Unresolved
+        );
+        let duplicate = serde_json::to_vec(&[listed_comment(COMMENTS_PER_PAGE, &exact)])
+            .expect("overlapping page");
+        assert_eq!(
+            observation_exchange(
+                |origin| vec![first(origin), ("200 OK", String::new(), duplicate),],
+                EXACT_TEST_CLOCK
+            ),
+            CurrentCommentPosture::Unresolved
+        );
+    }
+
+    #[test]
+    fn comment_observer_rejects_untrusted_links_and_never_requests_page_nine() {
+        let paths = [
+            "/repositories/12/issues/7/comments",
+            "/repositories/11/issues/8/comments",
+        ];
+        for path in paths {
+            assert_eq!(
+                observation_exchange(
+                    |origin| vec![("200 OK", next_link(origin, path, 2), full_page(1)),],
+                    EXACT_TEST_CLOCK
+                ),
+                CurrentCommentPosture::Unresolved
+            );
+        }
+        for link in [
+            next_link("https://example.invalid", STABLE_PATH, 2),
+            "Link: invalid\r\n".to_owned(),
+        ] {
+            assert_eq!(
+                observation_exchange(|_| vec![("200 OK", link, full_page(1))], EXACT_TEST_CLOCK),
+                CurrentCommentPosture::Unresolved
+            );
+        }
+        assert_eq!(
+            observation_exchange(
+                |origin| (0..MAX_PAGES)
+                    .map(|page| (
+                        "200 OK",
+                        next_link(origin, STABLE_PATH, page + 2),
+                        full_page(page * COMMENTS_PER_PAGE + 1),
+                    ))
+                    .collect(),
+                EXACT_TEST_CLOCK
+            ),
+            CurrentCommentPosture::Unresolved
+        );
+    }
+
+    #[test]
+    fn comment_observer_rejects_a_truncated_advertised_chain() {
+        assert_eq!(
+            observation_exchange(
+                |origin| {
+                    vec![
+                    ("200 OK", format!(
+                        "Link: <{origin}{STABLE_PATH}?page=2&per_page={COMMENTS_PER_PAGE}>; rel=\"next\", <{origin}{STABLE_PATH}?page=3&per_page={COMMENTS_PER_PAGE}>; rel=\"last\"\r\n"
+                    ), full_page(1)),
+                    ("200 OK", String::new(), full_page(COMMENTS_PER_PAGE + 1)),
+                ]
+                },
+                EXACT_TEST_CLOCK,
+            ),
+            CurrentCommentPosture::Unresolved,
+        );
+    }
+
+    #[test]
+    fn comment_observer_never_turns_invalid_response_into_absence() {
+        let check = |body| {
+            observation_exchange(|_| vec![("200 OK", String::new(), body)], EXACT_TEST_CLOCK)
+        };
+        assert_eq!(check(b"[]".to_vec()), CurrentCommentPosture::Absent);
+        assert_eq!(
+            check(b"not JSON".to_vec()),
+            CurrentCommentPosture::Unresolved
+        );
+        assert_eq!(
+            check(vec![b' '; MAX_COMMENT_PAGE_BYTES + 1]),
+            CurrentCommentPosture::Unresolved
+        );
+        let mut row = listed_comment(1, "other");
+        row["issue_url"] = format!("{GITHUB_ORIGIN}/repos/example/sandbox/issues/8").into();
+        assert_eq!(
+            check(serde_json::to_vec(&[row]).expect("wrong issue")),
+            CurrentCommentPosture::Unresolved
+        );
     }
 
     #[test]
