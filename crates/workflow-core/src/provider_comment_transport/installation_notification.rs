@@ -280,6 +280,11 @@ pub(crate) mod tests {
             ReviewedCreationReceiver<'_>,
             CreationNotification<'_>,
         ) -> Option<CreationCandidate>,
+        exercise: impl FnOnce(
+            ReviewedCreationReceiver<'_>,
+            CreationNotification<'_>,
+            &CreationCandidate,
+        ),
     ) -> CreationCandidate {
         let signer =
             signature::Ed25519KeyPair::from_seed_unchecked(&[7; 32]).expect("fixture signing key");
@@ -300,24 +305,7 @@ pub(crate) mod tests {
                      receiver: ReviewedCreationReceiver<'_>,
                      earliest: &TrustedTimeObservation,
                      latest: &TrustedTimeObservation| {
-            let bytes = serde_json::to_vec(event).expect("provider-shaped bytes");
-            let receipt = CreationReceipt {
-                receiving_installation: receiver.installation,
-                repository: receiver.repository,
-                payload_digest: SpecContentHash::from_bytes(&bytes),
-                earliest: earliest.clone(),
-                latest: latest.clone(),
-            };
-            let sig = signer.sign(&receipt.signing_bytes().expect("canonical receipt"));
-            verify(
-                receiver,
-                CreationNotification {
-                    body: &bytes,
-                    github_signature: &github_header(&[12; 32], &bytes),
-                    receipt: &receipt,
-                    receipt_signature: sig.as_ref().try_into().expect("fixture signature"),
-                },
-            )
+            with_signed_notification(event, receiver, &signer, earliest, latest, &verify)
         };
         let candidate =
             check(&payload, receiver, earliest, latest).expect("exact creation candidate");
@@ -373,7 +361,45 @@ pub(crate) mod tests {
             *altered.pointer_mut(path).expect("fixture field") = wrong;
             assert!(check(&altered, receiver, earliest, latest).is_none());
         }
+        with_signed_notification(
+            &payload,
+            receiver,
+            &signer,
+            earliest,
+            latest,
+            |receiver, notification| {
+                exercise(receiver, notification, &candidate);
+            },
+        );
         candidate
+    }
+
+    fn with_signed_notification<T>(
+        event: &Value,
+        receiver: ReviewedCreationReceiver<'_>,
+        signer: &signature::Ed25519KeyPair,
+        earliest: &TrustedTimeObservation,
+        latest: &TrustedTimeObservation,
+        consume: impl FnOnce(ReviewedCreationReceiver<'_>, CreationNotification<'_>) -> T,
+    ) -> T {
+        let bytes = serde_json::to_vec(event).expect("provider-shaped bytes");
+        let receipt = CreationReceipt {
+            receiving_installation: receiver.installation,
+            repository: receiver.repository,
+            payload_digest: SpecContentHash::from_bytes(&bytes),
+            earliest: earliest.clone(),
+            latest: latest.clone(),
+        };
+        let sig = signer.sign(&receipt.signing_bytes().expect("canonical receipt"));
+        consume(
+            receiver,
+            CreationNotification {
+                body: &bytes,
+                github_signature: &github_header(&[12; 32], &bytes),
+                receipt: &receipt,
+                receipt_signature: sig.as_ref().try_into().expect("fixture signature"),
+            },
+        )
     }
 
     fn assert_receipt_authentication(

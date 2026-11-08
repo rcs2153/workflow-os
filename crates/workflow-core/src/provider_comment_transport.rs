@@ -1181,7 +1181,7 @@ pub(crate) mod tests {
         trial: InventoryTrial,
         body: &str,
         writer_scope: &SpecContentHash,
-        exercise: impl FnOnce(&IndependentCommentInventory<'_>) -> T,
+        exercise: impl FnOnce(IndependentCommentInventory<'_>) -> T,
     ) -> T {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).expect("loopback");
         listener.set_nonblocking(true).expect("nonblocking");
@@ -1196,7 +1196,7 @@ pub(crate) mod tests {
         thread::scope(|scope| {
             let server =
                 scope.spawn(|| serve_independent_inventory(&listener, &origin, trial, body));
-            let result = exercise(&reader);
+            let result = exercise(reader);
             server.join().expect("independent inventory fixture");
             assert!(
                 matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
