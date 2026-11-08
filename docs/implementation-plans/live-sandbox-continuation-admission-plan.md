@@ -473,6 +473,25 @@ live adapter's mapping. Before admitting live data, establish a defensible
 source for those bounds; otherwise leave the outcome unresolved. Matching
 creation and update timestamps still do not prove the original payload.
 
+### Bounded Synthetic Page Chain
+
+The private verifier now requires normalized page links before classifying
+an observation. A scan starts at the initial request, follows each advertised
+cursor exactly once, ends at a terminal page, and stays within eight pages
+and 128 rows total. A broken link, missing terminal page, repeated cursor,
+or exhausted budget leaves the result unresolved even if an earlier page
+matches. Identity conflicts are checked across the whole chain.
+
+GitHub's [pagination documentation](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api)
+describes navigation, not snapshot consistency. The synthetic cursor IDs
+do not parse or authorize following external URLs. Live admission still
+needs a trusted adapter that validates links and provider identity. Neither
+the [comment endpoint](https://docs.github.com/en/rest/issues/comments#list-issue-comments)
+nor the [HTTP Date contract](https://www.rfc-editor.org/rfc/rfc9110.html#section-6.6.1)
+establishes a bound between the clock that recorded comment creation and the
+local reservation clock. Do not derive that bound from a later response
+header or an observed timestamp's display precision.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

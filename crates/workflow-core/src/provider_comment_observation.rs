@@ -8,6 +8,7 @@ use time::Duration;
 use crate::{GitHubPullRequestCommentTarget, Timestamp};
 
 const MAX_COMMENTS: usize = 128;
+const MAX_PAGES: usize = 8;
 const MAX_RAW_BODY_BYTES: usize = 64 * 1024;
 const MARKER_PREFIX: &str = "<!-- workflow-os/live-comment/";
 const MARKER_NAMESPACE: &str = "workflow-os/live-comment/";
@@ -68,11 +69,53 @@ pub(crate) enum CommentEnumeration<'a> {
     Complete {
         observed_at: Timestamp,
         timestamp_bounds: Option<ProviderTimestampBounds>,
-        comments: &'a [ProviderComment<'a>],
+        pages: &'a [CommentPage<'a>],
     },
     Incomplete,
     Unauthorized,
     Unavailable,
+}
+
+/// Adapter-normalized cursor identities, not URLs or permission to fetch.
+#[derive(Clone, Copy)]
+pub(crate) struct CommentPage<'a> {
+    pub(crate) request_cursor: Option<NonZeroU64>,
+    pub(crate) next_cursor: Option<NonZeroU64>,
+    pub(crate) comments: &'a [ProviderComment<'a>],
+}
+
+impl<'a> CommentPage<'a> {
+    pub(crate) const fn single(comments: &'a [ProviderComment<'a>]) -> Self {
+        Self {
+            request_cursor: None,
+            next_cursor: None,
+            comments,
+        }
+    }
+}
+
+fn scan_is_complete(pages: &[CommentPage<'_>]) -> bool {
+    if pages.is_empty() || pages.len() > MAX_PAGES {
+        return false;
+    }
+    let mut expected_cursor = None;
+    let mut remaining = MAX_COMMENTS;
+    for (index, page) in pages.iter().enumerate() {
+        let Some(rest) = remaining.checked_sub(page.comments.len()) else {
+            return false;
+        };
+        if page.request_cursor != expected_cursor
+            || page.next_cursor.is_none() != (index + 1 == pages.len())
+            || pages[..index]
+                .iter()
+                .any(|prior| prior.request_cursor == page.request_cursor)
+        {
+            return false;
+        }
+        expected_cursor = page.next_cursor;
+        remaining = rest;
+    }
+    true
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -92,7 +135,7 @@ pub(crate) fn verify_current_comment(
     let CommentEnumeration::Complete {
         observed_at,
         timestamp_bounds: Some(timestamp_bounds),
-        comments,
+        pages,
     } = enumeration
     else {
         return Unresolved;
@@ -109,7 +152,7 @@ pub(crate) fn verify_current_comment(
         || expected.not_before >= expected.not_after
         || observed_at < expected.not_before
         || timestamp_bounds.earliest_correction > timestamp_bounds.latest_correction
-        || comments.len() > MAX_COMMENTS
+        || !scan_is_complete(pages)
     {
         return Unresolved;
     }
@@ -117,15 +160,13 @@ pub(crate) fn verify_current_comment(
     if expected.body.len().saturating_add(suffix.len()) > MAX_RAW_BODY_BYTES {
         return Unresolved;
     }
-    let mut candidates = comments.iter().filter(|comment| {
+    let comments = || pages.iter().flat_map(|page| page.comments);
+    let mut candidates = comments().filter(|comment| {
         comment.raw_body.contains(expected.reservation_marker)
             || expected.known_comment_id == Some(comment.comment_id)
     });
     // Refuse an oversized response rather than reasoning from a truncated scan.
-    if comments
-        .iter()
-        .any(|comment| comment.raw_body.len() > MAX_RAW_BODY_BYTES)
-    {
+    if comments().any(|comment| comment.raw_body.len() > MAX_RAW_BODY_BYTES) {
         return Unresolved;
     }
     let Some(comment) = candidates.next() else {
@@ -134,8 +175,7 @@ pub(crate) fn verify_current_comment(
     let mut ambiguous = false;
     for candidate in std::iter::once(comment).chain(candidates) {
         // A later page can repeat the same ID after an edit removes the marker.
-        if comments
-            .iter()
+        if comments()
             .filter(|row| row.comment_id == candidate.comment_id)
             .take(2)
             .count()
@@ -228,7 +268,7 @@ mod tests {
                 CommentEnumeration::Complete {
                     observed_at: time(30),
                     timestamp_bounds: EXACT_TIME,
-                    comments,
+                    pages: &[CommentPage::single(comments)],
                 },
             )
         };
@@ -346,7 +386,7 @@ mod tests {
                 CommentEnumeration::Complete {
                     observed_at: time(30),
                     timestamp_bounds: EXACT_TIME,
-                    comments,
+                    pages: &[CommentPage::single(comments)],
                 },
             )
         };
@@ -376,7 +416,7 @@ mod tests {
                         earliest_correction,
                         latest_correction,
                     }),
-                    comments: std::slice::from_ref(&marked),
+                    pages: &[CommentPage::single(std::slice::from_ref(&marked))],
                 },
             )
         };
@@ -399,12 +439,104 @@ mod tests {
                     CommentEnumeration::Complete {
                         observed_at: time(30),
                         timestamp_bounds: None,
-                        comments,
+                        pages: &[CommentPage::single(comments)],
                     },
                 ),
                 Unresolved
             );
         }
+    }
+
+    #[test]
+    fn only_a_complete_bounded_page_chain_can_classify_observation() {
+        use CurrentCommentPosture::{Absent, Ambiguous, ExactCurrentMatch, Unresolved};
+
+        let target = GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("target");
+        let expected = expected(&target);
+        let raw = format!("exact body\n\n<!-- {MARKER} -->");
+        let marked = comment(&target, &raw);
+        let other = ProviderComment {
+            comment_id: id(4),
+            ..marked
+        };
+        let first = CommentPage {
+            next_cursor: Some(id(1)),
+            ..CommentPage::single(std::slice::from_ref(&marked))
+        };
+        let last = CommentPage {
+            request_cursor: Some(id(1)),
+            ..CommentPage::single(&[])
+        };
+        let inspect = |pages: &[CommentPage<'_>]| {
+            verify_current_comment(
+                &expected,
+                CommentEnumeration::Complete {
+                    observed_at: time(30),
+                    timestamp_bounds: EXACT_TIME,
+                    pages,
+                },
+            )
+        };
+        assert_eq!(inspect(&[CommentPage::single(&[])]), Absent);
+        assert_eq!(inspect(&[first, last]), ExactCurrentMatch);
+        assert_eq!(
+            inspect(&[
+                first,
+                CommentPage {
+                    comments: std::slice::from_ref(&other),
+                    ..last
+                }
+            ]),
+            Ambiguous
+        );
+        assert_eq!(inspect(&[]), Unresolved);
+        assert_eq!(inspect(&[first]), Unresolved);
+        assert_eq!(inspect(&[last]), Unresolved);
+        assert_eq!(
+            inspect(&[
+                first,
+                CommentPage {
+                    request_cursor: Some(id(2)),
+                    ..last
+                }
+            ]),
+            Unresolved
+        );
+        assert_eq!(
+            inspect(&[CommentPage::single(first.comments), last]),
+            Unresolved
+        );
+        assert_eq!(
+            inspect(&[
+                first,
+                CommentPage {
+                    next_cursor: Some(id(1)),
+                    ..last
+                },
+                last
+            ]),
+            Unresolved
+        );
+
+        let rows = vec![marked; MAX_COMMENTS];
+        assert_eq!(
+            inspect(&[
+                first,
+                CommentPage {
+                    comments: &rows,
+                    ..last
+                }
+            ]),
+            Unresolved
+        );
+        let page_chain: Vec<_> = (0..=MAX_PAGES)
+            .map(|index| CommentPage {
+                request_cursor: NonZeroU64::new(index as u64),
+                next_cursor: (index < MAX_PAGES).then(|| id(index as u64 + 1)),
+                comments: &[],
+            })
+            .collect();
+        assert_eq!(inspect(&page_chain), Unresolved);
     }
 
     #[test]
@@ -419,7 +551,7 @@ mod tests {
                 CommentEnumeration::Complete {
                     observed_at: time(30),
                     timestamp_bounds: EXACT_TIME,
-                    comments: &comments,
+                    pages: &[CommentPage::single(&comments)],
                 }
             ),
             CurrentCommentPosture::Unresolved,
