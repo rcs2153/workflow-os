@@ -69,13 +69,34 @@ jobs:
           set -euo pipefail
           binary=$(cargo test --locked -p workflow-core --lib --no-run --message-format=json |
             jq -er 'select(.reason == "compiler-artifact" and .target.name == "workflow_core" and .profile.test and .executable != null) | .executable')
-          bash scripts/rehearse-linux-signer-isolation.sh "$binary"
+          bash scripts/rehearse-signer-isolation.sh "$binary"
 
       - name: Rust docs
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
       - name: Cargo lockfile validation
         run: cargo metadata --locked --format-version 1
+
+  macos-signer-rehearsal:
+    name: macOS Signer Isolation Rehearsal
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rehearse private signer isolation under separate macOS identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=$(cargo test --locked -p workflow-core --lib --no-run --message-format=json |
+            jq -er 'select(.reason == "compiler-artifact" and .target.name == "workflow_core" and .profile.test and .executable != null) | .executable')
+          bash scripts/rehearse-signer-isolation.sh "$binary"
 
   release-packaging-rehearsal:
     name: Release Packaging Rehearsal

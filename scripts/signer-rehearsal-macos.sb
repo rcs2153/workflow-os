@@ -1,0 +1,5 @@
+(version 1)
+(allow default)
+(deny network*)
+(allow network-bind network-inbound network-outbound
+    (subpath (param "REHEARSAL_ROOT")))

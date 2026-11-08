@@ -1270,6 +1270,22 @@ exchange calls and exact replay after reopening SQLite in the same process.
 The rehearsal uses no live key or provider request and cannot admit a live
 trial or substitute for native macOS verification or independent review.
 
+### Hosted macOS Signer Rehearsal
+
+A separate hosted macOS job runs the same synthetic protocol and interruption
+matrix through Darwin peer credentials. The launcher uses the system
+`chroot` identity options with the existing root directory to set numeric
+UID and group without creating accounts. It stages the same tracked project
+and binary, strips the inherited environment, and applies a test-only
+`sandbox-exec` profile to deny IP networking while allowing Unix sockets
+under the disposable case directory. Each worker checks its identities and
+groups and requires IPv4 and IPv6 loopback bind and connect probes to fail.
+
+The profile is a disposable CI control, not a supported production launcher,
+a full sandbox claim, or proof on the intended deployment host. CI must pass
+both platform rehearsals on the exact reviewed head. No local account change,
+real signing material, provider traffic, or independent assurance is included.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

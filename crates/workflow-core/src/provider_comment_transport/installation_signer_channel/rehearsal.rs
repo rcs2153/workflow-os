@@ -39,6 +39,18 @@ pub(crate) fn trial() -> Trial {
 pub(crate) fn assert_isolated(uid: u32) {
     assert_eq!(nix::unistd::geteuid().as_raw(), uid);
     assert_eq!(nix::unistd::getuid().as_raw(), uid);
+    let gid = if POLICY.harness_uids.contains(&uid) {
+        uid
+    } else {
+        61_020
+    };
+    assert_eq!(nix::unistd::getegid().as_raw(), gid);
+    assert_eq!(nix::unistd::getgid().as_raw(), gid);
+    assert_platform_isolation(gid);
+}
+
+#[cfg(target_os = "linux")]
+fn assert_platform_isolation(_gid: u32) {
     assert_eq!(
         nix::unistd::getgroups().expect("supplementary groups"),
         [] as [nix::unistd::Gid; 0]
@@ -77,6 +89,40 @@ pub(crate) fn assert_isolated(uid: u32) {
         assert!(
             fd <= 2 || (fd == 3 && target == Path::new(&descriptor_directory)),
             "unexpected inherited descriptor"
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn assert_platform_isolation(gid: u32) {
+    use std::net::{TcpListener, TcpStream};
+    use std::process::Command;
+
+    let groups = Command::new("/usr/bin/id")
+        .arg("-G")
+        .env_clear()
+        .output()
+        .expect("inspect process groups");
+    assert!(groups.status.success());
+    let groups = std::str::from_utf8(&groups.stdout).expect("numeric groups");
+    let actual = groups
+        .split_whitespace()
+        .map(|group| group.parse::<u32>().expect("group ID"))
+        .collect::<Vec<_>>();
+    assert_eq!(actual, [gid]);
+
+    for address in ["127.0.0.1:0", "[::1]:0"] {
+        assert_eq!(
+            TcpListener::bind(address).err().map(|error| error.kind()),
+            Some(ErrorKind::PermissionDenied),
+            "IP bind must be denied by the rehearsal profile"
+        );
+    }
+    for address in ["127.0.0.1:9", "[::1]:9"] {
+        assert_eq!(
+            TcpStream::connect(address).err().map(|error| error.kind()),
+            Some(ErrorKind::PermissionDenied),
+            "IP connect must be denied by the rehearsal profile"
         );
     }
 }
@@ -150,8 +196,8 @@ pub(crate) fn assert_file_inaccessible(path: &Path) {
 }
 
 #[test]
-#[ignore = "requires the isolated Linux signer rehearsal launcher"]
-fn linux_rehearsal_signer_process() {
+#[ignore = "requires the hosted signer rehearsal launcher"]
+fn rehearsal_signer_process() {
     assert_isolated(POLICY.signer_uid);
     let trial = trial();
     let root = fixture_root();
@@ -195,8 +241,8 @@ fn linux_rehearsal_signer_process() {
 }
 
 #[test]
-#[ignore = "requires the isolated Linux signer rehearsal launcher"]
-fn linux_rehearsal_untrusted_process() {
+#[ignore = "requires the hosted signer rehearsal launcher"]
+fn rehearsal_untrusted_process() {
     assert_isolated(POLICY.harness_uids[0]);
     let root = fixture_root();
     for file in ["core-private/authority", "signer-private/custody"] {
