@@ -1847,7 +1847,7 @@ review. The launcher never needs provider network access or live material.
 ### Hosted And Headless Evidence Review
 
 Maintainer verdict at `25a55ca4`: accept the synthetic receiver boundary;
-**native recovery is unverified and live admission remains denied.**
+at that revision, native recovery was unverified and live admission was denied.
 [PR #885](https://github.com/rcs2153/workflow-os/pull/885) preserves the
 reviewed tree. The [exact-head CI run](https://github.com/rcs2153/workflow-os/actions/runs/42550430994)
 passed all ten jobs, including all four notification workers on each of the
@@ -1861,17 +1861,41 @@ merged revision. All eight tests passed. The real CLI reconstructed both
 unresolved and completed lookup states and the creation-response proof
 without changing snapshot hashes. The exporter used disposable state and
 cleaned it afterward. Claude Desktop could not be inspected because the Mac
-was locked. No native tool invocation or configuration change occurred.
+was locked. No native tool invocation or configuration change occurred in
+that review.
+
+### Native Desktop Recovery Inspection
+
+At `ba684b9a2ce81bbbd48ac30d6aaa4cdc5008c68b`, with one-time operator
+consent, Claude Desktop 4.23118.0 launched the staged local bridge. In a
+fresh incognito chat with unrelated connectors disabled, the operator
+observed three tool responses directly in the Desktop tool cards:
+
+| Read | Execution posture | Completion proof |
+| --- | --- | --- |
+| Unresolved | `reconciliation_required` | None |
+| Completed | `completion_verified` | `lookup` |
+| Completed replay | `completion_verified` | `lookup` |
+
+All three returned `status=inspected`, `evidence_source=synthetic_sandbox`,
+`historical_admission_verified=true`, `dispatch_authorized=false`, and
+`provider_called=false`. SHA-256 matched before and after for the manifest,
+kernel executable, bridge script, and both case snapshots. The temporary
+connector was removed, existing settings were preserved, and the disposable
+files were deleted. No raw tool transcript was retained as an artifact.
+
+The `dg/review` run `run-1794204067960497000-2` closed with 39 events,
+one proof-backed grant
+(`approval/run-1794204067960497000-2/review-scope-approved`), no retries,
+and no escalations. The Desktop configuration, tool calls, hash verification,
+and cleanup were operator actions outside kernel execution. This closes the
+synthetic native lookup-inspection gate only. The native trial did not test
+creation-response recovery, use live credentials, or provide independent
+assurance. **Live admission remains denied.**
 
 Remaining gates, in the existing queue order:
 
-1. With the Mac unlocked and separate operator consent, export fresh
-   disposable snapshots and use the read-only Claude Desktop bridge in a
-   fresh chat with unrelated tools disabled. Record the unresolved case and
-   two matching completed reads, verify unchanged snapshot hashes, and
-   remove the temporary configuration and files. Do not substitute headless
-   output for native evidence.
-2. Before a live trial, review an exact operator composition that binds
+1. Before a live trial, review an exact operator composition that binds
    the existing private transport and recovery to one reviewed target,
    actor, build and execution window. The public CLI currently offers the
    fixture continuation and synthetic inspection boundaries, not a reviewed
@@ -1879,7 +1903,7 @@ Remaining gates, in the existing queue order:
    configuration provenance, ACLs, descriptor handling, bounded webhook
    intake, clock, and actual provider installation scope. Hosted fixtures
    do not establish any of these deployment facts.
-3. Obtain separate approval for the exact disposable repository and PR,
+2. Obtain separate approval for the exact disposable repository and PR,
    scoped authentication and execution window, and name a distinct
    reviewer. The trial must preserve the interruption boundaries and
    reconcile the original effect without resending. Until then no trial,
