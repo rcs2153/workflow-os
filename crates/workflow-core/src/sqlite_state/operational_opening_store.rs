@@ -5433,12 +5433,11 @@ mod tests {
             |_: &crate::provider_comment_transport::InstallationObserverProfile| {
                 panic!("must not load recovery notification")
             };
-        let no_reader = |_: &crate::provider_comment_transport::InstallationObserverProfile| {
-            panic!("must not open reader")
-        };
         assert_eq!(
             backend
-                .recover_installation_comment(operation, action, no_notification, no_reader)
+                .recover_installation_comment(operation, action, no_notification, |_| panic!(
+                    "must not open reader"
+                ))
                 .expect("V17 must not open recovery inputs"),
             ReconciliationRequired,
         );
@@ -5450,7 +5449,9 @@ mod tests {
             ..action
         };
         assert!(backend
-            .recover_installation_comment(operation, wrong_action, no_notification, no_reader)
+            .recover_installation_comment(operation, wrong_action, no_notification, |_| panic!(
+                "must not open reader"
+            ))
             .is_err());
         assert_installation_receiver_pin(backend, operation, action, receiver, notification);
         let attempt = |trial| {

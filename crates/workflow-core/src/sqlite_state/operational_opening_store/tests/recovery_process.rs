@@ -294,14 +294,46 @@ fn replacement_child() {
                 .expect("fixture notification verification")
         },
         |receiver, notification, _| {
-            with_scoped_recovery_reader(reader_scope(&handoff.target), &body, |reader| {
+            let reviewed = reader_scope(&handoff.target);
+            let other_pr =
+                GitHubPullRequestCommentTarget::new("example", "sandbox", 999).expect("other PR");
+            for substituted in [
+                ReviewedReadInstallation {
+                    target: &other_pr,
+                    ..reviewed
+                },
+                ReviewedReadInstallation {
+                    app_slug: "other-app",
+                    ..reviewed
+                },
+                ReviewedReadInstallation {
+                    repository: std::num::NonZeroU64::new(999).expect("nonzero repository"),
+                    ..reviewed
+                },
+            ] {
                 assert_eq!(
                     backend
                         .recover_installation_comment(
                             &handoff.operation,
                             handoff.action(),
                             |_| Some((receiver, notification)),
-                            |profile| reader.issue(&profile.reader_access_review)
+                            |authorization| authorization.exchange(substituted, |_| panic!(
+                                "scope drift must not issue access"
+                            )),
+                        )
+                        .expect("reject reader substitution"),
+                    InstallationCommentRecoveryPosture::ReconciliationRequired
+                );
+            }
+            with_scoped_recovery_reader(reviewed, &body, |reader| {
+                assert_eq!(
+                    backend
+                        .recover_installation_comment(
+                            &handoff.operation,
+                            handoff.action(),
+                            |_| Some((receiver, notification)),
+                            |authorization| authorization
+                                .exchange(reviewed, |expected| reader.issue(expected))
                         )
                         .expect("reconcile replacement"),
                     InstallationCommentRecoveryPosture::ObservationReconciled,

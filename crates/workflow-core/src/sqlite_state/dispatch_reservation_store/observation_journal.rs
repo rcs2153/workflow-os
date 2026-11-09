@@ -1,7 +1,7 @@
 //! Private observation history and bounded recovery after acknowledgement loss.
 #![allow(dead_code)] // No operator observer is admitted yet.
 
-use std::num::NonZeroU64;
+use std::{num::NonZeroU64, time::Instant};
 
 use rusqlite::{params, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ use crate::authorized_execution_continuity_state::internal::TrustedTimeObservati
 use crate::dispatch_reservation::DispatchReservationOperationId;
 use crate::provider_comment_observation::CurrentCommentPosture;
 use crate::provider_comment_transport::{
-    installation_exchange::reader::VerifiedReadInstallationScope,
+    installation_exchange::reader::{ReviewedReadInstallation, VerifiedReadInstallationScope},
     installation_notification::{
         CreationCandidate, CreationNotification, ReviewedCreationReceiver,
     },
@@ -18,16 +18,17 @@ use crate::provider_comment_transport::{
 };
 use crate::provider_write::GitHubCommentContinuationAction;
 use crate::{
-    EventId, SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
-    SpecContentHash, Timestamp, WorkflowOsError, WorkflowRunEvent,
+    EventId, GitHubPullRequestCommentTarget, SideEffectOutcomeReference,
+    SideEffectOutcomeReferenceKind, SideEffectRecord, SpecContentHash, Timestamp, WorkflowOsError,
+    WorkflowRunEvent,
 };
 
 use super::{
     corrupt, find_live_comment_proof, installation_disposition, installation_inventory_context,
     installation_send_preparation_payload, live_comment_proof_key, not_dispatchable,
     persist_bound_live_comment_outcome, read_bound_installation_preparation,
-    read_live_recovery_admission, storage_error, verify_comment_disposition,
-    CollectedInstallationInventory, InstallationCommentRecoveryPosture,
+    read_installation_send_preparation_record, read_live_recovery_admission, storage_error,
+    verify_comment_disposition, CollectedInstallationInventory, InstallationCommentRecoveryPosture,
     InstallationInventoryContext, LiveCommentProofKind, LiveRecoveryAdmission,
 };
 use crate::sqlite_state::{
@@ -37,6 +38,48 @@ use crate::sqlite_state::{
 
 const MAX_OBSERVATIONS: u16 = 16;
 const MAX_RECOVERY_OBSERVATION_AGE: std::time::Duration = std::time::Duration::from_secs(30);
+
+pub(in crate::sqlite_state) struct RecoveryReaderAuthorization<'a> {
+    commitment: SpecContentHash,
+    target: &'a GitHubPullRequestCommentTarget,
+    repository: NonZeroU64,
+    profile: &'a InstallationObserverProfile,
+    started: Instant,
+}
+
+pub(in crate::sqlite_state) struct AuthorizedRecoveryReader {
+    commitment: SpecContentHash,
+    scope: VerifiedReadInstallationScope,
+}
+
+impl RecoveryReaderAuthorization<'_> {
+    pub(in crate::sqlite_state) fn exchange(
+        self,
+        reviewed: ReviewedReadInstallation<'_>,
+        issue: impl FnOnce(&SpecContentHash) -> Option<VerifiedReadInstallationScope>,
+    ) -> Option<AuthorizedRecoveryReader> {
+        let not_before = Timestamp::now_utc();
+        if reviewed.target != self.target
+            || reviewed.repository != self.repository
+            || reviewed.reader != self.profile.reader
+            || reviewed.access_commitment().as_ref() != Some(&self.profile.reader_access_review)
+            || not_before >= reviewed.deadline
+            || self.started.elapsed() >= MAX_RECOVERY_OBSERVATION_AGE
+        {
+            return None;
+        }
+        let scope = issue(&self.profile.reader_access_review)?;
+        if !scope.matches_fresh_review(reviewed, not_before, Timestamp::now_utc())
+            || self.started.elapsed() >= MAX_RECOVERY_OBSERVATION_AGE
+        {
+            return None;
+        }
+        Some(AuthorizedRecoveryReader {
+            commitment: self.commitment,
+            scope,
+        })
+    }
+}
 
 #[derive(Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -289,25 +332,105 @@ impl SqliteStateBackend {
         )
             -> Option<(ReviewedCreationReceiver<'a>, CreationNotification<'a>)>,
         exchange_reader: impl FnOnce(
-            &InstallationObserverProfile,
-        ) -> Option<VerifiedReadInstallationScope>,
+            RecoveryReaderAuthorization<'_>,
+        ) -> Option<AuthorizedRecoveryReader>,
     ) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
         self.recover_installation_comment_using(
             operation,
             action,
             receive,
             |profile, writer_scope, candidate| {
-                if let Some(reader) = exchange_reader(profile) {
+                let Some(authorization) = self.authorize_recovery_reader(
+                    operation,
+                    action,
+                    profile,
+                    writer_scope,
+                    candidate,
+                )?
+                else {
+                    return Ok(());
+                };
+                let commitment = authorization.commitment.clone();
+                let started = authorization.started;
+                if let Some(reader) = exchange_reader(authorization) {
+                    if reader.commitment != commitment {
+                        return Err(not_dispatchable());
+                    }
+                    if started.elapsed() >= MAX_RECOVERY_OBSERVATION_AGE {
+                        return Ok(());
+                    }
                     self.reconcile_prepared_installation_comment(
                         operation,
                         action,
                         candidate,
-                        &reader.inventory(writer_scope),
+                        &reader.scope.inventory(writer_scope),
                     )?;
                 }
                 Ok(())
             },
         )
+    }
+
+    fn authorize_recovery_reader<'a>(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'a>,
+        profile: &'a InstallationObserverProfile,
+        writer_scope: &SpecContentHash,
+        candidate: &CreationCandidate,
+    ) -> Result<Option<RecoveryReaderAuthorization<'a>>, WorkflowOsError> {
+        let started = Instant::now();
+        let mut connection = self.existing_read_only_connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|_| storage_error("begin_failed"))?;
+        require_journal_schema(&tx)?;
+        let admission = read_live_recovery_admission(&tx, operation, action.run)?;
+        if installation_disposition(&tx, &admission, action.run, action.side_effect)?
+            != InstallationCommentRecoveryPosture::ReconciliationRequired
+        {
+            return Ok(None);
+        }
+        let Some(record) =
+            read_installation_send_preparation_record(&tx, operation, action, &admission)?
+        else {
+            return Ok(None);
+        };
+        let witness = admission.witness.as_ref().ok_or_else(corrupt)?;
+        if witness.installation_observer_profile.as_ref() != Some(profile)
+            || &record.scope != writer_scope
+        {
+            return Err(not_dispatchable());
+        }
+        let Some(comment) = candidate.prepared_comment_id(
+            &record.reservation,
+            &record.body_commitment,
+            &record.marker_commitment,
+            Some(profile),
+        ) else {
+            return Err(not_dispatchable());
+        };
+        let (_, preparation) = installation_send_preparation_payload(&record)?;
+        let binding = encode_json(
+            &(
+                "workflow-os/installation-recovery-reader/v1",
+                operation.as_str(),
+                &record.invocation,
+                preparation,
+                &profile.reader_access_review,
+                comment,
+                candidate.commitments(),
+            ),
+            "installation recovery reader",
+        )?;
+        tx.commit().map_err(|_| storage_error("commit_failed"))?;
+        Ok(Some(RecoveryReaderAuthorization {
+            commitment: SpecContentHash::from_text(&binding),
+            target: action.target,
+            repository: witness.provider.repository_id,
+            profile,
+            started,
+        }))
     }
 
     #[cfg(test)]
