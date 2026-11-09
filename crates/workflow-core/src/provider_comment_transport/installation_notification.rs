@@ -15,6 +15,8 @@ use crate::{GitHubPullRequestCommentTarget, SpecContentHash, Timestamp};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod custody;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod handoff;
 
 const MAX_NOTIFICATION_BYTES: usize = 256 * 1024;
 const RECEIPT_DOMAIN: &str = "workflow-os/installation-comment-receiver-receipt/v1";
@@ -650,6 +652,8 @@ pub(crate) mod tests {
             .capture(bytes.as_slice(), &header, || samples.next().cloned())
             .expect("capture and attest original notification bytes");
         assert_eq!(captured.notification().body, bytes);
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let captured = handoff::tests::transfer_fixture(captured);
         consume(captured.notification());
     }
 
