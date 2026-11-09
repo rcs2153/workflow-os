@@ -1949,6 +1949,32 @@ in three fixtures. Source inspection, commands, and documentation were
 operator work. No live credentials, provider calls, or deployment were
 used, and this is not independent assurance.
 
+### Private Offline Operator Rehearsal
+
+The implementation in governed run `run-1794207410323028000-2` adds a
+fixture-only operator trial to the existing hosted launcher. The root-owned
+launch record pins the executable, launcher, sandbox profile, role IDs and
+reader deadline. Core commits the launch and exact action to the original
+execution window; its replacement verifies that binding before loading
+recovery evidence. The launcher also injects an unexpected descriptor and
+requires denial before the signer socket can be opened.
+
+The operator trial uses a distinct writer signer and commits one synthetic
+effect before losing the acknowledgement. After the writer and original
+Core exit, the replacement uses authenticated Unix peers for the independent
+receiver and read signer. The receiver attests the original synthetic
+notification; the reader's bounded inventory is tied to the candidate-bound
+recovery request. Core reuses the notification verifier, inventory
+classification, and durable reconciliation journal. The final assertion
+requires one unchanged provider-fixture effect, one appended completion,
+and terminal replay without contacting either observer.
+
+The Unix inventory source is test-only; the existing loopback tests cover
+the actual HTTP adapter. The rehearsal is not a public operator route,
+actual installation scope, intended-host evidence, or independent
+assurance. Linux and macOS hosted results must be verified at the delivered
+head. Live admission remains denied.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

@@ -26,6 +26,44 @@ const RECEIVER: ReceiverPeerPolicy = ReceiverPeerPolicy {
 };
 const BODY: &str = "Synthetic hosted recovery comment";
 
+pub(crate) fn send_operator_receipt(
+    body: &str,
+    deadline: Timestamp,
+    clock: impl FnMut() -> Option<TrustedTimeObservation>,
+) {
+    assert_isolated(RECEIVER.receiver_uid);
+    let root = fixture_root();
+    let webhook = material(&root.join("receiver-private/webhook"), &[12; 32], 0o400);
+    let seed = material(&root.join("receiver-private/receipt"), &[7; 32], 0o400);
+    let profile = fixture_observer_profile();
+    let custody =
+        ReceiverCustody::from_descriptors(RECEIVER.receiver_uid, &profile, &webhook, &seed)
+            .expect("isolated receiver custody");
+    let target = target();
+    let attester = custody
+        .attester(repository(), &target, deadline)
+        .expect("receiver");
+    let raw = serde_json::to_vec(&provider_payload(body)).expect("fixture payload");
+    let mac = github_header(&[12; 32], &raw);
+    let packet = attester
+        .capture(raw.as_slice(), &mac, clock)
+        .expect("synthetic creation receipt");
+    let listener = bind_socket(&root.join("receiver-socket/receipt"));
+    ReceiptSender::authenticate(accept_socket(&listener), &RECEIVER)
+        .expect("exact Core peer")
+        .send(packet)
+        .expect("one bounded receipt");
+}
+
+pub(crate) fn with_operator_receipt<T>(exercise: impl FnOnce(CreationNotification<'_>) -> T) -> T {
+    let path = fixture_root().join("receiver-socket/receipt");
+    let incoming = ReceiptReceiver::authenticate(connect_socket(&path), &RECEIVER)
+        .expect("exact receiver peer")
+        .receive()
+        .expect("one bounded receipt");
+    exercise(incoming.notification())
+}
+
 fn time_at(seconds: i64) -> TrustedTimeObservation {
     trusted_time_observation(
         Timestamp::from_offset_date_time(

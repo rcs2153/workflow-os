@@ -62,6 +62,7 @@ trap cleanup EXIT
 sudo -n "$chown" 0:0 "$root"
 sudo -n /bin/chmod 0711 "$root"
 sudo -n /usr/bin/install -o 0 -g 0 -m 0555 -- "$1" "$root/worker"
+sudo -n /usr/bin/install -o 0 -g 0 -m 0444 -- "${BASH_SOURCE[0]}" "$root/launcher"
 if [[ $RUNNER_OS == macOS ]]; then
   sudo -n /usr/bin/install -o 0 -g 0 -m 0444 -- scripts/signer-rehearsal-macos.sb "$root/network.sb"
 fi
@@ -77,13 +78,46 @@ sudo -n /usr/bin/install -d -o 0 -g 0 -m 0555 "$root/core-fixture"
 sudo -n /bin/cp -R -- "$staging" "$root/core-fixture/project"
 sudo -n /bin/chmod -R a=rX "$root/core-fixture/project"
 
+hash_file() {
+  local digest rest
+  if [[ $RUNNER_OS == Linux ]]; then
+    read -r digest rest < <(/usr/bin/sha256sum "$1")
+  else
+    read -r digest rest < <(/usr/bin/shasum -a 256 "$1")
+  fi
+  [[ $digest =~ ^[a-f0-9]{64}$ ]] || return 2
+  printf '%s\n' "$digest"
+}
+worker_digest=$(hash_file "$root/worker")
+launcher_digest=$(hash_file "$root/launcher")
+network_digest=linux-netns
+if [[ $RUNNER_OS == macOS ]]; then
+  network_digest=$(hash_file "$root/network.sb")
+fi
+stage_launch() {
+  local manifest="$staging/operator-launch"
+  printf '%s\n' 'workflow-os/hosted-operator-rehearsal/v1' "$worker_digest" "$trial" \
+    "core=$core_uid signer=$signer_uid reader=$reader_uid receiver=$receiver_uid harness=$harness_uid group=$service_gid" \
+    "$launcher_digest" "$network_digest" > "$manifest"
+  if [[ $trial == operator ]]; then printf '%s\n' "$reader_deadline" >> "$manifest"; fi
+  sudo -n /usr/bin/install -o 0 -g 0 -m 0444 -- "$manifest" "$case_root/operator-launch"
+}
+
 run_worker() {
-  local uid=$1 gid=$2 test=$3
+  local uid=$1 gid=$2 test=$3 descriptor_probe=${4:-}
   local -a fixture_env=(
     "WORKFLOW_OS_SIGNER_REHEARSAL=$case_root" "WORKFLOW_OS_SIGNER_TRIAL=$trial"
     "TMPDIR=$case_root/core-private"
   )
+  if [[ $trial == operator ]]; then
+    fixture_env+=("WORKFLOW_OS_INSTALLATION_RECOVERY_TRIAL=$case_root/core-private"
+      "WORKFLOW_OS_INSTALLATION_RECOVERY_READER_DEADLINE=$reader_deadline")
+  fi
   local -a args=(--ignored --exact "$test" --test-threads=1)
+  local -a worker=("$root/worker" "${args[@]}")
+  if [[ $descriptor_probe == inject ]]; then
+    worker=(/bin/sh -c 'exec 9</dev/null; exec "$@"' sh "${worker[@]}")
+  fi
   # Only system launchers run elevated. Both variants replace inherited groups
   # and environment before starting the test executable.
   if [[ $RUNNER_OS == Linux ]]; then
@@ -91,13 +125,13 @@ run_worker() {
       --reuid="$uid" --regid="$gid" --clear-groups --no-new-privs \
       --inh-caps=-all --ambient-caps=-all --bounding-set=-all \
       /usr/bin/env -i "${fixture_env[@]}" \
-      /usr/bin/timeout --kill-after=2s 35s "$root/worker" "${args[@]}"
+      /usr/bin/timeout --kill-after=2s 35s "${worker[@]}"
   else
     # Root remains the system root; chroot is used here only to drop identity.
     sudo -n /usr/sbin/chroot -u "$uid" -g "$gid" -G "$gid" / \
       /usr/bin/env -i "${fixture_env[@]}" \
       /usr/bin/sandbox-exec -D "REHEARSAL_ROOT=$case_root" -f "$root/network.sb" \
-      "$root/worker" "${args[@]}"
+      "${worker[@]}"
   fi
 }
 
@@ -115,20 +149,72 @@ notification_test=$notification_prefix::rehearsal_notification_receiver
 notification_core_test=$notification_prefix::rehearsal_notification_core
 notification_writer_test=$notification_prefix::rehearsal_notification_writer_probe
 notification_harness_test=$notification_prefix::rehearsal_notification_harness_probe
+operator_prefix=sqlite_state::operational_opening_store::tests::recovery_process
 listed=$("$1" --list)
 for test in "$signer_test" "$core_test" "$replacement_test" "$harness_test" \
   "$reader_signer_test" "$reader_core_test" "$reader_writer_test" "$reader_harness_test" \
-  "$notification_test" "$notification_core_test" "$notification_writer_test" "$notification_harness_test"; do
+  "$notification_test" "$notification_core_test" "$notification_writer_test" "$notification_harness_test" \
+  "$operator_prefix::hosted_operator_producer" "$operator_prefix::hosted_operator_replacement" \
+  "$operator_prefix::hosted_operator_receiver" "$operator_prefix::hosted_operator_reader"; do
   if ! grep -Fqx "$test: test" <<<"$listed"; then
     echo "Missing exact rehearsal test: $test" >&2
     exit 2
   fi
 done
 
+echo 'Exact operator rehearsal: one write, lost acknowledgement, isolated replacement'
+trial=operator
+case_root="$root/$trial"
+if [[ $RUNNER_OS == Linux ]]; then
+  reader_deadline=$(/bin/date -u -d '+15 minutes' '+%Y-%m-%dT%H:%M:%SZ')
+else
+  reader_deadline=$(/bin/date -u -v+15M '+%Y-%m-%dT%H:%M:%SZ')
+fi
+sudo -n /usr/bin/install -d -o 0 -g 0 -m 0711 "$case_root"
+stage_launch
+for role in core signer reader receiver; do
+  case "$role" in
+    core) uid=$core_uid ;;
+    signer) uid=$signer_uid ;;
+    reader) uid=$reader_uid ;;
+    receiver) uid=$receiver_uid ;;
+  esac
+  sudo -n /usr/bin/install -d -o "$uid" -g "$service_gid" -m 0700 "$case_root/$role-private"
+  sudo -n /usr/bin/install -d -o "$uid" -g "$service_gid" -m 0750 "$case_root/$role-socket"
+done
+sudo -n /usr/bin/install -d -o "$core_uid" -g "$service_gid" -m 0750 "$case_root/provider-result"
+sudo -n /usr/bin/install -o "$core_uid" -g "$service_gid" -m 0600 /dev/null "$case_root/core-private/authority"
+sudo -n /usr/bin/install -o "$signer_uid" -g "$service_gid" -m 0600 /dev/null "$case_root/signer-private/custody"
+run_worker "$signer_uid" "$service_gid" "$signer_test" &
+signer_pid=$!
+producer_status=0
+run_worker "$core_uid" "$service_gid" "$operator_prefix::hosted_operator_producer" || producer_status=$?
+signer_status=0
+wait "$signer_pid" || signer_status=$?
+if ((producer_status != 77 || signer_status != 0)); then
+  echo "Expected accepted write followed by Core acknowledgement loss: Core=$producer_status signer=$signer_status" >&2
+  exit 1
+fi
+run_worker "$receiver_uid" "$service_gid" "$operator_prefix::hosted_operator_receiver" &
+receiver_pid=$!
+run_worker "$reader_uid" "$service_gid" "$operator_prefix::hosted_operator_reader" &
+reader_pid=$!
+replacement_status=0
+run_worker "$core_uid" "$service_gid" "$operator_prefix::hosted_operator_replacement" || replacement_status=$?
+receiver_status=0
+reader_status=0
+wait "$receiver_pid" || receiver_status=$?
+wait "$reader_pid" || reader_status=$?
+if ((replacement_status != 0 || receiver_status != 0 || reader_status != 0)); then
+  echo "Exact operator recovery failed: Core=$replacement_status receiver=$receiver_status reader=$reader_status" >&2
+  exit 1
+fi
+
 echo 'Notification receiver isolation rehearsal: distinct receipt producer'
 trial=notification
 case_root="$root/$trial"
 sudo -n /usr/bin/install -d -o 0 -g 0 -m 0711 "$case_root"
+stage_launch
 sudo -n /usr/bin/install -d -o "$core_uid" -g "$service_gid" -m 0700 "$case_root/core-private"
 sudo -n /usr/bin/install -d -o "$signer_uid" -g "$service_gid" -m 0700 "$case_root/signer-private"
 sudo -n /usr/bin/install -d -o "$reader_uid" -g "$service_gid" -m 0700 "$case_root/reader-private"
@@ -154,6 +240,7 @@ echo 'Reader signer isolation rehearsal: distinct custody'
 trial=reader
 case_root="$root/$trial"
 sudo -n /usr/bin/install -d -o 0 -g 0 -m 0711 "$case_root"
+stage_launch
 sudo -n /usr/bin/install -d -o "$core_uid" -g "$service_gid" -m 0700 "$case_root/core-private"
 sudo -n /usr/bin/install -d -o "$signer_uid" -g "$service_gid" -m 0700 "$case_root/signer-private"
 sudo -n /usr/bin/install -d -o "$reader_uid" -g "$service_gid" -m 0700 "$case_root/reader-private"
@@ -177,12 +264,21 @@ for trial in success before-commit after-commit after-callback; do
   echo "Signer isolation rehearsal: $trial"
   case_root="$root/$trial"
   sudo -n /usr/bin/install -d -o 0 -g 0 -m 0711 "$case_root"
+  stage_launch
   sudo -n /usr/bin/install -d -o "$core_uid" -g "$service_gid" -m 0750 "$case_root/core-socket"
   sudo -n /usr/bin/install -d -o "$signer_uid" -g "$service_gid" -m 0750 "$case_root/signer-socket"
   sudo -n /usr/bin/install -d -o "$core_uid" -g "$service_gid" -m 0700 "$case_root/core-private"
   sudo -n /usr/bin/install -d -o "$signer_uid" -g "$service_gid" -m 0700 "$case_root/signer-private"
   sudo -n /usr/bin/install -o "$core_uid" -g "$service_gid" -m 0600 /dev/null "$case_root/core-private/authority"
   sudo -n /usr/bin/install -o "$signer_uid" -g "$service_gid" -m 0600 /dev/null "$case_root/signer-private/custody"
+  if [[ $trial == success ]]; then
+    inherited_status=0
+    run_worker "$core_uid" "$service_gid" "$core_test" inject || inherited_status=$?
+    if ((inherited_status != 76)) || [[ -e $case_root/core-socket/decision ]]; then
+      echo "Inherited descriptor probe did not deny before signer access: $inherited_status" >&2
+      exit 1
+    fi
+  fi
   run_worker "$signer_uid" "$service_gid" "$signer_test" &
   signer_pid=$!
   core_status=0

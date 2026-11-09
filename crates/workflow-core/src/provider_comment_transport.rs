@@ -630,44 +630,76 @@ impl IndependentCommentInventory<'_> {
             Some(self.reader)
         };
         let pages = reader.read_comment_pages(expected.target, expected.repository, user_reader)?;
-        let transcript = pages
-            .iter()
-            .map(|page| {
-                (
-                    page.cursor,
-                    page.next,
-                    page.comments
-                        .iter()
-                        .map(|row| {
-                            (
-                                row.id,
-                                row.user.id,
-                                SpecContentHash::from_text(&row.body),
-                                row.created_at,
-                                row.updated_at,
-                            )
-                        })
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect::<Vec<_>>();
-        let commitment = SpecContentHash::from_bytes(
-            serde_json::to_vec(&(
-                "workflow-os/independent-comment-inventory/v1",
-                expected.target.reference(),
-                self.repository,
-                self.reader,
-                self.writer_scope,
-                transcript,
-            ))
-            .ok()?,
-        );
-        Some(VerifiedInventoryTraversal {
-            posture: classify_inventory(expected, &pages),
-            reader: self.reader,
-            commitment,
-        })
+        inventory_traversal(expected, self.reader, &pages)
     }
+}
+
+fn inventory_traversal(
+    expected: &PreparedCommentInventory<'_>,
+    reader: NonZeroU64,
+    pages: &[ObservedPage],
+) -> Option<VerifiedInventoryTraversal> {
+    let transcript = pages
+        .iter()
+        .map(|page| {
+            (
+                page.cursor,
+                page.next,
+                page.comments
+                    .iter()
+                    .map(|row| {
+                        (
+                            row.id,
+                            row.user.id,
+                            SpecContentHash::from_text(&row.body),
+                            row.created_at,
+                            row.updated_at,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let commitment = SpecContentHash::from_bytes(
+        serde_json::to_vec(&(
+            "workflow-os/independent-comment-inventory/v1",
+            expected.target.reference(),
+            expected.repository,
+            reader,
+            expected.writer_scope,
+            transcript,
+        ))
+        .ok()?,
+    );
+    Some(VerifiedInventoryTraversal {
+        posture: classify_inventory(expected, pages),
+        reader,
+        commitment,
+    })
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+pub(crate) fn observe_unix_rehearsal_inventory(
+    expected: &PreparedCommentInventory<'_>,
+    reader: NonZeroU64,
+    bytes: &[u8],
+) -> Option<VerifiedInventoryTraversal> {
+    if reader == expected.writer
+        || expected.observer_profile?.reader != reader
+        || bytes.len() > MAX_IDENTITY_RESPONSE_BYTES
+    {
+        return None;
+    }
+    let comments: Vec<GitHubListedComment> = serde_json::from_slice(bytes).ok()?;
+    inventory_traversal(
+        expected,
+        reader,
+        &[ObservedPage {
+            cursor: None,
+            next: None,
+            comments,
+        }],
+    )
 }
 
 fn classify_inventory(
