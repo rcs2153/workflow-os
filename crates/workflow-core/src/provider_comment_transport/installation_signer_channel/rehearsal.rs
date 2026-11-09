@@ -12,6 +12,8 @@ use super::decision::InstallationSignerDecisionChannel;
 use super::{InstallationSignerReceiver, SignerPeerPolicy};
 use crate::Timestamp;
 
+mod reader;
+
 pub(crate) const POLICY: SignerPeerPolicy = SignerPeerPolicy {
     exchange_uid: 61_021,
     signer_uid: 61_022,

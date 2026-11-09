@@ -14,6 +14,7 @@ fi
 core_uid=61021
 signer_uid=61022
 harness_uid=61023
+reader_uid=61025
 service_gid=61020
 id_is_assigned() {
   if [[ $RUNNER_OS == Linux ]]; then
@@ -24,7 +25,7 @@ id_is_assigned() {
     [[ -n $entry ]]
   fi
 }
-for uid in "$core_uid" "$signer_uid" "$harness_uid" 61024; do
+for uid in "$core_uid" "$signer_uid" "$harness_uid" 61024 "$reader_uid"; do
   if id_is_assigned passwd user "$uid" uid; then
     echo "Rehearsal UID is already assigned." >&2
     exit 2
@@ -103,13 +104,43 @@ signer_test=provider_comment_transport::installation_signer_channel::rehearsal::
 core_test=sqlite_state::operational_opening_store::tests::rehearsal_core_process
 replacement_test=sqlite_state::operational_opening_store::tests::rehearsal_replacement_core_process
 harness_test=provider_comment_transport::installation_signer_channel::rehearsal::rehearsal_untrusted_process
+reader_prefix=provider_comment_transport::installation_signer_channel::rehearsal::reader
+reader_signer_test=$reader_prefix::rehearsal_reader_signer_process
+reader_core_test=$reader_prefix::rehearsal_reader_core_process
+reader_writer_test=$reader_prefix::rehearsal_reader_writer_probe
+reader_harness_test=$reader_prefix::rehearsal_reader_harness_probe
 listed=$("$1" --list)
-for test in "$signer_test" "$core_test" "$replacement_test" "$harness_test"; do
+for test in "$signer_test" "$core_test" "$replacement_test" "$harness_test" \
+  "$reader_signer_test" "$reader_core_test" "$reader_writer_test" "$reader_harness_test"; do
   if ! grep -Fqx "$test: test" <<<"$listed"; then
     echo "Missing exact rehearsal test: $test" >&2
     exit 2
   fi
 done
+
+echo 'Reader signer isolation rehearsal: distinct custody'
+trial=reader
+case_root="$root/$trial"
+sudo -n /usr/bin/install -d -o 0 -g 0 -m 0711 "$case_root"
+sudo -n /usr/bin/install -d -o "$core_uid" -g "$service_gid" -m 0700 "$case_root/core-private"
+sudo -n /usr/bin/install -d -o "$signer_uid" -g "$service_gid" -m 0700 "$case_root/signer-private"
+sudo -n /usr/bin/install -d -o "$reader_uid" -g "$service_gid" -m 0700 "$case_root/reader-private"
+sudo -n /usr/bin/install -d -o "$reader_uid" -g "$service_gid" -m 0750 "$case_root/reader-socket"
+sudo -n /usr/bin/install -o "$core_uid" -g "$service_gid" -m 0600 /dev/null "$case_root/core-private/authority"
+sudo -n /usr/bin/install -o "$signer_uid" -g "$service_gid" -m 0600 /dev/null "$case_root/signer-private/custody"
+sudo -n /usr/bin/install -o "$reader_uid" -g "$service_gid" -m 0600 /dev/null "$case_root/reader-private/custody"
+run_worker "$reader_uid" "$service_gid" "$reader_signer_test" &
+reader_pid=$!
+reader_probe_status=0
+run_worker "$signer_uid" "$service_gid" "$reader_writer_test" &&
+  run_worker "$harness_uid" "$harness_uid" "$reader_harness_test" &&
+  run_worker "$core_uid" "$service_gid" "$reader_core_test" || reader_probe_status=$?
+reader_status=0
+wait "$reader_pid" || reader_status=$?
+if ((reader_probe_status != 0 || reader_status != 0)); then
+  echo "Unexpected reader rehearsal exit: probes/Core=$reader_probe_status signer=$reader_status" >&2
+  exit 1
+fi
 for trial in success before-commit after-commit after-callback; do
   echo "Signer isolation rehearsal: $trial"
   case_root="$root/$trial"
