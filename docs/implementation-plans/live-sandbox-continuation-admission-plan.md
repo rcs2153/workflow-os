@@ -1800,6 +1800,21 @@ signature, pinned profile, writer, marked body, and durable execution
 window. No listener, transport timeout policy, protected host resolver, or
 live custody is established; those must be reviewed separately.
 
+### Protected Receiver Descriptor Intake
+
+The private Linux and macOS receiver can load separate webhook and signing
+material from pre-opened descriptors supplied by a trusted host. It requires
+the exact non-root service UID, POSIX mode `0400`, regular files,
+one link each, stable metadata across the bounded reads, and separate file
+identities and material. Before constructing an attester it checks the
+webhook verification tag and attestation public key against the reviewed
+profile. No pathname or material is emitted into runtime evidence.
+
+Replacement recovery exercises this intake with disposable files. The
+checks do not prove how a host opened or provisioned the files, which ACLs
+apply, what descriptors were inherited, or how credentials are rotated.
+This is not a deployment or intended-host custody review.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

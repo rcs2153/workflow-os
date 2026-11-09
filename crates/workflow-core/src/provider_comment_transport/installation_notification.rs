@@ -13,6 +13,9 @@ use crate::provider_comment_observation::{
 };
 use crate::{GitHubPullRequestCommentTarget, SpecContentHash, Timestamp};
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod custody;
+
 const MAX_NOTIFICATION_BYTES: usize = 256 * 1024;
 const RECEIPT_DOMAIN: &str = "workflow-os/installation-comment-receiver-receipt/v1";
 
@@ -577,15 +580,28 @@ pub(crate) mod tests {
     ) {
         let target =
             GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("fixture target");
-        let attester = CreationReceiptAttester::new(
-            profile,
-            receiver.repository,
-            &target,
-            deadline,
-            receiver.github_hmac,
-            signer,
-        )
-        .expect("exact receiver custody configuration");
+        let direct_fixture = || {
+            CreationReceiptAttester::new(
+                profile,
+                receiver.repository,
+                &target,
+                deadline,
+                receiver.github_hmac,
+                signer,
+            )
+            .expect("exact receiver custody configuration")
+        };
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let custody =
+            (!nix::unistd::geteuid().is_root()).then(|| custody::tests::fixture_custody(profile));
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let attester = custody.as_ref().map_or_else(direct_fixture, |material| {
+            material
+                .attester(receiver.repository, &target, deadline)
+                .expect("attester from exact receiver custody")
+        });
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        let attester = direct_fixture();
         assert!(CreationReceiptAttester::new(
             profile,
             receiver.repository,
