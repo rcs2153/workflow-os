@@ -1971,9 +1971,39 @@ and terminal replay without contacting either observer.
 
 The Unix inventory source is test-only; the existing loopback tests cover
 the actual HTTP adapter. The rehearsal is not a public operator route,
-actual installation scope, intended-host evidence, or independent
-assurance. Linux and macOS hosted results must be verified at the delivered
-head. Live admission remains denied.
+actual installation scope, intended-host evidence, or independent assurance.
+
+The corrected [PR #889](https://github.com/rcs2153/workflow-os/pull/889)
+head `d96e3c121169a78a65e6c3e3df432aae51be595c` passed all ten
+[exact-head CI checks](https://github.com/rcs2153/workflow-os/actions/runs/42581525100).
+The separate-identity steps passed on
+[Linux](https://github.com/rcs2153/workflow-os/actions/runs/42581525100/job/129041127180)
+and [macOS](https://github.com/rcs2153/workflow-os/actions/runs/42581525100/job/129041127251).
+The squash merge `bdc141359373f0eec5fd4aa66400f82901900b71` and
+local `main` matched that reviewed tree. Accept this as offline synthetic
+evidence only. **Live admission remains denied.**
+
+### Intended-Host Preflight
+
+The next review needs a designated host and operator, an exact reviewed
+build and launch configuration, a maintainer-owned disposable repository
+and PR, and a named reviewer distinct from the operator and implementer.
+The hosted runners and local Desktop fixture are not an intended host.
+Do not ask for secret material in the preflight record.
+
+| Evidence | Acceptance |
+| --- | --- |
+| Launch | Record executable and configuration digests, host platform, service UIDs and groups, and socket paths and owners. Demonstrate a changed binary/configuration and wrong or root peers fail before custody access. |
+| Custody | Record effective ACLs, protected descriptor provenance and lifecycle, and denial of unexpected inheritance. Verify signer, reader, receiver and harness cannot read one another's custody or Core authority. Do not read or persist secret contents. |
+| Ingress and time | Establish bounded webhook intake and verifier generation, clock provenance, monotonic restart behavior and revocation. Use synthetic events to prove missing, stale or ambiguous evidence remains unresolved. |
+| Provider access | Review exact repository/PR and distinct writer, reader and receiver installation permission evidence. Do not infer actual scope from fixtures or a local configuration claim. Any live scope verification that needs provider access requires its own explicit authority. |
+| No dispatch | The preflight must not mint a live grant, exchange a writer assertion, submit a POST, or record fixture evidence as a live outcome. Record which checks were not run and why. |
+
+After those facts are reviewed, seek a separate trial decision bound to the
+exact target, actor, build, action and execution window, with explicit
+interruption points and no resend on uncertainty. The maintainer review
+`run-1794221406179844000-2` is not that approval and is not independent
+assurance.
 
 ## Delivery And Tests
 
