@@ -309,11 +309,13 @@ verified one unresolved read and two matching completed lookup reads without
 dispatch or changes to the staged evidence. The temporary connector and
 files were removed. The [exact operator composition review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#exact-operator-composition-review)
 found no non-test caller that composes live admission, one-shot dispatch,
-and independent recovery under a single reviewed launch binding. The next
-implementation is a private, offline operator composition rehearsal that
-rejects launch or role substitution before custody access. Live admission
-remains denied pending intended-host custody and scope evidence, a separately
-approved disposable target, and an independent reviewer.
+and independent recovery under a single reviewed launch binding. The
+[private offline rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#private-offline-operator-rehearsal)
+has since passed on Linux and macOS. It verifies synthetic recovery under
+separate roles, not a live operator route. The next gate is an
+[intended-host preflight without dispatch](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#intended-host-preflight).
+Live admission remains denied pending intended-host custody and scope
+evidence, a separately approved disposable target, and an independent reviewer.
 
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
