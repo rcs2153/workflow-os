@@ -1,8 +1,8 @@
 #![allow(clippy::expect_used)]
 
 use std::fs::{self, OpenOptions};
-use std::io::ErrorKind;
-use std::os::unix::fs::PermissionsExt;
+use std::io::{ErrorKind, Read};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -10,9 +10,9 @@ use std::time::{Duration, Instant};
 
 use super::decision::InstallationSignerDecisionChannel;
 use super::{InstallationSignerReceiver, SignerPeerPolicy};
-use crate::Timestamp;
+use crate::{SpecContentHash, Timestamp};
 
-mod reader;
+pub(crate) mod reader;
 
 pub(crate) const POLICY: SignerPeerPolicy = SignerPeerPolicy {
     exchange_uid: 61_021,
@@ -30,7 +30,7 @@ pub(crate) enum Trial {
 
 pub(crate) fn trial() -> Trial {
     match std::env::var("WORKFLOW_OS_SIGNER_TRIAL").as_deref() {
-        Ok("success") => Trial::Success,
+        Ok("success" | "operator") => Trial::Success,
         Ok("before-commit") => Trial::BeforeCommit,
         Ok("after-commit") => Trial::AfterCommit,
         Ok("after-callback") => Trial::AfterCallback,
@@ -38,7 +38,24 @@ pub(crate) fn trial() -> Trial {
     }
 }
 
+pub(crate) fn exchange_operator_assertion(
+    reviewed: crate::provider_comment_transport::installation_exchange::ReviewedInstallation<'_>,
+    request: &super::InstallationSignerRequest<'_>,
+    assertion: super::InstallationAppAssertion,
+) -> Option<crate::provider_comment_transport::installation_exchange::VerifiedInstallationScope> {
+    let (value, expires) =
+        assertion.into_writer_parts(request, &reviewed.issuance_commitment()?)?;
+    (value == "fixture-header.fixture-payload.fixture-signature").then(|| {
+        crate::provider_comment_transport::installation_exchange::VerifiedInstallationScope::test_receipt_with_live_shape(
+            reviewed, Timestamp::now_utc(), expires,
+        )
+    })
+}
+
 pub(crate) fn assert_isolated(uid: u32) {
+    if !only_standard_descriptors() {
+        std::process::exit(76);
+    }
     assert_eq!(nix::unistd::geteuid().as_raw(), uid);
     assert_eq!(nix::unistd::getuid().as_raw(), uid);
     let gid = if POLICY.harness_uids.contains(&uid) {
@@ -49,6 +66,174 @@ pub(crate) fn assert_isolated(uid: u32) {
     assert_eq!(nix::unistd::getegid().as_raw(), gid);
     assert_eq!(nix::unistd::getgid().as_raw(), gid);
     assert_platform_isolation(gid);
+    let _ = launch_commitment();
+}
+
+fn only_standard_descriptors() -> bool {
+    // Collect first so the directory's own descriptor is closed before probing.
+    let Ok(entries) = fs::read_dir("/dev/fd") else {
+        return false;
+    };
+    let Ok(entries) = entries
+        .map(|entry| entry.map(|entry| (entry.file_name(), entry.path())))
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return false;
+    };
+    entries.iter().all(|(name, path)| {
+        name.to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+            .is_some_and(|fd| {
+                fd <= 2
+                    || fs::symlink_metadata(path).is_err_and(|error| {
+                        error.kind() == ErrorKind::NotFound
+                            || error.raw_os_error() == Some(nix::libc::EBADF)
+                    })
+            })
+    })
+}
+
+#[test]
+fn rehearsal_descriptor_guard_distinguishes_clean_and_inherited_launches() {
+    let executable = std::env::current_exe().expect("fixture executable");
+    let worker = format!("{}::rehearsal_descriptor_probe", module_path!());
+    let (_, worker) = worker.split_once("::").expect("test path");
+    for (injected, expected) in [("no", 0), ("yes", 76)] {
+        let result = std::process::Command::new("/bin/bash")
+            .args([
+                "-c",
+                r#"
+                    exec 42</dev/null
+                    for path in /dev/fd/*; do
+                        fd=${path##*/}
+                        case $fd in 0|1|2|""|*[!0-9]*) continue;; esac
+                        eval "exec ${fd}<&-"
+                    done
+                    if [ "$1" = yes ]; then exec 42</dev/null; fi
+                    shift
+                    exec "$@"
+                "#,
+                "bash",
+                injected,
+            ])
+            .arg(&executable)
+            .args(["--ignored", "--exact", worker, "--test-threads=1"])
+            .env_clear()
+            .output()
+            .expect("launch descriptor probe");
+        assert_eq!(
+            result.status.code(),
+            Some(expected),
+            "{} {}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        if !matches!(injected, "yes") {
+            assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));
+        }
+    }
+}
+
+#[test]
+#[ignore = "launched by the descriptor regression fixture"]
+fn rehearsal_descriptor_probe() {
+    if !only_standard_descriptors() {
+        std::process::exit(76);
+    }
+}
+
+pub(crate) fn executable_digest() -> SpecContentHash {
+    file_digest(&std::env::current_exe().expect("fixture executable"))
+}
+
+fn file_digest(path: &Path) -> SpecContentHash {
+    let mut file = fs::File::open(path).expect("open reviewed fixture file");
+    let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut buffer = [0; 8192];
+    loop {
+        let read = file.read(&mut buffer).expect("read executable bytes");
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let bytes = hasher.finish();
+    let hex = bytes
+        .as_ref()
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, byte| {
+            use std::fmt::Write as _;
+            write!(&mut hex, "{byte:02x}").expect("write digest");
+            hex
+        });
+    SpecContentHash::new(hex).expect("SHA-256 digest")
+}
+
+pub(crate) fn launch_commitment() -> SpecContentHash {
+    let root = fixture_root();
+    let binary = std::env::current_exe().expect("running worker");
+    assert_eq!(
+        binary,
+        root.parent().expect("protected root").join("worker")
+    );
+    let meta = binary.metadata().expect("worker metadata");
+    assert!(meta.is_file() && meta.uid() == 0 && meta.mode() & 0o7777 == 0o555);
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+        .open(root.join("operator-launch"))
+        .expect("protected launch record");
+    let meta = file.metadata().expect("launch record metadata");
+    assert!(
+        meta.is_file() && meta.uid() == 0 && meta.nlink() == 1 && meta.mode() & 0o7777 == 0o444
+    );
+    let mut record = String::new();
+    file.take(1025)
+        .read_to_string(&mut record)
+        .expect("bounded launch record");
+    assert!(record.len() <= 1024);
+    let mut lines = record.lines();
+    assert_eq!(
+        lines.next(),
+        Some("workflow-os/hosted-operator-rehearsal/v1")
+    );
+    assert_eq!(lines.next(), Some(executable_digest().as_str()));
+    let trial = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("ASCII trial");
+    assert_eq!(
+        std::env::var("WORKFLOW_OS_SIGNER_TRIAL").as_deref(),
+        Ok(trial)
+    );
+    assert_eq!(lines.next(), Some(trial));
+    assert_eq!(
+        lines.next(),
+        Some("core=61021 signer=61022 reader=61025 receiver=61026 harness=61023 group=61020")
+    );
+    let launcher = root.parent().expect("protected root").join("launcher");
+    let metadata = launcher.symlink_metadata().expect("launcher metadata");
+    assert!(metadata.is_file() && metadata.uid() == 0 && metadata.mode() & 0o7777 == 0o444);
+    assert_eq!(lines.next(), Some(file_digest(&launcher).as_str()));
+    #[cfg(target_os = "linux")]
+    assert_eq!(lines.next(), Some("linux-netns"));
+    #[cfg(target_os = "macos")]
+    {
+        let profile = root.parent().expect("protected root").join("network.sb");
+        let metadata = profile
+            .symlink_metadata()
+            .expect("sandbox profile metadata");
+        assert!(metadata.is_file() && metadata.uid() == 0 && metadata.mode() & 0o7777 == 0o444);
+        assert_eq!(lines.next(), Some(file_digest(&profile).as_str()));
+    }
+    if trial == "operator" {
+        let deadline = std::env::var("WORKFLOW_OS_INSTALLATION_RECOVERY_READER_DEADLINE")
+            .expect("reviewed operator reader deadline");
+        assert!(Timestamp::parse_rfc3339(&deadline).is_ok());
+        assert_eq!(lines.next(), Some(deadline.as_str()));
+    }
+    assert!(lines.next().is_none());
+    SpecContentHash::from_text(&record)
 }
 
 #[cfg(target_os = "linux")]
@@ -78,21 +263,6 @@ fn assert_platform_isolation(_gid: u32) {
             .collect::<Vec<_>>(),
         ["lo"]
     );
-    // Ignore the descriptor opened by read_dir itself.
-    let descriptor_directory = format!("/proc/{}/fd", std::process::id());
-    for entry in fs::read_dir("/proc/self/fd").expect("descriptor list") {
-        let entry = entry.expect("descriptor");
-        let fd = entry
-            .file_name()
-            .to_string_lossy()
-            .parse::<u32>()
-            .expect("fd number");
-        let target = fs::read_link(entry.path()).expect("descriptor target");
-        assert!(
-            fd <= 2 || (fd == 3 && target == Path::new(&descriptor_directory)),
-            "unexpected inherited descriptor"
-        );
-    }
 }
 
 #[cfg(target_os = "macos")]

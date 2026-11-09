@@ -3663,7 +3663,7 @@ mod tests {
         use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture;
         use crate::dispatch_reservation::DispatchReservationOperationId;
         use crate::provider_comment_transport::installation_signer_channel::rehearsal::{
-            assert_isolated, trial, Trial, POLICY,
+            assert_isolated, launch_commitment, trial, Trial, POLICY,
         };
         assert_isolated(POLICY.exchange_uid);
         let expected = trial();
@@ -3705,6 +3705,20 @@ mod tests {
         assert_eq!(SpecContentHash::from_text(&payload).as_str(), hash);
         let claim: serde_json::Value = serde_json::from_str(&payload).expect("claim record");
         assert_eq!(claim["operation"], operation);
+        let window = crate::AuthorizedExecutionWindowId::new(
+            claim["window"].as_str().expect("bound window"),
+        )
+        .expect("window ID");
+        let snapshot = crate::sqlite_state::continuity_codec::load_snapshot(&connection)
+            .expect("durable continuity");
+        assert_eq!(
+            snapshot
+                .windows
+                .get(&window)
+                .expect("original window")
+                .governance_commitment,
+            launch_commitment()
+        );
         if expected == Trial::AfterCommit {
             let admission = admission.expect("committed signer admission");
             let admission_hash = admission_hash.expect("committed signer admission hash");
@@ -5150,6 +5164,13 @@ mod tests {
             reviewed,
             |request, claim| {
                 opens.set(opens.get() + 1);
+                if trial == CoordinatorTrial::ProcessRecovery
+                    && recovery_process::hosted_operator_trial()
+                {
+                    return recovery_process::exchange_hosted_operator(
+                        backend, request, admission, reviewed, claim,
+                    );
+                }
                 backend.use_installation_exchange_claim(request, admission, reviewed, claim, || {
                     Some(VerifiedInstallationScope::test_receipt_with_live_shape(
                         reviewed,
@@ -5160,6 +5181,7 @@ mod tests {
             },
             |request, exchanged| {
                 let operation = request.operation_id.clone();
+                let window = request.capability.window_id.clone();
                 backend.dispatch_lost_installation_ack_for_test(
                     request,
                     admission,
@@ -5177,7 +5199,7 @@ mod tests {
                             .expect("commit the provider effect before losing the response");
                         if trial == CoordinatorTrial::ProcessRecovery {
                             recovery_process::interrupt_after_provider_acceptance(
-                                path, &operation, action,
+                                path, &operation, &window, action,
                             );
                         }
                     }),
@@ -7569,6 +7591,14 @@ mod tests {
         }
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn staged_rehearsal_project() -> PathBuf {
+        crate::provider_comment_transport::installation_signer_channel::rehearsal::fixture_root()
+            .parent()
+            .expect("rehearsal root")
+            .join("core-fixture/project")
+    }
+
     fn build_live_test_bundle(
         run_id: &WorkflowRunId,
         trial: LiveGrantTrial,
@@ -7584,17 +7614,14 @@ mod tests {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../dogfood/workflow-os-self-governance");
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        let root = if matches!(
-            trial,
-            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::SignerRehearsal)
-        ) {
-            crate::provider_comment_transport::installation_signer_channel::rehearsal::fixture_root(
-            )
-            .parent()
-            .expect("rehearsal root")
-            .join("core-fixture/project")
-        } else {
-            root
+        let root = match trial {
+            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::SignerRehearsal) => {
+                staged_rehearsal_project()
+            }
+            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::Coordinator(
+                CoordinatorTrial::ProcessRecovery,
+            )) if recovery_process::hosted_operator_trial() => staged_rehearsal_project(),
+            _ => root,
         };
         let mut project = crate::load_project(root).bundle.expect("dogfood project");
         let workflow_id = WorkflowId::new("dg/trusted-host-docs-check").expect("workflow");
@@ -7763,9 +7790,20 @@ mod tests {
             mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
         };
         let invocation = action.commitment().expect("live action");
+        let governance = SpecContentHash::from_text("core governance");
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let governance = match trial {
+            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::Coordinator(
+                CoordinatorTrial::ProcessRecovery,
+            )) => recovery_process::dispatch_launch_commitment(&invocation),
+            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::SignerRehearsal) => {
+                crate::provider_comment_transport::installation_signer_channel::rehearsal::launch_commitment()
+            }
+            _ => governance,
+        };
         let authorization = OperationalExecutionWindowOpeningAuthorization::new(
             SpecContentHash::from_text("current authority"),
-            SpecContentHash::from_text("core governance"),
+            governance,
             operation_binding_commitment(
                 &fixture.workflow_id,
                 &fixture.run_id,

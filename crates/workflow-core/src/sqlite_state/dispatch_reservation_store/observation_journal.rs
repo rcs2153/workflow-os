@@ -60,6 +60,23 @@ impl RecoveryReaderAuthorization<'_> {
         reviewed: ReviewedReadInstallation<'_>,
         issue: impl FnOnce(&ReaderSignerRequest) -> Option<VerifiedReadInstallationScope>,
     ) -> Option<AuthorizedRecoveryReader> {
+        let (not_before, request) = self.signer_request(reviewed)?;
+        let scope = issue(&request)?;
+        if !scope.matches_fresh_review(reviewed, not_before, Timestamp::now_utc())
+            || self.started.elapsed() >= MAX_RECOVERY_OBSERVATION_AGE
+        {
+            return None;
+        }
+        Some(AuthorizedRecoveryReader {
+            commitment: self.commitment,
+            scope,
+        })
+    }
+
+    fn signer_request(
+        &self,
+        reviewed: ReviewedReadInstallation<'_>,
+    ) -> Option<(Timestamp, ReaderSignerRequest)> {
         let not_before = Timestamp::now_utc();
         if reviewed.target != self.target
             || reviewed.repository != self.repository
@@ -82,16 +99,7 @@ impl RecoveryReaderAuthorization<'_> {
             self.profile.reader_access_review.clone(),
             deadline,
         );
-        let scope = issue(&request)?;
-        if !scope.matches_fresh_review(reviewed, not_before, Timestamp::now_utc())
-            || self.started.elapsed() >= MAX_RECOVERY_OBSERVATION_AGE
-        {
-            return None;
-        }
-        Some(AuthorizedRecoveryReader {
-            commitment: self.commitment,
-            scope,
-        })
+        Some((not_before, request))
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -348,6 +356,59 @@ pub(super) fn verify_observed_completion(
 }
 
 impl SqliteStateBackend {
+    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+    pub(in crate::sqlite_state) fn recover_installation_comment_unix_rehearsal<'a>(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        receive: impl FnOnce(
+            &InstallationObserverProfile,
+        )
+            -> Option<(ReviewedCreationReceiver<'a>, CreationNotification<'a>)>,
+        reviewed: ReviewedReadInstallation<'_>,
+        read_inventory: impl FnOnce(&ReaderSignerRequest) -> Option<Vec<u8>>,
+    ) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
+        self.recover_installation_comment_using(
+            operation,
+            action,
+            receive,
+            |profile, writer_scope, candidate| {
+                let Some(authorization) = self.authorize_recovery_reader(
+                    operation,
+                    action,
+                    profile,
+                    writer_scope,
+                    candidate,
+                )?
+                else {
+                    return Ok(());
+                };
+                let Some((_, request)) = authorization.signer_request(reviewed) else {
+                    return Ok(());
+                };
+                self.reconcile_prepared_installation_comment_using(
+                    operation,
+                    action,
+                    candidate,
+                    |expected| {
+                        let bytes = read_inventory(&request)?;
+                        if authorization.started.elapsed() >= MAX_RECOVERY_OBSERVATION_AGE
+                            || Timestamp::now_utc() >= request.deadline
+                        {
+                            return None;
+                        }
+                        crate::provider_comment_transport::observe_unix_rehearsal_inventory(
+                            expected,
+                            reviewed.reader,
+                            &bytes,
+                        )
+                    },
+                )?;
+                Ok(())
+            },
+        )
+    }
+
     /// Resolves historical state before asking the trusted host for evidence.
     pub(in crate::sqlite_state) fn recover_installation_comment<'a>(
         &self,
@@ -557,8 +618,12 @@ impl SqliteStateBackend {
         reader: &IndependentCommentInventory<'_>,
     ) -> Result<Option<SpecContentHash>, WorkflowOsError> {
         require_journal_schema(&self.existing_read_only_connection()?)?;
-        let Some(collected) =
-            self.collect_prepared_installation_inventory(operation, action, candidate, reader)?
+        let Some(collected) = self.collect_prepared_installation_inventory(
+            operation,
+            action,
+            candidate,
+            |expected| reader.observe(expected),
+        )?
         else {
             return Ok(None);
         };
@@ -589,6 +654,24 @@ impl SqliteStateBackend {
         candidate: &CreationCandidate,
         reader: &IndependentCommentInventory<'_>,
     ) -> Result<Option<EventId>, WorkflowOsError> {
+        self.reconcile_prepared_installation_comment_using(
+            operation,
+            action,
+            candidate,
+            |expected| reader.observe(expected),
+        )
+    }
+
+    fn reconcile_prepared_installation_comment_using(
+        &self,
+        operation: &DispatchReservationOperationId,
+        action: GitHubCommentContinuationAction<'_>,
+        candidate: &CreationCandidate,
+        observe: impl FnOnce(
+            &crate::provider_comment_transport::PreparedCommentInventory<'_>,
+        )
+            -> Option<crate::provider_comment_transport::VerifiedInventoryTraversal>,
+    ) -> Result<Option<EventId>, WorkflowOsError> {
         {
             let mut connection = self.existing_read_only_connection()?;
             let tx = connection
@@ -609,7 +692,7 @@ impl SqliteStateBackend {
         let started = std::time::Instant::now();
         let started_clock = continuity_store::observe_continuity_trusted_time()?;
         let Some(collected) =
-            self.collect_prepared_installation_inventory(operation, action, candidate, reader)?
+            self.collect_prepared_installation_inventory(operation, action, candidate, observe)?
         else {
             return Ok(None);
         };

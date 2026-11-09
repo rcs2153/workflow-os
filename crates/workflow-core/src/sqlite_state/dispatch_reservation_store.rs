@@ -910,8 +910,12 @@ impl SqliteStateBackend {
         candidate: &crate::provider_comment_transport::installation_notification::CreationCandidate,
         reader: &crate::provider_comment_transport::IndependentCommentInventory<'_>,
     ) -> Result<CurrentCommentPosture, WorkflowOsError> {
-        let Some((before, traversal, _)) =
-            self.collect_prepared_installation_inventory(operation, action, candidate, reader)?
+        let Some((before, traversal, _)) = self.collect_prepared_installation_inventory(
+            operation,
+            action,
+            candidate,
+            |expected| reader.observe(expected),
+        )?
         else {
             return Ok(CurrentCommentPosture::Unresolved);
         };
@@ -945,7 +949,10 @@ impl SqliteStateBackend {
         operation: &DispatchReservationOperationId,
         action: GitHubCommentContinuationAction<'_>,
         candidate: &crate::provider_comment_transport::installation_notification::CreationCandidate,
-        reader: &crate::provider_comment_transport::IndependentCommentInventory<'_>,
+        observe: impl FnOnce(
+            &crate::provider_comment_transport::PreparedCommentInventory<'_>,
+        )
+            -> Option<crate::provider_comment_transport::VerifiedInventoryTraversal>,
     ) -> Result<Option<CollectedInstallationInventory>, WorkflowOsError> {
         use crate::provider_comment_transport::PreparedCommentInventory;
         let Some(context) = self.read_installation_inventory_context(operation, action)? else {
@@ -965,7 +972,7 @@ impl SqliteStateBackend {
             return Ok(None);
         };
         // Do not hold the SQLite transaction open across provider I/O.
-        let traversal = reader.observe(&PreparedCommentInventory {
+        let traversal = observe(&PreparedCommentInventory {
             target: action.target,
             repository: provider.repository_id,
             writer: provider.author_id,

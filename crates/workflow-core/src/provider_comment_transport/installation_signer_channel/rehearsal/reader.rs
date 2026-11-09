@@ -13,6 +13,68 @@ const READER_POLICY: ReaderSignerPeerPolicy = ReaderSignerPeerPolicy {
     writer_signer_uid: POLICY.signer_uid,
     harness_uids: POLICY.harness_uids,
 };
+const INVENTORY_LIMIT: usize = 64 * 1024;
+
+pub(crate) fn serve_operator_inventory(
+    review: &SpecContentHash,
+    deadline: Timestamp,
+    inventory: &serde_json::Value,
+) {
+    use super::super::{socket_peer_uid, write_frame};
+    assert_isolated(READER_POLICY.reader_signer_uid);
+    let root = fixture_root();
+    let assertion = bind_socket(&root.join("reader-socket/assertion"));
+    let inventory_socket = bind_socket(&root.join("reader-socket/inventory"));
+    let mut recovery = None;
+    RecoveryReaderSignerReceiver::authenticate(accept_socket(&assertion), &READER_POLICY)
+        .expect("exact Core peer")
+        .serve_once(review, deadline, |request| {
+            recovery = Some(request.recovery.clone());
+            Some(("fixture.reader.assertion".to_owned(), request.deadline))
+        })
+        .expect("operation-bound synthetic signer");
+    let mut stream = accept_socket(&inventory_socket);
+    assert_eq!(
+        socket_peer_uid(&stream).expect("inventory peer"),
+        READER_POLICY.core_uid
+    );
+    let bytes = serde_json::to_vec(&(recovery.expect("signed recovery"), inventory))
+        .expect("synthetic inventory packet");
+    write_frame(
+        &mut stream,
+        &bytes,
+        INVENTORY_LIMIT,
+        Instant::now() + Duration::from_secs(5),
+    )
+    .expect("bounded inventory");
+}
+
+pub(crate) fn read_operator_inventory(request: &ReaderSignerRequest) -> Option<Vec<u8>> {
+    use super::super::{read_frame, socket_peer_uid};
+    let root = fixture_root();
+    let signer = RecoveryReaderSigner::authenticate(
+        connect_socket(&root.join("reader-socket/assertion")),
+        &READER_POLICY,
+    )
+    .ok()?;
+    signer.request(request).ok()?.into_reader_parts(request)?;
+    let mut stream = connect_socket(&root.join("reader-socket/inventory"));
+    if socket_peer_uid(&stream).ok()? != READER_POLICY.reader_signer_uid {
+        return None;
+    }
+    let bytes = read_frame(
+        &mut stream,
+        INVENTORY_LIMIT,
+        Instant::now() + Duration::from_secs(5),
+    )
+    .ok()?;
+    let (recovery, inventory): (SpecContentHash, serde_json::Value) =
+        serde_json::from_slice(&bytes).ok()?;
+    if recovery != request.recovery {
+        return None;
+    }
+    serde_json::to_vec(&inventory).ok()
+}
 
 fn access_review() -> SpecContentHash {
     SpecContentHash::from_text("hosted reader scope rehearsal")
