@@ -1751,6 +1751,23 @@ signing admission, deployed service credential, or proof of OS custody.
 The offline replacement-process rehearsal exercises this boundary before the
 existing bounded issuance and inventory fixture. No live access is enabled.
 
+### Separate Reader Signer Protocol
+
+The private reader signing channel binds the exact pending recovery, reader
+access review, purpose, and short request deadline. The signer accepts one
+bounded frame from the pinned Core UID, under its own UID distinct from the
+writer signer and harnesses. The assertion response must echo the exact
+request and pass freshness checks; only a reader assertion can enter the
+scoped reader exchange. The writer signing protocol remains unchanged.
+
+The offline replacement process now obtains the synthetic assertion over
+this protocol before the loopback issuance and inventory exchange. Negative
+socket tests reject role aliases, unexpected peers, writer requests, changed
+reviews or recovery commitments, and stale responses. The socket-pair
+fixture does not establish distinct deployed UIDs or custody. A hosted
+reader isolation rehearsal and intended-host review remain required; no
+live credential, public route, or provider operation is admitted here.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
