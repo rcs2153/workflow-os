@@ -2005,6 +2005,17 @@ interruption points and no resend on uncertainty. The maintainer review
 `run-1794221406179844000-2` is not that approval and is not independent
 assurance.
 
+The [offline ARM64 fixture build](../../.github/workflows/preflight-arm64-bundle.yml)
+prepares inputs without giving the intended VM a compiler, repository
+checkout, or network access. The read-only build pins the source commit and
+records its tree, runner target and build identity with checksums for the
+test worker, reviewed hosted launcher, and tracked synthetic project.
+The short-lived CI artifact is not a release or a deployment. Verify its
+source, tree and digests outside the VM before a separate governed offline
+transfer. The hosted launcher is reference material; its hosted-runner
+guard must not be spoofed to run on the intended host. Building or
+transferring this bundle does not prove intended-host isolation.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

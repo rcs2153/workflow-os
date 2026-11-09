@@ -1,0 +1,75 @@
+name: Offline Preflight ARM64 Bundle
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/preflight-arm64-bundle.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/preflight-arm64-bundle.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: Build native ARM64 preflight fixture bundle
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      TARGET: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Build and bind fixture-only inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          binary=$(cargo test --locked -p workflow-core --lib --no-run --target "$TARGET" --message-format=json |
+            jq -er 'select(.reason == "compiler-artifact" and .target.name == "workflow_core" and .profile.test and .executable != null) | .executable')
+          readelf -h "$binary" | grep -E 'Machine:[[:space:]]+AArch64'
+          worker_list=$("$binary" --list)
+          prefix=sqlite_state::operational_opening_store::tests::recovery_process
+          for role in producer replacement receiver reader; do
+            grep -Fx "$prefix::hosted_operator_$role: test" <<< "$worker_list"
+          done
+
+          bundle=$(mktemp -d)
+          install -m 0555 "$binary" "$bundle/worker"
+          git show "$SOURCE_COMMIT:scripts/rehearse-signer-isolation.sh" > "$bundle/launcher"
+          git archive --format=tar "$SOURCE_COMMIT:dogfood/workflow-os-self-governance" > "$bundle/project.tar"
+          jq -n --arg commit "$SOURCE_COMMIT" --arg tree "$(git rev-parse 'HEAD^{tree}')" \
+            --arg target "$TARGET" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            '{kind:"workflow-os/offline-preflight-fixture/v1",source_commit:$commit,source_tree:$tree,target:$target,run_id:$run,run_attempt:$attempt}' > "$bundle/manifest.json"
+          (
+            cd "$bundle"
+            sha256sum worker launcher project.tar manifest.json > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+          output="$RUNNER_TEMP/offline-preflight"
+          mkdir "$output"
+          tar -C "$bundle" -czf "$output/fixture.tar.gz" worker launcher project.tar manifest.json SHA256SUMS
+          (cd "$output" && sha256sum fixture.tar.gz > fixture.tar.gz.sha256)
+
+      - name: Upload short-lived test fixture
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: offline-preflight-arm64-${{ env.SOURCE_COMMIT }}
+          path: ${{ runner.temp }}/offline-preflight/
+          if-no-files-found: error
+          retention-days: 7
