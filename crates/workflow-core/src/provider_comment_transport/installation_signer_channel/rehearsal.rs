@@ -99,12 +99,21 @@ fn rehearsal_descriptor_guard_distinguishes_clean_and_inherited_launches() {
     let worker = format!("{}::rehearsal_descriptor_probe", module_path!());
     let (_, worker) = worker.split_once("::").expect("test path");
     for (injected, expected) in [("no", 0), ("yes", 76)] {
-        let result = std::process::Command::new("/bin/sh")
+        let result = std::process::Command::new("/bin/bash")
             .args([
                 "-c",
-                "exec 3<&- 4<&- 5<&- 6<&- 7<&- 8<&- 9<&-; \
-                 if [ \"$1\" = yes ]; then exec 9</dev/null; fi; shift; exec \"$@\"",
-                "sh",
+                r#"
+                    exec 42</dev/null
+                    for path in /dev/fd/*; do
+                        fd=${path##*/}
+                        case $fd in 0|1|2|""|*[!0-9]*) continue;; esac
+                        eval "exec ${fd}<&-"
+                    done
+                    if [ "$1" = yes ]; then exec 42</dev/null; fi
+                    shift
+                    exec "$@"
+                "#,
+                "bash",
                 injected,
             ])
             .arg(&executable)
