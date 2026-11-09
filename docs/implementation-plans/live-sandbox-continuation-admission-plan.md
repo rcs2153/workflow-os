@@ -1893,21 +1893,61 @@ synthetic native lookup-inspection gate only. The native trial did not test
 creation-response recovery, use live credentials, or provide independent
 assurance. **Live admission remains denied.**
 
-Remaining gates, in the existing queue order:
+### Exact Operator Composition Review
 
-1. Before a live trial, review an exact operator composition that binds
-   the existing private transport and recovery to one reviewed target,
-   actor, build and execution window. The public CLI currently offers the
-   fixture continuation and synthetic inspection boundaries, not a reviewed
-   live operator route. Verify the intended host's roles, executable and
-   configuration provenance, ACLs, descriptor handling, bounded webhook
-   intake, clock, and actual provider installation scope. Hosted fixtures
-   do not establish any of these deployment facts.
-2. Obtain separate approval for the exact disposable repository and PR,
-   scoped authentication and execution window, and name a distinct
-   reviewer. The trial must preserve the interruption boundaries and
-   reconcile the original effect without resending. Until then no trial,
-   provider mutation, or independent assurance is claimed.
+Maintainer verdict at `9cb5fa55`: **live admission remains denied**.
+The [private coordinator](../../crates/workflow-core/src/sqlite_state/dispatch_reservation_store.rs)
+checks the action and immutable run, commits a single issuance claim, and
+opens the signer only for a fresh claim. Its dispatch recheck binds the
+current actor, attempt, window, grant, target and trusted clock. Exact replay
+returns the stored posture rather than opening the signer again.
+
+The [private recovery entry](../../crates/workflow-core/src/sqlite_state/dispatch_reservation_store/observation_journal.rs)
+loads and validates the historical operation first. It requests a
+notification against the pinned observer profile, then gives a separate
+reader a candidate-bound authorization. It checks that authorization on
+return and bounds the age of the observation. Recovery has no POST path.
+Terminal replay needs neither observer. The [receiver descriptor checks](../../crates/workflow-core/src/provider_comment_transport/installation_notification/custody.rs)
+verify the non-root UID, mode, file identity, and enrolled material; they
+do not prove who opened the descriptors, their inheritance, or host ACLs.
+
+**Gap:** the scoped coordinator and recovery entry have only test callers.
+The adapter and immutable run commitments do not identify the launched
+executables and configuration of Core, signer, writer, reader, and receiver
+as a reviewed composition. The host callbacks for signer and observer access
+are a trust boundary, not an operator route. The existing split-role and
+process-replacement rehearsals do not establish that both paths use the
+same protected launch binding or that a replacement cannot substitute it.
+
+Next executable gate: compose the existing private entry points in one
+offline operator rehearsal with disposable state, a fixed synthetic target,
+and no provider access. Bind the reviewed launch identity and configuration,
+role and socket identities, exact action and target, actor, trusted clock
+and execution window to admission. Recheck the launch binding before
+opening custody or making a transport call. Reopen the original operation
+in a fresh process and exercise both completed replay and acknowledgement
+loss without opening the writer again. Inject changed executable/config,
+wrong roles or inherited descriptors, changed target/actor, and stale
+window/clock. Assert zero signer or transport calls for rejected dispatch
+and no completion proof on unresolved recovery. A missing or retired
+recovery role must not make a new POST eligible. Do not expose a public
+route or add a mutation family in this phase.
+
+Before any live trial, verify these same bindings on the intended host:
+protected executable and configuration provenance, service identities and
+ACLs, descriptor lifecycle, bounded webhook ingress, clock and restart
+behavior, and actual writer, reader and receiver installation scope. Obtain
+separate approval for the exact disposable repository and PR, scoped
+authentication and execution window, and name a distinct reviewer. None of
+these deployment facts is supplied by the native or hosted fixtures.
+
+Governed review `run-1794206244093912000-2` received a proof-backed grant
+(`approval/run-1794206244093912000-2/review-scope-approved`). All eight
+focused `live_installation` Core tests passed with local socket access,
+including process replacement; the first sandboxed attempt denied loopback
+in three fixtures. Source inspection, commands, and documentation were
+operator work. No live credentials, provider calls, or deployment were
+used, and this is not independent assurance.
 
 ## Delivery And Tests
 

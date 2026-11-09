@@ -307,9 +307,13 @@ accepts synthetic receiver custody and handoff on Linux and macOS and the
 real CLI bridge preflight. A subsequent [native Claude Desktop recovery trial](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#native-desktop-recovery-inspection)
 verified one unresolved read and two matching completed lookup reads without
 dispatch or changes to the staged evidence. The temporary connector and
-files were removed. Live admission remains denied until a reviewed
-operator path, intended-host custody and scope evidence, a separately approved
-disposable target, and an independent reviewer are available.
+files were removed. The [exact operator composition review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#exact-operator-composition-review)
+found no non-test caller that composes live admission, one-shot dispatch,
+and independent recovery under a single reviewed launch binding. The next
+implementation is a private, offline operator composition rehearsal that
+rejects launch or role substitution before custody access. Live admission
+remains denied pending intended-host custody and scope evidence, a separately
+approved disposable target, and an independent reviewer.
 
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
