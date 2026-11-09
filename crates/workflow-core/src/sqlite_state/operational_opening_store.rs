@@ -7591,6 +7591,14 @@ mod tests {
         }
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn staged_rehearsal_project() -> PathBuf {
+        crate::provider_comment_transport::installation_signer_channel::rehearsal::fixture_root()
+            .parent()
+            .expect("rehearsal root")
+            .join("core-fixture/project")
+    }
+
     fn build_live_test_bundle(
         run_id: &WorkflowRunId,
         trial: LiveGrantTrial,
@@ -7606,17 +7614,14 @@ mod tests {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../dogfood/workflow-os-self-governance");
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        let root = if matches!(
-            trial,
-            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::SignerRehearsal)
-        ) {
-            crate::provider_comment_transport::installation_signer_channel::rehearsal::fixture_root(
-            )
-            .parent()
-            .expect("rehearsal root")
-            .join("core-fixture/project")
-        } else {
-            root
+        let root = match trial {
+            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::SignerRehearsal) => {
+                staged_rehearsal_project()
+            }
+            LiveGrantTrial::InstallationClaim(InstallationClaimTrial::Coordinator(
+                CoordinatorTrial::ProcessRecovery,
+            )) if recovery_process::hosted_operator_trial() => staged_rehearsal_project(),
+            _ => root,
         };
         let mut project = crate::load_project(root).bundle.expect("dogfood project");
         let workflow_id = WorkflowId::new("dg/trusted-host-docs-check").expect("workflow");
