@@ -1,8 +1,9 @@
 //! Offline verification only. Receiver trust must come from a reviewed host.
 #![allow(dead_code)] // No observer registration or delivery route is enabled.
 
-use std::{borrow::Cow, num::NonZeroU64};
+use std::{borrow::Cow, io::Read, num::NonZeroU64};
 
+use ring::signature::KeyPair;
 use ring::{hmac, signature};
 use serde::{Deserialize, Serialize};
 
@@ -64,6 +65,114 @@ pub(crate) struct CreationNotification<'a> {
     pub(crate) github_signature: &'a str,
     pub(crate) receipt: &'a CreationReceipt,
     pub(crate) receipt_signature: &'a [u8; 64],
+}
+
+/// Private receiver-side intake; the trusted host owns the clock and custody.
+pub(crate) struct CreationReceiptAttester<'a> {
+    profile: &'a super::InstallationObserverProfile,
+    repository: NonZeroU64,
+    target: &'a GitHubPullRequestCommentTarget,
+    deadline: Timestamp,
+    verifier: hmac::Key,
+    signer: &'a signature::Ed25519KeyPair,
+}
+
+pub(crate) struct AttestedCreationNotification<'a> {
+    body: Vec<u8>,
+    github_signature: &'a str,
+    receipt: CreationReceipt,
+    receipt_signature: [u8; 64],
+}
+
+impl AttestedCreationNotification<'_> {
+    pub(crate) fn notification(&self) -> CreationNotification<'_> {
+        CreationNotification {
+            body: &self.body,
+            github_signature: self.github_signature,
+            receipt: &self.receipt,
+            receipt_signature: &self.receipt_signature,
+        }
+    }
+}
+
+impl<'a> CreationReceiptAttester<'a> {
+    pub(crate) fn new(
+        profile: &'a super::InstallationObserverProfile,
+        repository: NonZeroU64,
+        target: &'a GitHubPullRequestCommentTarget,
+        deadline: Timestamp,
+        webhook_material: &[u8; 32],
+        signer: &'a signature::Ed25519KeyPair,
+    ) -> Option<Self> {
+        target.validate().ok()?;
+        let verifier = hmac::Key::new(hmac::HMAC_SHA256, webhook_material);
+        if signer.public_key().as_ref() != profile.attestation_key
+            || !profile.matches_webhook_material(&verifier)
+        {
+            return None;
+        }
+        Some(Self {
+            profile,
+            repository,
+            target,
+            deadline,
+            verifier,
+            signer,
+        })
+    }
+
+    pub(crate) fn capture<'header>(
+        &self,
+        body: impl Read,
+        github_signature: &'header str,
+        mut observe: impl FnMut() -> Option<TrustedTimeObservation>,
+    ) -> Option<AttestedCreationNotification<'header>> {
+        let mac = decode_signature(github_signature)?;
+        let earliest = observe()?;
+        if earliest.observed_at() >= self.deadline {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        body.take(MAX_NOTIFICATION_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        let latest = observe()?;
+        if bytes.len() > MAX_NOTIFICATION_BYTES
+            || !same_time_domain(&earliest, &latest)
+            || latest.observed_at() < earliest.observed_at()
+            || latest.observed_at() >= self.deadline
+        {
+            return None;
+        }
+        hmac::verify(&self.verifier, &bytes, &mac).ok()?;
+        let event: Notification<'_> = serde_json::from_slice(&bytes).ok()?;
+        if !event.matches_scope(
+            self.profile.receiver_installation,
+            self.repository,
+            self.target,
+        ) {
+            return None;
+        }
+        let receipt = CreationReceipt {
+            receiving_installation: self.profile.receiver_installation,
+            repository: self.repository,
+            payload_digest: SpecContentHash::from_bytes(&bytes),
+            earliest,
+            latest,
+        };
+        let receipt_signature = self
+            .signer
+            .sign(&receipt.signing_bytes()?)
+            .as_ref()
+            .try_into()
+            .ok()?;
+        Some(AttestedCreationNotification {
+            body: bytes,
+            github_signature,
+            receipt,
+            receipt_signature,
+        })
+    }
 }
 
 /// A current candidate only. No completeness, outcome, or dispatch authority.
@@ -150,6 +259,27 @@ struct Comment<'a> {
     body: Cow<'a, str>,
 }
 
+impl Notification<'_> {
+    fn matches_scope(
+        &self,
+        installation: NonZeroU64,
+        repository: NonZeroU64,
+        target: &GitHubPullRequestCommentTarget,
+    ) -> bool {
+        let repo = format!("{}/{}", target.owner(), target.repository());
+        let api = format!("https://api.github.com/repos/{repo}");
+        let number = target.pull_request_number();
+        self.action == "created"
+            && self.installation.id == installation
+            && self.repository.id == repository
+            && self.repository.full_name == repo
+            && self.issue.number.get() == number
+            && self.issue.pull_request.url == format!("{api}/pulls/{number}")
+            && self.comment.issue_url == format!("{api}/issues/{number}")
+            && self.comment.url == format!("{api}/issues/comments/{}", self.comment.id)
+    }
+}
+
 pub(crate) fn verify_creation_notification(
     expected: PreparedCreation<'_>,
     receiver: ReviewedCreationReceiver<'_>,
@@ -193,22 +323,11 @@ pub(crate) fn verify_creation_notification(
     }
     hmac::verify(&mac, input.body, &decode_signature(input.github_signature)?).ok()?;
     let event: Notification<'_> = serde_json::from_slice(input.body).ok()?;
-    let target = expected.target;
-    let repo = format!("{}/{}", target.owner(), target.repository());
-    let api = format!("https://api.github.com/repos/{repo}");
-    let number = target.pull_request_number();
     let observer_profile = match expected.observer_profile {
         Some(profile) => Some(profile.commitment()?),
         None => None,
     };
-    (event.action == "created"
-        && event.installation.id == receiver.installation
-        && event.repository.id == expected.repository
-        && event.repository.full_name == repo
-        && event.issue.number.get() == number
-        && event.issue.pull_request.url == format!("{api}/pulls/{number}")
-        && event.comment.issue_url == format!("{api}/issues/{number}")
-        && event.comment.url == format!("{api}/issues/comments/{}", event.comment.id)
+    (event.matches_scope(receiver.installation, expected.repository, expected.target)
         && event.comment.user.id == expected.writer
         && valid_body(&expected, &event.comment.body))
     .then(|| CreationCandidate {
@@ -227,15 +346,17 @@ fn valid_receipt_time(expected: &PreparedCreation<'_>, receipt: &CreationReceipt
     let prepared = expected.preparation_time;
     [&receipt.earliest, &receipt.latest, expected.checked_at]
         .into_iter()
-        .all(|time| {
-            time.source() == prepared.source()
-                && time.epoch_id() == prepared.epoch_id()
-                && time.provenance_commitment() == prepared.provenance_commitment()
-        })
+        .all(|time| same_time_domain(time, prepared))
         && prepared.observed_at() <= receipt.earliest.observed_at()
         && receipt.earliest.observed_at() <= receipt.latest.observed_at()
         && receipt.latest.observed_at() < expected.deadline
         && receipt.latest.observed_at() <= expected.checked_at.observed_at()
+}
+
+fn same_time_domain(first: &TrustedTimeObservation, second: &TrustedTimeObservation) -> bool {
+    first.source() == second.source()
+        && first.epoch_id() == second.epoch_id()
+        && first.provenance_commitment() == second.provenance_commitment()
 }
 
 fn valid_body(expected: &PreparedCreation<'_>, body: &str) -> bool {
@@ -430,17 +551,90 @@ pub(crate) mod tests {
             *altered.pointer_mut(path).expect("fixture field") = wrong;
             assert!(check(&altered, receiver, earliest, latest).is_none());
         }
-        with_signed_notification(
-            &payload,
+        with_captured_notification(
+            payload,
             receiver,
             &signer,
-            earliest,
-            latest,
-            |receiver, notification| {
+            &profile,
+            deadline,
+            [earliest, latest, &at_deadline, &other_epoch],
+            |notification| {
+                assert_eq!(verify(receiver, notification).as_ref(), Some(&candidate));
                 exercise(receiver, notification, &candidate);
             },
         );
         candidate
+    }
+
+    fn with_captured_notification(
+        payload: Value,
+        receiver: ReviewedCreationReceiver<'_>,
+        signer: &signature::Ed25519KeyPair,
+        profile: &super::super::InstallationObserverProfile,
+        deadline: Timestamp,
+        [earliest, latest, at_deadline, other_epoch]: [&TrustedTimeObservation; 4],
+        consume: impl FnOnce(CreationNotification<'_>),
+    ) {
+        let target =
+            GitHubPullRequestCommentTarget::new("example", "sandbox", 7).expect("fixture target");
+        let attester = CreationReceiptAttester::new(
+            profile,
+            receiver.repository,
+            &target,
+            deadline,
+            receiver.github_hmac,
+            signer,
+        )
+        .expect("exact receiver custody configuration");
+        assert!(CreationReceiptAttester::new(
+            profile,
+            receiver.repository,
+            &target,
+            deadline,
+            &[13; 32],
+            signer
+        )
+        .is_none());
+        let alternate_signer =
+            signature::Ed25519KeyPair::from_seed_unchecked(&[9; 32]).expect("other fixture signer");
+        assert!(CreationReceiptAttester::new(
+            profile,
+            receiver.repository,
+            &target,
+            deadline,
+            receiver.github_hmac,
+            &alternate_signer
+        )
+        .is_none());
+        let bytes = serde_json::to_vec(&payload).expect("exact body");
+        let header = github_header(receiver.github_hmac, &bytes);
+        let bad_header = github_header(&[13; 32], &bytes);
+        let mut wrong_target = payload;
+        wrong_target["issue"]["number"] = json!(8);
+        let wrong_target = serde_json::to_vec(&wrong_target).expect("other target bytes");
+        let target_header = github_header(receiver.github_hmac, &wrong_target);
+        let mut oversized = bytes.clone();
+        oversized.resize(MAX_NOTIFICATION_BYTES + 1, b' ');
+        let oversized_header = github_header(receiver.github_hmac, &oversized);
+        for (body, header, samples) in [
+            (bytes.as_slice(), bad_header.as_str(), [earliest, latest]),
+            (&wrong_target, target_header.as_str(), [earliest, latest]),
+            (&oversized, oversized_header.as_str(), [earliest, latest]),
+            (&bytes, header.as_str(), [earliest, at_deadline]),
+            (&bytes, header.as_str(), [earliest, other_epoch]),
+            (&bytes, header.as_str(), [latest, earliest]),
+        ] {
+            let mut samples = samples.into_iter();
+            assert!(attester
+                .capture(body, header, || samples.next().cloned())
+                .is_none());
+        }
+        let mut samples = [earliest, latest].into_iter();
+        let captured = attester
+            .capture(bytes.as_slice(), &header, || samples.next().cloned())
+            .expect("capture and attest original notification bytes");
+        assert_eq!(captured.notification().body, bytes);
+        consume(captured.notification());
     }
 
     fn with_signed_notification<T>(

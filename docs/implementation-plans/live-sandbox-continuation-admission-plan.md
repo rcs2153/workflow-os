@@ -1785,6 +1785,21 @@ This proof is limited to disposable hosted identities and synthetic inputs.
 It does not establish intended-host provisioning, live key custody, or actual
 provider access, and does not authorize a live trial.
 
+### Private Notification Receipt Producer
+
+The private receiver binds the reviewed attestation public key and webhook
+material before intake. It bounds the original body, brackets the read with
+trusted time observations in the same domain, authenticates the raw bytes,
+and verifies the receiving installation, repository, and PR before signing
+the receipt. Late, reversed, or incompatible time observations and changes
+to the key, webhook material, target, or body fail closed.
+
+The replacement recovery fixture consumes a receipt produced by this path,
+not a hand-assembled success receipt. Core independently revalidates the
+signature, pinned profile, writer, marked body, and durable execution
+window. No listener, transport timeout policy, protected host resolver, or
+live custody is established; those must be reviewed separately.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
