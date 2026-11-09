@@ -1830,6 +1830,20 @@ over a disposable socket pair. That fixture does not prove cross-UID
 receiver deployment or intended-host custody. The handoff has no public
 listener, route, or authority to issue a new provider operation.
 
+### Hosted Receiver Custody And Handoff Rehearsal
+
+The isolated Linux and macOS launcher stages a distinct notification receiver
+UID. That receiver cannot open Core authority, writer custody, or reader
+custody. It loads synthetic material through the descriptor checks, refuses
+the writer's connection, and sends one attested notification to authenticated
+Core. The harness cannot connect or replace the socket. Core, the writer, and
+the harness cannot open the receiver's material files. Core independently
+verifies the receipt against a prepared fixture and rejects a changed writer.
+
+This evidence covers a synthetic prepared fixture and clock, not a deployed
+receiver, actual key provisioning, webhook delivery, or an intended-host
+review. The launcher never needs provider network access or live material.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
