@@ -122,7 +122,11 @@ pub(super) mod tests {
         }
     }
 
-    fn material(path: &Path, bytes: &[u8], mode: u32) -> File {
+    pub(in crate::provider_comment_transport::installation_notification) fn material(
+        path: &Path,
+        bytes: &[u8],
+        mode: u32,
+    ) -> File {
         use std::{io::Write, os::unix::fs::OpenOptionsExt};
         let mut file = fs::OpenOptions::new()
             .create_new(true)

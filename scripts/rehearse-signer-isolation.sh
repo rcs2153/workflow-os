@@ -15,6 +15,7 @@ core_uid=61021
 signer_uid=61022
 harness_uid=61023
 reader_uid=61025
+receiver_uid=61026
 service_gid=61020
 id_is_assigned() {
   if [[ $RUNNER_OS == Linux ]]; then
@@ -25,7 +26,7 @@ id_is_assigned() {
     [[ -n $entry ]]
   fi
 }
-for uid in "$core_uid" "$signer_uid" "$harness_uid" 61024 "$reader_uid"; do
+for uid in "$core_uid" "$signer_uid" "$harness_uid" 61024 "$reader_uid" "$receiver_uid"; do
   if id_is_assigned passwd user "$uid" uid; then
     echo "Rehearsal UID is already assigned." >&2
     exit 2
@@ -109,14 +110,45 @@ reader_signer_test=$reader_prefix::rehearsal_reader_signer_process
 reader_core_test=$reader_prefix::rehearsal_reader_core_process
 reader_writer_test=$reader_prefix::rehearsal_reader_writer_probe
 reader_harness_test=$reader_prefix::rehearsal_reader_harness_probe
+notification_prefix=provider_comment_transport::installation_notification::rehearsal
+notification_test=$notification_prefix::rehearsal_notification_receiver
+notification_core_test=$notification_prefix::rehearsal_notification_core
+notification_writer_test=$notification_prefix::rehearsal_notification_writer_probe
+notification_harness_test=$notification_prefix::rehearsal_notification_harness_probe
 listed=$("$1" --list)
 for test in "$signer_test" "$core_test" "$replacement_test" "$harness_test" \
-  "$reader_signer_test" "$reader_core_test" "$reader_writer_test" "$reader_harness_test"; do
+  "$reader_signer_test" "$reader_core_test" "$reader_writer_test" "$reader_harness_test" \
+  "$notification_test" "$notification_core_test" "$notification_writer_test" "$notification_harness_test"; do
   if ! grep -Fqx "$test: test" <<<"$listed"; then
     echo "Missing exact rehearsal test: $test" >&2
     exit 2
   fi
 done
+
+echo 'Notification receiver isolation rehearsal: distinct receipt producer'
+trial=notification
+case_root="$root/$trial"
+sudo -n /usr/bin/install -d -o 0 -g 0 -m 0711 "$case_root"
+sudo -n /usr/bin/install -d -o "$core_uid" -g "$service_gid" -m 0700 "$case_root/core-private"
+sudo -n /usr/bin/install -d -o "$signer_uid" -g "$service_gid" -m 0700 "$case_root/signer-private"
+sudo -n /usr/bin/install -d -o "$reader_uid" -g "$service_gid" -m 0700 "$case_root/reader-private"
+sudo -n /usr/bin/install -d -o "$receiver_uid" -g "$service_gid" -m 0700 "$case_root/receiver-private"
+sudo -n /usr/bin/install -d -o "$receiver_uid" -g "$service_gid" -m 0750 "$case_root/receiver-socket"
+sudo -n /usr/bin/install -o "$core_uid" -g "$service_gid" -m 0600 /dev/null "$case_root/core-private/authority"
+sudo -n /usr/bin/install -o "$signer_uid" -g "$service_gid" -m 0600 /dev/null "$case_root/signer-private/custody"
+sudo -n /usr/bin/install -o "$reader_uid" -g "$service_gid" -m 0600 /dev/null "$case_root/reader-private/custody"
+run_worker "$receiver_uid" "$service_gid" "$notification_test" &
+notification_pid=$!
+notification_probe_status=0
+run_worker "$signer_uid" "$service_gid" "$notification_writer_test" &&
+  run_worker "$harness_uid" "$harness_uid" "$notification_harness_test" &&
+  run_worker "$core_uid" "$service_gid" "$notification_core_test" || notification_probe_status=$?
+notification_status=0
+wait "$notification_pid" || notification_status=$?
+if ((notification_probe_status != 0 || notification_status != 0)); then
+  echo "Unexpected notification rehearsal exit: probes/Core=$notification_probe_status receiver=$notification_status" >&2
+  exit 1
+fi
 
 echo 'Reader signer isolation rehearsal: distinct custody'
 trial=reader

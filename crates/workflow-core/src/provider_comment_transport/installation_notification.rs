@@ -17,6 +17,8 @@ use crate::{GitHubPullRequestCommentTarget, SpecContentHash, Timestamp};
 mod custody;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod handoff;
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod rehearsal;
 
 const MAX_NOTIFICATION_BYTES: usize = 256 * 1024;
 const RECEIPT_DOMAIN: &str = "workflow-os/installation-comment-receiver-receipt/v1";
@@ -451,7 +453,7 @@ pub(crate) mod tests {
         assert!(!decoded.matches_webhook_material(&verifier));
     }
 
-    fn provider_payload(body: &str) -> Value {
+    pub(super) fn provider_payload(body: &str) -> Value {
         json!({
             "action": "created", "installation": {"id": 91},
             "repository": {"id": 123, "full_name": "example/sandbox"},
