@@ -1736,6 +1736,21 @@ synthetic reader exchange and replacement recovery rehearsal still exercise
 the reviewed reader scope. Live reader issuance requires its own admitted
 assertion source and host custody proof; the writer channel cannot supply it.
 
+### Exact Recovery Reader Authorization
+
+Before opening the reader exchange, Core rechecks the unresolved operation,
+durable send preparation, pinned observer profile, and verified notification
+candidate in a read transaction. Its private authorization binds the exact
+operation, invocation, preparation, reviewed reader scope, and notification
+commitments. A changed App review or repository is rejected before issuance;
+the returned scope is checked before inventory and cannot be substituted from
+a different recovery binding. Terminal replay still opens neither input.
+
+The authorization is short-lived and process-local. It is not a durable
+signing admission, deployed service credential, or proof of OS custody.
+The offline replacement-process rehearsal exercises this boundary before the
+existing bounded issuance and inventory fixture. No live access is enabled.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

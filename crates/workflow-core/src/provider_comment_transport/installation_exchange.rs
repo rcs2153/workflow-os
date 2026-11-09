@@ -1154,6 +1154,12 @@ pub(crate) mod tests {
             .exchange_reader(scope, &access, ASSERTION, scope.deadline, || now);
             if inventory {
                 let verified = result.expect("scoped bearer");
+                let later = Timestamp::from_offset_date_time(
+                    now.as_offset_date_time() + time::Duration::seconds(1),
+                );
+                assert!(verified.matches_fresh_review(scope, now, now));
+                assert!(!verified.matches_fresh_review(scope, later, later));
+                assert!(!verified.matches_fresh_review(scope, now, scope.deadline));
                 let mut profile =
                     super::super::installation_notification::tests::fixture_observer_profile();
                 profile.reader = scope.reader;

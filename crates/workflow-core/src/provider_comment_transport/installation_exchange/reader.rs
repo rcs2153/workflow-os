@@ -101,6 +101,22 @@ pub(crate) struct VerifiedReadInstallationScope {
 }
 
 impl VerifiedReadInstallationScope {
+    pub(crate) fn matches_fresh_review(
+        &self,
+        reviewed: ReviewedReadInstallation<'_>,
+        not_before: Timestamp,
+        now: Timestamp,
+    ) -> bool {
+        &self.target == reviewed.target
+            && self.reader == reviewed.reader
+            && self.repository == reviewed.repository
+            && reviewed.access_commitment().as_ref() == Some(&self.access_review)
+            && self.verified_at >= not_before
+            && self.verified_at <= now
+            && self.deadline <= reviewed.deadline
+            && now < self.deadline
+    }
+
     pub(crate) fn inventory<'a>(
         &'a self,
         writer_scope: &'a SpecContentHash,
