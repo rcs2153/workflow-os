@@ -23,6 +23,36 @@ pub(crate) struct ReviewedReadInstallation<'a> {
     pub(crate) deadline: Timestamp,
 }
 
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ReaderSignerRequest {
+    purpose: ReaderSigningPurpose,
+    pub(crate) recovery: SpecContentHash,
+    pub(crate) review: SpecContentHash,
+    pub(crate) deadline: Timestamp,
+}
+
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+enum ReaderSigningPurpose {
+    #[serde(rename = "observe/installation/v1")]
+    RecoverComment,
+}
+
+impl ReaderSignerRequest {
+    pub(crate) fn new(
+        recovery: SpecContentHash,
+        review: SpecContentHash,
+        deadline: Timestamp,
+    ) -> Self {
+        Self {
+            purpose: ReaderSigningPurpose::RecoverComment,
+            recovery,
+            review,
+            deadline,
+        }
+    }
+}
+
 impl ReviewedReadInstallation<'_> {
     pub(crate) fn access_commitment(&self) -> Option<SpecContentHash> {
         self.target.validate().ok()?;
@@ -135,6 +165,28 @@ impl VerifiedReadInstallationScope {
 }
 
 impl Exchange<'_> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(super) fn exchange_signed_reader(
+        &self,
+        scope: ReviewedReadInstallation<'_>,
+        request: &ReaderSignerRequest,
+        assertion: super::super::installation_signer_channel::reader_signer::ReaderInstallationAssertion,
+    ) -> Option<VerifiedReadInstallationScope> {
+        if request.deadline > scope.deadline
+            || scope.access_commitment().as_ref() != Some(&request.review)
+        {
+            return None;
+        }
+        let (assertion, expires) = assertion.into_reader_parts(request)?;
+        self.exchange_reader(
+            scope,
+            &request.review,
+            &assertion,
+            expires,
+            Timestamp::now_utc,
+        )
+    }
+
     pub(super) fn exchange_reader(
         &self,
         scope: ReviewedReadInstallation<'_>,
@@ -239,4 +291,17 @@ impl Exchange<'_> {
             origin: self.origin.to_owned(),
         })
     }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn exchange_scoped_reader(
+    scope: ReviewedReadInstallation<'_>,
+    request: &ReaderSignerRequest,
+    assertion: super::super::installation_signer_channel::reader_signer::ReaderInstallationAssertion,
+) -> Option<VerifiedReadInstallationScope> {
+    Exchange {
+        agent: github_agent(),
+        origin: super::GITHUB_ORIGIN,
+    }
+    .exchange_signed_reader(scope, request, assertion)
 }

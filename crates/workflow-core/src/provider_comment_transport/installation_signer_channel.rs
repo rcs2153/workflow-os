@@ -12,6 +12,7 @@ use super::installation_exchange::valid_app_assertion;
 use crate::{SpecContentHash, Timestamp, WorkflowOsError};
 
 pub(crate) mod decision;
+pub(crate) mod reader_signer;
 #[cfg(test)]
 pub(crate) mod rehearsal;
 use decision::{InstallationSignerDecisionChannel, SignerDecisionPermit};

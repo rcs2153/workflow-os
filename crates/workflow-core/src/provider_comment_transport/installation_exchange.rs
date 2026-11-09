@@ -1208,17 +1208,36 @@ pub(crate) mod tests {
     }
 
     impl RecoveryReaderFixture<'_> {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         pub(crate) fn issue(
             &self,
-            expected: &SpecContentHash,
+            request: &super::reader::ReaderSignerRequest,
         ) -> Option<super::reader::VerifiedReadInstallationScope> {
-            self.exchange.exchange_reader(
-                self.scope,
-                expected,
-                ASSERTION,
-                self.scope.deadline,
-                Timestamp::now_utc,
-            )
+            use super::super::installation_signer_channel::reader_signer::{
+                RecoveryReaderSigner, RecoveryReaderSignerReceiver,
+            };
+            let (client, peer) =
+                std::os::unix::net::UnixStream::pair().expect("reader signer fixture");
+            let assertion = thread::scope(|threads| {
+                let signer = threads.spawn(|| {
+                    RecoveryReaderSignerReceiver::from_fixture_stream(peer).serve_once(
+                        &self.scope.access_commitment().expect("fixture review"),
+                        self.scope.deadline,
+                        |received| {
+                            assert!(received == request);
+                            Some((ASSERTION.to_owned(), received.deadline))
+                        },
+                    )
+                });
+                let result = RecoveryReaderSigner::from_fixture_stream(client).request(request);
+                signer
+                    .join()
+                    .expect("reader signer fixture")
+                    .expect("approved read signing");
+                result.expect("bound reader assertion")
+            });
+            self.exchange
+                .exchange_signed_reader(self.scope, request, assertion)
         }
     }
 

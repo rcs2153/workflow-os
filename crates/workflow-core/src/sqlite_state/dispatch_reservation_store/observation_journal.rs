@@ -10,7 +10,9 @@ use crate::authorized_execution_continuity_state::internal::TrustedTimeObservati
 use crate::dispatch_reservation::DispatchReservationOperationId;
 use crate::provider_comment_observation::CurrentCommentPosture;
 use crate::provider_comment_transport::{
-    installation_exchange::reader::{ReviewedReadInstallation, VerifiedReadInstallationScope},
+    installation_exchange::reader::{
+        ReaderSignerRequest, ReviewedReadInstallation, VerifiedReadInstallationScope,
+    },
     installation_notification::{
         CreationCandidate, CreationNotification, ReviewedCreationReceiver,
     },
@@ -56,7 +58,7 @@ impl RecoveryReaderAuthorization<'_> {
     pub(in crate::sqlite_state) fn exchange(
         self,
         reviewed: ReviewedReadInstallation<'_>,
-        issue: impl FnOnce(&SpecContentHash) -> Option<VerifiedReadInstallationScope>,
+        issue: impl FnOnce(&ReaderSignerRequest) -> Option<VerifiedReadInstallationScope>,
     ) -> Option<AuthorizedRecoveryReader> {
         let not_before = Timestamp::now_utc();
         if reviewed.target != self.target
@@ -68,7 +70,19 @@ impl RecoveryReaderAuthorization<'_> {
         {
             return None;
         }
-        let scope = issue(&self.profile.reader_access_review)?;
+        let remaining = MAX_RECOVERY_OBSERVATION_AGE.checked_sub(self.started.elapsed())?;
+        let deadline = Timestamp::from_offset_date_time(
+            not_before
+                .as_offset_date_time()
+                .checked_add(time::Duration::try_from(remaining).ok()?)?,
+        )
+        .min(reviewed.deadline);
+        let request = ReaderSignerRequest::new(
+            self.commitment.clone(),
+            self.profile.reader_access_review.clone(),
+            deadline,
+        );
+        let scope = issue(&request)?;
         if !scope.matches_fresh_review(reviewed, not_before, Timestamp::now_utc())
             || self.started.elapsed() >= MAX_RECOVERY_OBSERVATION_AGE
         {
@@ -77,6 +91,18 @@ impl RecoveryReaderAuthorization<'_> {
         Some(AuthorizedRecoveryReader {
             commitment: self.commitment,
             scope,
+        })
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(in crate::sqlite_state) fn exchange_with_signer(
+        self,
+        reviewed: ReviewedReadInstallation<'_>,
+        signer: crate::provider_comment_transport::installation_signer_channel::reader_signer::RecoveryReaderSigner,
+    ) -> Option<AuthorizedRecoveryReader> {
+        self.exchange(reviewed, |request| {
+            let assertion = signer.request(request).ok()?;
+            crate::provider_comment_transport::installation_exchange::reader::exchange_scoped_reader(reviewed, request, assertion)
         })
     }
 }
