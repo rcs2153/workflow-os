@@ -21,6 +21,7 @@ const MAX_REQUEST: usize = 1024;
 const MAX_RESPONSE: usize = 10_240;
 const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_ASSERTION_LIFETIME: time::Duration = time::Duration::minutes(2);
+const WRITER_OPERATION_PREFIX: &str = "dispatch/installation/";
 
 // A trusted launcher owns the connected descriptor and these configured UIDs.
 pub(crate) struct SignerPeerPolicy {
@@ -93,6 +94,10 @@ struct SignerResponse {
 // Neither serializable nor printable. Only the fixed-origin exchange reads it.
 pub(crate) struct InstallationAppAssertion {
     assertion: String,
+    operation: String,
+    claim: SpecContentHash,
+    scope: SpecContentHash,
+    deadline: Timestamp,
     issued_at: Timestamp,
     expires_at: Timestamp,
 }
@@ -102,8 +107,18 @@ impl InstallationAppAssertion {
         self.issued_at
     }
 
-    pub(super) fn into_parts(self) -> (String, Timestamp) {
-        (self.assertion, self.expires_at)
+    pub(super) fn into_writer_parts(
+        self,
+        admitted: &InstallationSignerRequest<'_>,
+        reviewed_scope: &SpecContentHash,
+    ) -> Option<(String, Timestamp)> {
+        (self.operation == admitted.operation
+            && self.operation.starts_with(WRITER_OPERATION_PREFIX)
+            && &self.claim == admitted.claim
+            && &self.scope == admitted.scope
+            && &self.scope == reviewed_scope
+            && self.deadline == admitted.deadline)
+            .then_some((self.assertion, self.expires_at))
     }
 }
 
@@ -158,7 +173,7 @@ impl InstallationSignerReceiver {
         let request: ReceivedInstallationSignerRequest =
             serde_json::from_slice(&payload).map_err(|_| channel_denied())?;
         if !request.has_current_version()
-            || !request.operation.starts_with("dispatch/installation/")
+            || !request.operation.starts_with(WRITER_OPERATION_PREFIX)
             || Timestamp::now_utc() >= request.deadline
         {
             return Err(channel_denied());
@@ -227,7 +242,7 @@ fn exchange(
     timeout: Duration,
 ) -> Result<InstallationAppAssertion, WorkflowOsError> {
     let started = now();
-    if started >= request.deadline {
+    if !request.operation.starts_with(WRITER_OPERATION_PREFIX) || started >= request.deadline {
         return Err(channel_denied());
     }
     let stop = Instant::now()
@@ -253,6 +268,10 @@ fn exchange(
     }
     Ok(InstallationAppAssertion {
         assertion: response.assertion,
+        operation: request.operation.to_owned(),
+        claim: response.claim,
+        scope: response.scope,
+        deadline: request.deadline,
         issued_at: response.issued_at,
         expires_at: response.expires_at,
     })
@@ -489,9 +508,63 @@ mod tests {
     }
 
     #[test]
-    fn installation_signer_accepts_only_exact_fresh_bounded_response() {
+    fn installation_signer_assertion_cannot_be_rebound_at_exchange() {
+        let operation = "dispatch/installation/fixture";
+        let claim = SpecContentHash::from_text("committed claim");
+        let scope = SpecContentHash::from_text("reviewed scope");
+        let other = SpecContentHash::from_text("substituted commitment");
+        let exact = InstallationSignerRequest::new(operation, &claim, &scope, at(200));
+        for (admitted, reviewed_scope) in [
+            (
+                InstallationSignerRequest::new(
+                    "dispatch/installation/other",
+                    &claim,
+                    &scope,
+                    at(200),
+                ),
+                &scope,
+            ),
+            (
+                InstallationSignerRequest::new(
+                    "observe/installation/fixture",
+                    &claim,
+                    &scope,
+                    at(200),
+                ),
+                &scope,
+            ),
+            (
+                InstallationSignerRequest::new(operation, &other, &scope, at(200)),
+                &scope,
+            ),
+            (
+                InstallationSignerRequest::new(operation, &claim, &other, at(200)),
+                &other,
+            ),
+            (
+                InstallationSignerRequest::new(operation, &claim, &scope, at(201)),
+                &scope,
+            ),
+            (
+                InstallationSignerRequest::new(operation, &claim, &scope, at(200)),
+                &other,
+            ),
+        ] {
+            let assertion = fixture_exchange(|reply| frame(&reply)).expect("matching response");
+            assert!(assertion
+                .into_writer_parts(&admitted, reviewed_scope)
+                .is_none());
+        }
         let assertion = fixture_exchange(|reply| frame(&reply)).expect("matching response");
-        assert_eq!(assertion.into_parts(), (ASSERTION.to_owned(), at(150)));
+        assert_eq!(
+            assertion.into_writer_parts(&exact, &scope),
+            Some((ASSERTION.to_owned(), at(150)))
+        );
+    }
+
+    #[test]
+    fn installation_signer_accepts_only_exact_fresh_bounded_response() {
+        assert!(fixture_exchange(|reply| frame(&reply)).is_ok());
         for (field, value) in [
             ("claim", json!(SpecContentHash::from_text("another claim"))),
             ("scope", json!(SpecContentHash::from_text("another scope"))),

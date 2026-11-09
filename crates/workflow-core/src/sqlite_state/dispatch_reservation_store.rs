@@ -1008,6 +1008,7 @@ impl SqliteStateBackend {
         channel: InstallationSignerChannel,
         exchange: impl FnOnce(
             ReviewedInstallation<'_>,
+            &InstallationSignerRequest<'_>,
             InstallationAppAssertion,
         ) -> Option<VerifiedInstallationScope>,
     ) -> Result<Option<InstallationExchangedScope>, WorkflowOsError> {
@@ -1027,7 +1028,7 @@ impl SqliteStateBackend {
             &claim,
             Some(assertion.issued_at()),
         )?;
-        let verified = exchange(reviewed, assertion);
+        let verified = exchange(reviewed, &signer_request, assertion);
         finish_installation_exchange(claim, verified, now)
     }
 

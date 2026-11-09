@@ -3,8 +3,6 @@ use std::num::NonZeroU64;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use super::GITHUB_ORIGIN;
 use super::{
     decode, github_agent, github_request, valid_app_assertion, valid_app_slug, App, Bot, Exchange,
     GitHubRepositoryIdentity, Installation, InstallationRepositories, MetadataPermission,
@@ -118,26 +116,6 @@ impl VerifiedReadInstallationScope {
             verified_installation: Some((&self.target, self.verified_at, self.deadline)),
         }
     }
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub(crate) fn exchange_read_installation_scope(
-    scope: ReviewedReadInstallation<'_>,
-    expected_access: &SpecContentHash,
-    assertion: super::super::installation_signer_channel::InstallationAppAssertion,
-) -> Option<VerifiedReadInstallationScope> {
-    let (assertion, deadline) = assertion.into_parts();
-    Exchange {
-        agent: github_agent(),
-        origin: GITHUB_ORIGIN,
-    }
-    .exchange_reader(
-        scope,
-        expected_access,
-        &assertion,
-        deadline,
-        Timestamp::now_utc,
-    )
 }
 
 impl Exchange<'_> {

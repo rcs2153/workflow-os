@@ -5945,7 +5945,7 @@ mod tests {
                         reviewed,
                         claim,
                         channel,
-                        |_, _| {
+                        |_, _, _| {
                             exchanges.set(exchanges.get() + 1);
                             None
                         },
@@ -6323,7 +6323,7 @@ mod tests {
                 reviewed,
                 claim,
                 InstallationSignerChannel::from_fixture_stream(client),
-                |_, _| panic!("unadmitted assertion must stop before provider exchange"),
+                |_, _, _| panic!("unadmitted assertion must stop before provider exchange"),
             );
             worker.join().expect("fixture signer");
             let Err(error) = result else {
@@ -6441,7 +6441,7 @@ mod tests {
                             reviewed,
                             claim,
                             InstallationSignerChannel::from_fixture_stream(client),
-                            |_, _| {
+                            |_, _, _| {
                                 exchanges += 1;
                                 None
                             },
