@@ -303,6 +303,14 @@ rejects reuse of the legacy lookup for live completion and defines the
 required exact provider observer. This is not independent review, and a
 live disposable target remains separately gated.
 
+The [hosted and headless evidence review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#hosted-and-headless-evidence-review)
+accepts synthetic receiver custody and handoff on Linux and macOS and the
+real CLI bridge preflight. It does not close the native recovery gate: the
+Desktop trial needs an unlocked host and separate operator consent for its
+temporary configuration. Live admission also remains denied until a reviewed
+operator path, intended-host custody and scope evidence, a separately approved
+disposable target, and an independent reviewer are available.
+
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
 recursive agents, nested-harness runtime, a new provider mutation family, or a

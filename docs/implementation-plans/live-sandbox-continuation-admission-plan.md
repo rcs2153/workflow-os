@@ -1844,6 +1844,47 @@ This evidence covers a synthetic prepared fixture and clock, not a deployed
 receiver, actual key provisioning, webhook delivery, or an intended-host
 review. The launcher never needs provider network access or live material.
 
+### Hosted And Headless Evidence Review
+
+Maintainer verdict at `25a55ca4`: accept the synthetic receiver boundary;
+**native recovery is unverified and live admission remains denied.**
+[PR #885](https://github.com/rcs2153/workflow-os/pull/885) preserves the
+reviewed tree. The [exact-head CI run](https://github.com/rcs2153/workflow-os/actions/runs/42550430994)
+passed all ten jobs, including all four notification workers on each of the
+Linux and macOS runners. Those workers independently verified the synthetic
+receipt, rejected it for a changed writer, and exercised socket and custody
+denial. They did not receive a live webhook or provision a deployment host.
+
+The governed local review `run-1794191681180292000-2` ran
+`npm run test:synthetic-recovery-bridge` against the rebuilt kernel at that
+merged revision. All eight tests passed. The real CLI reconstructed both
+unresolved and completed lookup states and the creation-response proof
+without changing snapshot hashes. The exporter used disposable state and
+cleaned it afterward. Claude Desktop could not be inspected because the Mac
+was locked. No native tool invocation or configuration change occurred.
+
+Remaining gates, in the existing queue order:
+
+1. With the Mac unlocked and separate operator consent, export fresh
+   disposable snapshots and use the read-only Claude Desktop bridge in a
+   fresh chat with unrelated tools disabled. Record the unresolved case and
+   two matching completed reads, verify unchanged snapshot hashes, and
+   remove the temporary configuration and files. Do not substitute headless
+   output for native evidence.
+2. Before a live trial, review an exact operator composition that binds
+   the existing private transport and recovery to one reviewed target,
+   actor, build and execution window. The public CLI currently offers the
+   fixture continuation and synthetic inspection boundaries, not a reviewed
+   live operator route. Verify the intended host's roles, executable and
+   configuration provenance, ACLs, descriptor handling, bounded webhook
+   intake, clock, and actual provider installation scope. Hosted fixtures
+   do not establish any of these deployment facts.
+3. Obtain separate approval for the exact disposable repository and PR,
+   scoped authentication and execution window, and name a distinct
+   reviewer. The trial must preserve the interruption boundaries and
+   reconcile the original effect without resending. Until then no trial,
+   provider mutation, or independent assurance is claimed.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
