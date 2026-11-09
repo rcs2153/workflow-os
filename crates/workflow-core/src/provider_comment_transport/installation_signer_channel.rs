@@ -228,7 +228,9 @@ fn authenticate_peer(
     Ok(())
 }
 
-fn socket_peer_uid(stream: &UnixStream) -> Result<u32, WorkflowOsError> {
+pub(in crate::provider_comment_transport) fn socket_peer_uid(
+    stream: &UnixStream,
+) -> Result<u32, WorkflowOsError> {
     #[cfg(target_os = "linux")]
     let cred = getsockopt(stream, nix::sys::socket::sockopt::PeerCredentials);
     #[cfg(target_os = "macos")]
@@ -284,7 +286,7 @@ fn valid_assertion_window(issued: Timestamp, expires: Timestamp, deadline: Times
         && expires.as_offset_date_time() - issued.as_offset_date_time() <= MAX_ASSERTION_LIFETIME
 }
 
-fn write_frame(
+pub(in crate::provider_comment_transport) fn write_frame(
     stream: &mut UnixStream,
     payload: &[u8],
     limit: usize,
@@ -301,7 +303,7 @@ fn write_frame(
         .map_err(|_| channel_denied())
 }
 
-fn read_frame(
+pub(in crate::provider_comment_transport) fn read_frame(
     stream: &mut UnixStream,
     limit: usize,
     stop: Instant,

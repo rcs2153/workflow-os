@@ -1815,6 +1815,21 @@ checks do not prove how a host opened or provisioned the files, which ACLs
 apply, what descriptors were inherited, or how credentials are rotated.
 This is not a deployment or intended-host custody review.
 
+### Private Receiver Receipt Handoff
+
+The private Unix handoff transports one size- and time-bounded receipt
+packet from a pinned non-root receiver UID to a distinct Core UID. Both
+ends authenticate the socket peer and reject configured writer, reader, or
+harness aliases. The packet contains original body bytes, signature headers,
+and the signed receipt, not custody material. Malformed or additional frames
+and a body inconsistent with its receipt are rejected before Core's separate
+verification of the HMAC, signature, and durable operation.
+
+The offline replacement recovery fixture now exercises the framed packet
+over a disposable socket pair. That fixture does not prove cross-UID
+receiver deployment or intended-host custody. The handoff has no public
+listener, route, or authority to issue a new provider operation.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
