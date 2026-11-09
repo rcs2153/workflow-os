@@ -296,8 +296,7 @@ The next implementation follows the
 [live admission and recovery plan](docs/implementation-plans/live-sandbox-continuation-admission-plan.md):
 exact live authority and atomic reservation first, then injected dispatch and
 loss recovery, then a reviewed public tool. The synthetic recovery CLI and
-MCP bridge now run together in clean-checkout CI; native recovery inspection
-remains unverified. The
+MCP bridge now run together in clean-checkout CI. The
 [focused maintainer review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#focused-maintainer-review-live-lookup-not-admitted)
 rejects reuse of the legacy lookup for live completion and defines the
 required exact provider observer. This is not independent review, and a
@@ -305,9 +304,10 @@ live disposable target remains separately gated.
 
 The [hosted and headless evidence review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#hosted-and-headless-evidence-review)
 accepts synthetic receiver custody and handoff on Linux and macOS and the
-real CLI bridge preflight. It does not close the native recovery gate: the
-Desktop trial needs an unlocked host and separate operator consent for its
-temporary configuration. Live admission also remains denied until a reviewed
+real CLI bridge preflight. A subsequent [native Claude Desktop recovery trial](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#native-desktop-recovery-inspection)
+verified one unresolved read and two matching completed lookup reads without
+dispatch or changes to the staged evidence. The temporary connector and
+files were removed. Live admission remains denied until a reviewed
 operator path, intended-host custody and scope evidence, a separately approved
 disposable target, and an independent reviewer are available.
 
