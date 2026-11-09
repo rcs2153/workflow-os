@@ -1768,6 +1768,23 @@ fixture does not establish distinct deployed UIDs or custody. A hosted
 reader isolation rehearsal and intended-host review remain required; no
 live credential, public route, or provider operation is admitted here.
 
+### Hosted Reader Custody Rehearsal
+
+The Linux and macOS signer launcher also runs a network-isolated reader case.
+It stages a separate reader UID and private custody directory, and binds the
+reader socket after dropping privileges. The writer shares the socket group
+but its connection is refused by the authenticated reader receiver; the
+harness cannot connect or replace the socket. Neither can read or write the
+reader custody marker, and the reader cannot access writer custody or Core
+authority files. Core must authenticate the reader peer, receive no assertion
+for a mismatched review, and consume one assertion for the exact request.
+The synthetic signing callback creates an exclusive marker, so an unexpected
+callback or duplicate callback fails the rehearsal.
+
+This proof is limited to disposable hosted identities and synthetic inputs.
+It does not establish intended-host provisioning, live key custody, or actual
+provider access, and does not authorize a live trial.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
