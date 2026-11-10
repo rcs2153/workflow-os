@@ -317,6 +317,12 @@ separate roles, not a live operator route. The
 also passed on the designated offline Linux VM using the exact merged
 worker and launcher. The designated human reviewer accepted the synthetic
 result only; that decision is not live access or dispatch approval.
+Before provisioning, implement and review a production, non-dispatch
+protected-launch preflight that shares its verifier with the rehearsal.
+The current launch verifier and operator composition are test-only; their
+acceptance does not make a deployable operator available. The next bounded
+implementation and rejection matrix are specified in the
+[post-rehearsal readiness review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#post-rehearsal-production-readiness-review).
 Live admission remains denied pending actual installation scope and
 custody evidence, reviewed ingress and time posture, and a separate
 decision for the exact disposable target.

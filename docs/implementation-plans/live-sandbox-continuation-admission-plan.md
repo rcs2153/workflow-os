@@ -2069,6 +2069,63 @@ live grant occurred. This result satisfies the bounded intended-host
 synthetic check only. Review actual deployment and provider scope
 under separate authority before requesting any live trial.
 
+### Post-Rehearsal Production Readiness Review
+
+The follow-up code-path review at `3c16b797` identifies a prerequisite to
+actual deployment, not a reason to repeat the synthetic proof. The
+`installation_signer_channel::rehearsal` module is `cfg(test)`; its
+`launch_commitment` function checks the protected test worker, launch record,
+launcher and platform isolation. The operator composition in
+`sqlite_state/operational_opening_store.rs` is inside its `cfg(test)` module.
+The scoped dispatch coordinator has no production caller outside its own
+internal composition. The accepted bundle therefore executes a test worker,
+not a production service. Installing App material cannot close this code gap.
+
+Next bounded implementation: extract the existing protected-launch verifier
+into production-compiled, Unix-only code and expose one explicit local
+**no-dispatch preflight** command. Keep the rehearsal on that shared verifier
+so its isolation evidence continues to test the deployed boundary rather than
+a parallel implementation. Do not expose dispatch or a general service runner
+as part of this increment.
+
+Required acceptance:
+
+- Read only an explicitly selected, bounded protected launch configuration;
+  reject unknown fields, malformed identities, unprotected ancestors,
+  symlinks, unexpected links, non-regular inputs and unsafe modes. Do not
+  follow references outside the reviewed launch roots.
+- Verify the exact executable/configuration digests and configured role
+  identities before accessing custody or invoking any callback. Preserve
+  the descriptor and platform checks already exercised by the rehearsal.
+  Fail closed on unsupported platforms or unavailable isolation evidence.
+- Return a bounded payload-free result identifying verified launch facts and
+  explicitly missing deployment, custody, ingress/time and provider scope
+  facts. A successful launch check is not live admission or proof that an
+  undeployed service exists.
+- Have no provider transport, signing, access-material load, live grant,
+  dispatch, installation, firewall mutation or state-repair path. In
+  particular, do not call the installation exchange: it can acquire access
+  material and is not a harmless local inspection.
+- Exercise success and executable/configuration drift, wrong UID, root peer,
+  inherited descriptor, invalid ownership/mode, symlink and oversized-input
+  rejection through the public command. Prove zero custody and network
+  activity on both success and denial, and retain native isolated rehearsal
+  coverage of the shared verifier.
+
+After focused maintainer/security review and exact-head CI, run the
+non-dispatch command on the designated host under a separate governed scope.
+Actual signer/reader/receiver provisioning and provider permission inspection
+remain subsequent explicit phases; neither this review nor the earlier human
+synthetic acceptance authorizes them. Do not mint a live grant until actual
+deployment evidence, provider scope, reviewer acceptance and the exact trial
+decision satisfy the existing admission table.
+
+Governed review `run-1794349470752294000-2` received proof-backed approval
+`approval/run-1794349470752294000-2/review-scope-approved`. This is a
+maintainer code-path review, not independent security assurance. Source
+inspection and documentation edits are executor work outside the kernel;
+no provider access, provisioning or dispatch was performed.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
