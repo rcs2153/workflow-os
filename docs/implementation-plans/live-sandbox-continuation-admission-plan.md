@@ -2053,8 +2053,16 @@ the read-only staged bundle still verified. Governed run
 approval, zero retries and zero escalations. Guest staging, commands
 and evidence inspection were operator actions outside the kernel.
 
-The maintainer is designated as independent reviewer; acceptance is
-pending. The private sandbox draft target exists but was not used by
+The designated human reviewer, separate from the implementation and VM
+operator, reviewed the evidence and answered: "Accept the synthetic result
+only." This accepts the bounded claim that the designated VM recovered one
+synthetic effect without a resend, not live GitHub access. The decision was
+received in the maintainer conversation after the rehearsal; it is a human review
+record, not an independently signed attestation or a new kernel capability.
+The documentation review is governed by `run-1794348486888103000-2`, with
+proof-backed approval `approval/run-1794348486888103000-2/review-scope-approved`.
+That delegated documentation gate does not substitute for the human decision.
+The private sandbox draft target exists but was not used by
 the fixture. No GitHub App installation, actual custody or provider
 scope check, public ingress, live clock check, provider request, or
 live grant occurred. This result satisfies the bounded intended-host

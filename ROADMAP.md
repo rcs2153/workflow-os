@@ -315,7 +315,8 @@ has since passed on Linux and macOS. It verifies synthetic recovery under
 separate roles, not a live operator route. The
 [intended-host synthetic rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#intended-host-synthetic-result)
 also passed on the designated offline Linux VM using the exact merged
-worker and launcher. Independent review of that result is pending.
+worker and launcher. The designated human reviewer accepted the synthetic
+result only; that decision is not live access or dispatch approval.
 Live admission remains denied pending actual installation scope and
 custody evidence, reviewed ingress and time posture, and a separate
 decision for the exact disposable target.
