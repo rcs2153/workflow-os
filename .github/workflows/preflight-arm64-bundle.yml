@@ -4,10 +4,12 @@ on:
   pull_request:
     paths:
       - .github/workflows/preflight-arm64-bundle.yml
+      - scripts/rehearse-signer-isolation.sh
   push:
     branches: [main]
     paths:
       - .github/workflows/preflight-arm64-bundle.yml
+      - scripts/rehearse-signer-isolation.sh
   workflow_dispatch:
 
 permissions:
@@ -40,6 +42,13 @@ jobs:
           [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
           test -z "$(git status --porcelain --untracked-files=all)"
+          status=0
+          bash scripts/rehearse-signer-isolation.sh --intended-host invalid invalid || status=$?
+          test "$status" = 2
+          status=0
+          bash scripts/rehearse-signer-isolation.sh --intended-host \
+            "$SOURCE_COMMIT" "$(printf '%064d' 0)" || status=$?
+          test "$status" = 2
           binary=$(cargo test --locked -p workflow-core --lib --no-run --target "$TARGET" --message-format=json |
             jq -er 'select(.reason == "compiler-artifact" and .target.name == "workflow_core" and .profile.test and .executable != null) | .executable')
           readelf -h "$binary" | grep -E 'Machine:[[:space:]]+AArch64'

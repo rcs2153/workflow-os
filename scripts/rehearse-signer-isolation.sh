@@ -1,14 +1,70 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ ${GITHUB_ACTIONS:-} != true || ${RUNNER_ENVIRONMENT:-} != github-hosted ||
-      (${RUNNER_OS:-} != Linux && ${RUNNER_OS:-} != macOS) ]]; then
-  echo "Signer rehearsal requires a disposable GitHub-hosted Linux or macOS runner." >&2
+deny() {
+  printf '%s\n' "$1" >&2
   exit 2
-fi
-if [[ $# != 1 || ! -f $1 || ! -x $1 ]]; then
-  echo "Expected exactly one compiled Core test executable." >&2
-  exit 2
+}
+
+intended_host=false
+if [[ ${1:-} == --intended-host ]]; then
+  intended_host=true
+  export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+  [[ $# == 3 && $2 =~ ^[a-f0-9]{40}$ && $3 =~ ^[a-f0-9]{64}$ ]] ||
+    deny "Expected --intended-host COMMIT SHA256SUMS_DIGEST."
+  [[ -z ${GITHUB_ACTIONS:-}${RUNNER_ENVIRONMENT:-}${RUNNER_OS:-} && $EUID != 0 &&
+    $(uname -s) == Linux && $(uname -m) == aarch64 &&
+    $(systemd-detect-virt --vm) == apple && $(hostname) == lima-wos-pf ]] ||
+    deny "Expected the designated Linux ARM64 guest and an unprivileged operator."
+  RUNNER_OS=Linux
+  bundle="/opt/workflow-os-preflight/${2:0:8}"
+  protected() {
+    [[ ! -L $1 && $(stat -c '%u:%g:%a' -- "$1") == "0:0:$2" ]]
+  }
+  marker=/etc/workflow-os-preflight-host
+  [[ -f $marker ]] && protected "$marker" 444 ||
+    deny "Missing protected intended-host designation."
+  mapfile -t designation < "$marker"
+  [[ ${#designation[@]} == 3 && ${designation[0]} == workflow-os/intended-preflight-host/v1 &&
+    ${designation[1]} == lima-wos-pf && ${designation[2]} =~ ^[a-f0-9]{64}$ ]] ||
+    deny "Invalid intended-host designation."
+  verify_firewall() {
+    local actual
+    systemctl is-enabled --quiet nftables && systemctl is-active --quiet nftables ||
+      deny "Intended-host outbound filter is not enabled and active."
+    actual=$(sudo -n /usr/sbin/nft -s list ruleset | /usr/bin/sha256sum)
+    [[ ${actual%% *} == "${designation[2]}" ]] ||
+      deny "Intended-host firewall does not match the reviewed ruleset."
+  }
+  verify_firewall
+  for dir in /opt /opt/workflow-os-preflight "$bundle"; do
+    [[ -d $dir ]] && protected "$dir" 755 || deny "Unprotected bundle directory."
+  done
+  [[ ${BASH_SOURCE[0]} == "$bundle/launcher" ]] || deny "Launch the protected bundle copy."
+  for name in launcher project.tar manifest.json SHA256SUMS; do
+    [[ -f $bundle/$name ]] && protected "$bundle/$name" 444 || deny "Unprotected bundle input."
+  done
+  [[ -f $bundle/worker ]] && protected "$bundle/worker" 555 || deny "Unprotected worker."
+  [[ $(wc -c < "$bundle/SHA256SUMS") -le 512 ]] || deny "Invalid checksum manifest size."
+  actual=$(sha256sum "$bundle/SHA256SUMS")
+  [[ ${actual%% *} == "$3" ]] || deny "Checksum manifest does not match the reviewed digest."
+  expected_files=$'launcher\nmanifest.json\nproject.tar\nworker'
+  listed_files=$(sed -nE 's/^[0-9a-f]{64}  (launcher|manifest\.json|project\.tar|worker)$/\1/p' "$bundle/SHA256SUMS" | sort)
+  [[ $listed_files == "$expected_files" && $(wc -l < "$bundle/SHA256SUMS") -eq 4 ]] ||
+    deny "Unexpected bundle checksum entries."
+  (cd "$bundle" && sha256sum --check --strict SHA256SUMS)
+  jq -e --arg commit "$2" '
+    .kind == "workflow-os/offline-preflight-fixture/v1" and .source_commit == $commit and
+    .target == "aarch64-unknown-linux-gnu" and (.source_tree | test("^[0-9a-f]{40}$"))
+  ' "$bundle/manifest.json" >/dev/null || deny "Bundle does not match the reviewed source."
+  worker_input="$bundle/worker"
+else
+  if [[ ${GITHUB_ACTIONS:-} != true || ${RUNNER_ENVIRONMENT:-} != github-hosted ||
+        (${RUNNER_OS:-} != Linux && ${RUNNER_OS:-} != macOS) ]]; then
+    deny "Signer rehearsal requires a disposable GitHub-hosted Linux or macOS runner."
+  fi
+  [[ $# == 1 && -f $1 && -x $1 ]] || deny "Expected exactly one compiled Core test executable."
+  worker_input=$1
 fi
 
 core_uid=61021
@@ -61,15 +117,19 @@ cleanup() {
 trap cleanup EXIT
 sudo -n "$chown" 0:0 "$root"
 sudo -n /bin/chmod 0711 "$root"
-sudo -n /usr/bin/install -o 0 -g 0 -m 0555 -- "$1" "$root/worker"
+sudo -n /usr/bin/install -o 0 -g 0 -m 0555 -- "$worker_input" "$root/worker"
 sudo -n /usr/bin/install -o 0 -g 0 -m 0444 -- "${BASH_SOURCE[0]}" "$root/launcher"
 if [[ $RUNNER_OS == macOS ]]; then
   sudo -n /usr/bin/install -o 0 -g 0 -m 0444 -- scripts/signer-rehearsal-macos.sb "$root/network.sb"
 fi
 
 staging=$(mktemp -d "$tmp/workflow-os-signer-spec.XXXXXXXX")
-git archive --format=tar HEAD:dogfood/workflow-os-self-governance |
-  /usr/bin/tar -xf - -C "$staging"
+if $intended_host; then
+  /usr/bin/tar -xf "$bundle/project.tar" -C "$staging" --no-same-owner --no-same-permissions
+else
+  git archive --format=tar HEAD:dogfood/workflow-os-self-governance |
+    /usr/bin/tar -xf - -C "$staging"
+fi
 if [[ ! -f $staging/workflow-os.yml || -n $(find "$staging" ! -type d ! -type f -print -quit) ]]; then
   echo "Expected a regular, tracked synthetic project fixture." >&2
   exit 2
@@ -150,7 +210,7 @@ notification_core_test=$notification_prefix::rehearsal_notification_core
 notification_writer_test=$notification_prefix::rehearsal_notification_writer_probe
 notification_harness_test=$notification_prefix::rehearsal_notification_harness_probe
 operator_prefix=sqlite_state::operational_opening_store::tests::recovery_process
-listed=$("$1" --list)
+listed=$("$worker_input" --list)
 for test in "$signer_test" "$core_test" "$replacement_test" "$harness_test" \
   "$reader_signer_test" "$reader_core_test" "$reader_writer_test" "$reader_harness_test" \
   "$notification_test" "$notification_core_test" "$notification_writer_test" "$notification_harness_test" \
@@ -301,3 +361,8 @@ for trial in success before-commit after-commit after-callback; do
   fi
   run_worker "$harness_uid" "$harness_uid" "$harness_test"
 done
+
+if $intended_host; then
+  verify_firewall
+  echo 'Intended-host synthetic fixture completed without provider access.'
+fi
