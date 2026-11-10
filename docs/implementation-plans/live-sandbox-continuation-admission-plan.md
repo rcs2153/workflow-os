@@ -2027,6 +2027,40 @@ Building or transferring the bundle does not prove intended-host
 isolation; run the probes under separate governance and keep live
 admission denied until the remaining requirements are verified.
 
+### Intended-Host Synthetic Result
+
+The designated offline Ubuntu ARM64 VM ran the fixture from merged
+`95204e9e28e0199c10f968f0af6ce039ad64142d`, tree
+`5c0fba6986d0d00c8c3356e9c32fa848f15e03cd`. The
+[exact-source ARM64 build](https://github.com/rcs2153/workflow-os/actions/runs/42727609883)
+produced artifact `13722523495`; its ZIP SHA-256
+`64e3994a8c32af0ad32db0ebfd24411b968bfdf7286b1899406aba8707e4bd75`
+matched GitHub's digest. The launcher matched the tracked source; the
+guest rechecked the verified archive and file hashes after transfer.
+
+Missing designation and a mismatched checksum manifest both exited 2
+before worker staging. The protected launcher then exited 0. Under
+separate guest UIDs and network namespaces, a replacement Core process
+recovered one accepted synthetic effect after acknowledgement loss,
+appended one completion, and replayed it without reopening either
+observer or resending. Wrong-peer, harness custody, inherited-descriptor,
+and signer interruption cases passed in the same launch.
+
+The outbound firewall ruleset digest was unchanged. No fixture workers,
+scratch directories or one-time designation remained after cleanup;
+the read-only staged bundle still verified. Governed run
+`run-1794270127547129000-2` closed with 39 events, one proof-backed
+approval, zero retries and zero escalations. Guest staging, commands
+and evidence inspection were operator actions outside the kernel.
+
+The maintainer is designated as independent reviewer; acceptance is
+pending. The private sandbox draft target exists but was not used by
+the fixture. No GitHub App installation, actual custody or provider
+scope check, public ingress, live clock check, provider request, or
+live grant occurred. This result satisfies the bounded intended-host
+synthetic check only. Review actual deployment and provider scope
+under separate authority before requesting any live trial.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
