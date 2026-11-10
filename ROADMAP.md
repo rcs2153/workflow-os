@@ -312,10 +312,13 @@ found no non-test caller that composes live admission, one-shot dispatch,
 and independent recovery under a single reviewed launch binding. The
 [private offline rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#private-offline-operator-rehearsal)
 has since passed on Linux and macOS. It verifies synthetic recovery under
-separate roles, not a live operator route. The next gate is an
-[intended-host preflight without dispatch](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#intended-host-preflight).
-Live admission remains denied pending intended-host custody and scope
-evidence, a separately approved disposable target, and an independent reviewer.
+separate roles, not a live operator route. The
+[intended-host synthetic rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#intended-host-synthetic-result)
+also passed on the designated offline Linux VM using the exact merged
+worker and launcher. Independent review of that result is pending.
+Live admission remains denied pending actual installation scope and
+custody evidence, reviewed ingress and time posture, and a separate
+decision for the exact disposable target.
 
 This sequencing tests the enterprise adoption thesis more directly than
 another private projection increment. It does not authorize agent teams,
