@@ -2012,9 +2012,20 @@ records its tree, runner target and build identity with checksums for the
 test worker, reviewed hosted launcher, and tracked synthetic project.
 The short-lived CI artifact is not a release or a deployment. Verify its
 source, tree and digests outside the VM before a separate governed offline
-transfer. The hosted launcher is reference material; its hosted-runner
-guard must not be spoofed to run on the intended host. Building or
-transferring this bundle does not prove intended-host isolation.
+transfer. The fixture launcher keeps its original hosted-runner guard.
+The explicit `--intended-host COMMIT SHA256SUMS_DIGEST` entry instead
+requires the designated Linux ARM64 VM, an unprivileged operator, a
+root-owned host designation, and an enabled firewall whose full ruleset
+matches the reviewed digest. It verifies the protected bundle before
+privileged staging, then reuses the same separate-UID and no-network
+worker path and rechecks the firewall. The designation file
+`/etc/workflow-os-preflight-host` must contain the version marker
+`workflow-os/intended-preflight-host/v1`, the guest hostname
+`lima-wos-pf`, and the reviewed stateless ruleset SHA-256, one per line.
+Create it only in the designated guest during the governed host phase.
+Building or transferring the bundle does not prove intended-host
+isolation; run the probes under separate governance and keep live
+admission denied until the remaining requirements are verified.
 
 ## Delivery And Tests
 
