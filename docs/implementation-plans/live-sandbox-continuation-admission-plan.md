@@ -1797,8 +1797,18 @@ to the key, webhook material, target, or body fail closed.
 The replacement recovery fixture consumes a receipt produced by this path,
 not a hand-assembled success receipt. Core independently revalidates the
 signature, pinned profile, writer, marked body, and durable execution
-window. No listener, transport timeout policy, protected host resolver, or
-live custody is established; those must be reviewed separately.
+window.
+
+The private Linux and macOS intake consumes an already connected Unix stream.
+It accepts one length-prefixed body of at most 256 KiB and requires end of
+stream immediately after the frame. Header, body, and end of stream share a
+five-second monotonic deadline; progress cannot extend it. Short, oversized,
+trailing, stalled, and expired input produces no receipt. The monotonic
+budget bounds the local socket read only; the receipt still requires its
+separate trusted-time observations around that read. The isolated rehearsal
+uses the same intake with synthetic frames. There is still no listener,
+reviewed ingress peer or resolver, HTTP request timeout policy, deployment,
+or live custody.
 
 ### Protected Receiver Descriptor Intake
 

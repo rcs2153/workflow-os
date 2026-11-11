@@ -1,7 +1,12 @@
 //! Offline verification only. Receiver trust must come from a reviewed host.
 #![allow(dead_code)] // No observer registration or delivery route is enabled.
 
-use std::{borrow::Cow, io::Read, num::NonZeroU64};
+use std::{borrow::Cow, num::NonZeroU64};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::{
+    os::unix::net::UnixStream,
+    time::{Duration, Instant},
+};
 
 use ring::signature::KeyPair;
 use ring::{hmac, signature};
@@ -21,6 +26,8 @@ mod handoff;
 pub(crate) mod rehearsal;
 
 const MAX_NOTIFICATION_BYTES: usize = 256 * 1024;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const INTAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const RECEIPT_DOMAIN: &str = "workflow-os/installation-comment-receiver-receipt/v1";
 
 /// Supplied by trusted Core composition, not decoded from a request.
@@ -128,21 +135,47 @@ impl<'a> CreationReceiptAttester<'a> {
         })
     }
 
-    pub(crate) fn capture<'header>(
+    /// The host must supply an already connected, reviewed ingress stream.
+    /// This verifies one frame, not the deployment or the ingress peer.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(crate) fn capture_frame<'header>(
         &self,
-        body: impl Read,
+        stream: UnixStream,
+        github_signature: &'header str,
+        observe: impl FnMut() -> Option<TrustedTimeObservation>,
+    ) -> Option<AttestedCreationNotification<'header>> {
+        let stop = Instant::now().checked_add(INTAKE_TIMEOUT)?;
+        self.capture_frame_until(stream, github_signature, observe, stop)
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn capture_frame_until<'header>(
+        &self,
+        mut stream: UnixStream,
+        github_signature: &'header str,
+        observe: impl FnMut() -> Option<TrustedTimeObservation>,
+        stop: Instant,
+    ) -> Option<AttestedCreationNotification<'header>> {
+        use super::installation_signer_channel::read_frame;
+
+        self.capture_with(github_signature, observe, || {
+            stream.set_nonblocking(true).ok()?;
+            read_frame(&mut stream, MAX_NOTIFICATION_BYTES, stop).ok()
+        })
+    }
+
+    fn capture_with<'header>(
+        &self,
         github_signature: &'header str,
         mut observe: impl FnMut() -> Option<TrustedTimeObservation>,
+        read_body: impl FnOnce() -> Option<Vec<u8>>,
     ) -> Option<AttestedCreationNotification<'header>> {
         let mac = decode_signature(github_signature)?;
         let earliest = observe()?;
         if earliest.observed_at() >= self.deadline {
             return None;
         }
-        let mut bytes = Vec::new();
-        body.take(MAX_NOTIFICATION_BYTES as u64 + 1)
-            .read_to_end(&mut bytes)
-            .ok()?;
+        let bytes = read_body()?;
         let latest = observe()?;
         if bytes.len() > MAX_NOTIFICATION_BYTES
             || !same_time_domain(&earliest, &latest)
@@ -628,6 +661,8 @@ pub(crate) mod tests {
         .is_none());
         let bytes = serde_json::to_vec(&payload).expect("exact body");
         let header = github_header(receiver.github_hmac, &bytes);
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        assert_invalid_intake_frames(&attester, &bytes, &header, earliest);
         let bad_header = github_header(&[13; 32], &bytes);
         let mut wrong_target = payload;
         wrong_target["issue"]["number"] = json!(8);
@@ -645,18 +680,110 @@ pub(crate) mod tests {
             (&bytes, header.as_str(), [latest, earliest]),
         ] {
             let mut samples = samples.into_iter();
-            assert!(attester
-                .capture(body, header, || samples.next().cloned())
-                .is_none());
+            assert!(
+                capture_fixture_notification(&attester, body, header, || samples.next().cloned())
+                    .is_none()
+            );
         }
         let mut samples = [earliest, latest].into_iter();
-        let captured = attester
-            .capture(bytes.as_slice(), &header, || samples.next().cloned())
-            .expect("capture and attest original notification bytes");
+        let captured =
+            capture_fixture_notification(&attester, &bytes, &header, || samples.next().cloned())
+                .expect("capture and attest original notification bytes");
         assert_eq!(captured.notification().body, bytes);
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let captured = handoff::tests::transfer_fixture(captured);
         consume(captured.notification());
+    }
+
+    pub(super) fn capture_fixture_notification<'header>(
+        attester: &CreationReceiptAttester<'_>,
+        body: &[u8],
+        header: &'header str,
+        observe: impl FnMut() -> Option<TrustedTimeObservation>,
+    ) -> Option<AttestedCreationNotification<'header>> {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            use super::super::installation_signer_channel::write_frame;
+            let (mut sender, receiver) = UnixStream::pair().expect("local intake stream");
+            sender
+                .set_nonblocking(true)
+                .expect("bounded fixture sender");
+            std::thread::scope(|threads| {
+                let writer = threads.spawn(move || {
+                    write_frame(
+                        &mut sender,
+                        body,
+                        MAX_NOTIFICATION_BYTES,
+                        Instant::now() + INTAKE_TIMEOUT,
+                    )
+                });
+                let captured = attester.capture_frame(receiver, header, observe);
+                let sent = writer.join().expect("fixture sender joined");
+                if captured.is_some() {
+                    sent.expect("write fixture frame");
+                }
+                captured
+            })
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        attester.capture_with(header, observe, || Some(body.to_vec()))
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn assert_invalid_intake_frames(
+        attester: &CreationReceiptAttester<'_>,
+        body: &[u8],
+        header: &str,
+        earliest: &TrustedTimeObservation,
+    ) {
+        use std::{io::Write, net::Shutdown};
+
+        let size = u32::try_from(body.len()).expect("fixture body length");
+        let oversized = u32::try_from(MAX_NOTIFICATION_BYTES + 1).expect("fixture size");
+        for (declared, sent, suffix, close, budget) in [
+            (size, body, b"x".as_slice(), true, INTAKE_TIMEOUT),
+            (
+                size,
+                &body[..body.len() - 1],
+                b"".as_slice(),
+                true,
+                INTAKE_TIMEOUT,
+            ),
+            (
+                oversized,
+                b"".as_slice(),
+                b"".as_slice(),
+                true,
+                INTAKE_TIMEOUT,
+            ),
+            (size, body, b"".as_slice(), false, Duration::from_millis(25)),
+            (size, body, b"".as_slice(), true, Duration::ZERO),
+        ] {
+            let (mut sender, receiver) = UnixStream::pair().expect("disposable intake stream");
+            sender
+                .write_all(&declared.to_be_bytes())
+                .expect("frame header");
+            sender.write_all(sent).expect("frame body");
+            sender.write_all(suffix).expect("frame suffix");
+            if close {
+                sender.shutdown(Shutdown::Write).expect("sender EOF");
+            }
+            let mut samples = [earliest.clone()].into_iter();
+            assert!(attester
+                .capture_frame_until(
+                    receiver,
+                    header,
+                    || Some(
+                        samples
+                            .next()
+                            .expect("only the opening observation is read")
+                    ),
+                    Instant::now() + budget,
+                )
+                .is_none());
+            assert!(samples.next().is_none());
+            drop(sender);
+        }
     }
 
     fn with_signed_notification<T>(
