@@ -338,8 +338,10 @@ separate roles, not a live operator route. The
 also passed on the designated offline Linux VM using the exact merged
 worker and launcher. The designated human reviewer accepted the synthetic
 result only; that decision is not live access or dispatch approval.
-Before provisioning, review and validate the production, non-dispatch
-protected-launch preflight candidate that shares checks with the rehearsal.
+The production, non-dispatch protected-launch preflight shares checks with
+the rehearsal and merged in [PR #897](https://github.com/rcs2153/workflow-os/pull/897)
+at `a769339a` after all ten exact-head checks passed. Prepare the separately
+bound ARM64 CLI artifact before a governed intended-host trial.
 The operator composition is still test-only; this does not make a deployable
 operator available. The bounded implementation and rejection matrix are specified in the
 [post-rehearsal readiness review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#post-rehearsal-production-readiness-review).

@@ -1,0 +1,99 @@
+name: Offline Protected Launch ARM64 CLI Bundle
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/protected-launch-arm64-bundle.yml
+      - crates/workflow-core/src/protected_launch.rs
+      - crates/workflow-core/src/protected_launch/**
+      - scripts/rehearse-protected-launch.sh
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/protected-launch-arm64-bundle.yml
+      - crates/workflow-core/src/protected_launch.rs
+      - crates/workflow-core/src/protected_launch/**
+      - scripts/rehearse-protected-launch.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: Build and rehearse protected launch ARM64 CLI
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      TARGET: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Build exact native production CLI
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          cargo build --locked --release -p workflow-cli --bin workflow-os --target "$TARGET"
+          readelf -h "target/$TARGET/release/workflow-os" | grep -E 'Machine:[[:space:]]+AArch64'
+          digest=$(sha256sum "target/$TARGET/release/workflow-os")
+          printf 'executable_sha256=%s\n' "${digest%% *}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify native launch and syscall boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v strace >/dev/null; then sudo apt-get install -y strace; fi
+          bash scripts/rehearse-protected-launch.sh "target/$TARGET/release/workflow-os"
+
+      - name: Bind the rehearsed binary to source and build evidence
+        env:
+          REHEARSED_BINARY_SHA256: ${{ steps.build.outputs.executable_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          bundle=$(mktemp -d)
+          install -m 0555 "target/$TARGET/release/workflow-os" "$bundle/workflow-os"
+          binary_sha=$(sha256sum "$bundle/workflow-os")
+          test "${binary_sha%% *}" = "$REHEARSED_BINARY_SHA256"
+          lock_sha=$(sha256sum Cargo.lock)
+          jq -n --arg commit "$SOURCE_COMMIT" --arg tree "$(git rev-parse 'HEAD^{tree}')" \
+            --arg target "$TARGET" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg rustc "$(rustc --version)" --arg lock "${lock_sha%% *}" \
+            --arg executable "${binary_sha%% *}" \
+            '{kind:"workflow-os/offline-protected-launch-cli/v1",source_commit:$commit,
+              source_tree:$tree,target:$target,run_id:$run,run_attempt:$attempt,rustc:$rustc,
+              cargo_lock_sha256:$lock,executable_sha256:$executable,native_rehearsal:"passed"}' \
+            > "$bundle/build.json"
+          (
+            cd "$bundle"
+            sha256sum workflow-os build.json > SHA256SUMS
+            sha256sum --check --strict SHA256SUMS
+          )
+          output="$RUNNER_TEMP/protected-launch-arm64"
+          mkdir "$output"
+          tar -C "$bundle" -czf "$output/protected-launch-cli.tar.gz" workflow-os build.json SHA256SUMS
+          (cd "$output" && sha256sum protected-launch-cli.tar.gz > protected-launch-cli.tar.gz.sha256)
+
+      - name: Upload short-lived no-dispatch CLI evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: offline-protected-launch-arm64-${{ env.SOURCE_COMMIT }}
+          path: ${{ runner.temp }}/protected-launch-arm64/
+          if-no-files-found: error
+          retention-days: 7
