@@ -371,6 +371,10 @@ descriptor handoff and retirement. The [designated offline VM result](docs/imple
 also verified both roles, fail-closed cases, and listener retirement with the
 exact-main ARM64 binary. This is not a service deployment or host-wide
 membership attestation.
+The [designated offline receiver result](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#designated-vm-receiver-descriptor-result)
+verified the merged receiver preflight with two synthetic inherited files.
+It passed the successful case and ten denials without accessing the files.
+This proves descriptor metadata at inspection time, not deployed custody.
 The operator composition is still test-only; this does not make a deployable
 operator available. The bounded implementation and rejection matrix are specified in the
 [post-rehearsal readiness review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#post-rehearsal-production-readiness-review).
