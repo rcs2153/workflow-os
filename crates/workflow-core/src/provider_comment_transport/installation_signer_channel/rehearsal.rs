@@ -1,8 +1,8 @@
 #![allow(clippy::expect_used)]
 
 use std::fs::{self, OpenOptions};
-use std::io::{ErrorKind, Read};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::io::ErrorKind;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -10,6 +10,9 @@ use std::time::{Duration, Instant};
 
 use super::decision::InstallationSignerDecisionChannel;
 use super::{InstallationSignerReceiver, SignerPeerPolicy};
+use crate::protected_launch::unix::{
+    bounded_bytes, matches_identity, only_standard_descriptors, protected_file,
+};
 use crate::{SpecContentHash, Timestamp};
 
 pub(crate) mod reader;
@@ -56,41 +59,14 @@ pub(crate) fn assert_isolated(uid: u32) {
     if !only_standard_descriptors() {
         std::process::exit(76);
     }
-    assert_eq!(nix::unistd::geteuid().as_raw(), uid);
-    assert_eq!(nix::unistd::getuid().as_raw(), uid);
     let gid = if POLICY.harness_uids.contains(&uid) {
         uid
     } else {
         61_020
     };
-    assert_eq!(nix::unistd::getegid().as_raw(), gid);
-    assert_eq!(nix::unistd::getgid().as_raw(), gid);
+    assert!(matches_identity(uid, gid));
     assert_platform_isolation(gid);
     let _ = launch_commitment();
-}
-
-fn only_standard_descriptors() -> bool {
-    // Collect first so the directory's own descriptor is closed before probing.
-    let Ok(entries) = fs::read_dir("/dev/fd") else {
-        return false;
-    };
-    let Ok(entries) = entries
-        .map(|entry| entry.map(|entry| (entry.file_name(), entry.path())))
-        .collect::<Result<Vec<_>, _>>()
-    else {
-        return false;
-    };
-    entries.iter().all(|(name, path)| {
-        name.to_str()
-            .and_then(|name| name.parse::<u32>().ok())
-            .is_some_and(|fd| {
-                fd <= 2
-                    || fs::symlink_metadata(path).is_err_and(|error| {
-                        error.kind() == ErrorKind::NotFound
-                            || error.raw_os_error() == Some(nix::libc::EBADF)
-                    })
-            })
-    })
 }
 
 #[test]
@@ -143,30 +119,14 @@ fn rehearsal_descriptor_probe() {
 }
 
 pub(crate) fn executable_digest() -> SpecContentHash {
-    file_digest(&std::env::current_exe().expect("fixture executable"))
+    let file = fs::File::open(std::env::current_exe().expect("fixture executable"))
+        .expect("open fixture executable");
+    crate::protected_launch::unix::executable_digest(file).expect("digest fixture executable")
 }
 
 fn file_digest(path: &Path) -> SpecContentHash {
-    let mut file = fs::File::open(path).expect("open reviewed fixture file");
-    let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
-    let mut buffer = [0; 8192];
-    loop {
-        let read = file.read(&mut buffer).expect("read executable bytes");
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    let bytes = hasher.finish();
-    let hex = bytes
-        .as_ref()
-        .iter()
-        .fold(String::with_capacity(64), |mut hex, byte| {
-            use std::fmt::Write as _;
-            write!(&mut hex, "{byte:02x}").expect("write digest");
-            hex
-        });
-    SpecContentHash::new(hex).expect("SHA-256 digest")
+    let file = protected_file(path, 0o444, true).expect("open protected fixture file");
+    SpecContentHash::from_bytes(bounded_bytes(file, 131_072).expect("read bounded fixture file"))
 }
 
 pub(crate) fn launch_commitment() -> SpecContentHash {
@@ -176,28 +136,19 @@ pub(crate) fn launch_commitment() -> SpecContentHash {
         binary,
         root.parent().expect("protected root").join("worker")
     );
-    let meta = binary.metadata().expect("worker metadata");
-    assert!(meta.is_file() && meta.uid() == 0 && meta.mode() & 0o7777 == 0o555);
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
-        .open(root.join("operator-launch"))
+    let executable = protected_file(&binary, 0o555, true).expect("protected worker");
+    let digest = crate::protected_launch::unix::executable_digest(executable)
+        .expect("digest protected worker");
+    let file = protected_file(&root.join("operator-launch"), 0o444, true)
         .expect("protected launch record");
-    let meta = file.metadata().expect("launch record metadata");
-    assert!(
-        meta.is_file() && meta.uid() == 0 && meta.nlink() == 1 && meta.mode() & 0o7777 == 0o444
-    );
-    let mut record = String::new();
-    file.take(1025)
-        .read_to_string(&mut record)
-        .expect("bounded launch record");
-    assert!(record.len() <= 1024);
+    let record = String::from_utf8(bounded_bytes(file, 1024).expect("bounded launch record"))
+        .expect("UTF-8 launch record");
     let mut lines = record.lines();
     assert_eq!(
         lines.next(),
         Some("workflow-os/hosted-operator-rehearsal/v1")
     );
-    assert_eq!(lines.next(), Some(executable_digest().as_str()));
+    assert_eq!(lines.next(), Some(digest.as_str()));
     let trial = root
         .file_name()
         .and_then(|name| name.to_str())
@@ -212,18 +163,12 @@ pub(crate) fn launch_commitment() -> SpecContentHash {
         Some("core=61021 signer=61022 reader=61025 receiver=61026 harness=61023 group=61020")
     );
     let launcher = root.parent().expect("protected root").join("launcher");
-    let metadata = launcher.symlink_metadata().expect("launcher metadata");
-    assert!(metadata.is_file() && metadata.uid() == 0 && metadata.mode() & 0o7777 == 0o444);
     assert_eq!(lines.next(), Some(file_digest(&launcher).as_str()));
     #[cfg(target_os = "linux")]
     assert_eq!(lines.next(), Some("linux-netns"));
     #[cfg(target_os = "macos")]
     {
         let profile = root.parent().expect("protected root").join("network.sb");
-        let metadata = profile
-            .symlink_metadata()
-            .expect("sandbox profile metadata");
-        assert!(metadata.is_file() && metadata.uid() == 0 && metadata.mode() & 0o7777 == 0o444);
         assert_eq!(lines.next(), Some(file_digest(&profile).as_str()));
     }
     if trial == "operator" {
@@ -238,31 +183,7 @@ pub(crate) fn launch_commitment() -> SpecContentHash {
 
 #[cfg(target_os = "linux")]
 fn assert_platform_isolation(_gid: u32) {
-    assert_eq!(
-        nix::unistd::getgroups().expect("supplementary groups"),
-        [] as [nix::unistd::Gid; 0]
-    );
-    let status = fs::read_to_string("/proc/self/status").expect("process isolation status");
-    let field = |name| {
-        status
-            .lines()
-            .filter_map(|line| line.split_once(':'))
-            .find_map(|(key, value)| (key == name).then_some(value.trim()))
-            .expect("process status field")
-    };
-    assert_eq!(field("NoNewPrivs"), "1");
-    for name in ["CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"] {
-        assert_eq!(field(name), "0000000000000000");
-    }
-    assert_eq!(
-        fs::read_to_string("/proc/net/dev")
-            .expect("network namespace interfaces")
-            .lines()
-            .skip(2)
-            .filter_map(|line| line.split_once(':').map(|(name, _)| name.trim()))
-            .collect::<Vec<_>>(),
-        ["lo"]
-    );
+    assert!(crate::protected_launch::unix::linux_isolation());
 }
 
 #[cfg(target_os = "macos")]

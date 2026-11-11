@@ -2126,6 +2126,101 @@ maintainer code-path review, not independent security assurance. Source
 inspection and documentation edits are executor work outside the kernel;
 no provider access, provisioning or dispatch was performed.
 
+### Protected-Launch Preflight Candidate
+
+The local production entry is `workflow-os launch-preflight --manifest
+<absolute-path> --sha256 <reviewed-manifest-sha256>`. It accepts exactly those
+options and emits bounded JSON on success. It does not initialize a project
+or runtime store. Linux is the supported production verification platform;
+all others fail closed. The macOS rehearsal continues to exercise the shared
+protected-file, identity and descriptor checks with its existing sandbox probes.
+
+The bounded JSON manifest uses version `workflow-os/protected-launch/v1`,
+the lowercase SHA-256 of the sibling `workflow-os` executable, one selected
+role (`core`, `signer`, `reader`, `receiver`, `harness`), and an `identities`
+object containing numeric `uid` and `gid` for all five roles. Role UIDs must
+be distinct and neither UID nor GID may be root or the invalid sentinel.
+Unknown and duplicate fields fail closed. The installed executable must be
+root-owned `0555`, the manifest root-owned `0444`, with a single link each.
+Production requires root-owned ancestors without group/other write or special
+mode bits, never the sticky temporary-directory exception used by fixtures.
+The file opened for hashing must match the running Linux executable inode.
+
+The launch check requires no inherited descriptors beyond standard streams,
+matching real/effective/saved/filesystem IDs, no supplementary groups,
+no-new-privileges, empty capability sets and loopback-only interfaces from
+Linux procfs. It trusts the OS and the root-controlled launch environment;
+this is not evidence of who deployed the executable, the trustworthiness of
+the caller's standard streams, or the identity of other running services.
+Only the current role is observed; other role entries are configuration.
+Success explicitly leaves deployment, custody, ingress, trusted time and
+provider scope unverified. It supplies no grant or action authority.
+
+The hosted Linux CI rehearsal runs the real CLI under separate identity and
+network isolation and checks syscall traces for no network or custody access.
+Its denial matrix covers manifest and executable drift, executable
+substitution, wrong identity, root, inherited descriptors, unprotected mode
+and ownership, links, writable ancestor, unknown fields, duplicate roles and
+oversized manifest. No provider exchange or state backend is reachable from
+this command. Native CI and focused maintainer review remain delivery gates;
+the designated VM is not used for this implementation phase.
+
+Governed implementation `run-1794359754262798000-2` has proof-backed approval
+`approval/run-1794359754262798000-2/implementation-approved`. Builds, file
+edits and test execution are executor work outside kernel preview handlers.
+Local macOS validation passed the strict CLI/no-state denial and clean versus
+inherited descriptor regressions, Core/CLI all-target Clippy with warnings
+denied, formatting, docs, shell syntax and whitespace checks. The privileged
+Linux rehearsal guard denied local invocation with exit 2, as intended.
+Linux compile, native success and syscall evidence remain CI requirements;
+they were not run on this Mac or on the designated VM.
+
+Focused maintainer review accepts the candidate for CI delivery, not live
+admission. The production command bypasses project/state invocation, rejects
+unknown options before inspection, and reads only the selected manifest,
+its fixed sibling executable and local process metadata. Metadata and digest
+checks use the same opened regular file. The root-managed environment is
+trusted; the result is neither independent assurance nor a deployment receipt.
+The temporary-directory exception is reachable only from the test rehearsal.
+Successful and denied Linux process traces, plus the existing Linux and macOS
+role rehearsals, must pass on the exact PR head before merge. The approved
+review `run-1794360772798636000-2` preserves the separate intended-host gate.
+
+The initial exact-head Linux CI run `42940073951` passed Rust Clippy and
+ordinary tests, but the signer notification receiver/Core missed their
+socket deadlines. The public preflight step was skipped; macOS isolation and
+the other eight jobs passed. The extracted verifier had replaced the original
+accelerated streaming digest with slower debug-mode hashing. The correction
+restores the original `ring` SHA-256 implementation on the same opened,
+bounded descriptor, without changing any deadline or isolation check. A
+digest equivalence regression checks exact content hashing. The corrected
+head still needs both native Linux rehearsals to pass; the initial result is
+not evidence of public preflight success. Blocker phase
+`run-1794361853841034000-2` received a proof-backed scoped approval for this
+correction only.
+Local digest equivalence, shared descriptor regression, warnings-denied
+Core/CLI Clippy, formatting, docs and whitespace checks passed after the
+correction. Native positive and syscall evidence remain pending.
+
+Exact-head run `42942476785` passed the shared Linux signer rehearsal after
+restoring the accelerated digest. The public rehearsal then exited 1 before
+reporting its first case; the original shell assertions did not identify the
+failure. The diagnostics correction records the case, exit and bounded error
+or unexpected syscall category, rejects an empty trace, and captures enough
+pathname bytes to detect the synthetic custody path. It runs the public
+rehearsal earlier without removing any merge check. This does not claim that
+the public verifier has passed. Governed blocker `run-1794363116148792000-2`
+approved this diagnostics-only change.
+
+Run `42944688840` reached the positive case and passed syscall inspection,
+but the verifier denied unprotected fixture metadata. The follow-up stages
+under a unique directory directly beneath the disposable runner root, checks
+the root and fixture owner/modes and exact file link counts before launch, and
+logs the previous `/opt` metadata for diagnosis. The production verifier,
+denial matrix and deadlines are unchanged. Governed blocker
+`run-1794363566953618000-2` authorizes only this fixture correction; the
+positive Linux result is still pending exact-head CI.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

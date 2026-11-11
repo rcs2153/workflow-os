@@ -132,6 +132,12 @@ fn main() {
 
 #[allow(clippy::too_many_lines)] // Exhaustive top-level command routing.
 fn run(args: &[String]) -> Result<(), WorkflowOsError> {
+    if args
+        .first()
+        .is_some_and(|command| command == "launch-preflight")
+    {
+        return launch_preflight_command(&args[1..]);
+    }
     let invocation = Invocation::parse(args)?;
     match &invocation.command {
         Command::Validate => validate_command(&invocation),
@@ -233,6 +239,34 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             Ok(())
         }
     }
+}
+
+fn launch_preflight_command(args: &[String]) -> Result<(), WorkflowOsError> {
+    let [manifest_flag, manifest, digest_flag, digest] = args else {
+        return Err(usage(
+            "launch-preflight requires --manifest <absolute-path> --sha256 <digest>",
+        ));
+    };
+    if manifest_flag != "--manifest"
+        || digest_flag != "--sha256"
+        || !Path::new(manifest).is_absolute()
+    {
+        return Err(usage(
+            "launch-preflight requires --manifest <absolute-path> --sha256 <digest>",
+        ));
+    }
+    let expected = SpecContentHash::new(digest.as_str())?;
+    let result =
+        workflow_core::protected_launch::inspect_protected_launch(Path::new(manifest), &expected)?;
+    let json = serde_json::to_string(&result).map_err(|_| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::Internal,
+            "protected_launch.output.invalid",
+            "cannot serialize launch inspection",
+        )
+    })?;
+    println!("{json}");
+    Ok(())
 }
 
 fn run_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> {
@@ -13560,6 +13594,7 @@ fn print_help() {
     );
     println!("  provider github-pr-comment recovery-summary --summary <path>");
     println!("  provider github-pr-comment continue-sandbox --request <path>");
+    println!("  launch-preflight --manifest <absolute-path> --sha256 <digest>  verify Linux launch without dispatch");
     println!("  provider github-pr-comment inspect-synthetic-recovery --run-id <id> --operation-id <id> --side-effect-id <id>");
     fixture_authority_cli::print_help();
     println!(

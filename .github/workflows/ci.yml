@@ -60,6 +60,14 @@ jobs:
       - name: Rust clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Rehearse public no-dispatch protected launch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v strace >/dev/null; then sudo apt-get install -y strace; fi
+          cargo build --locked -p workflow-cli --bin workflow-os
+          bash scripts/rehearse-protected-launch.sh target/debug/workflow-os
+
       - name: Rust tests
         run: cargo test --workspace
 
