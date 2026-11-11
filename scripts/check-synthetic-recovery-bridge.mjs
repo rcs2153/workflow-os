@@ -41,6 +41,11 @@ function check(root, kernel) {
     WORKFLOW_OS_SYNTHETIC_RESPONSE_MCP_MANIFEST: responseManifest,
   }, "real CLI bridge verification", 60_000);
   process.stdout.write(output);
+  if (process.argv[2] === "--protected-linux") {
+    process.stdout.write(run("sudo", ["-n", "/usr/bin/python3",
+      "scripts/rehearse-protected-recovery.py", kernel, lookupManifest, responseManifest,
+    ], env, "protected recovery preflight rehearsal", 120_000));
+  }
 }
 
 try {

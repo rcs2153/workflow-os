@@ -39,6 +39,43 @@ pub struct ProtectedReceiverDescriptorInspection {
     descriptor_count: u8,
 }
 
+/// Historical synthetic recovery evidence from a protected Core launch.
+#[derive(Debug, Serialize)]
+pub struct ProtectedSyntheticRecoveryInspection {
+    status: &'static str,
+    launch: ProtectedLaunchInspection,
+    recovery_manifest_sha256: SpecContentHash,
+    snapshot_sha256: SpecContentHash,
+    execution_posture: crate::SyntheticSandboxRecoveryPosture,
+    completion_proof_source: Option<crate::SyntheticSandboxCompletionProofSource>,
+    dispatch_authorized: bool,
+    provider_called: bool,
+}
+
+/// Verifies one pinned offline snapshot without creating or repairing state.
+///
+/// # Errors
+/// Fails closed without a verified Linux Core launch, protected inputs and
+/// exact synthetic historical admission evidence.
+pub fn inspect_protected_synthetic_recovery(
+    manifest: &Path,
+    expected: &SpecContentHash,
+    recovery_expected: &SpecContentHash,
+) -> Result<ProtectedSyntheticRecoveryInspection, WorkflowOsError> {
+    #[cfg(target_os = "linux")]
+    {
+        unix::inspect_synthetic_recovery(manifest, expected, recovery_expected)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (manifest, expected, recovery_expected);
+        Err(WorkflowOsError::invalid_state(
+            "protected_launch.platform.unsupported",
+            "protected-launch preflight requires Linux isolation evidence",
+        ))
+    }
+}
+
 /// Inspects the fixed Linux receiver descriptor set without reading its files.
 ///
 /// # Errors

@@ -2555,6 +2555,39 @@ host-wide access-control assurance, a deployed receiver, or authorization for
 provider scope verification, ingress, signing, or dispatch. Independent
 operator review is not asserted.
 
+### Protected Synthetic Recovery Preflight
+
+The Linux-only `launch-recovery-preflight --manifest <absolute-path> --sha256
+<digest> --recovery-sha256 <digest>` composes the verified shared Core launch
+with the existing read-only SQLite synthetic recovery verifier. It accepts
+no state path, credentials, or transport selector. The protected sibling
+`recovery.json` binds the launch digest, snapshot digest, exact run, operation
+and SideEffect to one reviewed configuration. The fixed sibling
+`recovery.sqlite3` must be a bounded, root-owned, single-link `0444` rollback
+format snapshot with no SQLite sidecars. The snapshot digest and sidecar
+posture are checked before and after inspection.
+
+The command distinguishes unresolved historical admission, verified synthetic
+lookup completion, and verified synthetic creation-response completion.
+Missing or mismatched evidence is denied; it is not classified as unresolved
+admission. Output is redacted and carries no current execution authority.
+There is no call to dispatch, authorize or contact an observer, open material,
+repair state, or create a new project. The reviewed launcher and storage owner
+remain trusted; matching digests are not proof of live deployment or who
+produced the synthetic snapshot.
+
+The exact-head Linux rehearsal uses disposable snapshots exported by the
+existing synthetic recovery tests, including both proof sources and the
+unresolved case. It checks drift, wrong role, unrelated run, missing snapshot,
+and sidecar rejection, and requires unchanged snapshot bytes and no network
+or child-process syscalls. This is the read-only operator entry, not a live
+admission path or an active recovery worker. Live admission remains denied.
+
+Implementation is scoped to `run-1794383425414936000-2` and proof-backed
+`approval/run-1794383425414936000-2/implementation-approved`. Source edits and
+verification are executor work outside preview handlers. Native exact-head
+evidence remains required before delivery.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
