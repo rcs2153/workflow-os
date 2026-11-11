@@ -2464,6 +2464,37 @@ Implementation `run-1794374746985770000-2` received proof-backed approval
 checks are executor work outside preview handlers. Native exact-head
 validation remains required; provider access, custody and dispatch remain denied.
 
+### Designated VM Named Endpoint Result
+
+[PR #905](https://github.com/rcs2153/workflow-os/pull/905) merged as
+`d4b6349d9d89952c5c0d6b0bcea4acfd2a50ab60`, tree
+`d44fa67e2a959eb65db7d10d282ce1af7a7eeb26`. The separate
+[exact-main ARM64 build](https://github.com/rcs2153/workflow-os/actions/runs/42968352706)
+passed the native rehearsal. Artifact `13831943670` was verified against the
+Actions digest, archive checksums, source and tree metadata, and AArch64
+executable format. The staged executable matched SHA-256
+`4596864c84cc1ba42f1b31560b48f9cb68f3b0efcdb7e7c2bf6ee4613aefc14a`
+before transfer and after protected installation on the designated offline VM.
+
+The reviewed rehearsal verified both endpoint roles and denied connection by
+an unrelated role. Wrong mode, owner, pathname and shared Core group were
+rejected. With an extra inherited descriptor the Core probe failed closed;
+the signer's otherwise valid peer observation remained valid. All six test
+listeners retired, and 23 nonempty probe traces passed the syscall bounds
+without payload exchange, custody access or child creation. No runtime state
+was created by the probes. Temporary staging was removed and the firewall
+digest was unchanged. The private transcript SHA-256 is
+`adeed420d22fb6c0b93010e05c6615795755b631d2126cd3f98b63f235af1aad`.
+
+Dogfood `dg/runtime-composition` run `run-1794376495374879000-2` closed with
+39 events, one proof-backed approval
+(`approval/run-1794376495374879000-2/composition-approved`), no retries and
+no escalations. Artifact verification, transfer, shell checks and cleanup
+were executor work outside the kernel; preview handler events are not host
+attestation. This result does not establish an installed operator, secret
+custody, reviewed ingress or trusted time, provider scope, or authorization
+for live dispatch. Independent operator review is not asserted.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
