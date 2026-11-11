@@ -2586,7 +2586,43 @@ admission path or an active recovery worker. Live admission remains denied.
 Implementation is scoped to `run-1794383425414936000-2` and proof-backed
 `approval/run-1794383425414936000-2/implementation-approved`. Source edits and
 verification are executor work outside preview handlers. Native exact-head
-evidence remains required before delivery.
+evidence passed before delivery.
+
+### Designated VM Protected Synthetic Recovery Result
+
+[PR #911](https://github.com/rcs2153/workflow-os/pull/911) merged at
+`b12b64fe7a024dab97d6f69f9194adbcc4559afa`, tree
+`3e9e7fa469283762e847e4525b881835755822a6`. The
+[exact-main Linux recovery job](https://github.com/rcs2153/workflow-os/actions/runs/42985171161/job/130404515569)
+passed all twelve cases. The separate
+[exact-main ARM64 artifact](https://github.com/rcs2153/workflow-os/actions/runs/42985171306)
+`13838594802` matched the Actions ZIP digest, source tree, lockfile, build
+metadata, archive checksums and AArch64 executable format. The binary digest
+`50079287e849413e02732197f05e9d7f385454f6f57f9b65045c59a1ac79cb6a`
+matched before and after transfer to the designated offline VM.
+
+Two local fixture exporters passed; the existing read-only CLI verified each
+export before transfer. On the VM, the reviewed rehearsal verified unresolved,
+lookup-completed and creation-response-completed posture and denied all nine
+invalid cases. The probes left snapshot bytes and file inventory unchanged,
+with no network or child-process syscalls. Temporary protected staging and
+upload files were removed and the firewall digest was unchanged. The private
+stdout transcript SHA-256 is
+`2b9ff95c49930d576471d14a6a0bade1e2b6d852ba4c49340c799bd9f4020d40`.
+
+Guest tar warned on stderr that archive timestamps were about 21 hours in
+its future. That warning is not a measured clock offset or root-cause finding.
+The read-only verifier checks historical proof and does not use the guest
+clock to authorize fresh work. Do not interpret this result as trusted-time
+evidence. Compare host and guest UTC, clock-source and restart posture in a
+separate review before any time-sensitive admission; no clock was changed.
+
+The rehearsal `dg/runtime-composition` run `run-1794384848652280000-2`
+closed with 39 events, one proof-backed approval
+(`approval/run-1794384848652280000-2/composition-approved`), no retries, and
+no escalations. Artifact verification, transfer, execution and cleanup were
+executor work outside preview handlers. No live data, authority, provider
+contact or dispatch was used. Independent operator review is not asserted.
 
 ## Delivery And Tests
 
