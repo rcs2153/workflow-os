@@ -5033,7 +5033,9 @@ mod tests {
         >,
         trial: CoordinatorTrial,
     ) {
-        use super::super::dispatch_reservation_store::InstallationCommentRecoveryPosture;
+        use super::super::dispatch_reservation_store::{
+            InstallationClaimClock, InstallationCommentRecoveryPosture,
+        };
         use std::cell::Cell;
 
         let opens = Cell::new(0);
@@ -5042,44 +5044,36 @@ mod tests {
             None
         };
         let coordinate = |action| {
-            backend.coordinate_scoped_installation_comment(
+            backend.coordinate_installation_comment_using(
                 request(),
                 admission,
                 action,
                 reviewed,
-                unavailable_signer,
+                InstallationClaimClock::SyntheticFixture,
+                |_, _| Ok(unavailable_signer()),
+                |_, _| panic!("unavailable signer cannot dispatch"),
             )
         };
         assert!(
             coordinate(action).is_err(),
             "V15 cannot start a signer claim"
         );
-        backend
-            .enable_installation_signer_admission_store()
-            .expect("V16");
-        if matches!(
-            trial,
-            CoordinatorTrial::Correlated
-                | CoordinatorTrial::CorrelatedFault(_)
-                | CoordinatorTrial::ObservedRecovery { .. }
-                | CoordinatorTrial::ProcessRecovery
-        ) {
-            backend
-                .enable_installation_send_preparation_store()
-                .expect("explicit V17");
-            if matches!(
-                trial,
-                CoordinatorTrial::CorrelatedFault(_) | CoordinatorTrial::ProcessRecovery
-            ) {
-                backend
-                    .enable_installation_observation_journal()
-                    .expect("fresh V18 reservation");
-            }
-        }
+        enable_coordinator_trial_schema(backend, trial);
         let wrong = crate::provider_write::GitHubCommentContinuationAction {
             body: "changed action",
             ..action
         };
+        let denied = backend.coordinate_scoped_installation_comment(
+            request(),
+            admission,
+            action,
+            reviewed,
+            || panic!("unqualified time cannot open the signer"),
+        );
+        assert_eq!(
+            denied.expect_err("production time must fail closed").code(),
+            "live_sandbox_continuation.trusted_time_unqualified"
+        );
         assert!(coordinate(wrong).is_err());
         if let Some(profile) = reviewed.observer_profile {
             let mut substituted = profile.clone();
@@ -5091,12 +5085,14 @@ mod tests {
                     ..reviewed
                 };
             assert!(backend
-                .coordinate_scoped_installation_comment(
+                .coordinate_installation_comment_using(
                     request(),
                     admission,
                     action,
                     changed,
-                    || panic!("changed target observer profile cannot open the signer"),
+                    InstallationClaimClock::SyntheticFixture,
+                    |_, _| panic!("changed target observer profile cannot open the signer"),
+                    |_, _| panic!("changed target observer profile cannot dispatch"),
                 )
                 .is_err());
         }
@@ -5126,6 +5122,32 @@ mod tests {
         assert_eq!(opens.get(), unavailable_calls);
         assert_eq!(coordinate(action).expect("exact replay"), expected);
         assert_eq!(opens.get(), unavailable_calls);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn enable_coordinator_trial_schema(backend: &SqliteStateBackend, trial: CoordinatorTrial) {
+        backend
+            .enable_installation_signer_admission_store()
+            .expect("V16");
+        if matches!(
+            trial,
+            CoordinatorTrial::Correlated
+                | CoordinatorTrial::CorrelatedFault(_)
+                | CoordinatorTrial::ObservedRecovery { .. }
+                | CoordinatorTrial::ProcessRecovery
+        ) {
+            backend
+                .enable_installation_send_preparation_store()
+                .expect("explicit V17");
+            if matches!(
+                trial,
+                CoordinatorTrial::CorrelatedFault(_) | CoordinatorTrial::ProcessRecovery
+            ) {
+                backend
+                    .enable_installation_observation_journal()
+                    .expect("fresh V18 reservation");
+            }
+        }
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -5162,6 +5184,7 @@ mod tests {
             admission,
             action,
             reviewed,
+            super::super::dispatch_reservation_store::InstallationClaimClock::SyntheticFixture,
             |request, claim| {
                 opens.set(opens.get() + 1);
                 if trial == CoordinatorTrial::ProcessRecovery
@@ -5251,6 +5274,7 @@ mod tests {
                         admission,
                         action,
                         reviewed,
+                        super::super::dispatch_reservation_store::InstallationClaimClock::Live,
                         |_, _| panic!("reserved replay must not reopen the signer"),
                         |_, _| panic!("reserved replay must not POST"),
                     )
@@ -5933,6 +5957,7 @@ mod tests {
             admission,
             action,
             reviewed,
+            super::super::dispatch_reservation_store::InstallationClaimClock::SyntheticFixture,
             |request, claim| {
                 opens.set(opens.get() + 1);
                 let listener = bind_socket(&root.join("core-socket/decision"));
@@ -8015,7 +8040,9 @@ mod tests {
                         &fixture_credential,
                     ))
                     .expect("register separate fixture principal");
-                assert!(backend.issue_live_sandbox_grant(facts, &grant).is_err());
+                assert!(backend
+                    .issue_live_sandbox_grant_for_test(facts, &grant)
+                    .is_err());
                 let verifier = LiveSandboxPrincipalVerifier::new(
                     facts.replacement.clone(),
                     harness,
@@ -8026,9 +8053,11 @@ mod tests {
                     .expect("register live principal");
                 assert!(backend.register_live_sandbox_principal(&verifier).is_err());
                 assert!(backend
-                    .issue_live_sandbox_grant(facts, &fixture_only)
+                    .issue_live_sandbox_grant_for_test(facts, &fixture_only)
                     .is_err());
-                assert!(backend.issue_live_sandbox_grant(facts, &grant).is_err());
+                assert!(backend
+                    .issue_live_sandbox_grant_for_test(facts, &grant)
+                    .is_err());
                 let effect =
                     live_test_effect(&fixture, facts, &capability.cursor.event_id, &policy_event);
                 backend
@@ -8044,7 +8073,7 @@ mod tests {
                 }
                 if trial.denies_issuance() {
                     let error = backend
-                        .issue_live_sandbox_grant(facts, &grant)
+                        .issue_live_sandbox_grant_for_test(facts, &grant)
                         .expect_err("issuance denied");
                     let expected = if trial.requires_check() {
                         "live_sandbox_continuation.required_check_unverified"
@@ -8054,12 +8083,21 @@ mod tests {
                     assert_eq!(error.code(), expected);
                     return;
                 }
-                let binding = backend
+                let unqualified = backend
                     .issue_live_sandbox_grant(facts, &grant)
+                    .expect_err("production time must fail closed");
+                assert_eq!(
+                    unqualified.code(),
+                    "live_sandbox_continuation.trusted_time_unqualified"
+                );
+                let binding = backend
+                    .issue_live_sandbox_grant_for_test(facts, &grant)
                     .expect("durable grant");
                 let backend =
                     SqliteStateBackend::open(&fixture.path).expect("reopen durable grant");
-                assert!(backend.issue_live_sandbox_grant(facts, &grant).is_err());
+                assert!(backend
+                    .issue_live_sandbox_grant_for_test(facts, &grant)
+                    .is_err());
                 let request = || {
                     let mut request = checked_reservation_request(&capability);
                     request.invocation_commitment = invocation.clone();
@@ -8536,7 +8574,9 @@ mod tests {
                             .reserve_live_sandbox_dispatch(request(), admission)
                             .is_err());
                         assert!(restarted.reserve_attempt_dispatch(request()).is_err());
-                        assert!(restarted.issue_live_sandbox_grant(facts, &grant).is_err());
+                        assert!(restarted
+                            .issue_live_sandbox_grant_for_test(facts, &grant)
+                            .is_err());
                         assert_eq!(counts(), (0, 0));
                         assert_eq!(event_count(), before);
                         return;

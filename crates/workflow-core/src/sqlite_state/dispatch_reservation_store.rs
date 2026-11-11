@@ -592,8 +592,26 @@ impl DispatchReservationStore for SqliteStateBackend {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) enum InstallationClaimClock {
+    Live,
+    #[cfg(test)]
+    SyntheticFixture,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl InstallationClaimClock {
+    fn observe(self) -> Result<TrustedTimeObservation, WorkflowOsError> {
+        match self {
+            Self::Live => continuity_store::observe_live_authority_time(),
+            #[cfg(test)]
+            Self::SyntheticFixture => continuity_store::observe_continuity_trusted_time(),
+        }
+    }
+}
+
 impl SqliteStateBackend {
-    #[allow(dead_code)] // Private until a reviewed signer caller exists.
+    #[cfg(test)]
     pub(super) fn claim_installation_exchange(
         &self,
         request: &DispatchReservationRequest,
@@ -603,6 +621,7 @@ impl SqliteStateBackend {
         self.claim_installation_exchange_with_fault(request, admission, reviewed, |_| Ok(()))
     }
 
+    #[cfg(test)]
     pub(super) fn claim_installation_exchange_with_fault(
         &self,
         request: &DispatchReservationRequest,
@@ -615,6 +634,7 @@ impl SqliteStateBackend {
             admission,
             reviewed,
             false,
+            continuity_store::observe_continuity_trusted_time,
             commit_boundary,
         )
     }
@@ -625,6 +645,7 @@ impl SqliteStateBackend {
         admission: LiveGrantAdmission<'_>,
         reviewed: ReviewedInstallation<'_>,
         require_signer_schema: bool,
+        observe: impl FnOnce() -> Result<TrustedTimeObservation, WorkflowOsError>,
         mut commit_boundary: impl FnMut(bool) -> Result<(), WorkflowOsError>,
     ) -> Result<InstallationIssuanceDisposition, WorkflowOsError> {
         if request.request_commitment != request_commitment(request)
@@ -664,7 +685,13 @@ impl SqliteStateBackend {
         if require_signer_schema && !installation_signer_schema(schema) {
             return Err(not_dispatchable());
         }
-        let now = verify_current_installation_exchange(&tx, request, admission, reviewed)?;
+        let now = verify_current_installation_exchange_at(
+            &tx,
+            request,
+            admission,
+            reviewed,
+            &observe()?,
+        )?;
         let record = InstallationClaimRecord {
             attempt: request.capability.attempt_id.as_str().to_owned(),
             window: request.capability.window_id.as_str().to_owned(),
@@ -724,6 +751,7 @@ impl SqliteStateBackend {
             admission,
             action,
             reviewed,
+            InstallationClaimClock::Live,
             exchange,
             |request, exchanged| {
                 self.dispatch_scoped_installation_comment(
@@ -734,12 +762,14 @@ impl SqliteStateBackend {
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn coordinate_installation_comment_using(
         &self,
         request: DispatchReservationRequest,
         admission: LiveGrantAdmission<'_>,
         action: GitHubCommentContinuationAction<'_>,
         reviewed: ReviewedInstallation<'_>,
+        clock: InstallationClaimClock,
         exchange: impl FnOnce(
             &DispatchReservationRequest,
             InstallationIssuanceClaim,
@@ -764,6 +794,7 @@ impl SqliteStateBackend {
             admission,
             reviewed,
             true,
+            || clock.observe(),
             |_| Ok(()),
         )? {
             InstallationIssuanceDisposition::Reserved(posture) => return Ok(posture),
@@ -2710,16 +2741,31 @@ fn verify_current_installation_exchange(
     admission: LiveGrantAdmission<'_>,
     reviewed: ReviewedInstallation<'_>,
 ) -> Result<Timestamp, WorkflowOsError> {
+    verify_current_installation_exchange_at(
+        tx,
+        request,
+        admission,
+        reviewed,
+        &continuity_store::observe_continuity_trusted_time()?,
+    )
+}
+
+fn verify_current_installation_exchange_at(
+    tx: &rusqlite::Transaction<'_>,
+    request: &DispatchReservationRequest,
+    admission: LiveGrantAdmission<'_>,
+    reviewed: ReviewedInstallation<'_>,
+    observation: &TrustedTimeObservation,
+) -> Result<Timestamp, WorkflowOsError> {
     check_dispatch_lane(
         tx,
         &request.capability.window_id,
         &request.capability.attempt_id,
         true,
     )?;
-    let observation = continuity_store::observe_continuity_trusted_time()?;
     let now = observation.observed_at();
     let state = continuity_codec::load_snapshot(tx)?;
-    verify_fresh_dispatch_state(tx, &state, request, &observation, true)?;
+    verify_fresh_dispatch_state(tx, &state, request, observation, true)?;
     let window = state
         .windows
         .get(&request.capability.window_id)
