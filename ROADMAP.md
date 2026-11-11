@@ -375,6 +375,11 @@ The [designated offline receiver result](docs/implementation-plans/live-sandbox-
 verified the merged receiver preflight with two synthetic inherited files.
 It passed the successful case and ten denials without accessing the files.
 This proves descriptor metadata at inspection time, not deployed custody.
+The [designated offline recovery result](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#designated-vm-protected-synthetic-recovery-result)
+then bound a protected Core launch to pinned synthetic recovery state. All
+twelve cases passed without mutating state or contacting a provider. Guest
+archive timestamps were reported roughly 21 hours ahead of the guest clock;
+trusted-time posture remains unverified and blocks live admission.
 The operator composition is still test-only; this does not make a deployable
 operator available. The bounded implementation and rejection matrix are specified in the
 [post-rehearsal readiness review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#post-rehearsal-production-readiness-review).
