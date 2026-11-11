@@ -212,8 +212,24 @@ jobs:
       - name: PostgreSQL state conformance
         run: cargo test -p workflow-core --test postgres_state_backend postgresql_backend_proves_shared_state_milestone -- --exact
 
+      - name: PostgreSQL timestamp precision
+        run: cargo test -p workflow-core --lib postgres_state::database_timestamp_tests::postgresql_database_epoch_millis_never_rounds_up -- --exact
+
       - name: Collaborative project boundary
         run: cargo test -p workflow-hosted tests::collaborative_project_boundary -- --exact
+
+      - name: Setup Node.js for hosted result interruption
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Hosted result interruption recovery
+        env:
+          WORKFLOW_OS_RESULT_REHEARSAL_DATABASE_URL: postgres://workflow_os:workflow_os_ci_only@127.0.0.1:5432/workflow_os_result_interruption
+        run: |
+          psql "$WORKFLOW_OS_POSTGRES_RESTORE_ADMIN_URL" -X -v ON_ERROR_STOP=1 -c 'CREATE DATABASE workflow_os_result_interruption'
+          cargo build -p workflow-hosted --bin workflow-os-hosted
+          node scripts/rehearse-hosted-result-interruption.mjs
 
       - name: PostgreSQL backup and restore rehearsal
         run: bash scripts/rehearse-postgresql-state-recovery.sh

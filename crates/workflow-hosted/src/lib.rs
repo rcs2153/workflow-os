@@ -36,19 +36,19 @@ use workflow_core::{
     invoke_hosted_execution_provider, load_project, ActorId, ApprovalDecisionKind,
     ApprovalPresentationRecord, ApprovalPresentationRecordStore, ApprovalReferenceId,
     ApprovalStore, CorrelationId, EventLogStore, HostedAuthorityRegistryRevision,
-    HostedCatalogEntryId, HostedExecutionAttemptPosture, HostedExecutionBudget,
-    HostedExecutionErrorCategory, HostedExecutionId, HostedExecutionInvocationError,
-    HostedExecutionPolicyBinding, HostedExecutionPolicyId, HostedExecutionProvider,
-    HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
-    HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
-    HostedExecutionStatus, HostedNoWriteDispatchInputs, HostedPrincipalBinding,
-    HostedPrincipalRegistry as CoreHostedPrincipalRegistry, HostedProjectCapability,
-    HostedProjectCatalogVersion, HostedProjectResourceBinding, HostedProjectResourceBindingStatus,
-    HostedProjectResourceKind, HostedProjectScope, HostedTerminalReportArtifact,
-    HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
-    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
-    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
-    ImmutableRunBundleVersion, LocalApprovalDecisionRequest,
+    HostedCatalogEntryId, HostedExecutionAttemptPosture, HostedExecutionAttemptStatus,
+    HostedExecutionBudget, HostedExecutionErrorCategory, HostedExecutionId,
+    HostedExecutionInvocationError, HostedExecutionPolicyBinding, HostedExecutionPolicyId,
+    HostedExecutionProvider, HostedExecutionProviderId, HostedExecutionProviderVersion,
+    HostedExecutionReceipt, HostedExecutionReference, HostedExecutionReferenceKind,
+    HostedExecutionRequest, HostedExecutionStatus, HostedNoWriteDispatchInputs,
+    HostedPrincipalBinding, HostedPrincipalRegistry as CoreHostedPrincipalRegistry,
+    HostedProjectCapability, HostedProjectCatalogVersion, HostedProjectResourceBinding,
+    HostedProjectResourceBindingStatus, HostedProjectResourceKind, HostedProjectScope,
+    HostedTerminalReportArtifact, HostedTerminalResultProjection, HostedUnreceiptedOutcome,
+    HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus,
+    IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite, ImmutableRunBundleId,
+    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, LocalApprovalDecisionRequest,
     LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
     LocalCancellationRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
@@ -2638,6 +2638,10 @@ impl HostedWorker {
             self.provider.configuration_hash(),
             claimed.lease(),
         )?;
+        if prepared.value().status() == HostedExecutionAttemptStatus::Invoking {
+            // A reclaimed attempt may already have executed. Never invoke it again.
+            return self.require_reconciliation(claimed, prepared.revision());
+        }
         let invoking = self.backend.mark_hosted_execution_attempt_invoking(
             work_item.work_item_id(),
             prepared.revision(),
@@ -2646,26 +2650,7 @@ impl HostedWorker {
         let Ok(receipt) =
             invoke_hosted_execution_provider(self.provider.as_ref(), work_item.execution_request())
         else {
-            let occurred_at = Timestamp::now_utc();
-            let ambiguous = work_item.transition(HostedWorkItemStatus::Ambiguous, occurred_at)?;
-            let current_run = self.backend.rehydrate_run(work_item.run_id())?;
-            let projection = HostedUnreceiptedResultProjection::new(
-                &current_run,
-                work_item,
-                HostedUnreceiptedOutcome::ReconciliationRequired,
-                self.worker.clone(),
-                occurred_at,
-            )?;
-            self.backend.commit_hosted_unreceipted_projection(
-                PostgresCommitHostedUnreceiptedProjectionRequest {
-                    expected_work_item_revision: claimed.work_item().revision(),
-                    work_item: &ambiguous,
-                    expected_attempt_revision: Some(invoking.revision()),
-                    lease: claimed.lease(),
-                    projection: &projection,
-                },
-            )?;
-            return Ok(HostedWorkerOutcome::ReconciliationRequired);
+            return self.require_reconciliation(claimed, invoking.revision());
         };
         let terminal = work_item.transition(
             hosted_terminal_work_item_status(receipt.status()),
@@ -2694,6 +2679,34 @@ impl HostedWorker {
             },
         )?;
         Ok(HostedWorkerOutcome::Receipt(Box::new(receipt)))
+    }
+
+    fn require_reconciliation(
+        &self,
+        claimed: &PostgresClaimedHostedWorkItem,
+        attempt_revision: workflow_core::DurableRevision,
+    ) -> Result<HostedWorkerOutcome, WorkflowOsError> {
+        let work_item = claimed.work_item().value();
+        let occurred_at = Timestamp::now_utc();
+        let ambiguous = work_item.transition(HostedWorkItemStatus::Ambiguous, occurred_at)?;
+        let current_run = self.backend.rehydrate_run(work_item.run_id())?;
+        let projection = HostedUnreceiptedResultProjection::new(
+            &current_run,
+            work_item,
+            HostedUnreceiptedOutcome::ReconciliationRequired,
+            self.worker.clone(),
+            occurred_at,
+        )?;
+        self.backend.commit_hosted_unreceipted_projection(
+            PostgresCommitHostedUnreceiptedProjectionRequest {
+                expected_work_item_revision: claimed.work_item().revision(),
+                work_item: &ambiguous,
+                expected_attempt_revision: Some(attempt_revision),
+                lease: claimed.lease(),
+                projection: &projection,
+            },
+        )?;
+        Ok(HostedWorkerOutcome::ReconciliationRequired)
     }
 }
 

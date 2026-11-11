@@ -6799,12 +6799,16 @@ fn validate_hosted_receipt_input(
     Ok(())
 }
 
+const DATABASE_EPOCH_MILLIS_EXPRESSION: &str =
+    "floor(extract(epoch FROM sampled_at) * 1000)::bigint";
+
 fn database_timestamp_tx(tx: &mut Transaction<'_>) -> Result<crate::Timestamp, WorkflowOsError> {
+    // Casting numeric directly to bigint rounds and can create a future sample.
+    let query = format!(
+        "SELECT {DATABASE_EPOCH_MILLIS_EXPRESSION} FROM (SELECT clock_timestamp() AS sampled_at) AS clock"
+    );
     let epoch_millis: i64 = tx
-        .query_one(
-            "SELECT (extract(epoch FROM clock_timestamp()) * 1000)::bigint",
-            &[],
-        )
+        .query_one(&query, &[])
         .map_err(|error| database_error("database_time", &error))?
         .get(0);
     let nanos = i128::from(epoch_millis)
@@ -7109,6 +7113,44 @@ CREATE TABLE workflow_os.collaborative_approval_authority_receipts (
     inserted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 ";
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod database_timestamp_tests {
+    use super::*;
+
+    #[test]
+    fn postgresql_database_epoch_millis_never_rounds_up() {
+        let url = std::env::var("WORKFLOW_OS_TEST_POSTGRES_URL").ok();
+        assert!(
+            url.is_some() || std::env::var_os("WORKFLOW_OS_REQUIRE_POSTGRES_TESTS").is_none(),
+            "WORKFLOW_OS_TEST_POSTGRES_URL is required"
+        );
+        let Some(url) = url else { return };
+        let config: Config = url.parse().expect("PostgreSQL URL parses");
+        let mut client = PostgresNoTlsConnectionFactory::new(config)
+            .connect()
+            .expect("precision test connection");
+        let query = format!(
+            "SELECT {DATABASE_EPOCH_MILLIS_EXPRESSION} FROM (SELECT $1::text::timestamptz AS sampled_at) AS clock"
+        );
+        for (sample, expected) in [
+            ("1970-01-01T00:00:00.0006Z", 0_i64),
+            ("1970-01-01T00:00:00.9996Z", 999),
+            ("1969-12-31T23:59:59.9996Z", -1),
+            ("2026-11-10T00:00:00.0006Z", 1_794_268_800_000),
+        ] {
+            let actual: i64 = client
+                .query_one(&query, &[&sample])
+                .expect("sample conversion")
+                .get(0);
+            assert_eq!(actual, expected, "fractional sample must floor");
+        }
+        let mut tx = client.transaction().expect("time transaction");
+        let sampled = database_timestamp_tx(&mut tx).expect("production clock sample");
+        assert!(sampled <= crate::Timestamp::now_utc());
+    }
+}
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]

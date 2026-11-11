@@ -11,7 +11,7 @@ use workflow_core::{
 };
 use workflow_hosted::{
     hosted_router, HostedApiAuth, HostedApiState, HostedAuthTokenDigest, HostedWorker,
-    NoWriteHostedExecutionProvider,
+    HostedWorkerOutcome, NoWriteHostedExecutionProvider,
 };
 
 #[tokio::main]
@@ -51,7 +51,7 @@ async fn run() -> Result<(), WorkflowOsError> {
             Duration::from_secs(30),
         ));
         if mode == ProcessMode::WorkerOnce {
-            print_worker_outcome(run_worker_once(worker).await?);
+            print_worker_outcome(run_worker_once(worker).await?.as_ref());
         } else {
             run_worker_loop(worker).await?;
         }
@@ -119,7 +119,7 @@ fn process_mode() -> ProcessMode {
 async fn run_worker_loop(worker: Arc<HostedWorker>) -> Result<(), WorkflowOsError> {
     let mut shutdown = Box::pin(shutdown_signal());
     loop {
-        print_worker_outcome(run_worker_once(Arc::clone(&worker)).await?);
+        print_worker_outcome(run_worker_once(Arc::clone(&worker)).await?.as_ref());
         tokio::select! {
             () = &mut shutdown => return Ok(()),
             () = tokio::time::sleep(Duration::from_millis(500)) => {}
@@ -127,18 +127,54 @@ async fn run_worker_loop(worker: Arc<HostedWorker>) -> Result<(), WorkflowOsErro
     }
 }
 
-async fn run_worker_once(worker: Arc<HostedWorker>) -> Result<bool, WorkflowOsError> {
+async fn run_worker_once(
+    worker: Arc<HostedWorker>,
+) -> Result<Option<HostedWorkerOutcome>, WorkflowOsError> {
     let outcome = tokio::task::spawn_blocking(move || worker.run_once())
         .await
         .map_err(|_| {
             WorkflowOsError::invalid_state("hosted.worker.task.failed", "hosted worker task failed")
         })??;
-    Ok(outcome.is_some())
+    Ok(outcome)
 }
 
-fn print_worker_outcome(completed: bool) {
-    println!(
-        "worker_outcome: {}",
-        if completed { "completed" } else { "idle" }
-    );
+fn worker_outcome_label(outcome: Option<&HostedWorkerOutcome>) -> &'static str {
+    match outcome {
+        None => "idle",
+        Some(HostedWorkerOutcome::Receipt(receipt)) => match receipt.status() {
+            workflow_core::HostedExecutionStatus::Completed => "completed",
+            workflow_core::HostedExecutionStatus::Failed => "failed",
+            workflow_core::HostedExecutionStatus::Canceled => "canceled",
+            workflow_core::HostedExecutionStatus::Ambiguous => "reconciliation_required",
+        },
+        Some(HostedWorkerOutcome::RejectedBeforeStart) => "rejected_before_start",
+        Some(HostedWorkerOutcome::ReconciliationRequired) => "reconciliation_required",
+        Some(HostedWorkerOutcome::CanceledBeforeStart) => "canceled_before_start",
+    }
+}
+
+fn print_worker_outcome(outcome: Option<&HostedWorkerOutcome>) {
+    println!("worker_outcome: {}", worker_outcome_label(outcome));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_receipt_outcomes_never_claim_completion() {
+        assert_eq!(worker_outcome_label(None), "idle");
+        assert_eq!(
+            worker_outcome_label(Some(&HostedWorkerOutcome::ReconciliationRequired)),
+            "reconciliation_required"
+        );
+        assert_eq!(
+            worker_outcome_label(Some(&HostedWorkerOutcome::RejectedBeforeStart)),
+            "rejected_before_start"
+        );
+        assert_eq!(
+            worker_outcome_label(Some(&HostedWorkerOutcome::CanceledBeforeStart)),
+            "canceled_before_start"
+        );
+    }
 }
