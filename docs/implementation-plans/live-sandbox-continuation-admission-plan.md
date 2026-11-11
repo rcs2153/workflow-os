@@ -2624,6 +2624,57 @@ no escalations. Artifact verification, transfer, execution and cleanup were
 executor work outside preview handlers. No live data, authority, provider
 contact or dispatch was used. Independent operator review is not asserted.
 
+### Intended Host Trusted Time Blocker
+
+Read-only review `run-1794385404273517000-2`, proof-backed approval
+`approval/run-1794385404273517000-2/review-scope-approved`, took three host UTC
+brackets around guest UTC samples on the running offline VM. Across those
+brackets, guest minus host was between `-75858.762` and `-75858.690` seconds
+(rounded outwards). Guest UTC and uptime advanced over the four-second sample
+span. The guest reported `arch_sys_counter`, `Etc/UTC`, active
+`systemd-timesyncd`, and `NTPSynchronized=no`. The host clock was a comparison
+reference, not an independently verified time source. The private observation
+SHA-256 is `4ec7113c22f56e615410467a3df90a28cc94db70204a9bcfaccfd99695310554`.
+No restart, clock adjustment, or configuration change was performed. The
+review closed with 39 events, one approval, and no retries or escalations;
+measurements were executor work outside preview handlers. This is not a
+root-cause diagnosis or restart test.
+
+The [SQLite system clock](../../crates/workflow-core/src/sqlite_state/continuity_store.rs)
+samples local UTC and attaches the expected provenance and epoch. Those
+labels enable continuity checks but do not authenticate an external source,
+establish an error bound, or qualify an unsynchronized guest. A one-time
+clock correction or a short period of monotonic progress is not acceptance.
+Do not change firewall or network isolation to make this VM appear qualified.
+
+Before any live admission, review the exact intended host and source as a
+separate governed phase. A qualified path must:
+
+1. Identify the independently trusted time reference, how its provenance and
+   freshness are verified, and the host, boot or source epoch to which each
+   observation is bound. Record how the source and local observation can fail
+   separately. Keep the current VM offline for no-dispatch tests if it cannot
+   meet this requirement under its existing isolation.
+2. Set and test an explicit uncertainty and observation-age budget derived
+   from the shortest permitted approval, grant, window and observer deadline.
+   The full accepted observation interval must lie inside the permitted window;
+   overlap or unavailable source evidence denies a fresh action. Do not infer
+   freshness from a provider timestamp or a stale last-known value.
+3. Prove no new admission on rollback, suspended or unsynchronized source,
+   stale observation, or unreviewed epoch change. Requalify after restart or
+   restore before granting new authority. Preserve already consumed attempts
+   and unknown effects for read-only reconciliation without a resend.
+4. Use deterministic fault cases plus a separately authorized intended-host
+   rehearsal to distinguish in-process monotonic time from wall time across
+   restart, suspend and restore. Do not retrofit a live source into the
+   historical synthetic verifier. Source qualification closes only the time
+   prerequisite, not deployment, custody, ingress, provider scope, or the
+   separate trial decision and independent review.
+
+This update is scoped to docs run `run-1794386319492771000-2` and proof-backed
+`approval/run-1794386319492771000-2/planning-approved`. It does not authorize
+clock-source integration or live work.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
