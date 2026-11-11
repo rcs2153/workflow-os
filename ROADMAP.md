@@ -383,6 +383,9 @@ the [read-only clock review](docs/implementation-plans/live-sandbox-continuation
 confirmed a 21-hour offset relative to the host and no guest synchronization.
 Trusted time remains an open live-admission gate; the offline VM remains
 valid for tests that do not authorize fresh work from its wall clock.
+The [time qualification review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#trusted-time-pilot-qualification-contract)
+retains that isolation and specifies the evidence needed from a separate
+pilot host and authenticated reference. No host or reference is enrolled.
 The [designated VM framed notification rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#designated-vm-framed-notification-result)
 then used the exact merged worker to attest one synthetic notification and
 recover the fixture effect without resending. This verifies the private
