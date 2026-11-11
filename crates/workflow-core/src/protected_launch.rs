@@ -72,7 +72,34 @@ pub fn inspect_protected_launch_peer(
 ) -> Result<ProtectedLaunchPeerInspection, WorkflowOsError> {
     #[cfg(target_os = "linux")]
     {
-        unix::inspect_peer(manifest, expected)
+        unix::inspect_peer(manifest, expected, false)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (manifest, expected);
+        Err(WorkflowOsError::invalid_state(
+            "protected_launch.platform.unsupported",
+            "protected-launch preflight requires Linux isolation evidence",
+        ))
+    }
+}
+
+/// Verifies peer credentials and the fixed protected Core/signer socket path.
+///
+/// Inspects only the connected standard input descriptor. The trusted launcher
+/// owns endpoint creation and handoff; this check grants no authority.
+///
+/// # Errors
+///
+/// Fails closed if launch, peer identity, endpoint name or permissions cannot
+/// be verified.
+pub fn inspect_protected_launch_endpoint(
+    manifest: &Path,
+    expected: &SpecContentHash,
+) -> Result<ProtectedLaunchPeerInspection, WorkflowOsError> {
+    #[cfg(target_os = "linux")]
+    {
+        unix::inspect_peer(manifest, expected, true)
     }
     #[cfg(not(target_os = "linux"))]
     {

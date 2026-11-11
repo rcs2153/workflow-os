@@ -365,6 +365,10 @@ merged in [PR #903](https://github.com/rcs2153/workflow-os/pull/903). Its
 [designated VM peer check](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#designated-vm-core-signer-peer-result)
 verified reciprocal connection credentials and all denials without payload
 exchange or custody. This is not evidence of a running operator.
+The [named endpoint preflight](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#protected-named-endpoint-preflight)
+checks a sealed filesystem socket separately from peer identity and verifies
+descriptor handoff and retirement in native rehearsal. This is not a service
+deployment or host-wide membership attestation.
 The operator composition is still test-only; this does not make a deployable
 operator available. The bounded implementation and rejection matrix are specified in the
 [post-rehearsal readiness review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#post-rehearsal-production-readiness-review).

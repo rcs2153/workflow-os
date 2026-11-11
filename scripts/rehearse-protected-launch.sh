@@ -18,7 +18,7 @@ for actor in "$uid" "$other_uid" 61023 61025 61026; do
     exit 2
   fi
 done
-if getent group "$gid" >/dev/null || getent group 61023 >/dev/null; then
+if getent group "$gid" >/dev/null || getent group 61023 >/dev/null || getent group 61027 >/dev/null; then
   echo 'Rehearsal groups are already assigned.' >&2
   exit 2
 fi
@@ -189,54 +189,86 @@ install_manifest "$scratch/shared.json"
 [[ $sha == "$shared_sha" ]]
 sudo -n install -o 0 -g 0 -m 0444 "$scratch/valid.json" "$root/v1.json"
 v1_sha=$(sha256sum "$root/v1.json")
-sudo -n /usr/bin/unshare --net -- /usr/bin/python3 - "$root" "$shared_sha" "${v1_sha%% *}" "$strace" <<'PY'
+jq '.identities.core.gid = 61027' "$scratch/shared.json" > "$scratch/named.json"
+sudo -n install -o 0 -g 0 -m 0444 "$scratch/named.json" "$root/named.json"
+named_sha=$(sha256sum "$root/named.json")
+sudo -n /usr/bin/unshare --net -- /usr/bin/python3 - "$root" "$shared_sha" "${v1_sha%% *}" "${named_sha%% *}" "$strace" <<'PY'
+import errno
 import json
+import os
 import select
+import socket
 import subprocess
 import sys
 import uuid
 
-root, digest, v1_digest, strace = sys.argv[1:]
+root, digest, v1_digest, named_digest, strace = sys.argv[1:]
 worker = r"""
+import errno
 import json
 import os
 import socket
 import subprocess
 import sys
 
-root, digest, v1_digest, strace, mode, address, case = sys.argv[1:]
+root, digest, v1_digest, named_digest, strace, mode, address, case = sys.argv[1:]
+named = mode.startswith("named-")
+shared = mode.startswith("named-shared-")
+if named:
+    mode = mode.removeprefix("named-")
+if shared:
+    mode = mode.removeprefix("shared-")
+address = address if named else "\0" + address
 conn = None
+if mode == "access":
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as denied:
+        denied.settimeout(5)
+        try:
+            denied.connect(address)
+        except OSError as error:
+            assert error.errno == errno.EACCES, error
+        else:
+            raise RuntimeError("unexpected endpoint connection")
+    sys.exit(0)
 if mode == "listen":
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
         listener.settimeout(15)
-        listener.bind("\0" + address)
+        listener.bind(address)
         listener.listen(1)
         print("ready", flush=True)
         conn, _ = listener.accept()
-elif mode == "connect":
+elif mode in ("connect", "connect-extra"):
     conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     conn.settimeout(15)
-    conn.connect("\0" + address)
+    conn.connect(address)
 elif mode in ("datagram", "socket-output"):
     kind = socket.SOCK_DGRAM if mode == "datagram" else socket.SOCK_STREAM
     conn, other = socket.socketpair(socket.AF_UNIX, kind)
 elif mode == "unconnected":
     conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 
-manifest = root + ("/v1.json" if mode == "v1" else "/launch.json")
+manifest = root + ("/named.json" if named and not shared else "/v1.json" if mode == "v1" else "/launch.json")
 trace = f"{root}/trace-{os.getuid()}/peer-{case}.trace"
 args = [
     strace, "-qq", "-f", "-s", "160",
     "-e", "trace=%network,read,readv,write,writev,open,openat,openat2,clone,clone3,fork,vfork",
     "-o", trace, root + "/workflow-os", "launch-peer-preflight",
-    "--manifest", manifest, "--sha256", v1_digest if mode == "v1" else digest,
+    "--manifest", manifest, "--sha256", named_digest if named and not shared else v1_digest if mode == "v1" else digest,
 ]
-result = subprocess.run(
-    args,
-    stdin=conn if conn is not None else subprocess.DEVNULL,
-    stdout=conn if mode == "socket-output" else subprocess.PIPE,
-    stderr=subprocess.PIPE, text=True, env={}, timeout=30,
-)
+if named:
+    args.append("--named-endpoint")
+extra = os.open("/dev/null", os.O_RDONLY) if mode == "connect-extra" else None
+try:
+    result = subprocess.run(
+        args,
+        stdin=conn if conn is not None else subprocess.DEVNULL,
+        stdout=conn if mode == "socket-output" else subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, env={}, timeout=30,
+        pass_fds=() if extra is None else (extra,),
+    )
+finally:
+    if extra is not None:
+        os.close(extra)
 if mode == "socket-output":
     conn.close()
     other.settimeout(5)
@@ -250,7 +282,7 @@ def argv(uid, gid, mode, address, case):
     return [
         "/usr/bin/setpriv", f"--reuid={uid}", f"--regid={gid}", "--clear-groups",
         "--no-new-privs", "--inh-caps=-all", "--ambient-caps=-all", "--bounding-set=-all",
-        sys.executable, "-c", worker, root, digest, v1_digest, strace, mode, address, case,
+        sys.executable, "-c", worker, root, digest, v1_digest, named_digest, strace, mode, address, case,
     ]
 
 
@@ -265,9 +297,10 @@ def check(result, label, expected):
         assert code == 0 and not stderr, (label, result)
         evidence = json.loads(stdout)
         local, peer, uid, gid = expected
-        assert evidence["status"] == "peer_verified_no_dispatch", evidence
+        named = label.startswith("endpoint-")
+        assert evidence["status"] == ("endpoint_verified_no_dispatch" if named else "peer_verified_no_dispatch"), evidence
         assert evidence["launch"]["role"] == local, evidence
-        assert evidence["launch"]["manifest_sha256"] == digest, evidence
+        assert evidence["launch"]["manifest_sha256"] == (named_digest if named else digest), evidence
         assert (evidence["peer_role"], evidence["peer_uid"], evidence["peer_gid"]) == (peer, uid, gid), evidence
     print("protected_launch_peer_case:", label, flush=True)
 
@@ -306,14 +339,79 @@ for mode, expected in (
 ):
     result = subprocess.check_output(argv(61021, 61020, mode, "", mode), text=True, env={}, timeout=35)
     check(json.loads(result), mode, expected)
+
+
+def run_endpoint(label, expected_client, expected_server, *, mode=0o620, owner=0, wrong_path=False, extra=False, shared=False):
+    label = "endpoint-" + label
+    directory = root + "/peer"
+    reviewed = directory + "/signer.sock"
+    address = directory + "/other.sock" if wrong_path else reviewed
+    core_gid = 61020 if shared else 61027
+    prefix = "named-shared-" if shared else "named-"
+    subprocess.run(["/usr/bin/install", "-d", "-o", "61022", "-g", "61020", "-m", "0700", directory], check=True)
+    with subprocess.Popen(
+        argv(61022, 61020, prefix + "listen", address, label + "-server"),
+        stdout=subprocess.PIPE, text=True, env={},
+    ) as server:
+        try:
+            assert select.select([server.stdout], [], [], 10)[0], "named listener not ready"
+            assert server.stdout.readline().strip() == "ready"
+            # Seal the directory before enabling access to the socket.
+            os.chown(directory, 0, 0)
+            os.chmod(directory, 0o711)
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as unused:
+                if wrong_path:
+                    unused.bind(reviewed)
+                    os.chown(reviewed, 0, 61027)
+                    os.chmod(reviewed, 0o620)
+                os.chown(address, owner, core_gid)
+                os.chmod(address, mode)
+                if label == "endpoint-matching":
+                    for uid, gid in [(61025, 61020), (61026, 61020), (61023, 61023)]:
+                        subprocess.run(argv(uid, gid, "named-access", address, label), env={}, check=True, timeout=8)
+                    print("protected_launch_peer_case: endpoint-unrelated-access-denied", flush=True)
+                client = subprocess.check_output(
+                    argv(61021, core_gid, prefix + ("connect-extra" if extra else "connect"), address, label + "-client"),
+                    text=True, env={}, timeout=35,
+                )
+                observed, _ = server.communicate(timeout=35)
+                assert server.returncode == 0, observed
+                check(json.loads(client), label + "-client", expected_client)
+                check(json.loads(observed), label + "-server", expected_server)
+                # The path can remain after exit, but no listener remains.
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale:
+                    stale.settimeout(5)
+                    try:
+                        stale.connect(address)
+                    except OSError as error:
+                        assert error.errno == errno.ECONNREFUSED, error
+                    else:
+                        raise RuntimeError("endpoint listener survived the probe")
+        finally:
+            if server.poll() is None:
+                server.kill()
+            subprocess.run(["/usr/bin/rm", "-f", "--", address, reviewed], check=True)
+            subprocess.run(["/usr/bin/rmdir", "--", directory], check=True)
+    print("protected_launch_peer_case:", label + "-retired", flush=True)
+
+
+client_match = ("core", "signer", 61022, 61020)
+server_match = ("signer", "core", 61021, 61027)
+endpoint_denial = "protected_launch.endpoint.unverified"
+run_endpoint("matching", client_match, server_match)
+run_endpoint("wrong-mode", endpoint_denial, endpoint_denial, mode=0o622)
+run_endpoint("wrong-owner", endpoint_denial, endpoint_denial, owner=61021)
+run_endpoint("wrong-path", endpoint_denial, endpoint_denial, wrong_path=True)
+run_endpoint("shared-group", endpoint_denial, endpoint_denial, shared=True)
+run_endpoint("extra-fd", "protected_launch.descriptors.unverified", server_match, extra=True)
 PY
 [[ ! -e "$scratch/.workflow-os" && ! -e "$root/.workflow-os" ]]
-[[ $(sudo -n find "$root" -name 'peer-*.trace' -type f -size +0c | wc -l) -eq 11 ]]
+[[ $(sudo -n find "$root" -name 'peer-*.trace' -type f -size +0c | wc -l) -eq 23 ]]
 sudo -n find "$root" -name 'peer-*.trace' -type f -exec awk '
   {
     sub(/^[0-9]+ +/, "");
     if ($0 ~ /\/custody\// || $0 ~ /^(read|readv|write|writev)\(0,/ ||
-        $0 !~ /^(read|readv|write|writev|open|openat|openat2|getsockopt|getpeername)\(/) {
+        $0 !~ /^(read|readv|write|writev|open|openat|openat2|getsockopt|getpeername|getsockname)\(/) {
       print "Unexpected peer preflight syscall: " $0;
       bad = 1;
     }

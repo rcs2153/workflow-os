@@ -256,12 +256,17 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
 
 fn launch_preflight_command(args: &[String], peer: bool) -> Result<(), WorkflowOsError> {
     let usage_message = if peer {
-        "launch-peer-preflight requires --manifest <absolute-path> --sha256 <digest>"
+        "launch-peer-preflight requires --manifest <absolute-path> --sha256 <digest> [--named-endpoint]"
     } else {
         "launch-preflight requires --manifest <absolute-path> --sha256 <digest>"
     };
-    let [manifest_flag, manifest, digest_flag, digest] = args else {
+    let [manifest_flag, manifest, digest_flag, digest, options @ ..] = args else {
         return Err(usage(usage_message));
+    };
+    let named_endpoint = match options {
+        [] => false,
+        [option] if peer && option == "--named-endpoint" => true,
+        _ => return Err(usage(usage_message)),
     };
     if manifest_flag != "--manifest"
         || digest_flag != "--sha256"
@@ -271,7 +276,11 @@ fn launch_preflight_command(args: &[String], peer: bool) -> Result<(), WorkflowO
     }
     let expected = SpecContentHash::new(digest.as_str())?;
     let path = Path::new(manifest);
-    let json = if peer {
+    let json = if named_endpoint {
+        serde_json::to_string(
+            &workflow_core::protected_launch::inspect_protected_launch_endpoint(path, &expected)?,
+        )
+    } else if peer {
         serde_json::to_string(
             &workflow_core::protected_launch::inspect_protected_launch_peer(path, &expected)?,
         )
@@ -13617,7 +13626,7 @@ fn print_help() {
     println!("  provider github-pr-comment recovery-summary --summary <path>");
     println!("  provider github-pr-comment continue-sandbox --request <path>");
     println!("  launch-preflight --manifest <absolute-path> --sha256 <digest>  verify Linux launch without dispatch");
-    println!("  launch-peer-preflight --manifest <absolute-path> --sha256 <digest>  verify the connected Core/signer peer on stdin");
+    println!("  launch-peer-preflight --manifest <absolute-path> --sha256 <digest> [--named-endpoint]  verify the connected Core/signer peer on stdin");
     println!("  provider github-pr-comment inspect-synthetic-recovery --run-id <id> --operation-id <id> --side-effect-id <id>");
     fixture_authority_cli::print_help();
     println!(
