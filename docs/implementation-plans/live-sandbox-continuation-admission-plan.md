@@ -2186,6 +2186,22 @@ Successful and denied Linux process traces, plus the existing Linux and macOS
 role rehearsals, must pass on the exact PR head before merge. The approved
 review `run-1794360772798636000-2` preserves the separate intended-host gate.
 
+The initial exact-head Linux CI run `42940073951` passed Rust Clippy and
+ordinary tests, but the signer notification receiver/Core missed their
+socket deadlines. The public preflight step was skipped; macOS isolation and
+the other eight jobs passed. The extracted verifier had replaced the original
+accelerated streaming digest with slower debug-mode hashing. The correction
+restores the original `ring` SHA-256 implementation on the same opened,
+bounded descriptor, without changing any deadline or isolation check. A
+digest equivalence regression checks exact content hashing. The corrected
+head still needs both native Linux rehearsals to pass; the initial result is
+not evidence of public preflight success. Blocker phase
+`run-1794361853841034000-2` received a proof-backed scoped approval for this
+correction only.
+Local digest equivalence, shared descriptor regression, warnings-denied
+Core/CLI Clippy, formatting, docs and whitespace checks passed after the
+correction. Native positive and syscall evidence remain pending.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

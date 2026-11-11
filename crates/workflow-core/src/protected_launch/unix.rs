@@ -1,9 +1,8 @@
+use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Read};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path};
-
-use sha2::{Digest, Sha256};
 
 use crate::{SpecContentHash, WorkflowOsError};
 
@@ -185,7 +184,7 @@ pub(crate) fn executable_digest(file: File) -> Result<SpecContentHash, WorkflowO
         return Err(size_invalid());
     }
     let mut input = file.take(MAX_EXECUTABLE_BYTES + 1);
-    let mut hasher = Sha256::new();
+    let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
     let mut buffer = [0; 8192];
     loop {
         let count = input.read(&mut buffer).map_err(|_| unprotected())?;
@@ -197,7 +196,32 @@ pub(crate) fn executable_digest(file: File) -> Result<SpecContentHash, WorkflowO
     if input.limit() == 0 {
         return Err(size_invalid());
     }
-    SpecContentHash::new(format!("{:x}", hasher.finalize()))
+    let digest = hasher.finish();
+    let mut hex = String::with_capacity(64);
+    for byte in digest.as_ref() {
+        write!(&mut hex, "{byte:02x}").map_err(|_| {
+            WorkflowOsError::new(
+                crate::WorkflowOsErrorKind::Internal,
+                "protected_launch.digest.encoding",
+                "cannot encode executable digest",
+            )
+        })?;
+    }
+    SpecContentHash::new(hex)
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_executable_digest_matches_spec_content_hash() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/protected_launch/unix.rs");
+        let file = File::open(path).expect("digest fixture");
+        let expected = SpecContentHash::from_bytes(fs::read(path).expect("fixture bytes"));
+        assert_eq!(executable_digest(file).expect("streaming digest"), expected);
+    }
 }
 
 #[cfg(target_os = "linux")]
