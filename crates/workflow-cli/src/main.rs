@@ -131,11 +131,11 @@ fn main() {
         }
     }
     #[cfg(target_os = "linux")]
-    if env::args_os()
-        .nth(1)
-        .is_some_and(|arg| arg == "launch-preflight")
-        && env::args_os().any(|arg| arg == "--receiver-descriptors")
-    {
+    if env::args_os().nth(1).is_some_and(|arg| {
+        arg == "launch-recovery-preflight"
+            || (arg == "launch-preflight"
+                && env::args_os().any(|option| option == "--receiver-descriptors"))
+    }) {
         use std::os::unix::fs::FileTypeExt as _;
 
         // Keep all output off inherited regular files and connections.
@@ -167,6 +167,7 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
     match args.first().map(String::as_str) {
         Some("launch-preflight") => return launch_preflight_command(&args[1..], false),
         Some("launch-peer-preflight") => return launch_preflight_command(&args[1..], true),
+        Some("launch-recovery-preflight") => return launch_recovery_preflight_command(&args[1..]),
         _ => {}
     }
     let invocation = Invocation::parse(args)?;
@@ -315,6 +316,35 @@ fn launch_preflight_command(args: &[String], peer: bool) -> Result<(), WorkflowO
         )?)
     }
     .map_err(|_| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::Internal,
+            "protected_launch.output.invalid",
+            "cannot serialize launch inspection",
+        )
+    })?;
+    println!("{json}");
+    Ok(())
+}
+
+fn launch_recovery_preflight_command(args: &[String]) -> Result<(), WorkflowOsError> {
+    let usage_message = "launch-recovery-preflight requires --manifest <absolute-path> --sha256 <digest> --recovery-sha256 <digest>";
+    let [manifest_flag, manifest, digest_flag, digest, recovery_flag, recovery_digest] = args
+    else {
+        return Err(usage(usage_message));
+    };
+    if manifest_flag != "--manifest"
+        || digest_flag != "--sha256"
+        || recovery_flag != "--recovery-sha256"
+        || !Path::new(manifest).is_absolute()
+    {
+        return Err(usage(usage_message));
+    }
+    let result = workflow_core::protected_launch::inspect_protected_synthetic_recovery(
+        Path::new(manifest),
+        &SpecContentHash::new(digest.as_str())?,
+        &SpecContentHash::new(recovery_digest.as_str())?,
+    )?;
+    let json = serde_json::to_string(&result).map_err(|_| {
         WorkflowOsError::new(
             WorkflowOsErrorKind::Internal,
             "protected_launch.output.invalid",
@@ -13652,6 +13682,7 @@ fn print_help() {
     println!("  provider github-pr-comment continue-sandbox --request <path>");
     println!("  launch-preflight --manifest <absolute-path> --sha256 <digest> [--receiver-descriptors]  verify Linux launch without dispatch");
     println!("  launch-peer-preflight --manifest <absolute-path> --sha256 <digest> [--named-endpoint]  verify the connected Core/signer peer on stdin");
+    println!("  launch-recovery-preflight --manifest <absolute-path> --sha256 <digest> --recovery-sha256 <digest>  verify pinned synthetic recovery without dispatch");
     println!("  provider github-pr-comment inspect-synthetic-recovery --run-id <id> --operation-id <id> --side-effect-id <id>");
     fixture_authority_cli::print_help();
     println!(

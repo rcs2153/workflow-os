@@ -232,4 +232,6 @@ mod tests {
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub(super) use linux::{inspect, inspect_peer, inspect_receiver_descriptors};
+pub(super) use linux::{
+    inspect, inspect_peer, inspect_receiver_descriptors, inspect_synthetic_recovery,
+};

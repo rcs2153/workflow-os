@@ -58,6 +58,14 @@ fn launch_preflight_rejects_extra_options_and_does_not_initialize_state() {
     assert!(String::from_utf8_lossy(&receiver.stderr).contains("error[protected_launch."));
     let receiver_as_peer = invoke("launch-peer-preflight", &["--receiver-descriptors"]);
     assert_eq!(receiver_as_peer.status.code(), Some(2));
+    let recovery_without_digest = invoke("launch-recovery-preflight", &[]);
+    assert_eq!(recovery_without_digest.status.code(), Some(2));
+    let recovery = invoke("launch-recovery-preflight", &["--recovery-sha256", &digest]);
+    assert_eq!(recovery.status.code(), Some(3));
+    assert_eq!(recovery.stdout, [] as [u8; 0]);
+    let error = String::from_utf8_lossy(&recovery.stderr);
+    assert!(error.contains("error[protected_launch."));
+    assert!(!error.contains("not-a-manifest.json"));
     assert!(!project.path().join("unexpected-state").exists());
     assert!(!project.path().join(".workflow-os").exists());
 }

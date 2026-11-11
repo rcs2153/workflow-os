@@ -13,9 +13,10 @@ use super::{
     unprotected,
 };
 use crate::protected_launch::{
-    ProtectedLaunchInspection, ProtectedLaunchPeerInspection, ProtectedReceiverDescriptorInspection,
+    ProtectedLaunchInspection, ProtectedLaunchPeerInspection,
+    ProtectedReceiverDescriptorInspection, ProtectedSyntheticRecoveryInspection,
 };
-use crate::{SpecContentHash, WorkflowOsError};
+use crate::{SideEffectId, SpecContentHash, SqliteStateBackend, WorkflowOsError, WorkflowRunId};
 
 #[derive(Deserialize)]
 #[serde(tag = "version", deny_unknown_fields)]
@@ -154,6 +155,112 @@ pub(in crate::protected_launch) fn inspect(
     expected: &SpecContentHash,
 ) -> Result<ProtectedLaunchInspection, WorkflowOsError> {
     verify_launch(manifest, expected, only_standard_descriptors).map(|(launch, _, _)| launch)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveryManifest {
+    version: String,
+    launch_sha256: SpecContentHash,
+    snapshot_sha256: SpecContentHash,
+    run_id: String,
+    operation_id: String,
+    side_effect_id: String,
+}
+
+pub(in crate::protected_launch) fn inspect_synthetic_recovery(
+    manifest: &Path,
+    expected: &SpecContentHash,
+    recovery_expected: &SpecContentHash,
+) -> Result<ProtectedSyntheticRecoveryInspection, WorkflowOsError> {
+    let (launch, role, config) = verify_launch(manifest, expected, only_standard_descriptors)?;
+    if !matches!((role, config), (Role::Core, Manifest::Shared { .. })) {
+        return Err(denied(
+            "protected_launch.recovery.role_unsupported",
+            "synthetic recovery inspection requires a verified shared Core launch",
+        ));
+    }
+    let directory = manifest.parent().ok_or_else(unprotected)?;
+    let invalid = || {
+        denied(
+            "protected_launch.recovery.manifest_unverified",
+            "recovery manifest does not match the reviewed launch or recovery inputs",
+        )
+    };
+    let bytes = bounded_bytes(
+        protected_file(&directory.join("recovery.json"), 0o444, false)?,
+        4096,
+    )?;
+    if SpecContentHash::from_bytes(&bytes) != *recovery_expected {
+        return Err(invalid());
+    }
+    let recovery: RecoveryManifest = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+    if recovery.version != "workflow-os/protected-synthetic-recovery/v1"
+        || recovery.launch_sha256 != *expected
+    {
+        return Err(invalid());
+    }
+    let run = WorkflowRunId::new(&recovery.run_id).map_err(|_| invalid())?;
+    let side_effect = SideEffectId::new(&recovery.side_effect_id).map_err(|_| invalid())?;
+    let database = directory.join("recovery.sqlite3");
+    verify_recovery_snapshot(directory, &database, &recovery.snapshot_sha256)?;
+    let inspection = SqliteStateBackend::open_read_only(&database)
+        .and_then(|backend| {
+            backend.inspect_synthetic_sandbox_recovery_proof(
+                &run,
+                &recovery.operation_id,
+                &side_effect,
+            )
+        })
+        .map_err(|_| {
+            denied(
+                "protected_launch.recovery.proof_unverified",
+                "synthetic recovery proof is missing, unsupported, or does not match",
+            )
+        })?;
+    verify_recovery_snapshot(directory, &database, &recovery.snapshot_sha256)?;
+    Ok(ProtectedSyntheticRecoveryInspection {
+        status: "synthetic_recovery_verified_no_dispatch",
+        launch,
+        recovery_manifest_sha256: recovery_expected.clone(),
+        snapshot_sha256: recovery.snapshot_sha256,
+        execution_posture: inspection.posture(),
+        completion_proof_source: inspection.completion_proof_source(),
+        dispatch_authorized: false,
+        provider_called: false,
+    })
+}
+
+fn verify_recovery_snapshot(
+    directory: &Path,
+    database: &Path,
+    expected: &SpecContentHash,
+) -> Result<(), WorkflowOsError> {
+    let invalid = || {
+        denied(
+            "protected_launch.recovery.snapshot_unverified",
+            "the protected offline snapshot does not match or requires SQLite sidecar state",
+        )
+    };
+    for sidecar in [
+        "recovery.sqlite3-wal",
+        "recovery.sqlite3-shm",
+        "recovery.sqlite3-journal",
+    ] {
+        if !fs::symlink_metadata(directory.join(sidecar))
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        {
+            return Err(invalid());
+        }
+    }
+    let bytes = bounded_bytes(protected_file(database, 0o444, false)?, 16 * 1024 * 1024)?;
+    if !bytes.starts_with(b"SQLite format 3\0")
+        || bytes.get(18..20) != Some(&[1, 1])
+        || SpecContentHash::from_bytes(&bytes) != *expected
+    {
+        return Err(invalid());
+    }
+    Ok(())
 }
 
 const RECEIVER_DESCRIPTORS: [u32; 2] = [3, 4];

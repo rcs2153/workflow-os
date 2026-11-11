@@ -38,7 +38,9 @@ jobs:
           test -x target/debug/workflow-os
 
       - name: Verify synthetic recovery bridge with the real CLI
-        run: npm run test:synthetic-recovery-bridge
+        run: |
+          if ! command -v strace >/dev/null; then sudo apt-get install -y strace; fi
+          npm run test:synthetic-recovery-bridge -- --protected-linux
 
   rust:
     name: Rust
