@@ -340,8 +340,11 @@ worker and launcher. The designated human reviewer accepted the synthetic
 result only; that decision is not live access or dispatch approval.
 The production, non-dispatch protected-launch preflight shares checks with
 the rehearsal and merged in [PR #897](https://github.com/rcs2153/workflow-os/pull/897)
-at `a769339a` after all ten exact-head checks passed. Prepare the separately
-bound ARM64 CLI artifact before a governed intended-host trial.
+at `a769339a` after all ten exact-head checks passed. The separately built
+exact-main ARM64 CLI from [PR #898](https://github.com/rcs2153/workflow-os/pull/898)
+passed offline verification and the [designated VM no-dispatch check](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#intended-host-production-launch-result).
+One isolated Core launch verified and five invalid launches failed closed;
+no live effect, state, or provider access was authorized.
 The operator composition is still test-only; this does not make a deployable
 operator available. The bounded implementation and rejection matrix are specified in the
 [post-rehearsal readiness review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#post-rehearsal-production-readiness-review).
