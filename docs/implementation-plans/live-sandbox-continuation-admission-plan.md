@@ -2212,6 +2212,15 @@ rehearsal earlier without removing any merge check. This does not claim that
 the public verifier has passed. Governed blocker `run-1794363116148792000-2`
 approved this diagnostics-only change.
 
+Run `42944688840` reached the positive case and passed syscall inspection,
+but the verifier denied unprotected fixture metadata. The follow-up stages
+under a unique directory directly beneath the disposable runner root, checks
+the root and fixture owner/modes and exact file link counts before launch, and
+logs the previous `/opt` metadata for diagnosis. The production verifier,
+denial matrix and deadlines are unchanged. Governed blocker
+`run-1794363566953618000-2` authorizes only this fixture correction; the
+positive Linux result is still pending exact-head CI.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

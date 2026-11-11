@@ -16,13 +16,19 @@ if getent passwd "$uid" >/dev/null || getent passwd "$other_uid" >/dev/null || g
   echo 'Rehearsal identities are already assigned.' >&2
   exit 2
 fi
-root=$(sudo -n mktemp -d /opt/workflow-os-launch-preflight.XXXXXXXX)
 scratch=$(mktemp -d)
+root=
 cleanup() {
-  sudo -n rm -rf -- "$root"
+  if [[ -n $root ]]; then sudo -n rm -rf -- "$root"; fi
   rm -rf -- "$scratch"
 }
 trap cleanup EXIT
+read -r root_owner root_mode < <(stat -c '%u:%g %a' /)
+[[ $root_owner == 0:0 && $root_mode =~ ^[0-7]{3,4}$ ]]
+(( (8#$root_mode & 07022) == 0 ))
+if [[ -e /opt ]]; then stat -c 'ambient_opt_owner=%u:%g mode=%a' /opt; fi
+root=$(sudo -n mktemp -d /workflow-os-launch-preflight.XXXXXXXX)
+sudo -n chown 0:0 "$root"
 sudo -n chmod 0755 "$root"
 sudo -n install -d -o "$uid" -g "$gid" -m 0700 "$root/trace-$uid"
 sudo -n install -d -o "$other_uid" -g "$gid" -m 0700 "$root/trace-$other_uid"
@@ -44,6 +50,10 @@ install_manifest() {
   sha=${sha%% *}
 }
 install_manifest "$scratch/valid.json"
+stat -c 'protected_fixture_input: %F owner=%u:%g mode=%a links=%h' / "$root" "$manifest" "$root/workflow-os"
+[[ $(stat -c '%F:%u:%g:%a' "$root") == directory:0:0:755 ]]
+[[ $(stat -c '%F:%u:%g:%a:%h' "$manifest") == 'regular file:0:0:444:1' ]]
+[[ $(stat -c '%F:%u:%g:%a:%h' "$root/workflow-os") == 'regular file:0:0:555:1' ]]
 cd "$scratch"
 
 run_case() {
