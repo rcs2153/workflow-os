@@ -2249,6 +2249,50 @@ contact a provider, mint a grant, dispatch, or change live admission.
 Implementation run `run-1794364595902626000-2` proof-approved this build scope;
 native ARM64 CI and artifact verification remain delivery requirements.
 
+### Intended-Host Production Launch Result
+
+[PR #898](https://github.com/rcs2153/workflow-os/pull/898) merged at
+`bc96b962012e2a7b5e223b1d04ef000aa012cd1e`, tree
+`3987ba1e17fdb463d11be1f754e6471f90b96e04`. The
+[exact-main native run](https://github.com/rcs2153/workflow-os/actions/runs/42949475400)
+passed build, launch and syscall rehearsal. Artifact `13823659837` had ZIP
+SHA-256 `c2a80c7125db00eb1022ec03c09d4883a6833a6aafa5d3063f102d54ff881809`.
+Offline review `run-1794365908771346000-2` verified the Actions digest, exact
+archive inventory, both checksum layers, build identity, lockfile and ELF
+architecture. It did not execute or transfer the binary.
+
+The separate governed VM phase used existing local management SSH to transfer
+only the verified executable to `lima-wos-pf`. Its executable SHA-256,
+`77e557d550f31ac72210727d97a10da0fcdae89a850c8dde1617b97b737244dd`,
+matched on the Mac, guest upload and protected staging path. The temporary
+root-owned manifest SHA-256 was
+`baf9141e1896c0f55be8308e71f52d289a3aa47377786e3cbca1b4b7f9f64bac`.
+The single-link manifest and executable were root-owned modes `0444` and
+`0555`, with protected ancestors.
+
+Core UID `61021`, GID `61020`, returned `verified_no_dispatch` with exit 0
+under isolated launch. Manifest digest drift, a same-byte different executable
+inode, the wrong UID, a root caller and an inherited descriptor each returned
+the expected diagnostic and exit 3. The syscall filter observed no network
+calls, child creation or custody opens in the traced launches. No Workflow OS
+runtime state was created. Both staging directories and an empty upload
+directory from an initial wrapper attempt were removed; no Workflow OS
+process remained. The active stateless firewall digest was unchanged:
+`baa6ee62d4224545ab4247b9bdb42cc49bfa021d2d6942f2d28c1f0358b3d78a`.
+
+Governed run `run-1794366158978371000-2` closed with 39 events, one
+proof-backed approval
+`approval/run-1794366158978371000-2/composition-approved`, zero retries and
+zero escalations. Transfer, guest staging, probes and cleanup were operator
+work outside the kernel. The retained operator probe log has SHA-256
+`1e78d116470f86954b744d044d85961f605126c363c53641dfd037e6025e866a`;
+it is not a WorkReport or independent attestation.
+
+This establishes the bounded production launch check only. Other role
+identities were configuration, not deployed processes. Deployment, custody,
+ingress, trusted time and provider scope remain unverified. No provisioning,
+provider request, grant or dispatch occurred. Live admission remains denied.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
