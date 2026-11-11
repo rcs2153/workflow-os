@@ -23,28 +23,30 @@ fn launch_preflight_rejects_extra_options_and_does_not_initialize_state() {
     let project = TestProject::new("launch-preflight");
     let manifest = project.path().join("not-a-manifest.json");
     let digest = "0".repeat(64);
-    let invoke = |extra: &[&str]| {
+    let invoke = |command, extra: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_workflow-os"))
             .current_dir(project.path())
-            .args(["launch-preflight", "--manifest"])
+            .args([command, "--manifest"])
             .arg(&manifest)
             .args(["--sha256", &digest])
             .args(extra)
             .output()
             .expect("invoke local preflight")
     };
-    let extra = invoke(&["--state-dir", "unexpected-state"]);
-    assert_eq!(extra.status.code(), Some(2));
-    assert_eq!(extra.stdout, [] as [u8; 0]);
-    assert!(String::from_utf8_lossy(&extra.stderr).contains("error[cli.usage]"));
-    let denied = invoke(&[]);
-    assert_eq!(denied.status.code(), Some(3));
-    assert_eq!(denied.stdout, [] as [u8; 0]);
-    let error = String::from_utf8_lossy(&denied.stderr);
-    assert!(error.contains("error[protected_launch."));
-    assert!(!error.contains("not-a-manifest.json"));
-    #[cfg(not(target_os = "linux"))]
-    assert!(error.contains("protected_launch.platform.unsupported"));
+    for command in ["launch-preflight", "launch-peer-preflight"] {
+        let extra = invoke(command, &["--state-dir", "unexpected-state"]);
+        assert_eq!(extra.status.code(), Some(2));
+        assert_eq!(extra.stdout, [] as [u8; 0]);
+        assert!(String::from_utf8_lossy(&extra.stderr).contains("error[cli.usage]"));
+        let denied = invoke(command, &[]);
+        assert_eq!(denied.status.code(), Some(3));
+        assert_eq!(denied.stdout, [] as [u8; 0]);
+        let error = String::from_utf8_lossy(&denied.stderr);
+        assert!(error.contains("error[protected_launch."));
+        assert!(!error.contains("not-a-manifest.json"));
+        #[cfg(not(target_os = "linux"))]
+        assert!(error.contains("protected_launch.platform.unsupported"));
+    }
     assert!(!project.path().join("unexpected-state").exists());
     assert!(!project.path().join(".workflow-os").exists());
 }

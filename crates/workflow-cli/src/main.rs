@@ -116,6 +116,20 @@ const AGENT_HARNESS_BEGIN: &str = "<!-- BEGIN WORKFLOW OS AGENT HARNESS -->";
 const AGENT_HARNESS_END: &str = "<!-- END WORKFLOW OS AGENT HARNESS -->";
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    if env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == "launch-peer-preflight")
+    {
+        use std::os::unix::fs::FileTypeExt as _;
+
+        // Do not echo evidence or diagnostics into the inspected connection.
+        if ["/proc/self/fd/1", "/proc/self/fd/2"].iter().any(|path| {
+            !std::fs::metadata(path).is_ok_and(|metadata| !metadata.file_type().is_socket())
+        }) {
+            std::process::exit(EXIT_RUNTIME);
+        }
+    }
     let args = env::args().skip(1).collect::<Vec<_>>();
     let exit = match run(&args) {
         Ok(()) => EXIT_OK,
@@ -132,11 +146,10 @@ fn main() {
 
 #[allow(clippy::too_many_lines)] // Exhaustive top-level command routing.
 fn run(args: &[String]) -> Result<(), WorkflowOsError> {
-    if args
-        .first()
-        .is_some_and(|command| command == "launch-preflight")
-    {
-        return launch_preflight_command(&args[1..]);
+    match args.first().map(String::as_str) {
+        Some("launch-preflight") => return launch_preflight_command(&args[1..], false),
+        Some("launch-peer-preflight") => return launch_preflight_command(&args[1..], true),
+        _ => {}
     }
     let invocation = Invocation::parse(args)?;
     match &invocation.command {
@@ -241,24 +254,33 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
     }
 }
 
-fn launch_preflight_command(args: &[String]) -> Result<(), WorkflowOsError> {
+fn launch_preflight_command(args: &[String], peer: bool) -> Result<(), WorkflowOsError> {
+    let usage_message = if peer {
+        "launch-peer-preflight requires --manifest <absolute-path> --sha256 <digest>"
+    } else {
+        "launch-preflight requires --manifest <absolute-path> --sha256 <digest>"
+    };
     let [manifest_flag, manifest, digest_flag, digest] = args else {
-        return Err(usage(
-            "launch-preflight requires --manifest <absolute-path> --sha256 <digest>",
-        ));
+        return Err(usage(usage_message));
     };
     if manifest_flag != "--manifest"
         || digest_flag != "--sha256"
         || !Path::new(manifest).is_absolute()
     {
-        return Err(usage(
-            "launch-preflight requires --manifest <absolute-path> --sha256 <digest>",
-        ));
+        return Err(usage(usage_message));
     }
     let expected = SpecContentHash::new(digest.as_str())?;
-    let result =
-        workflow_core::protected_launch::inspect_protected_launch(Path::new(manifest), &expected)?;
-    let json = serde_json::to_string(&result).map_err(|_| {
+    let path = Path::new(manifest);
+    let json = if peer {
+        serde_json::to_string(
+            &workflow_core::protected_launch::inspect_protected_launch_peer(path, &expected)?,
+        )
+    } else {
+        serde_json::to_string(&workflow_core::protected_launch::inspect_protected_launch(
+            path, &expected,
+        )?)
+    }
+    .map_err(|_| {
         WorkflowOsError::new(
             WorkflowOsErrorKind::Internal,
             "protected_launch.output.invalid",
@@ -13595,6 +13617,7 @@ fn print_help() {
     println!("  provider github-pr-comment recovery-summary --summary <path>");
     println!("  provider github-pr-comment continue-sandbox --request <path>");
     println!("  launch-preflight --manifest <absolute-path> --sha256 <digest>  verify Linux launch without dispatch");
+    println!("  launch-peer-preflight --manifest <absolute-path> --sha256 <digest>  verify the connected Core/signer peer on stdin");
     println!("  provider github-pr-comment inspect-synthetic-recovery --run-id <id> --operation-id <id> --side-effect-id <id>");
     fixture_authority_cli::print_help();
     println!(

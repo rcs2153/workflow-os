@@ -184,3 +184,140 @@ run_case protected_launch.manifest.invalid "$uid" "$manifest" "$sha"
 jq '.version = "workflow-os/protected-launch/v3"' "$scratch/shared.json" > "$scratch/changed.json"
 install_manifest "$scratch/changed.json"
 run_case protected_launch.manifest.invalid "$uid" "$manifest" "$sha"
+
+install_manifest "$scratch/shared.json"
+[[ $sha == "$shared_sha" ]]
+sudo -n install -o 0 -g 0 -m 0444 "$scratch/valid.json" "$root/v1.json"
+v1_sha=$(sha256sum "$root/v1.json")
+sudo -n /usr/bin/unshare --net -- /usr/bin/python3 - "$root" "$shared_sha" "${v1_sha%% *}" "$strace" <<'PY'
+import json
+import select
+import subprocess
+import sys
+import uuid
+
+root, digest, v1_digest, strace = sys.argv[1:]
+worker = r"""
+import json
+import os
+import socket
+import subprocess
+import sys
+
+root, digest, v1_digest, strace, mode, address, case = sys.argv[1:]
+conn = None
+if mode == "listen":
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.settimeout(15)
+        listener.bind("\0" + address)
+        listener.listen(1)
+        print("ready", flush=True)
+        conn, _ = listener.accept()
+elif mode == "connect":
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.settimeout(15)
+    conn.connect("\0" + address)
+elif mode in ("datagram", "socket-output"):
+    kind = socket.SOCK_DGRAM if mode == "datagram" else socket.SOCK_STREAM
+    conn, other = socket.socketpair(socket.AF_UNIX, kind)
+elif mode == "unconnected":
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+
+manifest = root + ("/v1.json" if mode == "v1" else "/launch.json")
+trace = f"{root}/trace-{os.getuid()}/peer-{case}.trace"
+args = [
+    strace, "-qq", "-f", "-s", "160",
+    "-e", "trace=%network,read,readv,write,writev,open,openat,openat2,clone,clone3,fork,vfork",
+    "-o", trace, root + "/workflow-os", "launch-peer-preflight",
+    "--manifest", manifest, "--sha256", v1_digest if mode == "v1" else digest,
+]
+result = subprocess.run(
+    args,
+    stdin=conn if conn is not None else subprocess.DEVNULL,
+    stdout=conn if mode == "socket-output" else subprocess.PIPE,
+    stderr=subprocess.PIPE, text=True, env={}, timeout=30,
+)
+if mode == "socket-output":
+    conn.close()
+    other.settimeout(5)
+    if other.recv(1):
+        raise RuntimeError("peer preflight emitted bytes to its socket")
+print(json.dumps([result.returncode, result.stdout or "", result.stderr]))
+"""
+
+
+def argv(uid, gid, mode, address, case):
+    return [
+        "/usr/bin/setpriv", f"--reuid={uid}", f"--regid={gid}", "--clear-groups",
+        "--no-new-privs", "--inh-caps=-all", "--ambient-caps=-all", "--bounding-set=-all",
+        sys.executable, "-c", worker, root, digest, v1_digest, strace, mode, address, case,
+    ]
+
+
+def check(result, label, expected):
+    if isinstance(expected, str):
+        code, stdout, stderr = result
+        assert code == 3 and not stdout and f"error[{expected}]:" in stderr, (label, result)
+    elif expected is None:
+        assert result == [3, "", ""], (label, result)
+    else:
+        code, stdout, stderr = result
+        assert code == 0 and not stderr, (label, result)
+        evidence = json.loads(stdout)
+        local, peer, uid, gid = expected
+        assert evidence["status"] == "peer_verified_no_dispatch", evidence
+        assert evidence["launch"]["role"] == local, evidence
+        assert evidence["launch"]["manifest_sha256"] == digest, evidence
+        assert (evidence["peer_role"], evidence["peer_uid"], evidence["peer_gid"]) == (peer, uid, gid), evidence
+    print("protected_launch_peer_case:", label, flush=True)
+
+
+def run_pair(label, server_uid, server_gid, expected_client, expected_server):
+    address = "workflow-os-peer-" + uuid.uuid4().hex
+    with subprocess.Popen(
+        argv(server_uid, server_gid, "listen", address, label + "-server"),
+        stdout=subprocess.PIPE, text=True, env={},
+    ) as server:
+        try:
+            assert select.select([server.stdout], [], [], 10)[0], "peer listener not ready"
+            assert server.stdout.readline().strip() == "ready"
+            client = subprocess.check_output(
+                argv(61021, 61020, "connect", address, label + "-client"),
+                text=True, env={}, timeout=35,
+            )
+            observed, _ = server.communicate(timeout=35)
+            assert server.returncode == 0, observed
+            check(json.loads(client), label + "-client", expected_client)
+            check(json.loads(observed), label + "-server", expected_server)
+        finally:
+            if server.poll() is None:
+                server.kill()
+
+
+run_pair("matching", 61022, 61020, ("core", "signer", 61022, 61020), ("signer", "core", 61021, 61020))
+run_pair("wrong-peer", 61023, 61023, "protected_launch.peer.identity_mismatch", "protected_launch.peer.role_unsupported")
+run_pair("wrong-gid", 61022, 61023, "protected_launch.peer.identity_mismatch", "protected_launch.identity.mismatch")
+for mode, expected in (
+    ("null", "protected_launch.peer.transport_unverified"),
+    ("datagram", "protected_launch.peer.transport_unverified"),
+    ("unconnected", "protected_launch.peer.transport_unverified"),
+    ("v1", "protected_launch.peer.role_unsupported"),
+    ("socket-output", None),
+):
+    result = subprocess.check_output(argv(61021, 61020, mode, "", mode), text=True, env={}, timeout=35)
+    check(json.loads(result), mode, expected)
+PY
+[[ ! -e "$scratch/.workflow-os" && ! -e "$root/.workflow-os" ]]
+[[ $(sudo -n find "$root" -name 'peer-*.trace' -type f -size +0c | wc -l) -eq 11 ]]
+sudo -n find "$root" -name 'peer-*.trace' -type f -exec awk '
+  {
+    sub(/^[0-9]+ +/, "");
+    if ($0 ~ /\/custody\// || $0 ~ /^(read|readv|write|writev)\(0,/ ||
+        $0 !~ /^(read|readv|write|writev|open|openat|openat2|getsockopt|getpeername)\(/) {
+      print "Unexpected peer preflight syscall: " $0;
+      bad = 1;
+    }
+  }
+  END { exit bad }
+' {} +
+printf 'protected_launch_peer_rehearsal: passed\n'
