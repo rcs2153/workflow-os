@@ -2202,6 +2202,16 @@ Local digest equivalence, shared descriptor regression, warnings-denied
 Core/CLI Clippy, formatting, docs and whitespace checks passed after the
 correction. Native positive and syscall evidence remain pending.
 
+Exact-head run `42942476785` passed the shared Linux signer rehearsal after
+restoring the accelerated digest. The public rehearsal then exited 1 before
+reporting its first case; the original shell assertions did not identify the
+failure. The diagnostics correction records the case, exit and bounded error
+or unexpected syscall category, rejects an empty trace, and captures enough
+pathname bytes to detect the synthetic custody path. It runs the public
+rehearsal earlier without removing any merge check. This does not claim that
+the public verifier has passed. Governed blocker `run-1794363116148792000-2`
+approved this diagnostics-only change.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

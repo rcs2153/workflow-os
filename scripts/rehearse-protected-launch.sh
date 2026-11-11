@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'printf "Protected launch rehearsal failed at line %s\n" "$LINENO" >&2' ERR
 
 if [[ ${GITHUB_ACTIONS:-} != true || ${RUNNER_ENVIRONMENT:-} != github-hosted || ${RUNNER_OS:-} != Linux ]]; then
   echo 'Protected launch rehearsal requires a disposable GitHub-hosted Linux runner.' >&2
@@ -53,23 +54,49 @@ run_case() {
     invocation=(/bin/sh -c 'exec 9</dev/null; exec "$@"' sh "${invocation[@]}")
   fi
   local status=0
+  printf 'protected_launch_case: %s\n' "$code"
   sudo -n /usr/bin/unshare --net -- /usr/bin/setpriv \
     --reuid="$actor" --regid="$gid" --clear-groups --no-new-privs \
     --inh-caps=-all --ambient-caps=-all --bounding-set=-all \
-    /usr/bin/env -i /usr/bin/timeout --kill-after=2s 30s "$strace" -qq -f \
+    /usr/bin/env -i /usr/bin/timeout --kill-after=2s 30s "$strace" -qq -f -s 256 \
       -e trace=%network,open,openat,openat2,clone,clone3,fork,vfork -o "$trace" \
       "${invocation[@]}" </dev/null > "$scratch/out" 2> "$scratch/err" || status=$?
-  sudo -n awk '{ sub(/^[0-9]+ +/, ""); if ($0 !~ /^(open|openat|openat2)\(/ || $0 ~ /\/custody\//) exit 1 }' "$trace"
+  if ! sudo -n test -s "$trace"; then
+    printf 'Missing syscall trace for %s (exit %s)\n' "$code" "$status" >&2
+    head -c 1024 "$scratch/err" >&2
+    exit 1
+  fi
+  if ! sudo -n awk '
+    {
+      sub(/^[0-9]+ +/, "");
+      if ($0 ~ /\/custody\//) { print "Unexpected custody access"; exit 1 }
+      if ($0 !~ /^(open|openat|openat2)\(/) {
+        split($0, parts, "[( ]");
+        printf "Unexpected trace record: %.48s\n", parts[1];
+        exit 1;
+      }
+    }' "$trace" >&2; then
+    printf 'Syscall check failed for %s (exit %s)\n' "$code" "$status" >&2
+    head -c 1024 "$scratch/err" >&2
+    exit 1
+  fi
   if [[ $code == success ]]; then
-    [[ $status == 0 && ! -s $scratch/err ]]
-    jq -e --arg manifest "$digest" --arg executable "$exe_sha" '
+    if [[ $status != 0 || -s $scratch/err ]]; then
+      printf 'Expected verified launch without stderr, got exit %s\n' "$status" >&2
+      head -c 1024 "$scratch/err" >&2
+      exit 1
+    fi
+    if ! jq -e --arg manifest "$digest" --arg executable "$exe_sha" '
       .status == "verified_no_dispatch" and .role == "core" and .uid == 61021 and .gid == 61020
       and .manifest_sha256 == $manifest and .executable_sha256 == $executable
       and .unverified == ["deployment","custody","ingress","trusted_time","provider_scope"]
-    ' "$scratch/out" >/dev/null
+    ' "$scratch/out" >/dev/null; then
+      echo 'Verified launch result did not match expected facts.' >&2
+      exit 1
+    fi
   elif [[ $status != 3 || -s $scratch/out ]] || ! grep -Fq "error[$code]:" "$scratch/err"; then
     printf 'Expected %s (exit 3), got exit %s\n' "$code" "$status" >&2
-    sed -n '1,4p' "$scratch/err" >&2
+    head -c 1024 "$scratch/err" >&2
     exit 1
   fi
   [[ ! -e $scratch/.workflow-os && ! -e $root/.workflow-os ]]
