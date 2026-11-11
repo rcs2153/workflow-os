@@ -154,9 +154,29 @@ privacy/redaction, compatibility, and the standards boundaries above. Explain
 how WorkReports, EvidenceReferences, SideEffects, audit and provider receipts
 relate without making report prose authoritative.
 
+Compare an embedded harness plugin, task sidecar, local daemon, and remote
+policy decision point or gateway. For each, document which component owns
+canonical state, what the workload and cell must trust, how policy and
+version compatibility are checked, and what happens on revocation, network
+partition, upgrade, and rollback. Central authority means one canonical
+decision and execution record, not a mandatory centralized hosting model.
+
+A task cell may enforce finite delegated scope, mediate governed calls and
+return attributable, operation-bound observations. It must not mint,
+expand, renew, reinterpret or independently persist executable authority.
+Only the canonical kernel may resolve and admit new consequential actions.
+The harness remains responsible for execution and its VM, container or
+sandbox remains responsible for isolation. A governed gateway owns any
+provider access needed for the supported action; a wrapper alone cannot
+close alternate credential, tool or egress paths.
+
 Non-goals: generic orchestration, identity provider, OAuth server, payment
 rail, sandbox, agent framework, blockchain requirement, private chain-of-thought
 capture, production claim or assumed cross-domain trust.
+Defer an optional first-party delegator, objective decomposition, automatic
+harness selection, spawning and recursive delegation until independent
+executors can receive, exercise, surrender and return finite authority.
+Any delegator would sit above Core, not become its authority source.
 
 Exit: accepted maintainer/security architecture review and a stable distinction
 between portable proof and executable authority. Owner review must be labeled
@@ -201,6 +221,29 @@ Exit: forged/replayed/wrong-audience/expired context and delegation beyond
 parent scope fail closed. Transport success cannot manufacture admission.
 Pin draft revisions, trust configuration and interoperability test vectors.
 
+## Phase 3A: Reference Enforcement Plane
+
+After accepted Phase 1 through Phase 3 exits, prove one task-scoped cell, one
+governed credential/tool gateway, one bounded provider integration and one
+public versioned protocol. Use the topology selected by the ADR, not four
+implementations. The executor receives no reusable provider credential or
+direct state-store access. At the supported boundary, the gateway obtains a
+fresh decision and exercises only an exact, one-use admission. The kernel
+retains action identity, ambiguity, reconciliation and reporting posture.
+Cell observations are bound to the operation and distinguishable from
+provider evidence. Do not add a generic gateway, scheduler or sandbox.
+
+Exit: prove both the admitted path and denial when current authority cannot
+be resolved. Preregister expected results for stale policy, revocation during
+disconnection, expired or consumed leases, duplicate cells and replacement
+executors, forked or restored state, replayed mandates, wrong audience or
+domain, network partition, clock rollback, conflicting provider observations,
+and interruption after acceptance but before acknowledgement. Unavailable
+authority denies new effects. Insufficient or contradictory observations
+preserve uncertainty without a resend. Neither a signed envelope nor cached
+policy may become a bearer credential. Record distinct results for initial
+admission, recovery and terminal reporting.
+
 ## Phase 4: Cross-Host Consequential-Action Proof
 
 Preregister a bounded remediation simulation. A human issues an exact mandate;
@@ -215,10 +258,22 @@ A blind verifier receives only exported proof and provider history, not private
 database access or transcript authority. The trial must disclose any custom
 integration and operator action, trust assumptions and unresolved evidence.
 
+Run the same governed task across two materially different compute substrates
+and two independently implemented harnesses. A shared kernel and protocol are
+expected; two configurations of the same harness or two copies of one host
+image do not prove these properties. The replacement independently
+authenticates and recovers from kernel-owned state without the original
+transcript or transferable provider authority.
+
 Exit: zero unauthorized or duplicate accepted effects, zero transcript-derived
 authority, correct decisions at every preregistered fault point, and explicit
 unresolved posture for insufficient provider observation. Measure recovery
-turns, latency, lookups, tokens, custom integration code and verifier success.
+turns, latency, lookups, tokens, custom integration code, operator overhead
+and verifier success. Before a distributed authority-plane claim, require one
+real bounded consequential effect, verified revocation and expiry, successful
+post-effect reconciliation without blind retry, and independent reconstruction
+from public proof surfaces. Synthetic and no-dispatch evidence may qualify
+the protocol but cannot close the real-effect gate.
 Do not promise exactly-once provider execution absent its own contract.
 
 ## Phase 5: Terminal Work Provenance And Verifier
@@ -268,6 +323,23 @@ delegation, cryptographic work provenance and a generalized protocol are not
 current claims. Reconcile the product contract and V1 criteria through separate
 governed changes only when accepted public-boundary evidence supports them.
 
+Use three future deployment postures, separate from proportional governance:
+
+- **Observe:** record available decisions and actions. Bypass may remain
+  possible; the record is not proof that all consequential work was mediated.
+- **Enforce:** require the governed gateway for consequential actions within
+  the documented integration boundary. Name the actions and disclose paths
+  outside that boundary.
+- **Strict:** additionally verify that workloads have no ambient provider
+  credentials or unrestricted consequential tool or egress paths in the
+  declared environment. If the controls cannot be verified, withhold the
+  Strict claim. A cooperative wrapper or audit-only adapter is not sufficient.
+
+Claim only what can be shown: supported consequential actions are admitted,
+authorized, identified, reconciled, and reported at the declared boundary.
+Do not claim global mediation, non-bypassability outside the verified boundary,
+or that every tool call is recorded.
+
 This plan succeeds only when a replacement independently authenticates without
 the original transcript or transferable provider authority, resolves current
 permission, recovers exact execution truth without duplicating an uncertain
@@ -278,3 +350,9 @@ Planning run `run-1794367438224102000-2` has proof-backed approval
 `approval/run-1794367438224102000-2/planning-approved`. Source inspection,
 primary-source reading, documentation edits and checks are executor work outside
 the preview kernel handlers. This record is not independent assurance.
+
+The enforcement-plane additions follow read-only review
+`run-1794379401146053000-2` and docs run `run-1794379495160632000-2`, with
+proof-backed approvals at `review-scope-approved` and `planning-approved`,
+respectively. They are deferred acceptance criteria, not an ADR decision,
+implementation approval or a change to Phase 0.

@@ -6925,11 +6925,35 @@ Parallel planning sprint outputs are documented in [Parallel Planning Sprint Rep
 
 This milestone must not introduce domain packs, write-capable adapters, or new runtime primitives until a scoped ADR or implementation plan is accepted.
 
+## Future Distributed Enforcement
+
+The [durable authority continuation plan](docs/implementation-plans/durable-authority-continuation-profile-plan.md#phase-1-architecture-decision)
+will evaluate lightweight, task-scoped enforcement beside a workload. The
+kernel remains the canonical authority and execution record; a cell can
+enforce a bounded decision and return observations but cannot create,
+expand, or renew authority. Harnesses still execute; their environments
+still provide compute isolation.
+
+The [reference enforcement plane](docs/implementation-plans/durable-authority-continuation-profile-plan.md#phase-3a-reference-enforcement-plane)
+is a future prerequisite for the broad cross-host proof, not for the
+current P0 work. The proof must span independently implemented harnesses and
+distinct compute substrates, enforce current authority at admission, and
+reconcile a bounded real effect without blind retry. Observe, Enforce, and
+Strict describe deployment guarantees within a declared boundary, not
+governance decisions or current product capabilities. An optional delegator
+harness is deferred until governed replacement is proven. This section does
+not modify the Active Delivery Queue or authorize implementation.
+
 ## Reasoning Lineage / Claim Graph Architecture
 
 The [Governed Work Pattern](docs/concepts/governed-work-pattern.md) is accepted as architecture direction, and [Reasoning Lineage / Claim Graph](docs/concepts/reasoning-lineage.md) remains captured as proposed architecture direction in [ADR 0008](docs/adr/0008-reasoning-lineage-claim-graph.md). Reasoning Lineage is a follow-on provenance direction after Governed Work Pattern, and neither direction is implemented as runtime behavior.
 
 Revisit Reasoning Lineage after the EvidenceReference and WorkReportContract foundations are scoped. Revisit these directions together before policy-gated writes, generic runtime adapter execution, or broader domain packs. Implementation of either direction requires a separate accepted ADR or scoped implementation plan.
+
+For the distributed lane, lineage follows the enforcement and continuation
+proof. It can enrich terminal provenance later but must not block the
+cross-host proof or substitute for admission, provider observation, or
+reconciliation evidence.
 
 This milestone should treat reasoning lineage as supporting structure for governed work, not as the primary workflow runtime. Workflow OS must remain a declarative workflow kernel with durable state, policy gates, approvals, auditability, observability, and adapter boundaries.
 
