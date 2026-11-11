@@ -2429,6 +2429,41 @@ endpoint ownership and descriptor lifecycle before any separate custody
 scope. No provider access, grant, dispatch or independent acceptance occurred.
 Live admission remains denied.
 
+### Protected Named Endpoint Preflight
+
+The opt-in `--named-endpoint` mode of `launch-peer-preflight` retains
+the v2 launch and reciprocal credential checks, then requires the fixed
+`peer/signer.sock` beside the manifest. The pathname must sit beneath
+protected root-owned directories. The socket must be single-link,
+root-owned, mode `0620`, and grouped to the Core GID, which no other
+configured role may share. Under [Linux pathname socket](https://man7.org/linux/man-pages/man7/unix.7.html)
+and [POSIX ACL](https://man7.org/linux/man-pages/man5/acl.5.html)
+semantics, group write permits connection; other write and
+unprivileged directory mutation are not permitted. This does not verify
+host-wide group membership or non-POSIX ACL policy.
+
+Core observes the named peer address; signer observes the named local
+address. A matching path and stable path metadata are distinct from
+kernel-observed connection credentials. Neither is a claim that the
+descriptor's socket inode is the filesystem inode, that the peer is still
+live, or that a privileged launcher cannot replace the endpoint. The trusted
+launcher must create the listener under the signer identity, seal its
+directory before handoff, and control retirement. The verifier does not
+create, bind, connect, read or write the socket.
+
+Native rehearsal tests both directions, unrelated-role access denial,
+wrong mode, owner and pathname, shared Core group, extra inherited descriptor,
+listener exit and removal of the path. Syscall traces restrict the command
+to socket inspection and show no payload, custody opens or child creation.
+No persistence or live operator entry is enabled.
+
+Read-only review `run-1794373752272164000-2` found the prior fixture's
+shared service group was insufficient to infer exclusive access.
+Implementation `run-1794374746985770000-2` received proof-backed approval
+`approval/run-1794374746985770000-2/implementation-approved`. Edits and
+checks are executor work outside preview handlers. Native exact-head
+validation remains required; provider access, custody and dispatch remain denied.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

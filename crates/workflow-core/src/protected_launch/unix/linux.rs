@@ -1,14 +1,14 @@
 use std::fs;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::Path;
 
-use nix::sys::socket::{getpeername, getsockopt, sockopt, SockType, UnixAddr};
+use nix::sys::socket::{getpeername, getsockname, getsockopt, sockopt, SockType, UnixAddr};
 use serde::Deserialize;
 
 use super::{
     bounded_bytes, denied, executable_digest, linux_isolation, matches_identity,
-    only_standard_descriptors, protected_file, unprotected,
+    only_standard_descriptors, protected_file, protected_parents, unprotected,
 };
 use crate::protected_launch::{ProtectedLaunchInspection, ProtectedLaunchPeerInspection};
 use crate::{SpecContentHash, WorkflowOsError};
@@ -155,6 +155,7 @@ pub(in crate::protected_launch) fn inspect(
 pub(in crate::protected_launch) fn inspect_peer(
     manifest: &Path,
     expected: &SpecContentHash,
+    named_endpoint: bool,
 ) -> Result<ProtectedLaunchPeerInspection, WorkflowOsError> {
     let (launch, local_role, config) = verify_launch(manifest, expected)?;
     let (Manifest::Shared { identities, .. }, peer_role) = (
@@ -175,11 +176,10 @@ pub(in crate::protected_launch) fn inspect_peer(
             "standard input is not a verified connected Unix stream",
         )
     };
-    if getsockopt(&socket, sockopt::SockType).ok() != Some(SockType::Stream)
-        || getpeername::<UnixAddr>(socket.as_raw_fd()).is_err()
-    {
+    if getsockopt(&socket, sockopt::SockType).ok() != Some(SockType::Stream) {
         return Err(unverified());
     }
+    let peer_address = getpeername::<UnixAddr>(socket.as_raw_fd()).map_err(|_| unverified())?;
     let peer = getsockopt(&socket, sockopt::PeerCredentials).map_err(|_| unverified())?;
     let expected_peer = identities.for_role(peer_role);
     if peer.pid() <= 0 || peer.uid() != expected_peer.uid || peer.gid() != expected_peer.gid {
@@ -188,13 +188,69 @@ pub(in crate::protected_launch) fn inspect_peer(
             "connected peer does not match the reviewed counterpart",
         ));
     }
+    let status = if named_endpoint {
+        verify_named_endpoint(manifest, &identities, local_role, &socket, peer_address)?;
+        "endpoint_verified_no_dispatch"
+    } else {
+        "peer_verified_no_dispatch"
+    };
     Ok(ProtectedLaunchPeerInspection {
-        status: "peer_verified_no_dispatch",
+        status,
         launch,
         peer_role: peer_role.label(),
         peer_uid: peer.uid(),
         peer_gid: peer.gid(),
     })
+}
+
+fn verify_named_endpoint(
+    manifest: &Path,
+    identities: &Identities,
+    role: Role,
+    socket: &std::io::Stdin,
+    peer_address: UnixAddr,
+) -> Result<(), WorkflowOsError> {
+    let unverified = || {
+        denied(
+            "protected_launch.endpoint.unverified",
+            "connected endpoint does not match the protected launch pathname or access policy",
+        )
+    };
+    let core_gid = identities.core.gid;
+    if identities
+        .all()
+        .iter()
+        .any(|(role, identity)| !matches!(role, Role::Core) && identity.gid == core_gid)
+    {
+        return Err(unverified());
+    }
+    let path = manifest
+        .parent()
+        .ok_or_else(unverified)?
+        .join("peer/signer.sock");
+    protected_parents(&path, false).map_err(|_| unverified())?;
+    let metadata = || {
+        let file = fs::symlink_metadata(&path).map_err(|_| unverified())?;
+        if !file.file_type().is_socket()
+            || file.uid() != 0
+            || file.gid() != core_gid
+            || file.nlink() != 1
+            || file.mode() & 0o7777 != 0o620
+        {
+            return Err(unverified());
+        }
+        Ok((file.dev(), file.ino()))
+    };
+    let before = metadata()?;
+    let address = match role {
+        Role::Core => peer_address,
+        Role::Signer => getsockname::<UnixAddr>(socket.as_raw_fd()).map_err(|_| unverified())?,
+        _ => return Err(peer_role_unsupported()),
+    };
+    if address.path().map(Path::as_os_str) != Some(path.as_os_str()) || metadata()? != before {
+        return Err(unverified());
+    }
+    Ok(())
 }
 
 fn peer_role_unsupported() -> WorkflowOsError {

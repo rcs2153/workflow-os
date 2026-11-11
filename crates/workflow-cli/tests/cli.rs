@@ -47,6 +47,11 @@ fn launch_preflight_rejects_extra_options_and_does_not_initialize_state() {
         #[cfg(not(target_os = "linux"))]
         assert!(error.contains("protected_launch.platform.unsupported"));
     }
+    let unexpected = invoke("launch-preflight", &["--named-endpoint"]);
+    assert_eq!(unexpected.status.code(), Some(2));
+    let endpoint = invoke("launch-peer-preflight", &["--named-endpoint"]);
+    assert_eq!(endpoint.status.code(), Some(3));
+    assert_eq!(endpoint.stdout, [] as [u8; 0]);
     assert!(!project.path().join("unexpected-state").exists());
     assert!(!project.path().join(".workflow-os").exists());
 }
