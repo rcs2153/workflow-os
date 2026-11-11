@@ -71,6 +71,14 @@ jobs:
             jq -er 'select(.reason == "compiler-artifact" and .target.name == "workflow_core" and .profile.test and .executable != null) | .executable')
           bash scripts/rehearse-signer-isolation.sh "$binary"
 
+      - name: Rehearse public no-dispatch protected launch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v strace >/dev/null; then sudo apt-get install -y strace; fi
+          cargo build --locked -p workflow-cli --bin workflow-os
+          bash scripts/rehearse-protected-launch.sh target/debug/workflow-os
+
       - name: Rust docs
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 

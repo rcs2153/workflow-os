@@ -115,8 +115,9 @@ cross-harness milestone is an interruption-continuity and authority-integrity
 proof. The approximately `49.9%` and `50.1%` gross recovery-token observations
 remain secondary operational evidence, not the primary product claim.
 
-A P0 **hosted invocation-result interruption** preemption takes priority over
-production preflight implementation. External evaluation reported worker
+The P0 **hosted invocation-result interruption** preemption closed with
+[PR #896](https://github.com/rcs2153/workflow-os/pull/896) at `2660073f` and
+all ten exact-head checks green. External evaluation reported worker
 death during success persistence, replacement failure after lease expiry,
 and create replay with no report. A local PostgreSQL process-death regression
 reproduced `hosted.execution_attempt.transition.invalid`. The bounded
@@ -128,12 +129,11 @@ integer cast rounds fractional milliseconds and can make a durable attempt
 appear later than a subsequent local outcome. The correction floors the
 conversion without weakening time-regression rejection. Its deterministic
 fractional-millisecond test, mandatory PostgreSQL conformance and rebuilt
-worker crash/replay rehearsal now pass locally; delivery remains gated on
-exact-head CI. Final maintainer recheck accepts this bounded correction without
+worker crash/replay rehearsal passed locally and in CI. Final maintainer
+recheck accepts this bounded correction without
 claiming independent assurance or recovery of a missing provider receipt.
-The regression, truthful worker outcome labels, and exact-head PostgreSQL CI
-must pass focused review before this preemption closes. Recovery of the actual
-provider outcome remains distinct from classifying uncertainty. See the
+Recovery of the actual provider outcome remains distinct from classifying
+uncertainty. Production no-dispatch preflight implementation resumes. See the
 [implementation evidence](docs/concepts/HOSTED_INVOCATION_RESULT_INTERRUPTION_REPORT.md).
 
 A prior P0 **hosted partial-run recovery** preemption is active before further
@@ -338,11 +338,10 @@ separate roles, not a live operator route. The
 also passed on the designated offline Linux VM using the exact merged
 worker and launcher. The designated human reviewer accepted the synthetic
 result only; that decision is not live access or dispatch approval.
-Before provisioning, implement and review a production, non-dispatch
-protected-launch preflight that shares its verifier with the rehearsal.
-The current launch verifier and operator composition are test-only; their
-acceptance does not make a deployable operator available. The next bounded
-implementation and rejection matrix are specified in the
+Before provisioning, review and validate the production, non-dispatch
+protected-launch preflight candidate that shares checks with the rehearsal.
+The operator composition is still test-only; this does not make a deployable
+operator available. The bounded implementation and rejection matrix are specified in the
 [post-rehearsal readiness review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#post-rehearsal-production-readiness-review).
 Live admission remains denied pending actual installation scope and
 custody evidence, reviewed ingress and time posture, and a separate
