@@ -354,9 +354,12 @@ exact-main ARM64 CLI from [PR #898](https://github.com/rcs2153/workflow-os/pull/
 passed offline verification and the [designated VM no-dispatch check](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#intended-host-production-launch-result).
 One isolated Core launch verified and five invalid launches failed closed;
 no live effect, state, or provider access was authorized.
-The next production preflight increment checks all five isolated roles against
-one reviewed manifest digest while preserving the single-role contract. See the
-[shared-role launch preflight](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#shared-role-production-launch-preflight).
+The [shared-role launch preflight](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#shared-role-production-launch-preflight)
+merged in [PR #901](https://github.com/rcs2153/workflow-os/pull/901). The
+[exact-main designated VM check](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#designated-vm-shared-role-result)
+verified all five roles against one protected manifest and executable.
+Wrong GID, digest drift and a caller-selected v2 role failed closed; firewall
+and no-dispatch posture were unchanged.
 The operator composition is still test-only; this does not make a deployable
 operator available. The bounded implementation and rejection matrix are specified in the
 [post-rehearsal readiness review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#post-rehearsal-production-readiness-review).

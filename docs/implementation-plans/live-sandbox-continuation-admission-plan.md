@@ -2321,6 +2321,47 @@ stopped before checking the Linux code because the C cross-compiler was
 unavailable. Exact-head native CI is required before accepting the shared-role
 proof; the designated VM result above remains single-role v1 evidence.
 
+### Designated VM Shared-Role Result
+
+[PR #901](https://github.com/rcs2153/workflow-os/pull/901) merged at
+`e6056d003322d3a9d70d2f5fe4d912c95639c008`, reviewed tree
+`b63c49530e1f64aa09e4e23c18c9dfa62cf0474f`, after all ten standard checks and
+the native ARM64 rehearsal passed. The
+[exact-main build](https://github.com/rcs2153/workflow-os/actions/runs/42957255678)
+repeated the five-role proof and uploaded artifact `13826979879`. Its
+ZIP SHA-256 was
+`1d80949e40f7f8d51a219aba5be60080395e9338506a30792faccd0b85598ca6`.
+Offline review `run-1794370139959999000-2` verified the archive, checksums,
+source and build bindings and ELF architecture before any guest transfer.
+
+The verified executable SHA-256,
+`6493de150016a54b1f0d867177d8766c4c60c09d4d3162936be23a8864ae0ed4`,
+matched on the Mac, temporary upload and protected path. On the designated
+offline `lima-wos-pf` VM, isolated Core, signer, reader, receiver and harness
+processes each returned `verified_no_dispatch` with their exact reviewed
+UID/GID. The same single-link, root-owned `0444` v2 manifest bound every
+result to SHA-256
+`ff76416ca111160919a6b610f08e5c93f5a2f134c884bb3ae6e5ff3e0f2d1bcf`.
+A mismatched GID, wrong expected manifest digest, and explicit role in v2
+each produced the expected exit 3 denial. The traced probes observed no
+network calls, custody opens or child creation. No runtime state was created;
+temporary directories were removed and no Workflow OS process remained.
+The active stateless firewall digest matched before and after.
+
+Governed VM run `run-1794370396023953000-2` closed with 39 events and one
+proof-backed approval `approval/run-1794370396023953000-2/composition-approved`,
+with no retries or escalations. Transfer, guest checks and cleanup were
+operator work outside preview handlers. The retained operator log SHA-256 is
+`299b4feaa32f8581008fb98b89a6e2f90ff88310e371ff5b6f68046bd1e08d42`.
+
+These are sequential per-process observations, not a running multi-role
+composition. Service provisioning, peer/socket identity and ACLs, custody,
+ingress, trusted time and provider scope remain unverified. No grant, live
+provider action, or independent acceptance occurred. Live admission remains
+denied. The next operator boundary is reviewed local peer identity and
+protected role composition without custody or dispatch, not another isolated
+launch rehearsal.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
