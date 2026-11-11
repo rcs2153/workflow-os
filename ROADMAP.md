@@ -379,7 +379,10 @@ The [designated offline recovery result](docs/implementation-plans/live-sandbox-
 then bound a protected Core launch to pinned synthetic recovery state. All
 twelve cases passed without mutating state or contacting a provider. Guest
 archive timestamps were reported roughly 21 hours ahead of the guest clock;
-trusted-time posture remains unverified and blocks live admission.
+the [read-only clock review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#intended-host-trusted-time-blocker)
+confirmed a 21-hour offset relative to the host and no guest synchronization.
+Trusted time remains an open live-admission gate; the offline VM remains
+valid for tests that do not authorize fresh work from its wall clock.
 The operator composition is still test-only; this does not make a deployable
 operator available. The bounded implementation and rejection matrix are specified in the
 [post-rehearsal readiness review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#post-rehearsal-production-readiness-review).
