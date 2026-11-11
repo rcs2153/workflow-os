@@ -1,13 +1,12 @@
 # Workflow OS User Guide
 
 These guides cover the current Workflow OS `0.4.0-preview.1` preparation
-identity on `main`. Workflow OS is an open-source continuity-of-authority
-kernel for agentic work. It provides shared governance across people, agents,
-processes, and execution frameworks by preserving procedure authority,
-invocation authority, execution truth, and the next lawful action across
-interruptions and executor replacement. It is an advanced local governance
-preview, not a production enterprise control plane or packaged cross-harness
-runtime.
+identity on `main`. Workflow OS is an open-source governance kernel that gives
+agent harnesses shared state for supported governed work. It records which
+procedure and approvals applied, what happened, and what another authorized
+executor may do next. This continuity of authority is available through
+documented paths in the local preview, not a production enterprise control
+plane or packaged cross-harness runtime.
 
 Start with the [Current Product Contract](current-product-contract.md) when a
 guide, implementation report, or older release document appears to disagree
@@ -25,7 +24,7 @@ with current behavior.
 | Proportional governance | Bounded routing among quiet capture, visible disclosure, blocking approval, and denial. |
 | State | Local filesystem, SQLite continuity, and PostgreSQL implementations; production HA is not claimed. |
 | Read-only integrations | Fixture-first and opt-in live GitHub, Jira, and GitHub Actions paths. |
-| External writes | Narrow GitHub comment and managed draft-PR execution paths only; no general write-adapter product. |
+| External writes | Narrow, explicit GitHub sandbox paths for PR comments and managed draft PRs only; no general write-adapter product. |
 | Hosting | Single-tenant no-write alpha; not production multi-tenant hosting. |
 | OpenShell | Optional no-write boundary and compatibility work; not a complete execution-provider integration. |
 | Self-governance | `dg/*` workflows govern this repository and serve as team-specific examples, not downstream defaults. |

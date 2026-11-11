@@ -4,16 +4,19 @@
 [![Release](https://img.shields.io/github/v/release/rcs2153/workflow-os?include_prereleases)](https://github.com/rcs2153/workflow-os/releases)
 [![License](https://img.shields.io/github/license/rcs2153/workflow-os)](LICENSE)
 
-Workflow OS is an open-source, local-first continuity-of-authority kernel for
-agentic work. It provides shared governance across people, agents, processes,
-and execution frameworks without replacing the systems that execute the work.
-It converts ephemeral conversation and execution context into a durable,
-policy-governed run whose authority, execution state, evidence, and next
-permissible action can be recovered by another authorized executor.
+Workflow OS is an open-source, local-first governance kernel for AI agents.
+It provides shared state and authority beneath agent harnesses, the tools that
+run agents. Agents plan, code, and call tools; Workflow OS governs supported
+actions by binding the exact scope, policy, approvals, evidence, and recorded
+side effects to a durable run.
 
 ```text
 Agent executes. Workflow OS governs.
 ```
+
+An authorized replacement executor can use that record to find out what
+happened and what it may do next, without treating missing acknowledgement
+as permission to retry. We call that **continuity of authority**.
 
 Agents can already write code, call tools, and change external systems. Most
 systems preserve context, traces, or task state. Workflow OS preserves whether
@@ -256,8 +259,10 @@ For a fully local approval and event-history demonstration, see the
   denial.
 - Scoped capability, current-authority, required-context, and check models.
 - Local filesystem, SQLite continuity, and PostgreSQL state implementations.
-- Fixture-first read-only GitHub, Jira, and GitHub Actions adapters.
-- Narrow GitHub comment and managed draft-pull-request execution paths.
+- Fixture-first read-only GitHub, Jira, and GitHub Actions adapters, with
+  opt-in live reads for documented operations.
+- Narrow, explicit GitHub sandbox write paths for pull-request comments and
+  managed draft pull requests, not general provider automation.
 - A single-tenant hosted no-write alpha and optional OpenShell boundary.
 
 Not every Core capability is exposed through the CLI. The
