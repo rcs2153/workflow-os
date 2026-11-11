@@ -12,15 +12,22 @@ use crate::protected_launch::ProtectedLaunchInspection;
 use crate::{SpecContentHash, WorkflowOsError};
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Manifest {
-    version: String,
-    executable_sha256: SpecContentHash,
-    role: Role,
-    identities: Identities,
+#[serde(tag = "version", deny_unknown_fields)]
+enum Manifest {
+    #[serde(rename = "workflow-os/protected-launch/v1")]
+    Selected {
+        executable_sha256: SpecContentHash,
+        role: Role,
+        identities: Identities,
+    },
+    #[serde(rename = "workflow-os/protected-launch/v2")]
+    Shared {
+        executable_sha256: SpecContentHash,
+        identities: Identities,
+    },
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Role {
     Core,
@@ -57,38 +64,81 @@ fn invalid_manifest() -> WorkflowOsError {
 impl Manifest {
     fn parse(bytes: &[u8]) -> Result<Self, WorkflowOsError> {
         let manifest: Self = serde_json::from_slice(bytes).map_err(|_| invalid_manifest())?;
-        let roles = &manifest.identities;
-        let identities = [
-            &roles.core,
-            &roles.signer,
-            &roles.reader,
-            &roles.receiver,
-            &roles.harness,
-        ];
-        if manifest.version != "workflow-os/protected-launch/v1"
-            || identities.iter().enumerate().any(|(i, identity)| {
-                identity.uid == 0
-                    || identity.gid == 0
-                    || identity.uid == u32::MAX
-                    || identity.gid == u32::MAX
-                    || identities[..i]
-                        .iter()
-                        .any(|prior| prior.uid == identity.uid)
-            })
-        {
+        let identities = manifest.identities().all();
+        if identities.iter().enumerate().any(|(i, (_, identity))| {
+            identity.uid == 0
+                || identity.gid == 0
+                || identity.uid == u32::MAX
+                || identity.gid == u32::MAX
+                || identities[..i]
+                    .iter()
+                    .any(|(_, prior)| prior.uid == identity.uid)
+        }) {
             return Err(invalid_manifest());
         }
         Ok(manifest)
     }
 
-    fn selected(&self) -> (&'static str, &Identity) {
-        let roles = &self.identities;
-        match self.role {
-            Role::Core => ("core", &roles.core),
-            Role::Signer => ("signer", &roles.signer),
-            Role::Reader => ("reader", &roles.reader),
-            Role::Receiver => ("receiver", &roles.receiver),
-            Role::Harness => ("harness", &roles.harness),
+    fn identities(&self) -> &Identities {
+        match self {
+            Self::Selected { identities, .. } | Self::Shared { identities, .. } => identities,
+        }
+    }
+
+    fn executable_sha256(&self) -> &SpecContentHash {
+        match self {
+            Self::Selected {
+                executable_sha256, ..
+            }
+            | Self::Shared {
+                executable_sha256, ..
+            } => executable_sha256,
+        }
+    }
+
+    fn current_role(&self) -> Option<(Role, &Identity)> {
+        let matches =
+            |(_, identity): &(Role, &Identity)| matches_identity(identity.uid, identity.gid);
+        match self {
+            Self::Selected {
+                role, identities, ..
+            } => Some((*role, identities.for_role(*role))).filter(matches),
+            Self::Shared { identities, .. } => identities.all().into_iter().find(matches),
+        }
+    }
+}
+
+impl Identities {
+    fn for_role(&self, role: Role) -> &Identity {
+        match role {
+            Role::Core => &self.core,
+            Role::Signer => &self.signer,
+            Role::Reader => &self.reader,
+            Role::Receiver => &self.receiver,
+            Role::Harness => &self.harness,
+        }
+    }
+
+    fn all(&self) -> [(Role, &Identity); 5] {
+        [
+            Role::Core,
+            Role::Signer,
+            Role::Reader,
+            Role::Receiver,
+            Role::Harness,
+        ]
+        .map(|role| (role, self.for_role(role)))
+    }
+}
+
+impl Role {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Core => "core",
+            Self::Signer => "signer",
+            Self::Reader => "reader",
+            Self::Receiver => "receiver",
+            Self::Harness => "harness",
         }
     }
 }
@@ -124,13 +174,12 @@ pub(in crate::protected_launch) fn inspect(
         ));
     }
     let config = Manifest::parse(&bytes)?;
-    let (role, identity) = config.selected();
-    if !matches_identity(identity.uid, identity.gid) {
-        return Err(denied(
+    let (role, identity) = config.current_role().ok_or_else(|| {
+        denied(
             "protected_launch.identity.mismatch",
             "current process does not match the selected role",
-        ));
-    }
+        )
+    })?;
     let directory = manifest.parent().ok_or_else(unprotected)?;
     let executable = protected_file(&directory.join("workflow-os"), 0o555, false)?;
     let installed = executable.metadata().map_err(|_| unprotected())?;
@@ -145,12 +194,12 @@ pub(in crate::protected_launch) fn inspect(
         return Err(wrong_executable());
     }
     let executable_sha256 = executable_digest(executable)?;
-    if executable_sha256 != config.executable_sha256 {
+    if &executable_sha256 != config.executable_sha256() {
         return Err(wrong_executable());
     }
     Ok(ProtectedLaunchInspection {
         status: "verified_no_dispatch",
-        role,
+        role: role.label(),
         uid: identity.uid,
         gid: identity.gid,
         manifest_sha256,

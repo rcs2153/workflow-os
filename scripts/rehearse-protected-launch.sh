@@ -12,8 +12,14 @@ strace=$(command -v strace)
 uid=61021
 other_uid=61022
 gid=61020
-if getent passwd "$uid" >/dev/null || getent passwd "$other_uid" >/dev/null || getent group "$gid" >/dev/null; then
-  echo 'Rehearsal identities are already assigned.' >&2
+for actor in "$uid" "$other_uid" 61023 61025 61026; do
+  if getent passwd "$actor" >/dev/null; then
+    echo 'Rehearsal identities are already assigned.' >&2
+    exit 2
+  fi
+done
+if getent group "$gid" >/dev/null || getent group 61023 >/dev/null; then
+  echo 'Rehearsal groups are already assigned.' >&2
   exit 2
 fi
 scratch=$(mktemp -d)
@@ -30,8 +36,9 @@ if [[ -e /opt ]]; then stat -c 'ambient_opt_owner=%u:%g mode=%a' /opt; fi
 root=$(sudo -n mktemp -d /workflow-os-launch-preflight.XXXXXXXX)
 sudo -n chown 0:0 "$root"
 sudo -n chmod 0755 "$root"
-sudo -n install -d -o "$uid" -g "$gid" -m 0700 "$root/trace-$uid"
-sudo -n install -d -o "$other_uid" -g "$gid" -m 0700 "$root/trace-$other_uid"
+for actor in "$uid" "$other_uid" 61023 61025 61026; do
+  sudo -n install -d -o "$actor" -g "$gid" -m 0700 "$root/trace-$actor"
+done
 sudo -n install -d -o 0 -g 0 -m 0700 "$root/custody"
 sudo -n install -o 0 -g 0 -m 0555 "$binary" "$root/workflow-os"
 sudo -n install -o 0 -g 0 -m 0555 "$binary" "$root/substitute"
@@ -59,6 +66,7 @@ cd "$scratch"
 run_case() {
   local code=$1 actor=$2 configuration=$3 digest=$4 program=${5:-$root/workflow-os}
   local inject=${6:-no} trace=$root/trace-$actor/syscalls
+  local expected_role=${7:-core} actor_gid=${8:-$gid}
   local -a invocation=("$program" launch-preflight --manifest "$configuration" --sha256 "$digest")
   if [[ $inject == yes ]]; then
     invocation=(/bin/sh -c 'exec 9</dev/null; exec "$@"' sh "${invocation[@]}")
@@ -66,7 +74,7 @@ run_case() {
   local status=0
   printf 'protected_launch_case: %s\n' "$code"
   sudo -n /usr/bin/unshare --net -- /usr/bin/setpriv \
-    --reuid="$actor" --regid="$gid" --clear-groups --no-new-privs \
+    --reuid="$actor" --regid="$actor_gid" --clear-groups --no-new-privs \
     --inh-caps=-all --ambient-caps=-all --bounding-set=-all \
     /usr/bin/env -i /usr/bin/timeout --kill-after=2s 30s "$strace" -qq -f -s 256 \
       -e trace=%network,open,openat,openat2,clone,clone3,fork,vfork -o "$trace" \
@@ -96,8 +104,9 @@ run_case() {
       head -c 1024 "$scratch/err" >&2
       exit 1
     fi
-    if ! jq -e --arg manifest "$digest" --arg executable "$exe_sha" '
-      .status == "verified_no_dispatch" and .role == "core" and .uid == 61021 and .gid == 61020
+    if ! jq -e --arg manifest "$digest" --arg executable "$exe_sha" --arg role "$expected_role" \
+      --argjson uid "$actor" --argjson gid "$actor_gid" '
+      .status == "verified_no_dispatch" and .role == $role and .uid == $uid and .gid == $gid
       and .manifest_sha256 == $manifest and .executable_sha256 == $executable
       and .unverified == ["deployment","custody","ingress","trusted_time","provider_scope"]
     ' "$scratch/out" >/dev/null; then
@@ -150,3 +159,28 @@ run_case protected_launch.manifest.invalid "$uid" "$manifest" "$sha"
 head -c 4097 /dev/zero > "$scratch/changed.json"
 install_manifest "$scratch/changed.json"
 run_case protected_launch.file.size_invalid "$uid" "$manifest" "$sha"
+
+jq '.version = "workflow-os/protected-launch/v2" | del(.role)' \
+  "$scratch/valid.json" > "$scratch/shared.json"
+install_manifest "$scratch/shared.json"
+shared_sha=$sha
+for role in core signer reader receiver harness; do
+  actor=$(jq -r --arg role "$role" '.identities[$role].uid' "$scratch/shared.json")
+  actor_gid=$(jq -r --arg role "$role" '.identities[$role].gid' "$scratch/shared.json")
+  run_case success "$actor" "$manifest" "$shared_sha" "$root/workflow-os" no "$role" "$actor_gid"
+  printf 'protected_launch_shared_role: %s manifest_sha256=%s\n' "$role" "$shared_sha"
+done
+run_case protected_launch.identity.mismatch "$uid" "$manifest" "$shared_sha" "$root/workflow-os" no core 61023
+run_case protected_launch.manifest.digest_mismatch "$uid" "$manifest" "$wrong_sha"
+jq '.role = "core"' "$scratch/shared.json" > "$scratch/changed.json"
+install_manifest "$scratch/changed.json"
+run_case protected_launch.manifest.invalid "$uid" "$manifest" "$sha"
+jq '.identities.receiver.uid = .identities.core.uid' "$scratch/shared.json" > "$scratch/changed.json"
+install_manifest "$scratch/changed.json"
+run_case protected_launch.manifest.invalid "$uid" "$manifest" "$sha"
+jq '.version = "workflow-os/protected-launch/v1"' "$scratch/shared.json" > "$scratch/changed.json"
+install_manifest "$scratch/changed.json"
+run_case protected_launch.manifest.invalid "$uid" "$manifest" "$sha"
+jq '.version = "workflow-os/protected-launch/v3"' "$scratch/shared.json" > "$scratch/changed.json"
+install_manifest "$scratch/changed.json"
+run_case protected_launch.manifest.invalid "$uid" "$manifest" "$sha"
