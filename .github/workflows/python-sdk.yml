@@ -1,0 +1,44 @@
+name: Native Python SDK
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  native-python:
+    name: Python ${{ matrix.python }} on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.10'
+          - os: ubuntu-latest
+            python: '3.14'
+          - os: macos-15
+            python: '3.12'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install 'maturin>=1.9,<2'
+      - name: Build and install the native wheel
+        working-directory: packages/sdk-python
+        run: |
+          maturin build --locked --out dist
+          python -m pip install dist/*.whl
+      - name: Build CLI for native interoperability checks
+        run: cargo build --locked -p workflow-cli --bin workflow-os
+      - name: Exercise in-process kernel and callback contracts
+        env:
+          WORKFLOW_OS_TEST_CLI: ${{ github.workspace }}/target/debug/workflow-os
+        run: python -m unittest discover -s packages/sdk-python/tests -v

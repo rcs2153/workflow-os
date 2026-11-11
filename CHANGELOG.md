@@ -6,6 +6,11 @@ This project follows the versioning policy in [docs/release/SEMVER.md](docs/rele
 
 ## Unreleased
 
+- Add an experimental native Python SDK for in-process Rust Core calls,
+  explicitly registered local Python callbacks, and the existing GitHub
+  repository-metadata fixture approval path. No subprocess, live provider
+  expansion, sandbox, or Python package publication is implied.
+
 ## 0.4.0-preview.1 - Governed Authority And Repository Adoption Preview
 
 This preparation identity carries current `main` forward without moving or
