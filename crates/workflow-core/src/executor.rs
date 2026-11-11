@@ -15677,7 +15677,7 @@ fn execute_coordinated_hosted_no_write_dispatch(
         execution.actor.clone(),
     );
     let run = match reconciled_run.snapshot.status {
-        WorkflowRunStatus::WaitingForApproval => reconciled_run,
+        WorkflowRunStatus::WaitingForApproval | WorkflowRunStatus::Escalated => reconciled_run,
         status if status.is_terminal() => reconciled_run,
         WorkflowRunStatus::Running if plan.policy_effects.requires_approval() => {
             executor.pause_for_approval(plan)?
