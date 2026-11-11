@@ -86,6 +86,15 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
+After the complete protected-host and cross-harness continuity exit gate,
+the first strategic planning phase is the **Authority Continuation Architecture
+Decision**, unless a higher-severity correctness issue preempts it. The
+[durable authority continuation and proof-carrying work plan](docs/implementation-plans/durable-authority-continuation-profile-plan.md)
+defines that dependency, not a parallel delivery queue. Its architecture,
+portable profiles, cryptographic proof, external identity/transport integration
+and independent verification are future work. Recording this direction does
+not preempt the active P0 hosted, protected-host or continuation phases.
+
 Every item in this queue is evaluated against the primary product invariant:
 Workflow OS is a **continuity-of-authority kernel for agentic work**. The kernel
 must preserve the exact relationship among declared intent, scoped authority,
@@ -4564,6 +4573,14 @@ being closed. Use **Active Delivery Queue** above for execution order.
 
 ### Later Strategic Capabilities
 
+- [Durable authority continuation and proof-carrying work](docs/implementation-plans/durable-authority-continuation-profile-plan.md):
+  extend the existing kernel through a non-bearer continuation profile,
+  current-authority resolution and independently verifiable work provenance.
+  Finish current continuity proofs first; architecture decision, canonical
+  envelope, bounded identity/transport profiles, cross-host proof, terminal
+  verifier, domain pilots and open-profile engagement then follow in order.
+  This is a strategic continuation, not a product rename, implemented
+  standard, cross-domain federation or current production claim.
 - Composable Harness Contracts and typed governed handoffs.
 - Nested harness execution patterns after contract and authority boundaries.
 - Reasoning Lineage / Claim Graph after evidence, reports, and harness contracts.
