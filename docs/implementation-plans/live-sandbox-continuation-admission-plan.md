@@ -2362,6 +2362,35 @@ denied. The next operator boundary is reviewed local peer identity and
 protected role composition without custody or dispatch, not another isolated
 launch rehearsal.
 
+### Core Signer Peer Preflight
+
+`workflow-os launch-peer-preflight --manifest <absolute-path> --sha256 <digest>`
+is a separate Linux-only inspection. It uses the shared v2 launch verifier,
+then requires an already-connected Unix stream on standard input. Only the
+fixed Core/signer pair is supported. Linux-reported peer UID and GID must
+both match the opposite role in the same manifest. No caller-provided role
+or peer identity is accepted. The existing launch preflight is unchanged.
+
+The inspection neither opens a new connection nor exchanges a payload.
+The CLI silently rejects socket-backed output streams so that evidence and
+diagnostics cannot be written directly to the inspected channel. The native
+rehearsal runs the public binary under both roles, checks denial of an
+unlisted counterpart, wrong group, unconnected or non-stream input, v1 and
+socket output, and traces for no payload on standard input, no extra network
+calls, no custody opens and no child creation.
+
+The output is a snapshot of connection-establishment credentials, not peer
+liveness, peer executable identity, peer-side manifest verification or a
+deployment receipt. The trusted launcher and OS remain part of the boundary.
+Socket path ownership, ACLs, provisioning, other role edges and an actual
+custody protocol remain unverified. It returns no capability, opens no
+custody, initializes no state and does not admit any provider action.
+
+Governed implementation `run-1794371708456251000-2` received proof-backed
+approval `approval/run-1794371708456251000-2/implementation-approved`.
+Edits and validation are executor work outside the kernel. Exact-head
+native Linux validation is required before accepting the peer proof.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

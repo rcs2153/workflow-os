@@ -227,4 +227,4 @@ mod tests {
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub(super) use linux::inspect;
+pub(super) use linux::{inspect, inspect_peer};

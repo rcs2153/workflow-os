@@ -1,14 +1,16 @@
 use std::fs;
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
+use nix::sys::socket::{getpeername, getsockopt, sockopt, SockType, UnixAddr};
 use serde::Deserialize;
 
 use super::{
     bounded_bytes, denied, executable_digest, linux_isolation, matches_identity,
     only_standard_descriptors, protected_file, unprotected,
 };
-use crate::protected_launch::ProtectedLaunchInspection;
+use crate::protected_launch::{ProtectedLaunchInspection, ProtectedLaunchPeerInspection};
 use crate::{SpecContentHash, WorkflowOsError};
 
 #[derive(Deserialize)]
@@ -147,6 +149,65 @@ pub(in crate::protected_launch) fn inspect(
     manifest: &Path,
     expected: &SpecContentHash,
 ) -> Result<ProtectedLaunchInspection, WorkflowOsError> {
+    verify_launch(manifest, expected).map(|(launch, _, _)| launch)
+}
+
+pub(in crate::protected_launch) fn inspect_peer(
+    manifest: &Path,
+    expected: &SpecContentHash,
+) -> Result<ProtectedLaunchPeerInspection, WorkflowOsError> {
+    let (launch, local_role, config) = verify_launch(manifest, expected)?;
+    let (Manifest::Shared { identities, .. }, peer_role) = (
+        config,
+        match local_role {
+            Role::Core => Role::Signer,
+            Role::Signer => Role::Core,
+            _ => return Err(peer_role_unsupported()),
+        },
+    ) else {
+        return Err(peer_role_unsupported());
+    };
+
+    let socket = std::io::stdin();
+    let unverified = || {
+        denied(
+            "protected_launch.peer.transport_unverified",
+            "standard input is not a verified connected Unix stream",
+        )
+    };
+    if getsockopt(&socket, sockopt::SockType).ok() != Some(SockType::Stream)
+        || getpeername::<UnixAddr>(socket.as_raw_fd()).is_err()
+    {
+        return Err(unverified());
+    }
+    let peer = getsockopt(&socket, sockopt::PeerCredentials).map_err(|_| unverified())?;
+    let expected_peer = identities.for_role(peer_role);
+    if peer.pid() <= 0 || peer.uid() != expected_peer.uid || peer.gid() != expected_peer.gid {
+        return Err(denied(
+            "protected_launch.peer.identity_mismatch",
+            "connected peer does not match the reviewed counterpart",
+        ));
+    }
+    Ok(ProtectedLaunchPeerInspection {
+        status: "peer_verified_no_dispatch",
+        launch,
+        peer_role: peer_role.label(),
+        peer_uid: peer.uid(),
+        peer_gid: peer.gid(),
+    })
+}
+
+fn peer_role_unsupported() -> WorkflowOsError {
+    denied(
+        "protected_launch.peer.role_unsupported",
+        "peer preflight requires a shared launch and the Core/signer pair",
+    )
+}
+
+fn verify_launch(
+    manifest: &Path,
+    expected: &SpecContentHash,
+) -> Result<(ProtectedLaunchInspection, Role, Manifest), WorkflowOsError> {
     if nix::unistd::getuid().is_root() || nix::unistd::geteuid().is_root() {
         return Err(denied(
             "protected_launch.identity.root",
@@ -197,19 +258,23 @@ pub(in crate::protected_launch) fn inspect(
     if &executable_sha256 != config.executable_sha256() {
         return Err(wrong_executable());
     }
-    Ok(ProtectedLaunchInspection {
-        status: "verified_no_dispatch",
-        role: role.label(),
-        uid: identity.uid,
-        gid: identity.gid,
-        manifest_sha256,
-        executable_sha256,
-        unverified: [
-            "deployment",
-            "custody",
-            "ingress",
-            "trusted_time",
-            "provider_scope",
-        ],
-    })
+    Ok((
+        ProtectedLaunchInspection {
+            status: "verified_no_dispatch",
+            role: role.label(),
+            uid: identity.uid,
+            gid: identity.gid,
+            manifest_sha256,
+            executable_sha256,
+            unverified: [
+                "deployment",
+                "custody",
+                "ingress",
+                "trusted_time",
+                "provider_scope",
+            ],
+        },
+        role,
+        config,
+    ))
 }
