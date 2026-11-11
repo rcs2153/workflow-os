@@ -2293,6 +2293,34 @@ identities were configuration, not deployed processes. Deployment, custody,
 ingress, trusted time and provider scope remain unverified. No provisioning,
 provider request, grant or dispatch occurred. Live admission remains denied.
 
+### Shared-Role Production Launch Preflight
+
+The v1 manifest selects one role in its bytes. The shared
+`workflow-os/protected-launch/v2` manifest omits `role` and fixes the same
+executable digest and five distinct UID/GID role mappings in a single reviewed
+file. The existing `launch-preflight` command resolves the role from the
+verified process credentials; no argument or environment value selects it.
+A UID without its reviewed GID, a duplicated role UID, an explicit v2 role,
+an unknown version or a changed digest fails closed. V1 retains its required
+role and cannot select a different role even if the other identity is listed.
+
+The native rehearsal runs the exact production binary independently under
+Core, signer, reader, receiver and harness identities. It checks the same
+manifest and executable digests in all five results, both allow and deny
+syscall traces, and absence of runtime state. Each result describes only its
+current process: it does not establish simultaneous deployment, peer/socket
+identity, ACLs, custody, ingress, trusted time or provider scope. The process
+still cannot contact a provider, open custody, issue grants or dispatch.
+
+Implementation run `run-1794368560016222000-2` received proof-backed approval
+`approval/run-1794368560016222000-2/implementation-approved`. Edits and tests
+are executor work outside the kernel preview handlers. Local formatting,
+warnings-denied Core/CLI Clippy, the CLI option/no-state regression, shell
+syntax, docs and whitespace checks passed. The macOS-to-musl cross-check
+stopped before checking the Linux code because the C cross-compiler was
+unavailable. Exact-head native CI is required before accepting the shared-role
+proof; the designated VM result above remains single-role v1 evidence.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
