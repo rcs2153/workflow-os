@@ -2694,6 +2694,41 @@ This update is scoped to docs run `run-1794386319492771000-2` and proof-backed
 `approval/run-1794386319492771000-2/planning-approved`. It does not authorize
 clock-source integration or live work.
 
+### Designated VM Framed Notification Result
+
+[PR #915](https://github.com/rcs2153/workflow-os/pull/915) merged at
+`878c168437d2111200ca0da3f1039f52126c28bd`, tree
+`46b416c56de031ddec77ad70d5ab9b1364a870c9`. All ten checks passed,
+including separate-identity rehearsals on
+[Linux](https://github.com/rcs2153/workflow-os/actions/runs/42997681506/job/130445742732)
+and [macOS](https://github.com/rcs2153/workflow-os/actions/runs/42997681506/job/130445742805).
+The [exact-main ARM64 fixture build](https://github.com/rcs2153/workflow-os/actions/runs/43000033792)
+produced artifact `13846295251`. The Actions ZIP digest, archive and input
+checksums, source tree, launcher bytes, and tracked fixture contents verified
+on the Mac. The AArch64 worker SHA-256
+`b1e0e69a80c7deec87108bab9fcf31f8041657e4a7f644c841e75c7b8c2405cc`
+matched after protected staging on the designated offline VM.
+
+The existing isolated launcher exercised the new frame intake through the
+distinct receipt producer and the replacement Core. The rehearsal passed:
+one fixture effect survived lost acknowledgement, the replacement recovered
+it without resending, and terminal replay required no provider inputs.
+The VM run checked this composition; the malformed-frame matrix remains
+focused test evidence, not an independent VM ingress test. A first transfer
+stopped before protected staging on unexpected archive metadata and left no
+files; the plain two-file retry passed. The firewall hash matched before
+and after, and no worker, upload, protected bundle or temporary designation
+remained. The private transcript SHA-256 is
+`20c10468843bb0d54c51ab59e3c11980af6fda4c7b5a584df9061ab148f6b6e9`.
+
+Governed run `run-1794391228794696000-2` closed with 39 events, one
+proof-backed approval `approval/run-1794391228794696000-2/composition-approved`,
+and no retries or escalations in the kernel. Build, transfer and guest
+execution were operator work outside preview handlers. Guest archive-time
+warnings do not qualify its clock. There was no public listener, real
+installation access, provider call, live grant or dispatch. This is not
+independent assurance or a change to the live-admission decision.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
