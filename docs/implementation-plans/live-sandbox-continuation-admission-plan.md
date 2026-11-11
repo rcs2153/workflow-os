@@ -2523,7 +2523,37 @@ receiver, read real material, or enable ingress, signing, or dispatch.
 Implementation is scoped to governed run `run-1794380558503574000-2`,
 approval `approval/run-1794380558503574000-2/implementation-approved`.
 Edits and validation are executor work outside preview handlers. Native
-exact-head evidence remains required before delivery.
+exact-head evidence was required before delivery.
+
+### Designated VM Receiver Descriptor Result
+
+[PR #909](https://github.com/rcs2153/workflow-os/pull/909) passed all ten
+exact-head checks and its native ARM64 rehearsal before merging at
+`7910d8b9c5cd17a873a4a37f2bb6732c829086cb`, tree
+`ae5e930f8df5c5267e08b3ef6d4033c410ac7fda`. The separate
+[exact-main ARM64 build](https://github.com/rcs2153/workflow-os/actions/runs/42979298619)
+passed the same native rehearsal. Artifact `13837165829` matched the GitHub
+ZIP digest, archive checksums, source, tree, lockfile and build metadata,
+and AArch64 executable format. The binary matched SHA-256
+`fa71f42ba4edb3cb36890cb8a7a13b71e600838020e483cc3019f6ce54d8d631`
+before transfer and after protected staging on the designated offline VM.
+
+The reviewed receiver rehearsal passed one matching case and ten denials:
+missing, extra, default mode, wrong role, alias, writable, path-only,
+wrong mode, wrong owner and wrong size. All eleven probe traces met the
+no-input-access and no-network bounds. No runtime state was initialized by
+the probes. Temporary files and upload staging were removed; the firewall
+digest was unchanged. The private transcript SHA-256 is
+`3de8225bfd8beb0cba3a69b23ff603777dc74c0fd4a83ca3f3d9361323dcd5d3`.
+
+Dogfood `dg/runtime-composition` run `run-1794381972171215000-2` closed with
+39 events, one proof-backed approval
+(`approval/run-1794381972171215000-2/composition-approved`), and no retries or
+escalations. Archive verification, transfer, native probes, and cleanup
+were executor work outside preview handlers. This is not material provenance,
+host-wide access-control assurance, a deployed receiver, or authorization for
+provider scope verification, ingress, signing, or dispatch. Independent
+operator review is not asserted.
 
 ## Delivery And Tests
 
