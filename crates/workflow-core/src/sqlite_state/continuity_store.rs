@@ -75,6 +75,15 @@ pub(super) fn observe_continuity_trusted_time() -> Result<TrustedTimeObservation
     SystemContinuityClock.observe()
 }
 
+// The local continuity clock supplies ordering, not qualified live time.
+pub(super) fn observe_live_authority_time() -> Result<TrustedTimeObservation, WorkflowOsError> {
+    Err(WorkflowOsError::new(
+        WorkflowOsErrorKind::Security,
+        "live_sandbox_continuation.trusted_time_unqualified",
+        "fresh live authority requires a qualified time source",
+    ))
+}
+
 #[derive(Clone)]
 pub(super) struct SqliteContinuityStore {
     backend: SqliteStateBackend,

@@ -19,7 +19,7 @@ use super::{
     LIVE_SANDBOX_CHECK_PROOF_SCHEMA_V12, LIVE_SANDBOX_TARGET_SCHEMA_V13,
 };
 use crate::authorized_execution_continuity_state::internal::{
-    AuthoritativeAttemptState, AuthoritativeWindowState,
+    AuthoritativeAttemptState, AuthoritativeWindowState, TrustedTimeObservation,
 };
 use crate::dispatch_reservation::{DispatchAdmissionProjectionEvent, DispatchReservationRequest};
 use crate::live_sandbox_continuation_authority::{
@@ -438,12 +438,38 @@ impl SqliteStateBackend {
         facts: LiveSandboxContinuationFacts<'_>,
         grant: &CapabilityGrant,
     ) -> Result<SpecContentHash, WorkflowOsError> {
+        self.issue_live_sandbox_grant_with_time(
+            facts,
+            grant,
+            super::continuity_store::observe_live_authority_time,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn issue_live_sandbox_grant_for_test(
+        &self,
+        facts: LiveSandboxContinuationFacts<'_>,
+        grant: &CapabilityGrant,
+    ) -> Result<SpecContentHash, WorkflowOsError> {
+        self.issue_live_sandbox_grant_with_time(
+            facts,
+            grant,
+            super::continuity_store::observe_continuity_trusted_time,
+        )
+    }
+
+    fn issue_live_sandbox_grant_with_time(
+        &self,
+        facts: LiveSandboxContinuationFacts<'_>,
+        grant: &CapabilityGrant,
+        observe: impl FnOnce() -> Result<TrustedTimeObservation, WorkflowOsError>,
+    ) -> Result<SpecContentHash, WorkflowOsError> {
         let mut connection = self.existing_connection()?;
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| denied())?;
         validate_live_store(&tx)?;
-        let observation = super::continuity_store::observe_continuity_trusted_time()?;
+        let observation = observe()?;
         let state = super::continuity_codec::load_snapshot(&tx)?;
         let window = state.windows.get(facts.window).ok_or_else(denied)?;
         let attempt = state.attempts.get(facts.attempt).ok_or_else(denied)?;

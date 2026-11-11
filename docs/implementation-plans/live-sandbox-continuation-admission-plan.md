@@ -2647,6 +2647,15 @@ establish an error bound, or qualify an unsynchronized guest. A one-time
 clock correction or a short period of monotonic progress is not acceptance.
 Do not change firewall or network isolation to make this VM appear qualified.
 
+The Core production entry points for issuing a live sandbox grant and opening
+a fresh installation exchange claim now reject unqualified time. The
+installation coordinator returns an exact historical disposition before
+applying this guard; the read-only recovery verifier does not consult the
+current clock. Synthetic tests exercise issuance and the exchange path
+with the existing continuity clock explicitly. That clock is not a fallback
+in production. The guard does not qualify a source, deploy an operator, or
+certify the downstream deadline checks for live use.
+
 Before any live admission, review the exact intended host and source as a
 separate governed phase. A qualified path must:
 
