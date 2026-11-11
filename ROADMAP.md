@@ -6589,6 +6589,11 @@ With the dogfood docs cleanup complete, [Self-Governance Dogfood Hardening Test 
 
 ## P0 Adoption: Agent Harness By Default
 
+The [external developer adoption review](docs/concepts/EXTERNAL_DEVELOPER_ADOPTION_REVIEW.md)
+records reported downstream dogfooding, the Python SDK contribution review
+criteria, and public connector wording boundaries. It does not authorize SDK
+implementation, new integrations, or a change to the Active Delivery Queue.
+
 User feedback showed that evaluators often begin by hand-writing YAML and manually testing the kernel. The stronger adoption path is to connect Codex, Claude Code, or another coding agent to the local kernel and instruct the agent to use Workflow OS as the governing layer.
 
 Follow-up dogfood testing showed a second adoption gap: Workflow OS can govern projects that are already Workflow OS projects, but a normal existing repository still needs a scaffold before `workflow-os validate` or `workflow-os run` has a project contract to load. Existing-repo onboarding is now a P0 adoption lane. The goal is to help a user turn an existing repository into a valid Workflow OS project, or later create a sidecar project that governs an external target repository, without asking the user to copy Workflow OS's internal dogfood workflows or hand-author all YAML from scratch. The first scaffold slice is implemented as `workflow-os init-repo-governance` and accepted in [Existing Repo Governance Scaffold Review](docs/concepts/EXISTING_REPO_GOVERNANCE_SCAFFOLD_REVIEW.md). The follow-on first-run ledger/report posture mode is implemented as `workflow-os first-run` in [First-Run Governed Ledger/Report Plan](docs/implementation-plans/first-run-governed-ledger-report-plan.md). That first-run path carries Workflow OS's default governance opinions immediately: bounded goal, context, missing-evidence disclosure, skipped checks, approval posture, side-effect disclosure, skipped work, risks, report section closure, and review-only workflow recommendations. It does not run workflows, create runtime state, inspect raw source contents, write artifacts, or auto-register workflows.
