@@ -52,6 +52,12 @@ fn launch_preflight_rejects_extra_options_and_does_not_initialize_state() {
     let endpoint = invoke("launch-peer-preflight", &["--named-endpoint"]);
     assert_eq!(endpoint.status.code(), Some(3));
     assert_eq!(endpoint.stdout, [] as [u8; 0]);
+    let receiver = invoke("launch-preflight", &["--receiver-descriptors"]);
+    assert_eq!(receiver.status.code(), Some(3));
+    assert_eq!(receiver.stdout, [] as [u8; 0]);
+    assert!(String::from_utf8_lossy(&receiver.stderr).contains("error[protected_launch."));
+    let receiver_as_peer = invoke("launch-peer-preflight", &["--receiver-descriptors"]);
+    assert_eq!(receiver_as_peer.status.code(), Some(2));
     assert!(!project.path().join("unexpected-state").exists());
     assert!(!project.path().join(".workflow-os").exists());
 }

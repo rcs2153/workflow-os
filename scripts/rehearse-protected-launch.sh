@@ -419,3 +419,104 @@ sudo -n find "$root" -name 'peer-*.trace' -type f -exec awk '
   END { exit bad }
 ' {} +
 printf 'protected_launch_peer_rehearsal: passed\n'
+
+sudo -n /usr/bin/unshare --net -- /usr/bin/python3 - "$root" "$shared_sha" "$strace" <<'PY'
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+root, digest, strace = sys.argv[1:]
+receiver = 61026
+gid = 61020
+inputs = Path(root, "receiver-fixtures")
+inputs.mkdir(mode=0o700)
+for name, size, owner, mode in [
+    ("first", 32, receiver, 0o400),
+    ("second", 32, receiver, 0o400),
+    ("bad-mode", 32, receiver, 0o440),
+    ("bad-owner", 32, 0, 0o400),
+    ("bad-size", 31, receiver, 0o400),
+]:
+    path = inputs / name
+    path.write_bytes(bytes(size))
+    os.chown(path, owner, gid)
+    path.chmod(mode)
+
+worker = r"""
+import fcntl
+import os
+import sys
+
+strace, trace, binary, manifest, digest, option, *sources = sys.argv[1:]
+sources = [int(fd) for fd in sources]
+copies = [fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, 20) for fd in sources]
+for fd in set(sources):
+    os.close(fd)
+for dest, fd in enumerate(copies, 3):
+    os.dup2(fd, dest, inheritable=True)
+    os.close(fd)
+args = [strace, '-qq', '-f', '-yy', '-s', '128',
+        '-e', 'trace=%network,read,readv,pread64,preadv,preadv2,write,writev,mmap,open,openat,openat2,clone,clone3,fork,vfork',
+        '-o', trace, binary, 'launch-preflight', '--manifest', manifest, '--sha256', digest]
+if option == 'receiver':
+    args.append('--receiver-descriptors')
+os.execv(strace, args)
+"""
+
+
+def probe(label, expected, files, uid=receiver, option="receiver"):
+    trace = Path(root, f"trace-{uid}", f"receiver-{label}.trace")
+    fds = [os.open(inputs / name, flags) for name, flags in files]
+    try:
+        result = subprocess.run(
+            ["/usr/bin/setpriv", f"--reuid={uid}", f"--regid={gid}", "--clear-groups",
+             "--no-new-privs", "--inh-caps=-all", "--ambient-caps=-all", "--bounding-set=-all",
+             "/usr/bin/python3", "-c", worker, strace, str(trace), f"{root}/workflow-os",
+             f"{root}/launch.json", digest, option, *map(str, fds)],
+            env={}, pass_fds=fds, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=35,
+        )
+    finally:
+        for fd in fds:
+            os.close(fd)
+    assert trace.is_file() and trace.stat().st_size, (label, result.stderr)
+    for line in trace.read_text().splitlines():
+        # fdinfo is kernel metadata; only the synthetic input directory denotes material.
+        assert str(inputs) not in line, (label, "input access syscall")
+        syscall = re.sub(r"^\d+\s+", "", line).split("(", 1)[0]
+        assert syscall in {"read", "readv", "pread64", "preadv", "preadv2", "write", "writev",
+                           "mmap", "open", "openat", "openat2"}, (label, syscall)
+    if expected is None:
+        assert result.returncode == 0 and not result.stderr, (label, result.stderr)
+        report = json.loads(result.stdout)
+        assert report.keys() == {"status", "launch", "descriptor_count"}
+        assert report["status"] == "receiver_descriptor_metadata_verified_no_dispatch"
+        assert report["descriptor_count"] == 2
+        launch = report["launch"]
+        assert launch["role"] == "receiver" and launch["uid"] == uid and launch["gid"] == gid
+        assert launch["manifest_sha256"] == digest and "custody" in launch["unverified"]
+    else:
+        assert result.returncode == 3 and not result.stdout, (label, result.returncode)
+        assert f"error[{expected}]:" in result.stderr and str(inputs) not in result.stderr, (
+            label, result.stderr,
+        )
+    print("protected_launch_receiver_case:", label, flush=True)
+
+
+valid = [("first", os.O_RDONLY), ("second", os.O_RDONLY)]
+invalid = "protected_launch.receiver.descriptors_unverified"
+probe("matching", None, valid)
+probe("missing", invalid, valid[:1])
+probe("extra", "protected_launch.descriptors.unverified", valid + valid[:1])
+probe("default-denies", "protected_launch.descriptors.unverified", valid, option="default")
+probe("wrong-role", "protected_launch.receiver.role_unsupported", valid, uid=61025)
+probe("alias", invalid, valid[:1] * 2)
+probe("writable", invalid, [("first", os.O_RDWR), valid[1]])
+probe("path-only", invalid, [("first", os.O_PATH), valid[1]])
+for name in ["bad-mode", "bad-owner", "bad-size"]:
+    probe(name, invalid, [(name, os.O_RDONLY), valid[1]])
+PY
+[[ ! -e "$scratch/.workflow-os" && ! -e "$root/.workflow-os" ]]
+printf 'protected_launch_receiver_rehearsal: passed\n'
