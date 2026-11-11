@@ -62,7 +62,7 @@ fn launch_preflight_rejects_extra_options_and_does_not_initialize_state() {
     assert_eq!(recovery_without_digest.status.code(), Some(2));
     let recovery = invoke("launch-recovery-preflight", &["--recovery-sha256", &digest]);
     assert_eq!(recovery.status.code(), Some(3));
-    assert!(recovery.stdout.is_empty());
+    assert_eq!(recovery.stdout, [] as [u8; 0]);
     let error = String::from_utf8_lossy(&recovery.stderr);
     assert!(error.contains("error[protected_launch."));
     assert!(!error.contains("not-a-manifest.json"));
