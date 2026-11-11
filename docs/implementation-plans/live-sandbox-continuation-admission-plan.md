@@ -2221,6 +2221,34 @@ denial matrix and deadlines are unchanged. Governed blocker
 `run-1794363566953618000-2` authorizes only this fixture correction; the
 positive Linux result is still pending exact-head CI.
 
+### Offline ARM64 Production CLI Evidence
+
+[PR #897](https://github.com/rcs2153/workflow-os/pull/897) merged at
+`a769339a` after all ten exact-head checks passed. The final Linux log showed
+`/opt` mode `777`, root-owned protected fixture directories, single-link
+manifest/executable files, and passing public success, denial and syscall
+checks. The shared Linux and macOS isolation rehearsals passed on the same
+tree. No intended-host execution or deployment followed from that merge.
+
+The separate [ARM64 CLI build](../../.github/workflows/protected-launch-arm64-bundle.yml)
+checks out the event's exact commit without retained checkout credentials,
+builds the production CLI with a pinned toolchain and locked dependencies,
+checks the ELF machine, and runs the public rehearsal on native ARM64 before
+upload. The packaged executable must retain the digest recorded before the
+rehearsal. The archive has only `workflow-os`, `build.json` and `SHA256SUMS`;
+its external checksum travels alongside it. Build evidence binds commit,
+tree, target, run/attempt, toolchain, lockfile digest and executable digest.
+This is distinct from the test-worker fixture artifact, not a release or an
+independently signed attestation.
+
+Verify the exact merged build, GitHub artifact digest, archive inventory and
+both checksum layers offline before any separately governed VM transfer.
+The launch manifest and service identity are intended-host inputs and are not
+included in the artifact. This work does not provision roles, open custody,
+contact a provider, mint a grant, dispatch, or change live admission.
+Implementation run `run-1794364595902626000-2` proof-approved this build scope;
+native ARM64 CI and artifact verification remain delivery requirements.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
