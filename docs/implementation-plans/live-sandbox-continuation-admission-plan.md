@@ -2495,6 +2495,36 @@ attestation. This result does not establish an installed operator, secret
 custody, reviewed ingress or trusted time, provider scope, or authorization
 for live dispatch. Independent operator review is not asserted.
 
+### Receiver Descriptor Metadata Preflight
+
+`launch-preflight --manifest <absolute-path> --sha256 <digest>
+--receiver-descriptors` is a Linux-only, no-dispatch check for the shared
+receiver launch. After the existing manifest, executable, isolation and role
+checks, it requires exactly two inherited inputs at slots 3 and 4. Each must
+be a distinct, receiver-owned, single-link 32-byte regular file with mode
+`0400` and a read-only descriptor (not a path-only handle). Aliases to
+standard streams are rejected, and CLI output is restricted to pipes or
+character devices. Existing launch modes still deny inherited inputs.
+
+The verifier inspects kernel-generated metadata and does not open, read,
+map or write either supplied file. It reports neither paths nor file
+identities. Success does not establish file origin, material identity,
+host ACL policy, continuous descriptor integrity, or deployment. It cannot
+be used as custody evidence or authority for a later provider action.
+
+The native Linux rehearsal uses disposable inputs and traces success and
+denials for missing, extra, aliased, writable, path-only, wrong-owner,
+wrong-mode and wrong-size descriptors and a wrong role. It also checks the
+default mode still denies inherited inputs. The trace boundary rejects
+access to the fixture files, provider transport, and child creation during
+inspection. No project state is initialized. These checks do not install a
+receiver, read real material, or enable ingress, signing, or dispatch.
+
+Implementation is scoped to governed run `run-1794380558503574000-2`,
+approval `approval/run-1794380558503574000-2/implementation-approved`.
+Edits and validation are executor work outside preview handlers. Native
+exact-head evidence remains required before delivery.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an

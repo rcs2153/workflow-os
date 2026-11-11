@@ -31,6 +31,36 @@ pub struct ProtectedLaunchPeerInspection {
     peer_gid: u32,
 }
 
+/// Verified receiver descriptor metadata, not material or custody provenance.
+#[derive(Debug, Serialize)]
+pub struct ProtectedReceiverDescriptorInspection {
+    status: &'static str,
+    launch: ProtectedLaunchInspection,
+    descriptor_count: u8,
+}
+
+/// Inspects the fixed Linux receiver descriptor set without reading its files.
+///
+/// # Errors
+/// Fails closed for an unverified launch or descriptor set, or outside Linux.
+pub fn inspect_protected_receiver_descriptors(
+    manifest: &Path,
+    expected: &SpecContentHash,
+) -> Result<ProtectedReceiverDescriptorInspection, WorkflowOsError> {
+    #[cfg(target_os = "linux")]
+    {
+        unix::inspect_receiver_descriptors(manifest, expected)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (manifest, expected);
+        Err(WorkflowOsError::invalid_state(
+            "protected_launch.platform.unsupported",
+            "protected-launch preflight requires Linux isolation evidence",
+        ))
+    }
+}
+
 /// Verifies the reviewed manifest, installed binary, and current Linux launch.
 ///
 /// This command cannot open custody, contact a provider or authorize dispatch.

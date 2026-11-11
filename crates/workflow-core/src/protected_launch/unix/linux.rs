@@ -1,4 +1,5 @@
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read as _;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::Path;
@@ -8,9 +9,12 @@ use serde::Deserialize;
 
 use super::{
     bounded_bytes, denied, executable_digest, linux_isolation, matches_identity,
-    only_standard_descriptors, protected_file, protected_parents, unprotected,
+    only_launch_descriptors, only_standard_descriptors, protected_file, protected_parents,
+    unprotected,
 };
-use crate::protected_launch::{ProtectedLaunchInspection, ProtectedLaunchPeerInspection};
+use crate::protected_launch::{
+    ProtectedLaunchInspection, ProtectedLaunchPeerInspection, ProtectedReceiverDescriptorInspection,
+};
 use crate::{SpecContentHash, WorkflowOsError};
 
 #[derive(Deserialize)]
@@ -149,7 +153,101 @@ pub(in crate::protected_launch) fn inspect(
     manifest: &Path,
     expected: &SpecContentHash,
 ) -> Result<ProtectedLaunchInspection, WorkflowOsError> {
-    verify_launch(manifest, expected).map(|(launch, _, _)| launch)
+    verify_launch(manifest, expected, only_standard_descriptors).map(|(launch, _, _)| launch)
+}
+
+const RECEIVER_DESCRIPTORS: [u32; 2] = [3, 4];
+
+pub(in crate::protected_launch) fn inspect_receiver_descriptors(
+    manifest: &Path,
+    expected: &SpecContentHash,
+) -> Result<ProtectedReceiverDescriptorInspection, WorkflowOsError> {
+    let inventory = || only_launch_descriptors(&RECEIVER_DESCRIPTORS);
+    let (launch, role, config) = verify_launch(manifest, expected, inventory)?;
+    if !matches!((role, config), (Role::Receiver, Manifest::Shared { .. })) {
+        return Err(denied(
+            "protected_launch.receiver.role_unsupported",
+            "receiver descriptor inspection requires a verified shared receiver launch",
+        ));
+    }
+    let invalid = || {
+        denied(
+            "protected_launch.receiver.descriptors_unverified",
+            "the inherited receiver descriptor set was not verified",
+        )
+    };
+    let [first, second] = RECEIVER_DESCRIPTORS.map(|fd| receiver_descriptor(fd, launch.uid));
+    let (first, second) = (first.ok_or_else(invalid)?, second.ok_or_else(invalid)?);
+    if first == second
+        || (0..=2).any(|fd| {
+            !fs::metadata(format!("/proc/self/fd/{fd}"))
+                .is_ok_and(|meta| ![first, second].contains(&(meta.dev(), meta.ino())))
+        })
+        || !inventory()
+    {
+        return Err(invalid());
+    }
+    Ok(ProtectedReceiverDescriptorInspection {
+        status: "receiver_descriptor_metadata_verified_no_dispatch",
+        launch,
+        descriptor_count: 2,
+    })
+}
+
+fn receiver_descriptor(fd: u32, uid: u32) -> Option<(u64, u64)> {
+    let path = format!("/proc/self/fd/{fd}");
+    let fingerprint = |meta: fs::Metadata| {
+        (meta.is_file()
+            && meta.uid() == uid
+            && meta.mode() & 0o7777 == 0o400
+            && meta.nlink() == 1
+            && meta.len() == 32)
+            .then_some((meta.dev(), meta.ino(), meta.ctime(), meta.ctime_nsec()))
+    };
+    let before = fingerprint(fs::metadata(&path).ok()?)?;
+    // Read kernel-generated fdinfo, never open or read through the supplied file.
+    let mut info = String::new();
+    File::open(format!("/proc/self/fdinfo/{fd}"))
+        .ok()?
+        .take(4097)
+        .read_to_string(&mut info)
+        .ok()?;
+    if info.len() > 4096 || !receiver_read_only_flags(&info) {
+        return None;
+    }
+    (fingerprint(fs::metadata(path).ok()?)? == before).then_some((before.0, before.1))
+}
+
+fn receiver_read_only_flags(info: &str) -> bool {
+    let mut fields = info.lines().filter_map(|line| line.strip_prefix("flags:"));
+    let Some(flags) = fields
+        .next()
+        .and_then(|value| i32::from_str_radix(value.trim(), 8).ok())
+    else {
+        return false;
+    };
+    fields.next().is_none() && flags >= 0 && flags & (nix::libc::O_ACCMODE | nix::libc::O_PATH) == 0
+}
+
+#[cfg(test)]
+#[test]
+fn descriptor_flags_require_exactly_one_read_only_field() {
+    assert!(receiver_read_only_flags("pos:\t0\nflags:\t0100000\n"));
+    assert!(!receiver_read_only_flags(&format!(
+        "flags:\t{:o}\n",
+        nix::libc::O_PATH
+    )));
+    for invalid in [
+        "pos:\t0\n",
+        "flags:\t0100001\n",
+        "flags:\t0100002\n",
+        "flags:\t0100003\n",
+        "flags:\t-100\n",
+        "flags:\t9\n",
+        "flags:\t0\nflags:\t0\n",
+    ] {
+        assert!(!receiver_read_only_flags(invalid), "{invalid:?}");
+    }
 }
 
 pub(in crate::protected_launch) fn inspect_peer(
@@ -157,7 +255,8 @@ pub(in crate::protected_launch) fn inspect_peer(
     expected: &SpecContentHash,
     named_endpoint: bool,
 ) -> Result<ProtectedLaunchPeerInspection, WorkflowOsError> {
-    let (launch, local_role, config) = verify_launch(manifest, expected)?;
+    let (launch, local_role, config) =
+        verify_launch(manifest, expected, only_standard_descriptors)?;
     let (Manifest::Shared { identities, .. }, peer_role) = (
         config,
         match local_role {
@@ -263,6 +362,7 @@ fn peer_role_unsupported() -> WorkflowOsError {
 fn verify_launch(
     manifest: &Path,
     expected: &SpecContentHash,
+    descriptors_verified: impl FnOnce() -> bool,
 ) -> Result<(ProtectedLaunchInspection, Role, Manifest), WorkflowOsError> {
     if nix::unistd::getuid().is_root() || nix::unistd::geteuid().is_root() {
         return Err(denied(
@@ -270,7 +370,7 @@ fn verify_launch(
             "root launch is not permitted",
         ));
     }
-    if !only_standard_descriptors() {
+    if !descriptors_verified() {
         return Err(denied(
             "protected_launch.descriptors.unverified",
             "inherited descriptors are not permitted",

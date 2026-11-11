@@ -27,6 +27,10 @@ fn size_invalid() -> WorkflowOsError {
 }
 
 pub(crate) fn only_standard_descriptors() -> bool {
+    only_launch_descriptors(&[])
+}
+
+fn only_launch_descriptors(allowed: &[u32]) -> bool {
     // Close the enumeration descriptor before checking for inherited ones.
     let descriptor_root = if cfg!(target_os = "linux") {
         "/proc/self/fd"
@@ -47,6 +51,7 @@ pub(crate) fn only_standard_descriptors() -> bool {
             .and_then(|name| name.parse::<u32>().ok())
             .is_some_and(|fd| {
                 fd <= 2
+                    || allowed.contains(&fd)
                     || fs::symlink_metadata(path).is_err_and(|error| {
                         error.kind() == ErrorKind::NotFound
                             || error.raw_os_error() == Some(nix::libc::EBADF)
@@ -227,4 +232,4 @@ mod tests {
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub(super) use linux::{inspect, inspect_peer};
+pub(super) use linux::{inspect, inspect_peer, inspect_receiver_descriptors};
