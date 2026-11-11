@@ -2391,6 +2391,44 @@ approval `approval/run-1794371708456251000-2/implementation-approved`.
 Edits and validation are executor work outside the kernel. Exact-head
 native Linux validation is required before accepting the peer proof.
 
+### Designated VM Core Signer Peer Result
+
+[PR #903](https://github.com/rcs2153/workflow-os/pull/903) merged at
+`1a0e68fd6377b597246279c6910d92eeb57dfebf`, reviewed tree
+`c3d62ca7b16d44f8194629bc2dfc1a612a80ce72`, after ten standard checks and
+the native ARM64 rehearsal passed. The
+[exact-main native build](https://github.com/rcs2153/workflow-os/actions/runs/42962722490)
+passed all eleven peer cases and uploaded artifact `13829832422`, ZIP
+SHA-256 `8b3ccf95f3bc3c1d3ad3a3b275e20f24e06ceb6096b554c8a63e33060fcc26a1`.
+Offline review `run-1794373230807919000-2` verified the exact build, archive
+inventory, checksum layers, lockfile, executable and native logs before
+transfer.
+
+On the designated offline ARM64 VM, the protected executable SHA-256
+`67c3ec6c622e70be54e1abfd29f50720e1b98a0f39c8c8c3994121b29586213d`
+matched the downloaded binary. The shared v2 manifest SHA-256 was
+`9c9a5a1865dfaddf2575cdedf840755ef58a8e47f1522afd0c01365ca7609939`.
+The reviewed peer test section ran under a temporary isolated network
+namespace. Both directions verified the opposite role; wrong peer or group,
+null/datagram/unconnected input, v1 and socket output were rejected. All
+eleven traces passed the payload, custody and child-process checks. No
+runtime state was created, the active firewall digest was unchanged, and
+temporary staging and probe processes were removed.
+
+Governed VM run `run-1794373404358344000-2` closed with 39 events and one
+proof-backed approval `approval/run-1794373404358344000-2/composition-approved`,
+without retry or escalation. Transfer, guest commands and verification were
+operator work outside kernel preview handlers. The retained probe log SHA-256
+is `64327e100d718e9cd739da86b2f1f5d26dbb87fc54b0f4ea179b352a46da648d`.
+
+This evidence is limited to connection-establishment credentials for the
+fixed pair under the reviewed launcher. It does not establish peer liveness,
+socket path ownership or ACLs, a deployed operator, custody, ingress, trusted
+time or provider scope. The next protected composition review must cover
+endpoint ownership and descriptor lifecycle before any separate custody
+scope. No provider access, grant, dispatch or independent acceptance occurred.
+Live admission remains denied.
+
 ## Delivery And Tests
 
 1. Implement live authority issuance and atomic reservation in Core with an
