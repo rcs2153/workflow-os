@@ -361,8 +361,10 @@ verified all five roles against one protected manifest and executable.
 Wrong GID, digest drift and a caller-selected v2 role failed closed; firewall
 and no-dispatch posture were unchanged.
 The [Core/signer peer preflight](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#core-signer-peer-preflight)
-adds a fixed local connection check without reading or writing a payload.
-Native rehearsal is required; it does not establish a running operator.
+merged in [PR #903](https://github.com/rcs2153/workflow-os/pull/903). Its
+[designated VM peer check](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#designated-vm-core-signer-peer-result)
+verified reciprocal connection credentials and all denials without payload
+exchange or custody. This is not evidence of a running operator.
 The operator composition is still test-only; this does not make a deployable
 operator available. The bounded implementation and rejection matrix are specified in the
 [post-rehearsal readiness review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#post-rehearsal-production-readiness-review).
