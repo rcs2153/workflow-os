@@ -1,10 +1,17 @@
 #![allow(clippy::expect_used)]
 
-use std::{fs, io::ErrorKind, os::unix::net::UnixStream, time::Duration};
+use std::{
+    fs,
+    io::{ErrorKind, Read},
+    os::unix::net::UnixStream,
+    time::Duration,
+};
 
 use super::custody::{tests::material, ReceiverCustody};
 use super::handoff::{ReceiptReceiver, ReceiptSender, ReceiverPeerPolicy};
-use super::tests::{fixture_observer_profile, github_header, provider_payload};
+use super::tests::{
+    capture_fixture_notification, fixture_observer_profile, github_header, provider_payload,
+};
 use super::*;
 use crate::authorized_execution_continuity_state::internal::{
     trusted_time_observation, ContinuityTrustedTimeEpochId, TrustedTimeSourceKind,
@@ -45,8 +52,7 @@ pub(crate) fn send_operator_receipt(
         .expect("receiver");
     let raw = serde_json::to_vec(&provider_payload(body)).expect("fixture payload");
     let mac = github_header(&[12; 32], &raw);
-    let packet = attester
-        .capture(raw.as_slice(), &mac, clock)
+    let packet = capture_fixture_notification(&attester, &raw, &mac, clock)
         .expect("synthetic creation receipt");
     let listener = bind_socket(&root.join("receiver-socket/receipt"));
     ReceiptSender::authenticate(accept_socket(&listener), &RECEIVER)
@@ -119,8 +125,7 @@ fn rehearsal_notification_receiver() {
     let raw = serde_json::to_vec(&provider_payload(&marked)).expect("original fixture bytes");
     let mac = github_header(&[12; 32], &raw);
     let mut observed = [time_at(20), time_at(21)].into_iter();
-    let packet = attester
-        .capture(raw.as_slice(), &mac, || observed.next())
+    let packet = capture_fixture_notification(&attester, &raw, &mac, || observed.next())
         .expect("authenticated receipt");
     sender.send(packet).expect("one bounded receipt");
 }
