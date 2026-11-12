@@ -3,8 +3,8 @@ use super::error;
 use workflow_core::{
     compute_approval_presentation_content_hash, ActorId, ApprovalPresentationChannel,
     ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
-    ApprovalPresentationRecordStore, ApprovalPresentationSensitivity, RedactionMetadata, Timestamp,
-    WorkflowOsError, WorkflowRun,
+    ApprovalPresentationRecordStore, ApprovalPresentationSensitivity, ApprovalRequest,
+    RedactionMetadata, Timestamp, WorkflowOsError, WorkflowRun,
 };
 
 pub(super) fn persist<B: ApprovalPresentationRecordStore>(
@@ -46,22 +46,8 @@ pub(super) fn persist<B: ApprovalPresentationRecordStore>(
     }
     .to_owned();
     let work_summary = if fixture { "Read the immutable repository metadata fixture through the existing Rust adapter." } else { "Invoke explicitly registered trusted Python callbacks through the Rust local executor after policy and approval checks." }.to_owned();
-    let step = approval.step_id.as_ref().map_or_else(
-        || "workflow-level approval".to_owned(),
-        |id| format!("step {id}"),
-    );
-    let approved_scope = format!(
-        "Workflow {} at version {}; {}. Only the immutable run and its declared inputs and policy.",
-        approval.workflow_id, approval.workflow_version, step
-    );
+    let (approved_scope, expected_touched_surfaces) = describe_scope(approval);
     let strict_non_goals = vec!["No new provider writes, automatic approvals, tool interception, sandboxing, or authenticated identity claims.".to_owned()];
-    let mut expected_touched_surfaces = vec![
-        "Local durable run state, audit history, and explicitly registered tool handlers."
-            .to_owned(),
-    ];
-    if let (Some(skill), Some(version)) = (&approval.skill_id, &approval.skill_version) {
-        expected_touched_surfaces.push(format!("Declared skill {skill} at version {version}."));
-    }
     let validation_expectations = vec![
         "Core must validate the current workflow and approval context before allowing execution."
             .to_owned(),
@@ -117,4 +103,23 @@ pub(super) fn persist<B: ApprovalPresentationRecordStore>(
     })?;
     backend.write_approval_presentation_record(&record)?;
     Ok(record)
+}
+
+fn describe_scope(approval: &ApprovalRequest) -> (String, Vec<String>) {
+    let step = approval.step_id.as_ref().map_or_else(
+        || "workflow-level approval".to_owned(),
+        |id| format!("step {id}"),
+    );
+    let scope = format!(
+        "Workflow {} at version {}; {}. Only the immutable run and its declared inputs and policy.",
+        approval.workflow_id, approval.workflow_version, step
+    );
+    let mut surfaces = vec![
+        "Local durable run state, audit history, and explicitly registered tool handlers."
+            .to_owned(),
+    ];
+    if let (Some(skill), Some(version)) = (&approval.skill_id, &approval.skill_version) {
+        surfaces.push(format!("Declared skill {skill} at version {version}."));
+    }
+    (scope, surfaces)
 }
