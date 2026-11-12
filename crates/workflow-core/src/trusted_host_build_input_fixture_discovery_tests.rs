@@ -250,6 +250,7 @@ fn workflow_os_workspace_snapshot_is_repeatable_and_honestly_incomplete() {
         "crates/workflow-cli/Cargo.toml",
         "crates/workflow-hosted/Cargo.toml",
         "crates/workflow-local-host/Cargo.toml",
+        "crates/workflow-python/Cargo.toml",
     ] {
         fixture.copy_from(&source_root, relative);
     }
@@ -280,13 +281,13 @@ fn workflow_os_workspace_snapshot_is_repeatable_and_honestly_incomplete() {
     assert_eq!(count(&first, BuildTimeInputKind::RepositoryContent), 1);
     assert_eq!(
         count(&first, BuildTimeInputKind::ManifestOrConfiguration),
-        6
+        7
     );
-    // The nix socket feature adds memoffset and its autocfg build dependency.
-    assert_eq!(count(&first, BuildTimeInputKind::DependencyPackage), 212);
+    // Includes the native Python binding's locked dependencies.
+    assert_eq!(count(&first, BuildTimeInputKind::DependencyPackage), 220);
     assert_eq!(count(&first, BuildTimeInputKind::BuildScript), 0);
     assert_eq!(count(&first, BuildTimeInputKind::ProceduralMacro), 0);
-    assert_eq!(first.result().total_count(), 219);
+    assert_eq!(first.result().total_count(), 228);
     assert!(first
         .result()
         .host_obligations()

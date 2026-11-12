@@ -46,19 +46,29 @@ pub(super) fn persist<B: ApprovalPresentationRecordStore>(
     }
     .to_owned();
     let work_summary = if fixture { "Read the immutable repository metadata fixture through the existing Rust adapter." } else { "Invoke explicitly registered trusted Python callbacks through the Rust local executor after policy and approval checks." }.to_owned();
-    let approved_scope = "Only the exact run, declared workflow, skills, policies, inputs, and authored approval boundary.".to_owned();
+    let step = approval.step_id.as_ref().map_or_else(
+        || "workflow-level approval".to_owned(),
+        |id| format!("step {id}"),
+    );
+    let approved_scope = format!(
+        "Workflow {} at version {}; {}. Only the immutable run and its declared inputs and policy.",
+        approval.workflow_id, approval.workflow_version, step
+    );
     let strict_non_goals = vec!["No new provider writes, automatic approvals, tool interception, sandboxing, or authenticated identity claims.".to_owned()];
-    let expected_touched_surfaces = vec![
+    let mut expected_touched_surfaces = vec![
         "Local durable run state, audit history, and explicitly registered tool handlers."
             .to_owned(),
     ];
+    if let (Some(skill), Some(version)) = (&approval.skill_id, &approval.skill_version) {
+        expected_touched_surfaces.push(format!("Declared skill {skill} at version {version}."));
+    }
     let validation_expectations = vec![
         "Core must validate the current workflow and approval context before allowing execution."
             .to_owned(),
     ];
     let why_now =
         "The declared workflow has reached its authored human approval checkpoint.".to_owned();
-    let next_action = "Present this complete record to the human, then call approve with this run and approval ID, actor, and reason.".to_owned();
+    let next_action = "Present this complete record to the human, then call approve with this run, approval and presentation ID, actor, and reason.".to_owned();
     let channel = ApprovalPresentationChannel::Custom("python-sdk".to_owned());
     let sensitivity = ApprovalPresentationSensitivity::Internal;
     let content_hash = compute_approval_presentation_content_hash(

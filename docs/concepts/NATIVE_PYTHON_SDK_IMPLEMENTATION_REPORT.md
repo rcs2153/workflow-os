@@ -6,7 +6,9 @@
 - New `packages/sdk-python` package, types, example agent, and integration tests.
 - New `.github/workflows/python-sdk.yml` and Python build artifact ignores.
 - SDK guide/index, changelog entry, scoped implementation plan, and this report.
-- No Rust Core or CLI implementation was changed.
+- No runtime or CLI implementation was changed. The Core build-input
+  discovery parser and workspace fixture cover the native SDK's manifest
+  and locked dependencies.
 
 ## Behavior Added or Changed
 
@@ -92,6 +94,27 @@ No PyPI publication, production wheel release, general live provider expansion,
 async callback execution, callback attestation, or forceful callback timeout is
 included. The agent is a deterministic fixture harness, not an LLM integration.
 No automatic persisted WorkReport is claimed. CI acceptance is pending review.
+
+## Review Corrections
+
+- Upgrade the native binding to PyO3 0.29.0 and refresh the lockfile for the
+  two RustSec advisories reported against the original pin.
+- Accept the SDK's explicit `cdylib` and `rlib` artifact declarations in the
+  strict workspace build-input parser without admitting unknown types.
+- Bind SDK approval to the explicit presentation ID returned by the human
+  surface. The record identifies the workflow version and gated step and
+  skill when present. Returning an ID is not evidence of UI viewing or
+  authenticated identity; the embedding application owns that interaction.
+- Validate without creating state and inspect an existing database read-only
+  without taking the SDK writer lock. SQLite's WAL coordination is unchanged.
+- Add regression tests for missing or mismatched presentation IDs before
+  callback entry and for non-mutating inspection and validation.
+
+The correction run is `run-1794441295441028000-2`, with delegated approval
+`approval/run-1794441295441028000-2/implementation-approved` and
+presentation `presentation/2ae3f86ed267d3a7`. This authorizes a draft update,
+not merge or publication. The validation results above describe the original
+submission; exact corrected-head CI is tracked on the PR.
 
 ## Governed Phase Evidence
 

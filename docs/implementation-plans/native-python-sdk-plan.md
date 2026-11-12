@@ -23,19 +23,22 @@ publication, merge, or release were authorized.
 - Add `workflow-python` as a separate workspace crate, with an optional
   `extension-module` feature used by maturin. Ordinary Rust test linking does
   not enable that feature.
-- Pin PyO3 0.27.2 for the CPython ABI boundary instead of hand-written unsafe
+- Pin PyO3 0.29.0 for the CPython ABI boundary instead of hand-written unsafe
   FFI. The binding crate denies unsafe code. Transitive FFI remains inside
   PyO3, not a claim of an unsafe-free dependency graph.
 - Use maturin 1.x for mixed Python/Rust packaging and an ABI3 CPython 3.10+
   wheel. The package targets the existing Unix Core; no Windows support claim.
 - Reuse existing serde/serde_json, fs2, and time dependencies for an internal
-  typed request/result boundary, nonblocking operation lock, and the existing
+  typed request/result boundary, nonblocking writer lock, and the existing
   fixture execution window. JSON is an in-memory FFI encoding, not a subprocess
   protocol or a second policy model.
 - Expose local callbacks and the exact GitHub repository-metadata fixture as
   distinct modes. Reject unsupported project-level governance in local mode.
 - Preserve existing approval semantics: local approval also resumes execution;
   fixture approval grants and a subsequent run performs the read.
+- Require the caller to return the exact durable presentation ID after human
+  review. Validation does not open runtime state and inspection opens it
+  read-only without taking the writer lock.
 - Treat callbacks as trusted, synchronous, registered-unattested code. Return
   callback outputs ephemerally, never represent them as persisted WorkReports.
 

@@ -50,6 +50,7 @@ run = kernel.run("example/github-repository-metadata-fixture")
 print(run.run_id, run.status, run.presentation)
 # Present the complete presentation to a human. Only after their decision:
 run = kernel.approve(run.run_id, run.approval_id,
+                     presentation_id=run.presentation["presentation_id"],
                      actor="user/reviewer", reason="Reviewed exact fixture read")
 run = kernel.run("example/github-repository-metadata-fixture", run_id=run.run_id)
 print(kernel.inspect(run.run_id).events)
@@ -80,6 +81,7 @@ kernel.register("local/rec", "v0", recommend)
 run = kernel.run("ex/review")  # Callback has not executed: approval is required.
 # Human-facing application displays run.presentation and obtains a decision.
 run = kernel.approve(run.run_id, run.approval_id,
+                     presentation_id=run.presentation["presentation_id"],
                      actor="user/reviewer", reason="Reviewed local recommendation")
 print(run.outputs)  # Callback runs inside Core's approved execution path.
 ```
@@ -103,9 +105,14 @@ state rather than redispatching interrupted arbitrary callbacks.
   `local/` skill and version. Duplicate registration is rejected. Callbacks
   receive and return `dict[str, str]`, matching Core's current skill boundary.
 - `validate()` uses the canonical Rust project validator.
+  It does not open or create runtime state. Inspection opens an existing
+  database read-only and does not take the SDK writer lock. SQLite may still
+  maintain its [WAL coordination files](https://sqlite.org/wal.html#read_only_databases).
 - `run(workflow_id, run_id=None)` starts or reopens the explicit declared work.
-- `approve(run_id, approval_id, actor=..., reason=..., deny=False)` records the
-  human decision through the proof-enforced Core API. A nonempty reason is required.
+- `approve(run_id, approval_id, presentation_id=..., actor=..., reason=..., deny=False)`
+  records the decision through Core using the exact presentation shown to the
+  reviewer. The application is responsible for actually presenting the record
+  and obtaining the human decision. A nonempty reason is required.
 - `inspect(run_id)` and `status(run_id)` return the durable projection.
 - `Run` exposes `run_id`, `status`, pending `approval_id`, full `presentation`,
   ordered `events`, `snapshot`, ephemeral callback `outputs`, and fixture

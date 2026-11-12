@@ -18,14 +18,15 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use workflow_core::{
     execute_with_immutable_run_bundle, load_project, validate_loaded_project, ActorId,
-    ApprovalDecisionKind, CorrelationId, EventLogStore, ImmutableRunBundleId,
-    ImmutableRunBundleSensitivity, ImmutableRunBundleStore, ImmutableRunBundleVersion,
-    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
-    LocalApprovalPresentationProof, LocalExecutionBeforeSkillInvocationCheckpointInputs,
-    LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
-    LocalExecutionWithImmutableRunBundleRequest, LocalExecutor, LocalSkillRegistry, SkillHandler,
-    SkillId, SkillInput, SkillOutput, SkillVersion, SqliteStateBackend, StateBackend, Timestamp,
-    WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunId, WorkflowRunStatus,
+    ApprovalDecisionKind, ApprovalPresentationId, CorrelationId, EventLogStore,
+    ImmutableRunBundleId, ImmutableRunBundleSensitivity, ImmutableRunBundleStore,
+    ImmutableRunBundleVersion, LocalApprovalDecisionRequest,
+    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
+    LocalExecutionRequest, LocalExecutionWithImmutableRunBundleRequest, LocalExecutor,
+    LocalSkillRegistry, SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion,
+    SqliteStateBackend, StateBackend, Timestamp, WorkflowId, WorkflowOsError, WorkflowRun,
+    WorkflowRunId, WorkflowRunStatus,
 };
 
 pyo3::create_exception!(
@@ -48,6 +49,7 @@ struct Request {
     workflow_id: Option<String>,
     run_id: Option<String>,
     approval_id: Option<String>,
+    presentation_id: Option<String>,
     actor: String,
     reason: Option<String>,
     #[serde(default)]
@@ -119,7 +121,9 @@ fn approval(
             reason: required(request.reason.as_deref(), "reason")?.to_owned(),
             correlation_id: CorrelationId::generate(),
         },
-        proof: LocalApprovalPresentationProof::ResolveByRunAndApproval,
+        proof: LocalApprovalPresentationProof::PresentationId(ApprovalPresentationId::new(
+            required(request.presentation_id.as_deref(), "presentation_id")?,
+        )?),
         max_presentation_age: Some(Duration::from_secs(24 * 60 * 60)),
     })
 }
@@ -187,7 +191,7 @@ fn bundle_inputs<S: ImmutableRunBundleStore>(
 }
 
 fn local(request: &Request, handlers: Handlers) -> Result<Value, WorkflowOsError> {
-    let backend = SqliteStateBackend::open(request.state_dir.join("local.sqlite3"))?;
+    let backend = open_state(request, "local.sqlite3")?;
     let outputs: Outputs = Rc::default();
     let mut registry = LocalSkillRegistry::new();
     let mut registered = BTreeSet::new();
@@ -252,6 +256,15 @@ fn local(request: &Request, handlers: Handlers) -> Result<Value, WorkflowOsError
     )
 }
 
+fn open_state(request: &Request, filename: &str) -> Result<SqliteStateBackend, WorkflowOsError> {
+    let path = request.state_dir.join(filename);
+    if matches!(request.operation, Operation::Inspect) {
+        SqliteStateBackend::open_read_only(path)
+    } else {
+        SqliteStateBackend::open(path)
+    }
+}
+
 fn dispatch(request: &Request, handlers: Handlers) -> Result<Value, WorkflowOsError> {
     // Reject unsupported governance modes rather than silently using a weaker executor.
     if !matches!(request.operation, Operation::Inspect) {
@@ -290,9 +303,21 @@ fn dispatch(request: &Request, handlers: Handlers) -> Result<Value, WorkflowOsEr
 fn request(payload: &str, handlers: Handlers) -> PyResult<String> {
     let input: Request = serde_json::from_str(payload)
         .map_err(|_| NativeError::new_err(("python.request.invalid", "Invalid SDK request")))?;
-    // Serialize SDK operations, including callbacks. Nonblocking acquisition rejects
-    // reentrant callbacks and concurrent SDK clients instead of deadlocking the GIL.
-    fs::create_dir_all(&input.state_dir).map_err(|_| {
+    let _lock = if matches!(input.operation, Operation::Run | Operation::Approve) {
+        Some(lock_writer(&input.state_dir)?)
+    } else {
+        None
+    };
+    let output = dispatch(&input, handlers)
+        .map_err(|err| NativeError::new_err((err.code().to_owned(), err.to_string())))?;
+    serde_json::to_string(&output).map_err(|_| {
+        NativeError::new_err(("python.result.invalid", "Cannot serialize kernel result"))
+    })
+}
+
+fn lock_writer(state_dir: &std::path::Path) -> PyResult<fs::File> {
+    // Nonblocking writer acquisition also rejects reentrant callback writes.
+    fs::create_dir_all(state_dir).map_err(|_| {
         NativeError::new_err((
             "python.state.unavailable",
             "Cannot open SDK state directory",
@@ -303,7 +328,7 @@ fn request(payload: &str, handlers: Handlers) -> PyResult<String> {
         .truncate(false)
         .read(true)
         .write(true)
-        .open(input.state_dir.join(".python-sdk.lock"))
+        .open(state_dir.join(".python-sdk.lock"))
         .map_err(|_| {
             NativeError::new_err(("python.state.unavailable", "Cannot open SDK state lock"))
         })?;
@@ -313,11 +338,7 @@ fn request(payload: &str, handlers: Handlers) -> PyResult<String> {
             "Another SDK operation is active; concurrent and reentrant calls are rejected",
         ))
     })?;
-    let output = dispatch(&input, handlers)
-        .map_err(|err| NativeError::new_err((err.code().to_owned(), err.to_string())))?;
-    serde_json::to_string(&output).map_err(|_| {
-        NativeError::new_err(("python.result.invalid", "Cannot serialize kernel result"))
-    })
+    Ok(lock)
 }
 
 #[pymodule]

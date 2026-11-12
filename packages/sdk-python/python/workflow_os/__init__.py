@@ -56,7 +56,7 @@ class WorkflowOS:
     Callbacks are trusted application code, not sandboxed. The local approval
     operation resumes callbacks immediately, following Core's existing contract.
     Fixture approval only grants; call run again to execute the fixture adapter.
-    One operation per state directory may run at a time through this SDK.
+    One writing operation per state directory may run at a time through this SDK.
     """
 
     def __init__(self, project_dir: str | Path, state_dir: str | Path, *,
@@ -98,15 +98,17 @@ class WorkflowOS:
         """Start a declared workflow or inspect/replay the same durable request."""
         return Run._from_native(self._request("run", workflow_id=workflow_id, run_id=run_id))
 
-    def approve(self, run_id: str, approval_id: str, *, actor: str,
+    def approve(self, run_id: str, approval_id: str, *, presentation_id: str, actor: str,
                 reason: str, deny: bool = False) -> Run:
         """Record an explicit human decision. Do not expose this as a model tool.
 
         Local mode also resumes execution; fixture mode requires another run call.
+        Pass the presentation ID from the exact record shown to the reviewer.
         Actor is an audit label, not authenticated identity.
         """
         return Run._from_native(self._request("approve", run_id=run_id,
-            approval_id=approval_id, actor=actor, reason=reason, deny=deny))
+            approval_id=approval_id, presentation_id=presentation_id,
+            actor=actor, reason=reason, deny=deny))
 
     def inspect(self, run_id: str) -> Run:
         """Read the canonical snapshot and ordered event history."""

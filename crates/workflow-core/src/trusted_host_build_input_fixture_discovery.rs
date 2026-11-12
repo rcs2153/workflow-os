@@ -622,6 +622,15 @@ struct CargoLib {
     name: Option<String>,
     #[serde(default)]
     proc_macro: bool,
+    #[serde(default, rename = "crate-type")]
+    _crate_types: Vec<CargoLibraryArtifact>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum CargoLibraryArtifact {
+    Cdylib,
+    Rlib,
 }
 
 #[derive(Deserialize)]

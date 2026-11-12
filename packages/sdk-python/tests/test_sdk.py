@@ -31,6 +31,7 @@ class KernelTests(unittest.TestCase):
 
     def decide(self, run, deny=False, client=None):
         return (client or self.client).approve(run.run_id, run.approval_id,
+            presentation_id=run.presentation["presentation_id"],
             actor="user/synthetic-test-reviewer", reason="Fixture-only integration test", deny=deny)
 
     def use_local(self, callback=None):
@@ -191,8 +192,49 @@ class KernelTests(unittest.TestCase):
         second = self.client.run(FIXTURE)
         with self.assertRaises(WorkflowError):
             self.client.approve(second.run_id, first.approval_id,
+                presentation_id=first.presentation["presentation_id"],
                 actor="user/synthetic-test-reviewer", reason="Mismatched approval test")
         self.assertEqual(self.client.inspect(second.run_id).events, second.events)
+
+    def test_local_approval_requires_the_presented_record_before_callback(self):
+        calls = []
+        def callback(values):
+            calls.append(values)
+            return {"summary": "ok"}
+        self.use_local(callback)
+        first = self.client.run("ex/review")
+        second = self.client.run("ex/review")
+        self.assertIn(first.presentation["step_id"], first.presentation["approved_scope"])
+        self.assertTrue(any("local/rec" in surface
+                            for surface in first.presentation["expected_touched_surfaces"]))
+        fields = dict(run_id=first.run_id, approval_id=first.approval_id,
+                      actor="user/synthetic-test-reviewer", reason="Reviewed local step")
+        with self.assertRaisesRegex(WorkflowError, "missing required presentation_id"):
+            self.client._request("approve", **fields)
+        with self.assertRaises(WorkflowError):
+            self.client.approve(**fields, presentation_id=second.presentation["presentation_id"])
+        self.assertEqual(self.client.inspect(first.run_id).events, first.events)
+        self.assertEqual(calls, [])
+        self.assertEqual(self.decide(first).status, "completed")
+        self.assertEqual(len(calls), 1)
+
+    def test_validation_and_missing_inspection_do_not_create_state(self):
+        for mode in ("github_repository_metadata_fixture", "local"):
+            if mode == "local":
+                self.use_local()
+            self.client.validate()
+            with self.assertRaises(WorkflowError):
+                self.client.inspect("unknown-run")
+            self.assertFalse(self.state.exists())
+
+    def test_inspection_does_not_recreate_writer_lock_or_change_state(self):
+        run = self.client.run(FIXTURE)
+        (self.state / ".python-sdk.lock").unlink()
+        database = self.state / "github-repository-metadata.sqlite3"
+        before = database.read_bytes()
+        self.assertEqual(self.client.inspect(run.run_id).events, run.events)
+        self.assertEqual(database.read_bytes(), before)
+        self.assertFalse((self.state / ".python-sdk.lock").exists())
 
     def test_separate_python_process_reopens_durable_state(self):
         run = self.client.run(FIXTURE)

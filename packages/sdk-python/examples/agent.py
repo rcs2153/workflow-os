@@ -45,6 +45,7 @@ def main():
             return
         reason = input("Reason: ").strip()
         result = kernel.approve(result.run_id, result.approval_id,
+            presentation_id=result.presentation["presentation_id"],
             actor="user/local-demo-reviewer", reason=reason, deny=answer == "deny")
     print(json.dumps(asdict(result), indent=2))
 

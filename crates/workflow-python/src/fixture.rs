@@ -1,19 +1,19 @@
 //! The existing fixture-only Core path, without CLI text or subprocesses.
 use super::{
-    approval, bundle_inputs, error, execution, presentation, required, Operation, Request,
+    approval, bundle_inputs, error, execution, open_state, presentation, required, Operation,
+    Request,
 };
 use serde_json::{json, Value};
 use std::fs;
 use workflow_core::{
     decide_github_repository_metadata_fixture_approval, execute_github_repository_metadata_fixture,
     load_project, EventLogStore, GitHubRepositoryMetadataFixtureExecutionRequest,
-    LocalExecutionWithImmutableRunBundleRequest, SqliteStateBackend, StateBackend, Timestamp,
-    WorkflowOsError, WorkflowRunId, WorkflowRunStatus,
+    LocalExecutionWithImmutableRunBundleRequest, StateBackend, Timestamp, WorkflowOsError,
+    WorkflowRunId, WorkflowRunStatus,
 };
 
 pub(super) fn dispatch(request: &Request) -> Result<Value, WorkflowOsError> {
-    let backend =
-        SqliteStateBackend::open(request.state_dir.join("github-repository-metadata.sqlite3"))?;
+    let backend = open_state(request, "github-repository-metadata.sqlite3")?;
     let mut posture = None;
     let run = match request.operation {
         Operation::Run => {
