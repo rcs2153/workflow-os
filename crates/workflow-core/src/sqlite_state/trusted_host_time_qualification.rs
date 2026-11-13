@@ -58,7 +58,7 @@ struct FixtureObservation {
 fn assess_read_only(
     input: impl Read,
     decision_tick: u64,
-    current_epoch: impl FnOnce() -> Option<String>,
+    mut current_epoch: impl FnMut() -> Option<String>,
     policy: Policy,
 ) -> Result<(u64, u64), Denial> {
     let mut bytes = Vec::new();
@@ -78,7 +78,7 @@ fn assess_read_only(
     {
         return Err(Denial::DomainMismatch);
     }
-    qualify_at_epoch(
+    let interval = qualify_at_epoch(
         Sample {
             domain: policy.domain,
             captured_tick: frame.captured_tick,
@@ -88,7 +88,12 @@ fn assess_read_only(
         decision_tick,
         policy,
         epoch.as_deref(),
-    )
+    )?;
+    match current_epoch().as_deref() {
+        None | Some("") => Err(Denial::EpochUnavailable),
+        current if current == epoch.as_deref() => Ok(interval),
+        _ => Err(Denial::EpochMismatch),
+    }
 }
 
 fn qualify(sample: Sample, decision_tick: u64, policy: Policy) -> Result<(u64, u64), Denial> {
@@ -365,6 +370,28 @@ fn refuses_an_epoch_that_changes_after_observation_capture() {
             assess_read_only(OBSERVATION, 40, || epoch.map(str::to_owned), POLICY),
             Err(expected)
         );
+    }
+}
+
+#[test]
+fn rechecks_current_epoch_before_returning_a_qualified_interval() {
+    for (second, expected) in [
+        (Some(DOMAIN.epoch), Ok((108, 116))),
+        (None, Err(Denial::EpochUnavailable)),
+        (Some(""), Err(Denial::EpochUnavailable)),
+        (Some("fixture/replacement"), Err(Denial::EpochMismatch)),
+    ] {
+        let mut epochs = [Some(DOMAIN.epoch), second].into_iter();
+        assert_eq!(
+            assess_read_only(
+                OBSERVATION,
+                40,
+                || epochs.next().flatten().map(str::to_owned),
+                POLICY
+            ),
+            expected,
+        );
+        assert_eq!(epochs.len(), 0);
     }
 }
 
