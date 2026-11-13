@@ -181,6 +181,28 @@ as a local container result.
 The hosted alpha does not claim high availability, point-in-time recovery,
 recovery objectives, connection pooling, or production disaster recovery.
 
+### Conflicting Creation History
+
+HTTP 409 with `postgres_state.hosted_creation.prefix_conflict` means the
+stored events do not match the expected creation prefix. This is not a
+transient contention error. The conflicting retry does not rewrite history,
+dispatch work, or create a report. It does not prove that earlier requests
+had no effects.
+
+1. Stop retries for the original request. Keep its run ID, correlation ID,
+   and the error code in the operator incident record. Do not create a new
+   run or change the idempotency key to bypass the conflict.
+2. Using the existing authorized client, read
+   `GET /api/v0alpha1/runs/{run_id}` and
+   `GET /api/v0alpha1/runs/{run_id}/events`. If the run projection cannot
+   load, inspect the recorded events directly through the events endpoint.
+   Follow `has_more` using the last event's sequence as `after_sequence`.
+3. Escalate the original request and observed history to the operator for
+   reconciliation. A missing report or incomplete history is not a
+   clean failure. Do not edit stored events, assume the operation never
+   ran, or use cancellation as a repair. These reads do not resolve the
+   conflict or authorize redispatch.
+
 ## Explicitly Deferred
 
 The current hosted surface still does not expose:
