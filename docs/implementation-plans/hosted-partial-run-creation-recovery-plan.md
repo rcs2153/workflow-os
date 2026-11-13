@@ -205,3 +205,31 @@ restore rehearsal, and a real PostgreSQL process restart followed by another
 full milestone. See the [acceptance rerun](../concepts/HOSTED_PARTIAL_RUN_CREATION_ACCEPTANCE_RERUN.md),
 [focused review](../concepts/HOSTED_ADMISSION_CONTENTION_BLOCKER_FIX_REVIEW.md),
 and [final acceptance](../concepts/HOSTED_PARTIAL_RUN_CREATION_FINAL_ACCEPTANCE.md).
+
+## 11. Remaining Pilot Gate: Conflicting Legacy Histories
+
+The accepted automatic repair applies only to semantically matching history.
+An operator disposition is a separate decision, not a missing creation event
+or a replacement for the original run. Until runtime persistence is accepted,
+record dispositions externally as described in the
+[operator runbook](../runtime/single-tenant-hosted-alpha.md#conflicting-creation-history).
+
+The runtime slice must bind an authenticated, authorized operator decision to
+the original run, immutable request and exact observed history revision.
+Persist the decision separately from workflow events, with decision time,
+reason, bounded evidence references and follow-up ownership. Accept exact
+decision replay without duplicating the record; reject stale history, changed
+decision content under the same decision identity and evidence from another
+run. If a later review supersedes a decision, retain the prior record and link
+the replacement. Missing or contradictory evidence must remain unresolved
+unless the operator explicitly abandons further investigation, which makes no
+claim about whether the effect happened.
+
+Prove the boundary through an authenticated hosted API and disposable
+PostgreSQL fixture seeded with conflicting legacy history. Check that an exact
+create retry returns the original conflict before and after disposition, that
+history remains readable without repairing its projection, and that recording
+and replaying the decision never changes events, approval, work items,
+invocations, effects or reports. Include authorization, stale revision,
+cross-run evidence, concurrent decision and restart tests. A completed
+disposition does not admit the pilot or authorize new work.
