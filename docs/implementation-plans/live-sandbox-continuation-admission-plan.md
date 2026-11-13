@@ -2788,6 +2788,32 @@ and independent review exist.
 Documentation run `run-1794554006235786000-2` used proof-backed approval.
 Source inspection and docs validation ran outside the preview handlers.
 
+#### Protected Observation CI Evidence
+
+[PR #930](https://github.com/rcs2153/workflow-os/pull/930) established
+protected-file custody and bounded reads in Linux CI. [PR #931](https://github.com/rcs2153/workflow-os/pull/931)
+then composed those checks with the synthetic time decision model. The
+[Linux custody step](https://github.com/rcs2153/workflow-os/actions/runs/43391036390/job/131770711980)
+passed on head `d8d9d6925b256b1b54f045a5d13a6c48edea8561`, merged at
+`7312828ef05254d0e677f11923bee80084d72aed`. An unprivileged process read
+one root-owned observation through the protected opener and bounded reader.
+The valid case succeeded; missing and changed generations, excess sample age,
+and an upper interval bound equal to expiry were rejected.
+
+The CI runner provisioned the file, and the decision inputs were synthetic.
+This verifies neither an operator-owned collector nor a generation outside
+guest snapshots. Before an intended-host rehearsal, the operator still needs
+to bind the exact collector and verifier to the same suspend-aware elapsed
+clock, demonstrate read-only access and external generation custody, and set
+measured age and uncertainty budgets against the shortest relevant deadline.
+Reference bootstrap and egress must be reviewed before any source contact.
+Keep the rehearsal no-dispatch and the production time guard closed; CI
+success does not replace independent review or qualify live admission.
+
+Documentation run `run-1794558153452117000-2` used proof-backed approval.
+GitHub evidence inspection, edits, and docs validation ran outside the
+preview handlers.
+
 #### Stopped Pilot Designation
 
 The maintainer confirmed a separate disposable Ubuntu ARM64 VM for the
