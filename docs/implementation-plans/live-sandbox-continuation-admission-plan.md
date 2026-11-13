@@ -2835,6 +2835,38 @@ isolation, trust bootstrap, time qualification, or permission to boot.
 Review `run-1794546429083038000-2` used proof-backed approval; version and
 source inspection, edits, and validation ran outside the preview handlers.
 
+#### QEMU Offline Launcher Candidate
+
+Evaluate stock QEMU before building a VZ launcher. The
+[QEMU invocation reference](https://www.qemu.org/docs/master/system/invocation.html)
+documents both the implicit user network when no network is specified and an
+explicit `stream` backend over an inherited socket descriptor. Pair that
+backend with one explicit virtio NIC, disable default devices, and keep
+automatic reconnect disabled. Do not use a user-network backend or expose a
+monitor that the guest or its executor can use to add devices. The QEMU
+socket is only transport; it does not enforce the allowlist.
+
+Neither `qemu-system-aarch64` nor `qemu-img` was found on the reviewer's
+command path. Before staging anything, pin and review the actual ARM64
+binary and firmware and confirm their supported options. The offline trial
+should give the operator-owned peer no uplink and connect it only to
+controlled synthetic endpoints. Bind the peer and policy to the same
+launch record and reject a missing or wrong peer before guest execution.
+Verify exactly one NIC and backend from the realized device configuration,
+not just from the intended arguments. Keep capture outside the guest. Show
+that an allowed exchange succeeds, denied traffic does not reach the
+synthetic sink, and filter loss does not reconnect or open a second path.
+Use a new disposable disk; do not reuse or change either Lima instance.
+
+Keep packaging, launch, and filter custody with the pilot operator, outside
+Workflow OS. If an existing filter cannot meet the startup and failure
+requirements, use a separately reviewed dedicated host rather than writing
+a filter or hypervisor for the kernel. The review does not stage or run
+QEMU, qualify time, or authorize a network-enabled rehearsal.
+
+Review `run-1794547234946274000-2` used proof-backed approval. Documentation
+and path checks, edits, and validation ran outside the preview handlers.
+
 Review run `run-1794392678677450000-2` closed with 39 events, one
 proof-backed approval
 `approval/run-1794392678677450000-2/review-scope-approved`, and no retries
