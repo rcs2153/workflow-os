@@ -58,7 +58,7 @@ struct FixtureObservation {
 fn assess_read_only(
     input: impl Read,
     decision_tick: u64,
-    current_epoch: impl FnOnce() -> Option<&'static str>,
+    current_epoch: impl FnOnce() -> Option<String>,
     policy: Policy,
 ) -> Result<(u64, u64), Denial> {
     let mut bytes = Vec::new();
@@ -87,7 +87,7 @@ fn assess_read_only(
         },
         decision_tick,
         policy,
-        epoch,
+        epoch.as_deref(),
     )
 }
 
@@ -216,24 +216,45 @@ fn protected_observation_qualifies_only_inside_its_epoch_and_window() {
     use crate::protected_launch::unix::{bounded_bytes, protected_file};
 
     assert!(!nix::unistd::geteuid().is_root());
-    let path = std::path::PathBuf::from(
+    let root = std::path::PathBuf::from(
         std::env::var_os("WORKFLOW_OS_CLOCK_CUSTODY_FIXTURE").expect("fixture directory"),
-    )
-    .join("observation.json");
+    );
+    let path = root.join("observation.json");
+    let read_generation = |name| {
+        let file = protected_file(&root.join(name), 0o444, true).ok()?;
+        let value = String::from_utf8(bounded_bytes(file, 64).ok()?).ok()?;
+        (!value.is_empty()
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-')))
+        .then_some(value)
+    };
 
-    for (tick, epoch, policy, expected) in [
-        (40, Some(DOMAIN.epoch), POLICY, Ok((108, 116))),
-        (40, None, POLICY, Err(Denial::EpochUnavailable)),
+    for (tick, generation, policy, expected) in [
+        (40, "generation", POLICY, Ok((108, 116))),
         (
             40,
-            Some("fixture/post-restore"),
+            "missing-generation",
             POLICY,
-            Err(Denial::EpochMismatch),
+            Err(Denial::EpochUnavailable),
         ),
-        (41, Some(DOMAIN.epoch), POLICY, Err(Denial::StaleSample)),
+        (40, "changed-generation", POLICY, Err(Denial::EpochMismatch)),
         (
             40,
-            Some(DOMAIN.epoch),
+            "malformed-generation",
+            POLICY,
+            Err(Denial::EpochUnavailable),
+        ),
+        (
+            40,
+            "writable-generation",
+            POLICY,
+            Err(Denial::EpochUnavailable),
+        ),
+        (41, "generation", POLICY, Err(Denial::StaleSample)),
+        (
+            40,
+            "generation",
             Policy {
                 expires_ms: 116,
                 ..POLICY
@@ -245,8 +266,14 @@ fn protected_observation_qualifies_only_inside_its_epoch_and_window() {
         let bytes =
             bounded_bytes(file, u64::from(MAX_OBSERVATION_BYTES)).expect("bounded observation");
         assert_eq!(
-            assess_read_only(bytes.as_slice(), tick, || epoch, policy),
-            expected
+            assess_read_only(
+                bytes.as_slice(),
+                tick,
+                || read_generation(generation),
+                policy
+            ),
+            expected,
+            "{generation} at {tick}",
         );
     }
 }
@@ -278,7 +305,7 @@ fn reads_a_fixture_without_changing_its_bytes() -> std::io::Result<()> {
     drop(writer);
     let reader = std::fs::File::open(&fixture.0)?;
     assert_eq!(
-        assess_read_only(reader, 40, || Some(DOMAIN.epoch), POLICY),
+        assess_read_only(reader, 40, || Some(DOMAIN.epoch.to_owned()), POLICY),
         Ok((108, 116))
     );
     assert_eq!(std::fs::read(&fixture.0)?, OBSERVATION);
@@ -316,7 +343,7 @@ fn refuses_an_epoch_that_changes_after_observation_capture() {
         (Some("fixture/post-restore"), Denial::EpochMismatch),
     ] {
         assert_eq!(
-            assess_read_only(OBSERVATION, 40, || epoch, POLICY),
+            assess_read_only(OBSERVATION, 40, || epoch.map(str::to_owned), POLICY),
             Err(expected)
         );
     }
