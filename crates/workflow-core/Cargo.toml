@@ -34,7 +34,8 @@ toml = { version = "=0.8.23", default-features = false, features = ["parse"] }
 ureq = "2.12"
 url = "2.5"
 
-[dev-dependencies]
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+nix = { version = "0.30", features = ["time"] }
 
 [lints]
 workspace = true

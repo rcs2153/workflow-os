@@ -164,6 +164,52 @@ const OBSERVATION: &[u8] = br#"{"source":"fixture/source","provenance":"fixture/
 
 #[cfg(target_os = "linux")]
 #[test]
+#[ignore = "invoked by the parent clock bracket test"]
+fn linux_boottime_child() -> Result<(), nix::errno::Errno> {
+    let tick = nix::time::clock_gettime(nix::time::ClockId::CLOCK_BOOTTIME)?;
+    println!("boottime={}:{}", tick.tv_sec(), tick.tv_nsec());
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::expect_used)]
+fn linux_boottime_is_comparable_across_processes() -> Result<(), Box<dyn std::error::Error>> {
+    use nix::time::{clock_gettime, ClockId};
+
+    let mut command = std::process::Command::new(std::env::current_exe()?);
+    command.args([
+        "--ignored",
+        "--exact",
+        concat!(module_path!(), "::linux_boottime_child")
+            .split_once("::")
+            .expect("crate-qualified test module")
+            .1,
+        "--nocapture",
+    ]);
+    let before = clock_gettime(ClockId::CLOCK_BOOTTIME)?;
+    let output = command.output()?;
+    let after = clock_gettime(ClockId::CLOCK_BOOTTIME)?;
+    let stdout = std::str::from_utf8(&output.stdout)?;
+    assert!(output.status.success(), "{stdout}");
+    let mut samples = stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix("boottime="));
+    let (seconds, nanos) = samples
+        .next()
+        .expect("child clock sample")
+        .split_once(':')
+        .expect("seconds and nanoseconds");
+    assert!(samples.next().is_none());
+    let sample = (seconds.parse()?, nanos.parse()?);
+    assert!((0..1_000_000_000).contains(&sample.1));
+    assert!((before.tv_sec(), before.tv_nsec()) <= sample);
+    assert!(sample <= (after.tv_sec(), after.tv_nsec()));
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 #[ignore = "requires a root-owned observation and an unprivileged Linux reader"]
 #[allow(clippy::expect_used)]
 fn protected_observation_qualifies_only_inside_its_epoch_and_window() {
