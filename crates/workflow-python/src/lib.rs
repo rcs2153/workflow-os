@@ -341,8 +341,8 @@ fn lock_writer(state_dir: &std::path::Path) -> PyResult<fs::File> {
     Ok(lock)
 }
 
-#[pymodule]
-fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+#[pymodule(name = "_native")]
+fn native_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("NativeError", module.py().get_type::<NativeError>())?;
     module.add_function(wrap_pyfunction!(request, module)?)?;
     Ok(())
