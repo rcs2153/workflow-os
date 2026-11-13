@@ -210,8 +210,8 @@ and [final acceptance](../concepts/HOSTED_PARTIAL_RUN_CREATION_FINAL_ACCEPTANCE.
 
 The accepted automatic repair applies only to semantically matching history.
 An operator disposition is a separate decision, not a missing creation event
-or a replacement for the original run. Until runtime persistence is accepted,
-record dispositions externally as described in the
+or a replacement for the original run. For cases the operator API does
+not classify, record dispositions externally as described in the
 [operator runbook](../runtime/single-tenant-hosted-alpha.md#conflicting-creation-history).
 
 For a typed, grammar-valid history that diverges from the expected creation
@@ -249,3 +249,12 @@ and replaying the decision never changes events, approval, work items,
 invocations, effects or reports. Include authorization, stale revision,
 cross-run evidence, concurrent decision and restart tests. A completed
 disposition does not admit the pilot or authorize new work.
+
+[PostgreSQL CI for PR #955](https://github.com/rcs2153/workflow-os/actions/runs/43446700911/job/131957907789)
+verified the grammar-valid fixture through the operator API, including
+restart, unchanged execution records and visibility of stale evidence.
+The grammar-invalid inspection fixture is distinct: reading its events does
+not create a conflict observation or permit a disposition. Reproduce the
+reported policy decision with a missing scheduling event and verify that
+it can be dispositioned without repairing or advancing the run before
+requesting independent pilot acceptance.

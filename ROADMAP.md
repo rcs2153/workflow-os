@@ -180,11 +180,16 @@ pilot admission. Subsequent exact-head CI established two bounded proofs:
 
 Conflicting legacy histories remain an open pilot gate. The
 [operator runbook](docs/runtime/single-tenant-hosted-alpha.md#conflicting-creation-history)
-documents the fail-closed HTTP 409 and read-only inspection, not resolution.
-The next hosted pilot phase must establish an explicit operator disposition
-that preserves the original history and never infers that missing completion
-evidence authorizes another dispatch. Neither CI proof grants pilot admission
-or constitutes independent assurance.
+now documents an opt-in API for non-executing disposition of grammar-valid
+creation conflicts. [PostgreSQL CI for PR #955](https://github.com/rcs2153/workflow-os/actions/runs/43446700911/job/131957907789)
+verified separate operator access, exact replay and retrieval after
+restart, unchanged execution records, and visibility of stale evidence.
+Typed events from a grammar-invalid history can be inspected, but the
+original legacy case with a policy decision and missing scheduling event
+still lacks end-to-end disposition proof. The next hosted pilot phase must
+reproduce that case and verify a durable disposition without repair or
+redispatch. Independent acceptance remains open. These results do not
+authorize pilot admission or establish that a provider effect occurred.
 See the [contention recurrence report](docs/concepts/HOSTED_ADMISSION_CONTENTION_RECURRENCE_REPORT.md).
 
 The ordered queue is:
