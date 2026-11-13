@@ -2788,6 +2788,33 @@ and independent review exist.
 Documentation run `run-1794554006235786000-2` used proof-backed approval.
 Source inspection and docs validation ran outside the preview handlers.
 
+#### Deadline Measurement Checklist
+
+Record the exact applicable values for each decision. These source limits
+are ceilings, not candidate settings or evidence that the pilot meets them:
+
+| Decision | Bounds to record |
+| --- | --- |
+| Open and grant | The [opening check](../../crates/workflow-core/src/sqlite_state/live_sandbox_grant_store.rs#L932) limits the remaining window to five minutes and does not let it outlive a present approval expiry. Record actual approval, grant and window bounds and each required check's freshness deadline. |
+| Sign and exchange | The [writer signer](../../crates/workflow-core/src/provider_comment_transport/installation_signer_channel.rs#L283) caps the assertion at two minutes and at the request deadline. Record the actual assertion and access expiry. Signer-side UTC is sampled separately; Core qualification alone does not qualify it. |
+| Dispatch | The [final send check](../../crates/workflow-core/src/sqlite_state/dispatch_reservation_store.rs#L1684) requires time strictly before the stored creation deadline. Use the remaining time at dispatch, not the duration at opening; recheck after waits and callbacks. |
+| Reconcile | The [observation journal](../../crates/workflow-core/src/sqlite_state/dispatch_reservation_store/observation_journal.rs#L77) caps fresh read observation at 30 seconds and clamps the reader signer deadline to the earlier reviewed deadline. Historical lookup of durable evidence must not depend on a fresh send right. |
+
+For each no-dispatch trial, record the reference uncertainty, collector
+and verifier clock domain and generation, collection and handoff elapsed
+time, projection error, observation age, and remaining time at the
+decision point. Compare the full projected interval with the tightest
+applicable bound. Include a positive control and explicit denials for a
+missing bound, stale sample, generation change, and an interval whose
+upper bound reaches expiry. Treat measurements as observations, not
+worst-case guarantees; retain the configured limits and the basis for
+each separately. Do not fill missing values from the synthetic fixture.
+The pilot stays unqualified until exact values and host evidence are
+reviewed. This does not admit a boot, source access, or live authority.
+
+Source audit `run-1794562112877601000-2` and documentation run
+`run-1794562170543608000-2` used proof-backed approvals.
+
 #### Protected Observation CI Evidence
 
 [PR #930](https://github.com/rcs2153/workflow-os/pull/930) established
