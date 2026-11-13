@@ -162,7 +162,8 @@ async function rehearseExactCreateRecovery(stage) {
       ? "hosted.run_create.reservation_retry_exhausted"
       : "executor.hosted_no_write.creation_prefix_retry_exhausted");
     if (reservation) {
-      assert.equal(sql("SELECT last_value FROM public.wos_create_fault_attempts"), "8");
+      // Each of the eight reservation calls uses three backend transaction attempts.
+      assert.equal(sql("SELECT last_value FROM public.wos_create_fault_attempts"), "24");
       assert.equal(sql(`SELECT count(*) FROM workflow_os.idempotency WHERE key='${body.idempotency_key}'`), "0");
     }
     assert.equal(sql(`SELECT count(*) FROM workflow_os.events WHERE run_id='${runId}'`), "0");
