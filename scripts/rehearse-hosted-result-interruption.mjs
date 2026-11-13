@@ -57,6 +57,80 @@ async function finished(child) {
   await Promise.race([once(child, "exit"), sleep(45000, undefined, { ref: false }).then(() => { throw new Error("worker did not exit"); })]);
 }
 
+async function rehearseConcurrentCreates() {
+  const count = 25;
+  const retryable = new Set(["immutable_bundle", "creation_prefix", "dispatch", "rehydrate"]
+    .map(stage => `executor.hosted_no_write.${stage}_retry_exhausted`));
+  const bodies = Array.from({ length: count }, (_, index) => ({
+    run_id: `run-http-contention-${index}`, workflow_id: "hosted/recovery-proof",
+    bundle_id: `bundle-http-contention-${index}`, bundle_version: "v1",
+    created_at: new Date().toISOString(), correlation_id: `correlation-http-contention-${index}`,
+    idempotency_key: `http-contention-create-${index}`, sensitivity: "internal", redaction_required: true,
+  }));
+  let retries = 0;
+  async function create(body) {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const response = await request("/api/v0alpha1/runs", body);
+      const result = await response.json();
+      if (response.ok) {
+        assert.equal(response.status, 201);
+        assert.equal(result.snapshot.identity.run_id, body.run_id);
+        return result;
+      }
+      assert.equal(response.status, 409, `unexpected create status: ${result.code}`);
+      assert(retryable.has(result.code), `non-retryable conflict: ${result.code}`);
+      assert(attempt < 3, `exact retries exhausted for ${body.run_id}`);
+      retries++;
+      await sleep(100 * (attempt + 1) + 10 * Number(body.run_id.split("-").at(-1)));
+    }
+  }
+  const submitted = await Promise.allSettled(bodies.map(create));
+  for (const result of submitted) {
+    if (result.status === "rejected") throw result.reason;
+  }
+  for (let index = 0; index < count; index++) {
+    const worker = start(["--worker-once"], "service/http-contention", "wos-http-contention");
+    await finished(worker);
+    assert.equal(worker.exitCode, 0, outputs.get(worker));
+    assert.match(outputs.get(worker), /worker_outcome: completed/);
+  }
+  const reports = new Set();
+  for (const body of bodies) {
+    const path = `/api/v0alpha1/runs/${body.run_id}`;
+    const events = async () => {
+      const response = await request(`${path}/events?limit=50`);
+      assert.equal(response.status, 200);
+      const page = await response.json();
+      assert.equal(page.has_more, false);
+      return page.events;
+    };
+    const before = await events();
+    for (const kind of ["RunCreated", "SkillInvocationStarted", "SkillInvocationSucceeded", "RunCompleted"]) {
+      assert.equal(before.filter(event => event.kind.kind === kind).length, 1, `${body.run_id}: ${kind}`);
+    }
+    const report = async () => {
+      const response = await request(`${path}/report`);
+      assert.equal(response.status, 200);
+      const metadata = await response.json();
+      assert.equal(metadata.run_id, body.run_id);
+      assert(metadata.report_id);
+      return metadata;
+    };
+    const original = await report();
+    reports.add(original.report_id);
+    const replay = await create(body);
+    assert.equal(replay.snapshot.status, "completed");
+    assert.deepEqual(await events(), before);
+    assert.deepEqual(await report(), original);
+  }
+  assert.equal(reports.size, count);
+  const idle = start(["--worker-once"], "service/http-contention", "wos-http-contention");
+  await finished(idle);
+  assert.equal(idle.exitCode, 0, outputs.get(idle));
+  assert.match(outputs.get(idle), /worker_outcome: idle/);
+  console.log(`hosted_http_contention: ${count} distinct terminal runs and reports; ${retries} exact retries; no queued work remained`);
+}
+
 assert.equal(sql("SELECT count(*) FROM pg_namespace WHERE nspname='workflow_os'"), "0", "database must not contain Workflow OS state");
 try {
   const api = start([], "user/result-rehearsal", "wos-result-api");
@@ -111,6 +185,7 @@ try {
   assert.equal(sql("SELECT count(*) FROM workflow_os.events"), before);
   assert.equal(sql("SELECT count(*) FROM workflow_os.events WHERE payload::jsonb #>> '{kind,kind}' IN ('SkillInvocationSucceeded','RunCompleted')"), "0");
   console.log("hosted_result_interruption: passed; durable reconciliation, no repeated invocation or fabricated report");
+  await rehearseConcurrentCreates();
 } finally {
   for (const child of [...children]) {
     child.kill("SIGKILL");
