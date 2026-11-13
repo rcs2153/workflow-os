@@ -2818,6 +2818,35 @@ authorized by this contract.
 
 Planning run `run-1794563053625520000-2` used proof-backed approval.
 
+##### Offline Process-Replacement Result
+
+A local scratch harness used separate operator and simulated guest stores.
+Every operator command and verification ran in a new process. The verifier
+accepted the initial observation and policy with the current generation,
+denied a missing handoff after retirement, and denied replay of the same
+guest pair under the replacement generation. A fresh operator process
+refused to reactivate the retired generation, and a new observation
+matched the new generation. Hashes of the original observation and policy
+were unchanged.
+
+| Evidence | SHA-256 |
+| --- | --- |
+| Scratch harness | `51139546d1283487cde7fa7eefb975a6dec596e4eee9adf1eb698a97b10438d7` |
+| Final operator journal | `6feb05b63759ca98e956508adecbc4839df19a87889d6cf44672c250fd5ed786` |
+| Original guest observation | `50943f474b8f5890c51394032047cc9baf703b115131bff003e754c79b3b4cd2` |
+| Original guest policy | `cff76365d487d864578f2b71bc288f87a7422c05dad9d9e89b50c13360f8b78a` |
+
+Process replacement was real; guest rollback was represented by replaying
+unchanged files. The same-user fixture used a synthetic launch binding and
+does not establish privilege separation, authenticated handoff, behavior
+under concurrent lifecycle transitions, or custody across VM restore.
+Those gaps still bar fresh authority. No VM or provider was contacted.
+
+Implementation run `run-1794563945418206000-2` closed with 39 events, one
+proof-backed approval, and no retries or escalations. The fixture ran
+outside the preview handlers. Documentation run
+`run-1794564024990387000-2` rechecked the evidence hashes.
+
 #### Deadline Measurement Checklist
 
 Record the exact applicable values for each decision. These source limits
