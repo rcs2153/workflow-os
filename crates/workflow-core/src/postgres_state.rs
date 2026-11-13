@@ -819,6 +819,22 @@ impl PostgresStateBackend {
         })
     }
 
+    /// Reads typed events for inspection without requiring valid run grammar.
+    ///
+    /// Use runtime event reads for execution and recovery decisions. This
+    /// evidence-only read never updates a snapshot or accepts a transition.
+    ///
+    /// # Errors
+    ///
+    /// Rejects misbound, undecodable or unavailable durable rows.
+    pub fn inspect_hosted_event_history(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<WorkflowRunEvent>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        read_events_client(&mut client, run_id)
+    }
+
     /// Initializes or verifies the managed schema under a migration advisory lock.
     ///
     /// # Errors
@@ -2860,8 +2876,7 @@ impl EventLogStore for PostgresStateBackend {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<WorkflowRunEvent>, WorkflowOsError> {
-        let mut client = self.connections.connect()?;
-        read_events_client(&mut client, run_id)
+        validate_event_grammar(self.inspect_hosted_event_history(run_id)?)
     }
 }
 
@@ -4895,7 +4910,7 @@ fn read_events_tx(
             &[&run_id.as_str()],
         )
         .map_err(|error| database_error("event_read", &error))?;
-    decode_event_rows(rows, run_id)
+    validate_event_grammar(decode_event_rows(rows, run_id)?)
 }
 
 fn read_events_client(
@@ -4951,6 +4966,12 @@ fn decode_event_rows(
         }
         events.push(event);
     }
+    Ok(events)
+}
+
+fn validate_event_grammar(
+    events: Vec<WorkflowRunEvent>,
+) -> Result<Vec<WorkflowRunEvent>, WorkflowOsError> {
     if !events.is_empty() {
         WorkflowRun::rehydrate(&events)?;
     }

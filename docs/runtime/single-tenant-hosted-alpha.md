@@ -215,6 +215,9 @@ had no effects.
    `history_revision` for the full observed event stream. If it changes
    between pages, restart inspection from the first page. A matching
    revision does not validate the history or grant authority.
+   The inspection route can show typed events that fail run grammar; normal
+   run reads still reject them. Inspection also rejects rows that cannot be
+   decoded or whose stored identity does not match the event.
 3. Escalate the original request and observed history to the operator for
    reconciliation. A missing report or incomplete history is not a
    clean failure. Do not edit stored events, assume the operation never

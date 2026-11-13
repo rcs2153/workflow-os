@@ -1718,7 +1718,7 @@ async fn read_run_events(
     let backend = state.backend.clone();
     let (events, history_revision) = tokio::task::spawn_blocking(move || {
         require_legacy_unbound_resource(&backend, HostedProjectResourceKind::Run, run_id.as_str())?;
-        let events = backend.read_events(&run_id)?;
+        let events = backend.inspect_hosted_event_history(&run_id)?;
         let history_revision = if events.is_empty() {
             None
         } else {
