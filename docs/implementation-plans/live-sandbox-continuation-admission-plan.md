@@ -2802,6 +2802,39 @@ were executor work outside the preview handlers. No VM was booted or changed,
 no time source or provider was contacted by the pilot, and no live access
 was authorized.
 
+#### Preboot Boundary Selection
+
+The installed `limactl` reports `2.3.0`. In the
+[pinned VZ driver](https://github.com/lima-vm/lima/blob/v2.3.0/pkg/driver/vz/vm_darwin.go),
+`attachNetwork` constructs a primary user-network attachment before adding
+any unmanaged socket, managed network, or VZ NAT attachment. Selecting
+`user-v2` changes the primary user network; it does not remove it. Do not
+treat a second, filtered interface as containment for the first one or
+change global Lima settings to work around this. Keep both instances intact.
+
+For a local follow-up, evaluate an externally owned launcher with exactly
+one [socket-backed VZ network attachment](https://developer.apple.com/documentation/virtualization/vzfilehandlenetworkdeviceattachment)
+to a separately controlled filter. The filter must own the only route to an
+uplink; the guest must not also receive NAT, bridged networking, host mounts,
+or an unrestricted host relay. Prefer an existing supported tool if its
+effective configuration can prove these properties. Do not add a network
+stack or hypervisor fork to Workflow OS. If a supported local path cannot
+prove isolation, stop and seek separate approval for a dedicated host with
+an independently managed network boundary.
+
+The first acceptance test is offline against synthetic endpoints. Bind the
+launcher, image and effective attachment configuration to the reviewed
+policy. Require refusal to start with a missing or mismatched policy or an
+extra attachment; capture traffic from before boot and verify both an
+explicitly allowed synthetic exchange and blocked non-allowlisted traffic.
+Repeat across guest restart and loss of the filter: no fallback route and
+no further egress after loss. Do not add public time-source rules until the
+offline result is reviewed. This is a candidate architecture, not deployed
+isolation, trust bootstrap, time qualification, or permission to boot.
+
+Review `run-1794546429083038000-2` used proof-backed approval; version and
+source inspection, edits, and validation ran outside the preview handlers.
+
 Review run `run-1794392678677450000-2` closed with 39 events, one
 proof-backed approval
 `approval/run-1794392678677450000-2/review-scope-approved`, and no retries
