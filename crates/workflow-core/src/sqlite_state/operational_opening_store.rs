@@ -4958,6 +4958,35 @@ mod tests {
                 .expect("recover exact historical disposition"),
             expected
         );
+        let mut invalid_time = time.clone();
+        invalid_time.epoch_id = ContinuityTrustedTimeEpochId::new("epoch/replacement-fixture")
+            .expect("replacement epoch");
+        super::super::continuity_store::persist_trusted_time(&connection, &invalid_time)
+            .expect("inject an invalid stored epoch in disposable state");
+        assert_eq!(
+            inspect()
+                .expect_err("invalid epoch must not be inspected")
+                .code(),
+            "state.sqlite.schema.recovery_required"
+        );
+        assert_eq!(
+            reopened
+                .recover_installation_comment(
+                    &operation,
+                    action,
+                    |_| panic!("invalid epoch cannot require a new notification"),
+                    |_| panic!("invalid epoch cannot require a provider read"),
+                )
+                .expect_err("invalid epoch must not permit replay")
+                .code(),
+            "state.sqlite.schema.recovery_required"
+        );
+        super::super::continuity_store::persist_trusted_time(&connection, &time)
+            .expect("restore the valid epoch in disposable state");
+        assert_eq!(
+            inspect().expect("inspect after fixture restoration"),
+            expected
+        );
         backend
             .revoke_live_sandbox_grant(admission.grant_id)
             .expect("revoke consumed grant");
