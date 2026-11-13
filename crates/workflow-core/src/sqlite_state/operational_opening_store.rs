@@ -4958,27 +4958,33 @@ mod tests {
                 .expect("recover exact historical disposition"),
             expected
         );
-        time.epoch_id = ContinuityTrustedTimeEpochId::new("epoch/replacement-fixture")
+        let mut invalid_time = time.clone();
+        invalid_time.epoch_id = ContinuityTrustedTimeEpochId::new("epoch/replacement-fixture")
             .expect("replacement epoch");
-        super::super::continuity_store::persist_trusted_time(&connection, &time)
-            .expect("rotate the epoch in disposable state");
+        super::super::continuity_store::persist_trusted_time(&connection, &invalid_time)
+            .expect("inject an invalid stored epoch in disposable state");
         assert_eq!(
-            super::super::continuity_codec::load_snapshot(&connection)
-                .expect("read rotated state")
-                .trusted_time
-                .epoch_id,
-            time.epoch_id
+            inspect()
+                .expect_err("invalid epoch must not be inspected")
+                .code(),
+            "state.sqlite.schema.recovery_required"
         );
-        assert_eq!(inspect().expect("inspect after epoch rotation"), expected);
         assert_eq!(
             reopened
                 .recover_installation_comment(
                     &operation,
                     action,
-                    |_| panic!("epoch rotation cannot require a new notification"),
-                    |_| panic!("epoch rotation cannot require a provider read"),
+                    |_| panic!("invalid epoch cannot require a new notification"),
+                    |_| panic!("invalid epoch cannot require a provider read"),
                 )
-                .expect("recover after epoch rotation"),
+                .expect_err("invalid epoch must not permit replay")
+                .code(),
+            "state.sqlite.schema.recovery_required"
+        );
+        super::super::continuity_store::persist_trusted_time(&connection, &time)
+            .expect("restore the valid epoch in disposable state");
+        assert_eq!(
+            inspect().expect("inspect after fixture restoration"),
             expected
         );
         backend
