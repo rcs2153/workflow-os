@@ -217,6 +217,29 @@ had no effects.
    ran, or use cancellation as a repair. These reads do not resolve the
    conflict or authorize redispatch.
 
+Record the disposition in the access-controlled operator incident system,
+not in the run event stream:
+
+- Bind the record to the original run and correlation IDs, the protected
+  reference to the original request, and the inspected history (last
+  sequence and event ID plus a protected evidence reference). Record the
+  operator, decision time, reason, and follow-up owner. Do not copy request
+  bodies, credentials, or raw event payloads into incident summaries.
+- Record **investigation required** if the effect is unknown, the history
+  cannot be read completely, or evidence disagrees. Keep the incident open
+  and record what evidence would resolve it.
+- Record **effect confirmed; do not repeat** only with independently
+  attributable evidence bound to the exact original operation and target.
+  Do not turn that incident decision into a kernel completion or WorkReport.
+- Record **abandoned without redispatch** if the operator elects to stop
+  pursuing the original request. This administrative closure is not evidence
+  that nothing happened; preserve any uncertainty in the incident record.
+
+If the history changes during review, revisit the disposition against the
+new evidence. None of these decisions authorize another invocation, change
+the API's conflict response, or repair the run. The hosted API does not
+currently persist or enforce these incident dispositions.
+
 ## Explicitly Deferred
 
 The current hosted surface still does not expose:
