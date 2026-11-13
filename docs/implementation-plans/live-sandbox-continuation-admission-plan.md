@@ -2734,6 +2734,22 @@ lifetime. Reject the candidate if it cannot meet those budgets with isolation
 intact. These are acceptance criteria, not an implementation decision or a
 claim of trusted time. The current guard stays closed.
 
+#### Offline Time Qualification Model
+
+The private `trusted_host_time_qualification` test module projects a
+synthetic UTC interval using elapsed ticks and a fixed projection error
+budget. It requires a matching source, provenance, and epoch, rejects
+future or stale samples and malformed or excessively wide intervals, and
+requires the full projected interval inside an inclusive start and exclusive
+expiry. Tests cover an age advance representing suspend and uncertainty
+that reaches or crosses expiry.
+
+This is a test-only model, not a live observation producer. Its inputs and
+budgets are fixtures, not operator defaults. It does not derive uncertainty,
+read a suspend-aware clock, authenticate the epoch, or change the existing
+live-authority denial. Protected-host measurement and review remain required.
+Implementation run `run-1794550521545388000-2` used proof-backed approval.
+
 #### Stopped Pilot Designation
 
 The maintainer confirmed a separate disposable Ubuntu ARM64 VM for the
