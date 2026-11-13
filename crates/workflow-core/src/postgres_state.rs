@@ -730,12 +730,18 @@ pub struct HostedConflictDispositionRecord {
 }
 
 #[derive(Deserialize, Serialize)]
-struct HostedCreationConflictObservation {
-    run_id: WorkflowRunId,
-    observed_history_revision: SpecContentHash,
-    expected_prefix_revision: SpecContentHash,
-    first_mismatched_sequence: crate::EventSequenceNumber,
-    observed_at: crate::Timestamp,
+/// Core-observed mismatch between a durable history and its expected creation prefix.
+pub struct HostedCreationConflictObservation {
+    /// Original run.
+    pub run_id: WorkflowRunId,
+    /// Full observed event history revision.
+    pub observed_history_revision: SpecContentHash,
+    /// Expected creation prefix revision.
+    pub expected_prefix_revision: SpecContentHash,
+    /// Sequence of the first divergent event.
+    pub first_mismatched_sequence: crate::EventSequenceNumber,
+    /// Database observation time.
+    pub observed_at: crate::Timestamp,
 }
 
 impl PostgresHostedCreationPrefixReconciliation {
@@ -785,6 +791,53 @@ impl PostgresStateBackend {
         Self { connections }
     }
 
+    /// Lists conflict observations for one exact history revision.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on storage errors, mismatched records, or more than 100 matches.
+    pub fn read_hosted_creation_conflicts(
+        &self,
+        run_id: &WorkflowRunId,
+        revision: &SpecContentHash,
+    ) -> Result<Vec<HostedCreationConflictObservation>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        let rows = client
+            .query(
+                "SELECT key2, payload FROM workflow_os.records
+              WHERE family = $1 AND key1 = $2 AND key2 LIKE $3
+              ORDER BY key2 LIMIT 101",
+                &[
+                    &HOSTED_CREATION_CONFLICT_FAMILY,
+                    &run_id.as_str(),
+                    &format!("{revision}/%"),
+                ],
+            )
+            .map_err(|error| database_error("hosted_creation_conflict_read", &error))?;
+        if rows.len() > 100 {
+            return Err(state_error(
+                "hosted.conflict_observation.limit",
+                "too many matching conflict observations",
+            ));
+        }
+        rows.into_iter()
+            .map(|row| {
+                let key: String = row.get(0);
+                let record: HostedCreationConflictObservation = decode(row.get::<_, &str>(1))?;
+                if &record.run_id != run_id
+                    || &record.observed_history_revision != revision
+                    || key != format!("{revision}/{}", record.expected_prefix_revision)
+                {
+                    return Err(state_error(
+                        "postgres_state.hosted_creation.conflict_observation_mismatch",
+                        "stored hosted creation conflict observation does not match its identity",
+                    ));
+                }
+                Ok(record)
+            })
+            .collect()
+    }
+
     /// Records or exactly replays an authorized operator's non-executing decision.
     ///
     /// This is a trusted storage API, not an authentication boundary.
@@ -814,6 +867,14 @@ impl PostgresStateBackend {
         let mut client = self.connections.connect()?;
         serializable(&mut client, |tx| {
             lock_hosted_creation_run(tx, &request.run_id)?;
+            if read_project_resource_binding_tx(tx, HostedProjectResourceKind::Run, run_id, true)?
+                .is_some()
+            {
+                return Err(state_error(
+                    "hosted.resource.not_found",
+                    "hosted resource was not found",
+                ));
+            }
             if let Some(prior) = read_record_tx::<HostedConflictDispositionRecord>(
                 tx,
                 HOSTED_CONFLICT_DISPOSITION_FAMILY,

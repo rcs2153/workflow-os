@@ -244,8 +244,24 @@ not in the run event stream:
 
 If the history changes during review, revisit the disposition against the
 new evidence. None of these decisions authorize another invocation, change
-the API's conflict response, or repair the run. The hosted API does not
-currently persist or enforce these incident dispositions.
+the API's conflict response, or repair the run.
+
+The single-tenant server optionally exposes
+`GET /api/v0alpha1/operator/runs/{run_id}/creation-conflicts` and `POST` to
+the same path. Both operator settings must be present:
+`WORKFLOW_OS_HOSTED_CONFLICT_OPERATOR_TOKEN` and
+`WORKFLOW_OS_HOSTED_CONFLICT_OPERATOR_ACTOR`. The deployment must supply a
+separate credential and actor; ordinary API access does not grant operator
+access. Keep the endpoint on the existing bounded evaluation trust domain.
+
+Compare the GET observation to the revision of all inspected event pages.
+For POST, send the same run ID, a stable decision ID, observed and expected
+revisions from the observation, the current predecessor if superseding,
+disposition, bounded reason, owner and same-run event IDs. Only
+`investigation_required` and `abandoned_without_redispatch` are accepted.
+An exact retry returns the recorded decision, not a guarantee it is still
+current. A stale new decision or changed replay fails closed. The API does
+not confirm effects or replace external incident follow-up.
 
 ## Explicitly Deferred
 

@@ -66,12 +66,23 @@ async fn run() -> Result<(), WorkflowOsError> {
             WorkflowOsError::validation("hosted.bind.invalid", "hosted bind address is invalid")
         })?;
     let auth = HostedApiAuth::new(HostedAuthTokenDigest::from_token(&token)?, actor);
-    let state = HostedApiState::new(
+    let mut state = HostedApiState::new(
         backend,
         auth,
         format!("workflow-os-hosted/{}", env!("CARGO_PKG_VERSION")),
         required_env("WORKFLOW_OS_HOSTED_PROJECT_ROOT")?,
     )?;
+    let operator_token = env::var_os("WORKFLOW_OS_HOSTED_CONFLICT_OPERATOR_TOKEN");
+    let operator_actor = env::var_os("WORKFLOW_OS_HOSTED_CONFLICT_OPERATOR_ACTOR");
+    if operator_token.is_some() || operator_actor.is_some() {
+        let operator = HostedApiAuth::new(
+            HostedAuthTokenDigest::from_token(&required_env(
+                "WORKFLOW_OS_HOSTED_CONFLICT_OPERATOR_TOKEN",
+            )?)?,
+            ActorId::new(required_env("WORKFLOW_OS_HOSTED_CONFLICT_OPERATOR_ACTOR")?)?,
+        );
+        state = state.with_conflict_operator(operator)?;
+    }
     let listener = tokio::net::TcpListener::bind(bind).await.map_err(|_| {
         WorkflowOsError::invalid_state(
             "hosted.listener.unavailable",
