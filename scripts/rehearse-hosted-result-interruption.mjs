@@ -131,6 +131,60 @@ async function rehearseConcurrentCreates() {
   console.log(`hosted_http_contention: ${count} distinct terminal runs and reports; ${retries} exact retries; no queued work remained`);
 }
 
+async function rehearseExactCreateRecovery() {
+  const body = {
+    run_id: "run-http-prefix-recovery", workflow_id: "hosted/recovery-proof",
+    bundle_id: "bundle-http-prefix-recovery", bundle_version: "v1",
+    created_at: new Date().toISOString(), correlation_id: "correlation-http-prefix-recovery",
+    idempotency_key: "http-prefix-recovery-create", sensitivity: "internal", redaction_required: true,
+  };
+  const path = `/api/v0alpha1/runs/${body.run_id}`;
+  sql(`CREATE FUNCTION public.wos_prefix_fault() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.run_id = 'run-http-prefix-recovery' THEN
+        RAISE EXCEPTION 'fixture serialization failure' USING ERRCODE = '40001';
+      END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER wos_prefix_fault BEFORE INSERT ON workflow_os.events
+      FOR EACH ROW EXECUTE FUNCTION public.wos_prefix_fault();`);
+  try {
+    const rejected = await request("/api/v0alpha1/runs", body);
+    assert.equal(rejected.status, 409);
+    assert.equal((await rejected.json()).code, "executor.hosted_no_write.creation_prefix_retry_exhausted");
+    assert.equal(sql("SELECT count(*) FROM workflow_os.events WHERE run_id='run-http-prefix-recovery'"), "0");
+    assert.equal((await request(`${path}/report`)).status, 404);
+  } finally {
+    sql("DROP TRIGGER wos_prefix_fault ON workflow_os.events; DROP FUNCTION public.wos_prefix_fault()");
+  }
+  const recovered = await request("/api/v0alpha1/runs", body);
+  assert.equal(recovered.status, 201);
+  assert.equal((await recovered.json()).snapshot.identity.run_id, body.run_id);
+  const worker = start(["--worker-once"], "service/http-prefix-recovery", "wos-http-prefix-recovery");
+  await finished(worker);
+  assert.equal(worker.exitCode, 0, outputs.get(worker));
+  assert.match(outputs.get(worker), /worker_outcome: completed/);
+  async function read(suffix) {
+    const response = await request(path + suffix);
+    assert.equal(response.status, 200);
+    return response.json();
+  }
+  const events = await read("/events?limit=50");
+  assert.equal(events.has_more, false);
+  for (const kind of ["RunCreated", "SkillInvocationStarted", "SkillInvocationSucceeded", "RunCompleted"]) {
+    assert.equal(events.events.filter(event => event.kind.kind === kind).length, 1, kind);
+  }
+  const report = await read("/report");
+  assert.equal(report.run_id, body.run_id);
+  assert(report.report_id);
+  const replay = await request("/api/v0alpha1/runs", body);
+  assert(replay.ok);
+  assert.equal((await replay.json()).snapshot.status, "completed");
+  assert.deepEqual(await read("/events?limit=50"), events);
+  assert.deepEqual(await read("/report"), report);
+  console.log("hosted_http_exact_retry: passed; 409 prefix exhaustion recovered once");
+}
+
 assert.equal(sql("SELECT count(*) FROM pg_namespace WHERE nspname='workflow_os'"), "0", "database must not contain Workflow OS state");
 try {
   const api = start([], "user/result-rehearsal", "wos-result-api");
@@ -186,6 +240,7 @@ try {
   assert.equal(sql("SELECT count(*) FROM workflow_os.events WHERE payload::jsonb #>> '{kind,kind}' IN ('SkillInvocationSucceeded','RunCompleted')"), "0");
   console.log("hosted_result_interruption: passed; durable reconciliation, no repeated invocation or fabricated report");
   await rehearseConcurrentCreates();
+  await rehearseExactCreateRecovery();
 } finally {
   for (const child of [...children]) {
     child.kill("SIGKILL");
