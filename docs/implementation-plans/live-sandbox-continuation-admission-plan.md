@@ -2734,6 +2734,33 @@ lifetime. Reject the candidate if it cannot meet those budgets with isolation
 intact. These are acceptance criteria, not an implementation decision or a
 claim of trusted time. The current guard stays closed.
 
+#### Stopped Pilot Designation
+
+The maintainer confirmed a separate disposable Ubuntu ARM64 VM for the
+no-dispatch rehearsal. The delegated maintainer created `wos-time-pilot`
+under Lima, with the pinned Ubuntu 24.04 ARM64 image SHA-256
+`50e24e1fb79e89116e939d90aa7738f7af48c442fa1bc2510131e0b39c50348e`.
+The plain, no-mount configuration SHA-256 is
+`ee51fd65f0b46efbe3e62639f27b3d5658fcf2af1867f734849601d153c4ab5c`.
+The instance was verified stopped, and the existing offline VM's
+configuration digest was unchanged. A no-mount profile is not proof of
+restricted egress.
+
+The candidate is [Netnod public NTS](https://www.netnod.se/nts/network-time-security)
+at `nts.netnod.se`, for testing authenticated synchronization only. The
+public endpoint's accuracy is not assumed to meet a production deadline
+budget. Before the first network-enabled run, review bootstrap and trust
+roots, permitted NTS and name-resolution paths, the read-only observation
+interface, and how to prove provider egress is unavailable. Before time
+qualification, the independent reviewer, epoch evidence, and numeric
+deadline budgets must also be recorded. This designation does not close
+any of those gates.
+
+Setup run `run-1794544520824885000-2` closed with one proof-backed approval,
+39 events, and no retries or escalations. Lima creation and configuration
+verification were executor work outside preview handlers. No boot, source
+contact, provider access, or live admission occurred.
+
 Review run `run-1794392678677450000-2` closed with 39 events, one
 proof-backed approval
 `approval/run-1794392678677450000-2/review-scope-approved`, and no retries
