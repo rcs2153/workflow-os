@@ -20,6 +20,7 @@ compose_project="${WORKFLOW_OS_HOSTED_COMPOSE_PROJECT:-workflow-os-hosted-recove
 run_suffix="${WORKFLOW_OS_HOSTED_REHEARSAL_RUN_SUFFIX:-$(date -u +%Y%m%d%H%M%S)}"
 run_id="run-hosted-recovery-${run_suffix}"
 one_shot_run_id="run-hosted-worker-once-${run_suffix}"
+replacement_run_id="run-hosted-worker-replacement-${run_suffix}"
 bundle_id="bundle-hosted-recovery-${run_suffix}"
 bundle_version="v1"
 correlation_id="correlation-hosted-recovery-${run_suffix}"
@@ -116,6 +117,91 @@ run_worker_once() {
       "${actual_output}" >&2
     return 1
   fi
+}
+
+rehearsal_sql() {
+  compose exec -T postgres psql --no-psqlrc --set ON_ERROR_STOP=1 \
+    --username workflow_os_bootstrap --dbname workflow_os "$@"
+}
+
+rehearse_supervised_worker_replacement() {
+  local container restart_count started_at replacement_started_at attempts=0
+  local request run_path events report
+  container="$(compose ps --quiet worker)"
+  restart_count="$(docker inspect --format '{{.RestartCount}}' "${container}")"
+  started_at="$(docker inspect --format '{{.State.StartedAt}}' "${container}")"
+  run_path="${api_base_url}/api/v0alpha1/runs/${replacement_run_id}"
+  request="$(jq --compact-output --arg run_id "${replacement_run_id}" \
+    '.run_id = $run_id | .correlation_id = $run_id | .idempotency_key = $run_id' \
+    <<<"${run_request}")"
+
+  # Let Docker's restart policy arm before inducing an unsuccessful exit.
+  sleep 10
+  rehearsal_sql --set "fixture_run_id=${replacement_run_id}" <<'SQL'
+CREATE SEQUENCE public.wos_rehearsal_worker_failure;
+GRANT USAGE ON SEQUENCE public.wos_rehearsal_worker_failure TO workflow_os_runtime;
+CREATE FUNCTION public.wos_rehearsal_fail_first_claim() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  -- nextval survives the claim transaction's rollback.
+  IF nextval('public.wos_rehearsal_worker_failure') = 1 THEN
+    RAISE EXCEPTION 'hosted rehearsal first claim failure' USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER wos_rehearsal_fail_first_claim BEFORE UPDATE ON workflow_os.records
+  FOR EACH ROW WHEN (
+    OLD.family = 'hosted_work_item' AND OLD.key2 = 'queued' AND NEW.key2 = 'running'
+    AND OLD.payload::jsonb ->> 'run_id' = :'fixture_run_id'
+  ) EXECUTE FUNCTION public.wos_rehearsal_fail_first_claim();
+SQL
+  authenticated_post_json "${api_base_url}/api/v0alpha1/runs" "${request}" >"${response_file}"
+  jq --exit-status --arg run_id "${replacement_run_id}" \
+    '.snapshot.identity.run_id == $run_id' "${response_file}" >/dev/null
+  while :; do
+    replacement_started_at="$(docker inspect --format '{{if .State.Running}}{{.State.StartedAt}}{{end}}' "${container}")"
+    if [ -n "${replacement_started_at}" ] &&
+      [ "${replacement_started_at}" != "${started_at}" ] &&
+      [ "$(docker inspect --format '{{.RestartCount}}' "${container}")" -gt "${restart_count}" ]; then
+      break
+    fi
+    attempts=$((attempts + 1))
+    if [ "${attempts}" -ge 60 ]; then
+      printf 'hosted alpha supervisor did not replace the failed worker\n' >&2
+      return 1
+    fi
+    sleep 1
+  done
+  (
+    run_id="${replacement_run_id}"
+    wait_for_run_status completed
+  )
+  [ "$(docker inspect --format '{{.RestartCount}}' "${container}")" -eq "$((restart_count + 1))" ]
+  [ "$(docker inspect --format '{{.State.Running}}' "${container}")" = "true" ]
+  [ "$(docker inspect --format '{{.State.StartedAt}}' "${container}")" != "${started_at}" ]
+  [ "$(rehearsal_sql --tuples-only --no-align --command 'SELECT last_value FROM public.wos_rehearsal_worker_failure')" = 2 ]
+  events="$(authenticated_get "${run_path}/events?limit=50" | jq --compact-output --sort-keys .)"
+  jq --exit-status '
+    [.events[].kind.kind] as $kinds
+    | $kinds[-1] == "RunCompleted"
+      and (["RunCreated","SkillInvocationStarted","SkillInvocationSucceeded","RunCompleted"]
+           | all(. as $kind | [$kinds[] | select(. == $kind)] | length == 1))
+  ' <<<"${events}" >/dev/null
+  report="$(authenticated_get "${run_path}/report" | jq --compact-output --sort-keys .)"
+  jq --exit-status --arg run_id "${replacement_run_id}" \
+    '.run_id == $run_id and (.report_id | type == "string" and length > 0)' <<<"${report}" >/dev/null
+  authenticated_post_json "${api_base_url}/api/v0alpha1/runs" "${request}" >"${response_file}"
+  jq --exit-status --arg run_id "${replacement_run_id}" \
+    '.snapshot.identity.run_id == $run_id and .snapshot.status == "completed"' "${response_file}" >/dev/null
+  [ "$(authenticated_get "${run_path}/events?limit=50" | jq --compact-output --sort-keys .)" = "${events}" ]
+  [ "$(authenticated_get "${run_path}/report" | jq --compact-output --sort-keys .)" = "${report}" ]
+  rehearsal_sql <<'SQL'
+DROP TRIGGER wos_rehearsal_fail_first_claim ON workflow_os.records;
+DROP FUNCTION public.wos_rehearsal_fail_first_claim();
+DROP SEQUENCE public.wos_rehearsal_worker_failure;
+SQL
+  printf 'hosted_supervised_replacement: passed; one automatic restart and one completion with stable exact replay\n'
 }
 
 run_request="$(
@@ -229,8 +315,13 @@ if [ -z "${report_id}" ] || [ "${report_id}" = "null" ]; then
   exit 1
 fi
 
-printf 'hosted_rehearsal_step: restart_worker\n'
-compose restart worker
+if [ "${WORKFLOW_OS_HOSTED_CLEANUP:-0}" = "1" ]; then
+  printf 'hosted_rehearsal_step: supervise_failed_worker\n'
+  rehearse_supervised_worker_replacement
+else
+  printf 'hosted_rehearsal_step: restart_worker\n'
+  compose restart worker
+fi
 wait_for_api
 inspect_authenticated_surface
 wait_for_run_status completed

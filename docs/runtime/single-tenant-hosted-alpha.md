@@ -108,6 +108,14 @@ topology running for operator inspection. Set
 `WORKFLOW_OS_HOSTED_CLEANUP=1` for an isolated CI run that removes its compose
 volume on exit.
 
+In disposable cleanup mode the rehearsal replaces the manual worker restart
+with a one-shot PostgreSQL fault scoped to a new no-write run's first queue
+claim. The fault rolls back the claim and exits the worker. The rehearsal
+requires Docker to restart the same container exactly once without an operator
+restart, then verifies one completed invocation, one report, and unchanged
+events and report on exact HTTP replay. This does not prove recovery from an
+interruption after invocation or an external effect.
+
 The compose file binds the API only to local host port `8080`, uses
 `PostgreSQL` 17, creates one non-superuser runtime database role, and starts
 API and worker as separate processes. API and worker still share that runtime
