@@ -2867,6 +2867,49 @@ QEMU, qualify time, or authorize a network-enabled rehearsal.
 Review `run-1794547234946274000-2` used proof-backed approval. Documentation
 and path checks, edits, and validation ran outside the preview handlers.
 
+#### VFKit And Host-Side Peer Evidence
+
+Prefer stock VFKit to the inspected QEMU 11.1.3 Homebrew bottle for the
+offline rehearsal. The QEMU bottle matched its published digest, but the
+extracted ARM64 binary has relocation placeholders and non-system dynamic
+dependencies. It was not installed or executed.
+
+The [VFKit v0.6.4 release](https://github.com/crc-org/vfkit/releases/tag/v0.6.4)
+asset matched SHA-256
+`0ed83fc8ca7aa708598835480dba1362406aa7cd1dab3b27464eb76327d9652d`.
+Its ARM64 slice linked only macOS libraries and frameworks. Strict signature
+verification for both slices passed outside the shell sandbox, and static
+inspection confirmed the virtualization entitlement. The
+[pinned network constructor](https://github.com/crc-org/vfkit/blob/v0.6.4/pkg/vf/virtionet.go)
+uses a file-handle attachment when given a socket and otherwise creates NAT
+for the configured network device. Require exactly one explicit connected
+datagram descriptor; refuse an absent or wrong peer rather than falling
+back to a bare network device. This is source and artifact evidence only.
+
+| Governed run | Bounded evidence |
+| --- | --- |
+| `run-1794548142864983000-2` | QEMU bottle and firmware inspected without execution; the binary requires relocation and dependencies. |
+| `run-1794548243877707000-2` | VFKit release digest, architecture, linkage, signature and pinned source checked; no launcher execution. |
+| `run-1794548343948914000-2` | 20/20 same-process Unix datagram trials: exact reply, five denied inputs, valid control after denial and failed send after peer retirement. Scratch harness SHA-256 `21528214c0f6c78eb2b19173b246707b9e05134a0e78174cf48ebcd187a7caca`. |
+| `run-1794548419987400000-2` | 140/140 stand-in child cases: intended descriptor accepted; missing, leaked, wrong-type, unconnected, wrong-response and retired endpoints refused. Scratch harness SHA-256 `ba7615e1fe53533cd37c6ceb78e59938dff0200b255faac022e6dd83042678a1`. |
+
+All four runs closed with 39 events and one proof-backed approval each,
+without retries or escalations. Downloads, static checks and synthetic test
+execution ran outside the kernel. The socket tests had no IP sockets or
+guest and do not authenticate a hostile peer. Digests identify the scratch
+harnesses; they are not a published test distribution.
+
+Before a separately governed offline boot, bind the exact launcher,
+disposable image, operator-owned peer and capture to the launch record.
+Keep the peer without an uplink. Verify the realized guest has only the
+reviewed attachment, show an allowed synthetic exchange and blocked traffic
+at the outside capture point, and repeat after restart and peer loss. Do not
+modify either Lima instance. This record does not authorize boot, real time
+source contact, live admission, or claim independent acceptance.
+
+Documentation run `run-1794548503410626000-2` used proof-backed approval;
+digest rechecks, edits, and docs validation ran outside preview handlers.
+
 Review run `run-1794392678677450000-2` closed with 39 events, one
 proof-backed approval
 `approval/run-1794392678677450000-2/review-scope-approved`, and no retries
