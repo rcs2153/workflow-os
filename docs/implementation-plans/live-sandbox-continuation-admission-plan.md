@@ -2761,6 +2761,47 @@ Setup run `run-1794544520824885000-2` closed with one proof-backed approval,
 verification were executor work outside preview handlers. No boot, source
 contact, provider access, or live admission occurred.
 
+#### Static Bootstrap And Egress Review
+
+**Decision: do not boot the current pilot configuration.** Both instances
+were stopped and both configuration digests matched the recorded baseline.
+The pilot declares no additional networks, but [Lima's default network](https://lima-vm.io/docs/config/network/user/)
+still permits outbound traffic with host loopback disabled. Plain mode, no
+mounts, and no SSH agent forwarding do not prove network confinement. A
+firewall enabled by a late guest startup script would leave the early boot
+window unverified.
+
+Before a separately governed boot, require a default-deny boundary outside
+the guest that is active before its first packet and survives guest restart.
+Review the exact image, network attachment and rules together. Stage pinned
+packages and trust material offline rather than opening egress for bootstrap.
+Allow only the reviewed resolution path and exact destination and transport
+tuples for time. [RFC 8915](https://www.rfc-editor.org/rfc/rfc8915.html#section-4)
+uses TCP 4460 for key establishment; the authenticated response can nominate
+a different time host or UDP port (123 by default). An unreviewed destination
+must stay blocked, including on address changes. Cover IPv4, IPv6, host and
+LAN routes, and unintended resolver or proxy paths. Require a capture or
+counters outside the guest from before boot plus negative cases against
+controlled endpoints, not probes against GitHub or any other provider. Keep
+provider credentials and dispatch components off the pilot.
+
+Use a separately sourced, bounded initial clock for certificate validation;
+do not count it as a qualified observation. Pin and review the expected
+service name and trust roots. Keep certificate validity checks enabled and
+exclude alternate unauthenticated clock sources. If bootstrap cannot meet
+these conditions, stop rather than using [chrony's certificate-time bypass](https://chrony-project.org/doc/4.8/chrony.conf.html).
+Keep the clock daemon and its control socket under operator custody. A
+separate read-only collector may project selected-source, authentication,
+error and sample-age evidence; Core must not receive clock-control access.
+This review does not select or qualify a collector, external epoch, reviewer,
+or deadline budget, and does not approve a network or deployment change.
+
+Review run `run-1794545567001607000-2` used a proof-backed approval. Local
+status and digest checks, documentation review and edits, and docs validation
+were executor work outside the preview handlers. No VM was booted or changed,
+no time source or provider was contacted by the pilot, and no live access
+was authorized.
+
 Review run `run-1794392678677450000-2` closed with 39 events, one
 proof-backed approval
 `approval/run-1794392678677450000-2/review-scope-approved`, and no retries
