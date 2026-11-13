@@ -3080,6 +3080,54 @@ fn prove_hosted_creation_prefix_reconciliation(backend: &PostgresStateBackend, c
         error.code(),
         "postgres_state.hosted_creation.prefix_conflict"
     );
+    let run_id = &expected[0].run_id;
+    let observed_revision =
+        workflow_core::hosted_event_history_revision(run_id, std::slice::from_ref(&conflicting))
+            .expect("observed history revision");
+    let expected_revision = workflow_core::hosted_event_history_revision(run_id, &expected)
+        .expect("expected prefix revision");
+    let mut client = config.connect(NoTls).expect("read observation evidence");
+    let find_observation = |client: &mut postgres::Client| {
+        let rows = client
+            .query(
+                "SELECT payload, revision FROM workflow_os.records
+                    WHERE family = 'hosted_creation_conflict' AND key1 = $1",
+                &[&run_id.as_str()],
+            )
+            .expect("read observations");
+        assert_eq!(rows.len(), 1);
+        (rows[0].get::<_, String>(0), rows[0].get::<_, i64>(1))
+    };
+    let observation = find_observation(&mut client);
+    let payload: serde_json::Value =
+        serde_json::from_str(&observation.0).expect("decode observation");
+    assert_eq!(payload["run_id"], run_id.as_str());
+    assert_eq!(
+        payload["observed_history_revision"],
+        observed_revision.as_str()
+    );
+    assert_eq!(
+        payload["expected_prefix_revision"],
+        expected_revision.as_str()
+    );
+    assert_eq!(payload["first_mismatched_sequence"], 1);
+    assert!(payload["observed_at"].is_string());
+    assert_eq!(observation.1, 1);
+    let reopened = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
+        config.clone(),
+    )));
+    assert_eq!(
+        reopened
+            .reconcile_hosted_creation_prefix(&expected)
+            .expect_err("exact replay still conflicts")
+            .code(),
+        "postgres_state.hosted_creation.prefix_conflict"
+    );
+    assert_eq!(find_observation(&mut client), observation);
+    assert!(reopened
+        .load_snapshot(run_id)
+        .expect("read snapshot")
+        .is_none());
     assert_eq!(
         backend
             .read_events(&expected[0].run_id)

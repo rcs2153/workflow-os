@@ -5,7 +5,7 @@ use std::time::Duration;
 use postgres::error::SqlState;
 use postgres::{Client, Config, IsolationLevel, NoTls, Row, Transaction};
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::collaborative_identity_authority_source::{
@@ -680,6 +680,17 @@ pub struct PostgresHostedCreationPrefixReconciliation {
     appended_events: Vec<WorkflowRunEvent>,
 }
 
+const HOSTED_CREATION_CONFLICT_FAMILY: &str = "hosted_creation_conflict";
+
+#[derive(Deserialize, Serialize)]
+struct HostedCreationConflictObservation {
+    run_id: WorkflowRunId,
+    observed_history_revision: SpecContentHash,
+    expected_prefix_revision: SpecContentHash,
+    first_mismatched_sequence: crate::EventSequenceNumber,
+    observed_at: crate::Timestamp,
+}
+
 impl PostgresHostedCreationPrefixReconciliation {
     /// Returns the authoritative run after prefix reconciliation.
     #[must_use]
@@ -764,23 +775,27 @@ impl PostgresStateBackend {
             ));
         }
         let mut client = self.connections.connect()?;
-        serializable(&mut client, |tx| {
+        let outcome = serializable(&mut client, |tx| {
             let lock_key = format!("workflow_os_hosted_creation/{}", run_id.as_str());
             tx.execute("SELECT pg_advisory_xact_lock(hashtext($1))", &[&lock_key])
                 .map_err(|error| database_error("hosted_creation_lock", &error))?;
             let existing = read_events_tx(tx, run_id)?;
-            if existing
+            if let Some((durable, _)) = existing
                 .iter()
                 .take(expected_events.len())
                 .zip(expected_events)
-                .any(|(durable, expected)| {
+                .find(|(durable, expected)| {
                     !hosted_creation_event_semantically_matches(durable, expected)
                 })
             {
-                return Err(state_error(
-                    "postgres_state.hosted_creation.prefix_conflict",
-                    "hosted creation event prefix conflicts with durable state",
-                ));
+                record_hosted_creation_conflict(
+                    tx,
+                    run_id,
+                    &existing,
+                    expected_events,
+                    durable.sequence_number,
+                )?;
+                return Ok(None);
             }
             let appended_events = if existing.len() < expected_events.len() {
                 expected_events[existing.len()..].to_vec()
@@ -812,10 +827,17 @@ impl PostgresStateBackend {
                     prior.is_none(),
                 )?;
             }
-            Ok(PostgresHostedCreationPrefixReconciliation {
+            Ok(Some(PostgresHostedCreationPrefixReconciliation {
                 run,
                 appended_events,
-            })
+            }))
+        })?;
+        // Commit the diagnostic record before returning the existing fail-closed error.
+        outcome.ok_or_else(|| {
+            state_error(
+                "postgres_state.hosted_creation.prefix_conflict",
+                "hosted creation event prefix conflicts with durable state",
+            )
         })
     }
 
@@ -2817,6 +2839,55 @@ fn hosted_creation_event_semantically_matches(
     normalized.event_id = expected.event_id.clone();
     normalized.timestamp = expected.timestamp;
     normalized == *expected
+}
+
+fn record_hosted_creation_conflict(
+    tx: &mut Transaction<'_>,
+    run_id: &WorkflowRunId,
+    observed: &[WorkflowRunEvent],
+    expected: &[WorkflowRunEvent],
+    first_mismatched_sequence: crate::EventSequenceNumber,
+) -> Result<(), WorkflowOsError> {
+    let observed_history_revision = crate::hosted_event_history_revision(run_id, observed)?;
+    let expected_prefix_revision = crate::hosted_event_history_revision(run_id, expected)?;
+    let key = format!("{observed_history_revision}/{expected_prefix_revision}");
+    if let Some(prior) = read_record_tx::<HostedCreationConflictObservation>(
+        tx,
+        HOSTED_CREATION_CONFLICT_FAMILY,
+        run_id.as_str(),
+        &key,
+        true,
+    )? {
+        let prior = prior.value();
+        if &prior.run_id == run_id
+            && prior.observed_history_revision == observed_history_revision
+            && prior.expected_prefix_revision == expected_prefix_revision
+            && prior.first_mismatched_sequence == first_mismatched_sequence
+        {
+            return Ok(());
+        }
+        return Err(state_error(
+            "postgres_state.hosted_creation.conflict_observation_mismatch",
+            "stored hosted creation conflict observation does not match its identity",
+        ));
+    }
+    let observation = HostedCreationConflictObservation {
+        run_id: run_id.clone(),
+        observed_history_revision,
+        expected_prefix_revision,
+        first_mismatched_sequence,
+        observed_at: database_timestamp_tx(tx)?,
+    };
+    put_record(
+        tx,
+        HOSTED_CREATION_CONFLICT_FAMILY,
+        run_id.as_str(),
+        &key,
+        &observation,
+        None,
+        true,
+    )?;
+    Ok(())
 }
 
 impl fmt::Debug for PostgresStateBackend {
