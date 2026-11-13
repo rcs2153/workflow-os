@@ -217,6 +217,38 @@ async function rehearseExactCreateRecovery(stage) {
   console.log(`hosted_http_exact_retry: passed; 409 ${stage} exhaustion recovered once`);
 }
 
+async function rehearseInvalidHistoryInspection() {
+  const path = "/api/v0alpha1/runs/run-invalid-legacy-history";
+  // Seed an internally bound row that cannot begin a valid run.
+  sql(`INSERT INTO workflow_os.events
+        (run_id, sequence_number, event_id, workflow_id, schema_version, workflow_version, spec_hash, payload)
+      SELECT 'run-invalid-legacy-history', sequence_number, 'event-invalid-legacy-history',
+        workflow_id, schema_version, workflow_version, spec_hash,
+        (payload::jsonb || '{"run_id":"run-invalid-legacy-history","event_id":"event-invalid-legacy-history","kind":{"kind":"RunStarted"}}'::jsonb)::text
+      FROM workflow_os.events WHERE run_id='run-result-interruption' AND sequence_number=1`);
+  const rejected = await request(path);
+  assert.equal(rejected.status, 409);
+  assert.equal((await rejected.json()).code, "runtime.run_created.missing");
+  assert.equal((await fetch(`${base}${path}/events`)).status, 401);
+  async function inspect() {
+    const response = await request(`${path}/events?limit=1`);
+    assert.equal(response.status, 200);
+    return response.json();
+  }
+  const observed = await inspect();
+  assert.equal(observed.events.length, 1);
+  assert.equal(observed.events[0].kind.kind, "RunStarted");
+  assert.equal(observed.has_more, false);
+  assert.match(observed.history_revision, /^[a-f0-9]{64}$/);
+  assert.deepEqual(await inspect(), observed);
+  assert.equal(sql("SELECT count(*) FROM workflow_os.records WHERE key1='run-invalid-legacy-history'"), "0");
+  sql("UPDATE workflow_os.events SET event_id='event-invalid-legacy-misbound' WHERE run_id='run-invalid-legacy-history'");
+  const misbound = await request(`${path}/events`);
+  assert.equal(misbound.status, 409);
+  assert.equal((await misbound.json()).code, "postgres_state.event.identity_mismatch");
+  console.log("hosted_invalid_history_inspection: passed; grammar-invalid events remain inspectable, misbound events fail closed");
+}
+
 assert.equal(sql("SELECT count(*) FROM pg_namespace WHERE nspname='workflow_os'"), "0", "database must not contain Workflow OS state");
 try {
   const api = start([], "user/result-rehearsal", "wos-result-api");
@@ -274,6 +306,7 @@ try {
   await rehearseConcurrentCreates();
   await rehearseExactCreateRecovery("reservation");
   await rehearseExactCreateRecovery("prefix");
+  await rehearseInvalidHistoryInspection();
 } finally {
   for (const child of [...children]) {
     child.kill("SIGKILL");
