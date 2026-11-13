@@ -292,6 +292,8 @@ mod trusted_host_local_timer;
 mod trusted_host_operational_entry;
 #[allow(dead_code)]
 mod trusted_host_redispatch_loop;
+#[cfg(test)]
+mod trusted_host_time_qualification;
 #[allow(dead_code)]
 mod trusted_host_time_window_caller;
 #[allow(dead_code)]
