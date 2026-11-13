@@ -163,9 +163,28 @@ The hosted admission contention gate reopened during fixture-bridge delivery.
 The same 25-job assertion failed on both the exact base and fixture head in
 isolated PostgreSQL trials. The bounded coordination repair (`e4df5494`) and
 refreshed fixture bridge (`eb92306e`) both passed all nine exact-head CI jobs,
-including PostgreSQL 17.5. This closes the fixture delivery blocker, not hosted
-pilot admission. Public HTTP contention, supervised worker replacement and
-reconciliation of conflicting legacy histories remain separate pilot gates.
+including PostgreSQL 17.5. This closed the fixture delivery blocker, not hosted
+pilot admission. Subsequent exact-head CI established two bounded proofs:
+
+- **Public HTTP admission:** [PostgreSQL CI for PR #946](https://github.com/rcs2153/workflow-os/actions/runs/43425347388/job/131885298082)
+  completed 25 distinct no-write requests with one terminal run and report each,
+  no queued work remaining, and no outer exact retries in that batch. Explicit
+  reservation and creation-prefix exhaustion trials each returned HTTP 409
+  and recovered once on the unchanged request after fault removal. This does
+  not establish a production concurrency or availability guarantee.
+- **Supervised worker replacement:** [Hosted Alpha CI for PR #945](https://github.com/rcs2153/workflow-os/actions/runs/43420895290/job/131870311714)
+  observed one automatic Docker restart following a rolled-back first queue
+  claim, one completed no-write invocation, and stable events and report on
+  exact replay. This is not recovery after a provider effect or proof of
+  unattended operation.
+
+Conflicting legacy histories remain an open pilot gate. The
+[operator runbook](docs/runtime/single-tenant-hosted-alpha.md#conflicting-creation-history)
+documents the fail-closed HTTP 409 and read-only inspection, not resolution.
+The next hosted pilot phase must establish an explicit operator disposition
+that preserves the original history and never infers that missing completion
+evidence authorizes another dispatch. Neither CI proof grants pilot admission
+or constitutes independent assurance.
 See the [contention recurrence report](docs/concepts/HOSTED_ADMISSION_CONTENTION_RECURRENCE_REPORT.md).
 
 The ordered queue is:
