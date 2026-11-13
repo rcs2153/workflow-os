@@ -1,0 +1,17 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "workflow-os-native"
+version = "0.4.0.dev1"
+description = "Experimental native Python SDK for the Workflow OS Rust kernel"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+readme = "README.md"
+
+[tool.maturin]
+manifest-path = "../../crates/workflow-python/Cargo.toml"
+python-source = "python"
+module-name = "workflow_os._native"
+features = ["extension-module"]

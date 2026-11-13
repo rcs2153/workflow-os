@@ -5,3 +5,11 @@
 /dist/
 *.log
 .DS_Store
+
+# Native Python SDK build and interpreter artifacts
+__pycache__/
+*.pyc
+/packages/sdk-python/python/workflow_os/*.so
+/packages/sdk-python/python/workflow_os/*.pyd
+/packages/sdk-python/.venv/
+/packages/sdk-python/dist/
