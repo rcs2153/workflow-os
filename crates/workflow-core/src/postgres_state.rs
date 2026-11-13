@@ -681,6 +681,53 @@ pub struct PostgresHostedCreationPrefixReconciliation {
 }
 
 const HOSTED_CREATION_CONFLICT_FAMILY: &str = "hosted_creation_conflict";
+const HOSTED_CONFLICT_DISPOSITION_FAMILY: &str = "hosted_conflict_disposition";
+const HOSTED_CONFLICT_DISPOSITION_HEAD: &str = "hosted_conflict_disposition_head";
+
+/// Non-executing operator disposition for a hosted creation conflict.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostedConflictDispositionKind {
+    /// The outcome is unresolved and needs investigation.
+    InvestigationRequired,
+    /// The operator stopped investigation without making an outcome claim.
+    AbandonedWithoutRedispatch,
+}
+
+/// Inputs for one operator decision. The caller must authenticate and authorize the actor.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostedConflictDispositionRequest {
+    /// Original hosted run.
+    pub run_id: WorkflowRunId,
+    /// Stable identity for exact retries of this decision.
+    pub decision_id: IdempotencyKey,
+    /// Full history revision reviewed by the operator.
+    pub observed_history_revision: SpecContentHash,
+    /// Expected prefix revision from the Core conflict observation.
+    pub expected_prefix_revision: SpecContentHash,
+    /// Current decision to supersede, or none for the first decision.
+    pub supersedes: Option<IdempotencyKey>,
+    /// Administrative decision only.
+    pub disposition: HostedConflictDispositionKind,
+    /// Non-sensitive bounded reason.
+    pub reason: String,
+    /// Follow-up owner.
+    pub owner: ActorId,
+    /// Event references within the reviewed run.
+    pub evidence_event_ids: Vec<crate::EventId>,
+}
+
+/// A durable decision, separate from the run event stream.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HostedConflictDispositionRecord {
+    /// Exact accepted decision inputs.
+    pub request: HostedConflictDispositionRequest,
+    /// Actor supplied by the trusted operator boundary.
+    pub actor: ActorId,
+    /// Database observation time.
+    pub decided_at: crate::Timestamp,
+}
 
 #[derive(Deserialize, Serialize)]
 struct HostedCreationConflictObservation {
@@ -738,6 +785,102 @@ impl PostgresStateBackend {
         Self { connections }
     }
 
+    /// Records or exactly replays an authorized operator's non-executing decision.
+    ///
+    /// This is a trusted storage API, not an authentication boundary.
+    ///
+    /// # Errors
+    ///
+    /// Rejects invalid input, missing observations, stale history or predecessor,
+    /// cross-run evidence, changed replay content, and unavailable storage.
+    pub fn record_hosted_conflict_disposition(
+        &self,
+        actor: &ActorId,
+        request: &HostedConflictDispositionRequest,
+    ) -> Result<HostedConflictDispositionRecord, WorkflowOsError> {
+        if request.reason.trim().is_empty()
+            || request.reason.len() > 512
+            || request.reason.chars().any(char::is_control)
+            || request.evidence_event_ids.len() > 16
+            || request.evidence_event_ids.is_empty()
+        {
+            return Err(WorkflowOsError::validation(
+                "hosted.conflict_disposition.input_invalid",
+                "hosted conflict disposition requires a bounded reason and event evidence",
+            ));
+        }
+        let run_id = request.run_id.as_str();
+        let decision_id = request.decision_id.as_str();
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            lock_hosted_creation_run(tx, &request.run_id)?;
+            if let Some(prior) = read_record_tx::<HostedConflictDispositionRecord>(
+                tx,
+                HOSTED_CONFLICT_DISPOSITION_FAMILY,
+                run_id,
+                decision_id,
+                true,
+            )? {
+                let (prior, _) = prior.into_parts();
+                if &prior.request == request && &prior.actor == actor {
+                    return Ok(prior);
+                }
+                return Err(state_error(
+                    "hosted.conflict_disposition.replay_conflict",
+                    "hosted conflict disposition replay differs from the recorded decision",
+                ));
+            }
+            let events = reviewed_hosted_conflict_events(tx, request)?;
+            if request
+                .evidence_event_ids
+                .iter()
+                .any(|id| !events.iter().any(|event| &event.event_id == id))
+            {
+                return Err(state_error(
+                    "hosted.conflict_disposition.evidence_mismatch",
+                    "disposition evidence does not belong to the reviewed history",
+                ));
+            }
+            let head = read_record_tx::<IdempotencyKey>(
+                tx,
+                HOSTED_CONFLICT_DISPOSITION_HEAD,
+                run_id,
+                "",
+                true,
+            )?;
+            if head.as_ref().map(PostgresRevisionedRecord::value) != request.supersedes.as_ref() {
+                return Err(state_error(
+                    "hosted.conflict_disposition.predecessor_stale",
+                    "disposition must supersede the current decision",
+                ));
+            }
+            let record = HostedConflictDispositionRecord {
+                request: request.clone(),
+                actor: actor.clone(),
+                decided_at: database_timestamp_tx(tx)?,
+            };
+            put_record(
+                tx,
+                HOSTED_CONFLICT_DISPOSITION_FAMILY,
+                run_id,
+                decision_id,
+                &record,
+                None,
+                true,
+            )?;
+            put_record(
+                tx,
+                HOSTED_CONFLICT_DISPOSITION_HEAD,
+                run_id,
+                "",
+                &request.decision_id,
+                head.as_ref().map(PostgresRevisionedRecord::revision),
+                head.is_none(),
+            )?;
+            Ok(record)
+        })
+    }
+
     pub(crate) fn with_hosted_admission<T>(
         &self,
         operation: impl FnOnce() -> Result<T, WorkflowOsError>,
@@ -776,9 +919,7 @@ impl PostgresStateBackend {
         }
         let mut client = self.connections.connect()?;
         let outcome = serializable(&mut client, |tx| {
-            let lock_key = format!("workflow_os_hosted_creation/{}", run_id.as_str());
-            tx.execute("SELECT pg_advisory_xact_lock(hashtext($1))", &[&lock_key])
-                .map_err(|error| database_error("hosted_creation_lock", &error))?;
+            lock_hosted_creation_run(tx, run_id)?;
             let existing = read_events_tx(tx, run_id)?;
             if let Some((durable, _)) = existing
                 .iter()
@@ -2829,6 +2970,55 @@ impl PostgresStateBackend {
             recovery_required,
         })
     }
+}
+
+fn reviewed_hosted_conflict_events(
+    tx: &mut Transaction<'_>,
+    request: &HostedConflictDispositionRequest,
+) -> Result<Vec<WorkflowRunEvent>, WorkflowOsError> {
+    let run_id = request.run_id.as_str();
+    let observation_key = format!(
+        "{}/{}",
+        request.observed_history_revision, request.expected_prefix_revision
+    );
+    let observation = read_record_tx::<HostedCreationConflictObservation>(
+        tx,
+        HOSTED_CREATION_CONFLICT_FAMILY,
+        run_id,
+        &observation_key,
+        true,
+    )?;
+    if !observation.is_some_and(|record| {
+        let observed = record.value();
+        observed.run_id == request.run_id
+            && observed.observed_history_revision == request.observed_history_revision
+            && observed.expected_prefix_revision == request.expected_prefix_revision
+    }) {
+        return Err(state_error(
+            "hosted.conflict_disposition.observation_missing",
+            "matching hosted creation conflict was not observed",
+        ));
+    }
+    let events = read_events_tx(tx, &request.run_id)?;
+    if crate::hosted_event_history_revision(&request.run_id, &events)?
+        != request.observed_history_revision
+    {
+        return Err(state_error(
+            "hosted.conflict_disposition.history_stale",
+            "hosted event history changed since the operator reviewed it",
+        ));
+    }
+    Ok(events)
+}
+
+fn lock_hosted_creation_run(
+    tx: &mut Transaction<'_>,
+    run_id: &WorkflowRunId,
+) -> Result<(), WorkflowOsError> {
+    let key = format!("workflow_os_hosted_creation/{}", run_id.as_str());
+    tx.execute("SELECT pg_advisory_xact_lock(hashtext($1))", &[&key])
+        .map_err(|error| database_error("hosted_creation_lock", &error))?;
+    Ok(())
 }
 
 fn hosted_creation_event_semantically_matches(
