@@ -184,12 +184,15 @@ now documents an opt-in API for non-executing disposition of grammar-valid
 creation conflicts. [PostgreSQL CI for PR #955](https://github.com/rcs2153/workflow-os/actions/runs/43446700911/job/131957907789)
 verified separate operator access, exact replay and retrieval after
 restart, unchanged execution records, and visibility of stale evidence.
-Typed events from a grammar-invalid history can be inspected, but the
-original legacy case with a policy decision and missing scheduling event
-still lacks end-to-end disposition proof. The next hosted pilot phase must
-reproduce that case and verify a durable disposition without repair or
-redispatch. Independent acceptance remains open. These results do not
-authorize pilot admission or establish that a provider effect occurred.
+Typed events from a grammar-invalid history can be inspected without
+creating a disposition. The modeled legacy case with a policy decision
+in the missing schedule slot is a distinct, readable prefix conflict.
+[PostgreSQL CI for PR #957](https://github.com/rcs2153/workflow-os/actions/runs/43451657709/job/131975071001)
+verified that an operator disposition preserves its original conflict and
+history, creates no report or work item, and leaves the worker idle.
+The [independent rerun](docs/implementation-plans/hosted-partial-run-creation-recovery-plan.md#independent-pilot-rerun)
+remains open. These results do not authorize pilot admission or establish
+that a provider effect occurred.
 See the [contention recurrence report](docs/concepts/HOSTED_ADMISSION_CONTENTION_RECURRENCE_REPORT.md).
 
 The ordered queue is:

@@ -254,7 +254,32 @@ disposition does not admit the pilot or authorize new work.
 verified the grammar-valid fixture through the operator API, including
 restart, unchanged execution records and visibility of stale evidence.
 The grammar-invalid inspection fixture is distinct: reading its events does
-not create a conflict observation or permit a disposition. Reproduce the
-reported policy decision with a missing scheduling event and verify that
-it can be dispositioned without repairing or advancing the run before
-requesting independent pilot acceptance.
+not create a conflict observation or permit a disposition.
+[PostgreSQL CI for PR #957](https://github.com/rcs2153/workflow-os/actions/runs/43451657709/job/131975071001)
+verified the modeled missing-schedule case. The fixture preserves the
+original HTTP request identity, models a policy event in place of the
+missing schedule, and records an investigation without repairing the
+history, producing a report, or dispatching work. It does not use the
+original evaluator's database or certify production legacy histories.
+
+### Independent Pilot Rerun
+
+An evaluator other than the implementer or operator should use a clean
+checkout of the candidate revision, an empty disposable PostgreSQL database,
+and no live provider configuration. Build the hosted binary from that
+checkout and run the same rehearsal as the Shared PostgreSQL State CI job:
+
+```sh
+cargo build --locked -p workflow-hosted --bin workflow-os-hosted
+WORKFLOW_OS_RESULT_REHEARSAL_DATABASE_URL="$DISPOSABLE_DATABASE_URL" \
+  node scripts/rehearse-hosted-result-interruption.mjs
+```
+
+Record the exact commit, PostgreSQL version, and sanitized success markers
+for contention, exact retry, restart replay, current-decision freshness,
+invalid-history inspection, and missing-schedule disposition. Verify the
+fixture's unchanged history, absent report and work item, and idle worker
+assertions. Keep any deviation open with its observed diagnostic rather
+than declaring a pass from CI alone. Record the evaluator and verdict
+separately from the maintainer evidence. No production access, repair,
+redispatch, or pilot admission follows from this rerun.
