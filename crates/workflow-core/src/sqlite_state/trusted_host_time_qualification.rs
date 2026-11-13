@@ -1,5 +1,7 @@
 //! Synthetic qualification model; never supplies a live authority clock.
 
+use std::io::Read;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Domain {
     source: &'static str,
@@ -28,6 +30,8 @@ struct Policy {
 
 #[derive(Debug, PartialEq, Eq)]
 enum Denial {
+    ObservationUnavailable,
+    InvalidObservation,
     EpochUnavailable,
     EpochMismatch,
     DomainMismatch,
@@ -36,6 +40,55 @@ enum Denial {
     InvalidInterval,
     ExcessUncertainty,
     OutsideWindow,
+}
+
+const MAX_OBSERVATION_BYTES: u64 = 256;
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FixtureObservation {
+    source: String,
+    provenance: String,
+    epoch: String,
+    captured_tick: u64,
+    lower_utc_ms: u64,
+    upper_utc_ms: u64,
+}
+
+fn assess_read_only(
+    input: impl Read,
+    decision_tick: u64,
+    current_epoch: impl FnOnce() -> Option<&'static str>,
+    policy: Policy,
+) -> Result<(u64, u64), Denial> {
+    let mut bytes = Vec::new();
+    input
+        .take(MAX_OBSERVATION_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| Denial::ObservationUnavailable)?;
+    if bytes.len() as u64 > MAX_OBSERVATION_BYTES {
+        return Err(Denial::InvalidObservation);
+    }
+    let frame: FixtureObservation =
+        serde_json::from_slice(&bytes).map_err(|_| Denial::InvalidObservation)?;
+    let epoch = current_epoch();
+    if frame.source != policy.domain.source
+        || frame.provenance != policy.domain.provenance
+        || frame.epoch != policy.domain.epoch
+    {
+        return Err(Denial::DomainMismatch);
+    }
+    qualify_at_epoch(
+        Sample {
+            domain: policy.domain,
+            captured_tick: frame.captured_tick,
+            lower_utc_ms: frame.lower_utc_ms,
+            upper_utc_ms: frame.upper_utc_ms,
+        },
+        decision_tick,
+        policy,
+        epoch,
+    )
 }
 
 fn qualify(sample: Sample, decision_tick: u64, policy: Policy) -> Result<(u64, u64), Denial> {
@@ -106,6 +159,76 @@ const POLICY: Policy = Policy {
     not_before_ms: 100,
     expires_ms: 120,
 };
+
+const OBSERVATION: &[u8] = br#"{"source":"fixture/source","provenance":"fixture/provenance","epoch":"fixture/epoch","captured_tick":30,"lower_utc_ms":100,"upper_utc_ms":104}"#;
+
+#[test]
+fn reads_a_fixture_without_changing_its_bytes() {
+    use std::io::Write;
+
+    let path = std::env::temp_dir().join(format!(
+        "workflow-os-time-observation-{}-{}.json",
+        std::process::id(),
+        crate::Timestamp::now_utc()
+            .as_offset_date_time()
+            .unix_timestamp_nanos()
+    ));
+    let mut writer = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .expect("create isolated fixture");
+    struct RemoveFixture(std::path::PathBuf);
+    impl Drop for RemoveFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let fixture = RemoveFixture(path);
+    writer.write_all(OBSERVATION).expect("write fixture");
+    drop(writer);
+    let reader = std::fs::File::open(&fixture.0).expect("open read-only fixture");
+    assert_eq!(
+        assess_read_only(reader, 40, || Some(DOMAIN.epoch), POLICY),
+        Ok((108, 116))
+    );
+    assert_eq!(
+        std::fs::read(&fixture.0).expect("fixture unchanged"),
+        OBSERVATION
+    );
+}
+
+#[test]
+fn rejects_incomplete_oversized_and_trailing_observation_data() {
+    let mut padded = OBSERVATION.to_vec();
+    padded.resize(MAX_OBSERVATION_BYTES as usize + 1, b' ');
+    let mut trailing = OBSERVATION.to_vec();
+    trailing.extend_from_slice(b"{}");
+    for input in [&OBSERVATION[..OBSERVATION.len() - 1], &padded, &trailing] {
+        assert_eq!(
+            assess_read_only(
+                input,
+                40,
+                || panic!("invalid input cannot request an epoch"),
+                POLICY
+            ),
+            Err(Denial::InvalidObservation)
+        );
+    }
+}
+
+#[test]
+fn refuses_an_epoch_that_changes_after_observation_capture() {
+    for (epoch, expected) in [
+        (None, Denial::EpochUnavailable),
+        (Some("fixture/post-restore"), Denial::EpochMismatch),
+    ] {
+        assert_eq!(
+            assess_read_only(OBSERVATION, 40, || epoch, POLICY),
+            Err(expected)
+        );
+    }
+}
 
 #[test]
 fn refuses_joint_rollback_even_when_sample_and_policy_agree() {
