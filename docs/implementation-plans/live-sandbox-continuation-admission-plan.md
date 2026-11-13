@@ -2757,6 +2757,37 @@ missing or differs from the stored policy. This is synthetic input: it
 does not establish external epoch custody or detect a real VM restore.
 Implementation run `run-1794551479113642000-2` used proof-backed approval.
 
+#### Protected-Host Time Rehearsal Handoff
+
+The current protected-launch result deliberately lists `trusted_time` as
+unverified. [PR #927](https://github.com/rcs2153/workflow-os/pull/927)
+established that the fixed SQLite epoch cannot be changed in place: an
+invalid stored epoch blocks inspection and replay, and restoring the
+valid fixture makes the historical outcome readable without provider work.
+Do not use epoch rotation in SQLite as an operational recovery procedure.
+
+Before the first protected-host measurement, the operator must record:
+
+| Input | Required evidence |
+| --- | --- |
+| Clock domain and custody | Name the intended Linux host, exact launcher and collector build, and controlling operator. Collector and verifier use the same elapsed-time domain. The verifier has read-only access to observations and cannot alter clock or source configuration. |
+| Generation | Establish a current generation outside guest and database snapshots, bound to the measured launch. A host boot ID is not a guest generation. Missing custody or a generation change between capture and evaluation denies fresh authority. Prohibit restore if its lifecycle cannot be controlled. |
+| Reference and network | Record the source identity, roots, bootstrap proof, and external default-deny evidence before contact. No guest path to provider endpoints, no provider credentials, and no new timestamp relay. |
+| Deadline envelope | Identify the applicable approval, grant, window, signer and observer bounds. Measure collection and handoff latency and account for source and projection error. Set explicit fixture-only age and uncertainty budgets before testing. |
+| Review | Record the named reviewer separately from the operator and retain exact-build, source, generation and decision evidence. A successful fixture is not live admission. |
+
+First exercise the protected collector and read-only observation boundary
+without provider dispatch. Require positive source evidence before
+interpreting negative cases. Withhold or replace the generation after
+capture, age the sample beyond its bound, and move the projected interval
+to the exclusive deadline. Verify fresh authority remains denied, while
+valid historical evidence can be inspected without any resend. Keep the
+production live-time guard unconnected until qualified host measurements
+and independent review exist.
+
+Documentation run `run-1794554006235786000-2` used proof-backed approval.
+Source inspection and docs validation ran outside the preview handlers.
+
 #### Stopped Pilot Designation
 
 The maintainer confirmed a separate disposable Ubuntu ARM64 VM for the
