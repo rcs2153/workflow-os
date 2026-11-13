@@ -102,6 +102,11 @@ jobs:
           printf '%s' '{"source":"fixture/source","provenance":"fixture/provenance","epoch":"fixture/epoch","captured_tick":30,"lower_utc_ms":100,"upper_utc_ms":104}' |
             sudo -n tee "$fixture/observation.json" >/dev/null
           sudo -n chmod 0444 "$fixture/observation.json"
+          printf '%s' 'fixture/epoch' | sudo -n tee "$fixture/generation" >/dev/null
+          printf '%s' 'fixture/post-restore' | sudo -n tee "$fixture/changed-generation" >/dev/null
+          printf '%s' 'fixture/epoch!' | sudo -n tee "$fixture/malformed-generation" >/dev/null
+          sudo -n chmod 0444 "$fixture/"{generation,changed-generation,malformed-generation}
+          sudo -n install -m 0666 "$fixture/generation" "$fixture/writable-generation"
           sudo -n chmod 0755 "$fixture"
           for test in \
             protected_launch::unix::tests::protected_clock_input_custody \
