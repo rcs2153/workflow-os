@@ -1982,6 +1982,9 @@ fn dogfood_registry_with_explicit_docs_check(
 }
 
 fn workflow_os_binary() -> PathBuf {
+    if let Some(binary) = std::env::var_os("WORKFLOW_OS_LOCAL_EXECUTOR_TEST_CLI") {
+        return PathBuf::from(binary);
+    }
     let binary_name = if cfg!(windows) {
         "workflow-os.exe"
     } else {
