@@ -162,6 +162,49 @@ const POLICY: Policy = Policy {
 
 const OBSERVATION: &[u8] = br#"{"source":"fixture/source","provenance":"fixture/provenance","epoch":"fixture/epoch","captured_tick":30,"lower_utc_ms":100,"upper_utc_ms":104}"#;
 
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires a root-owned observation and an unprivileged Linux reader"]
+#[allow(clippy::expect_used)]
+fn protected_observation_qualifies_only_inside_its_epoch_and_window() {
+    use crate::protected_launch::unix::{bounded_bytes, protected_file};
+
+    assert!(!nix::unistd::geteuid().is_root());
+    let path = std::path::PathBuf::from(
+        std::env::var_os("WORKFLOW_OS_CLOCK_CUSTODY_FIXTURE").expect("fixture directory"),
+    )
+    .join("observation.json");
+
+    for (tick, epoch, policy, expected) in [
+        (40, Some(DOMAIN.epoch), POLICY, Ok((108, 116))),
+        (40, None, POLICY, Err(Denial::EpochUnavailable)),
+        (
+            40,
+            Some("fixture/post-restore"),
+            POLICY,
+            Err(Denial::EpochMismatch),
+        ),
+        (41, Some(DOMAIN.epoch), POLICY, Err(Denial::StaleSample)),
+        (
+            40,
+            Some(DOMAIN.epoch),
+            Policy {
+                expires_ms: 116,
+                ..POLICY
+            },
+            Err(Denial::OutsideWindow),
+        ),
+    ] {
+        let file = protected_file(&path, 0o444, true).expect("protected observation");
+        let bytes =
+            bounded_bytes(file, u64::from(MAX_OBSERVATION_BYTES)).expect("bounded observation");
+        assert_eq!(
+            assess_read_only(bytes.as_slice(), tick, || epoch, policy),
+            expected
+        );
+    }
+}
+
 #[test]
 fn reads_a_fixture_without_changing_its_bytes() -> std::io::Result<()> {
     use std::io::Write;
