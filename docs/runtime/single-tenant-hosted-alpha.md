@@ -263,6 +263,13 @@ An exact retry returns the recorded decision, not a guarantee it is still
 current. A stale new decision or changed replay fails closed. The API does
 not confirm effects or replace external incident follow-up.
 
+The same operator credential can read the current decision at
+`GET /api/v0alpha1/operator/runs/{run_id}/creation-conflicts/current-decision`.
+It returns 404 if there is no decision. Compare `current_history_revision`
+with `decision.request.observed_history_revision` before relying on the
+record. A mismatch means the history needs another review. Use the returned
+decision ID as the predecessor when proposing a replacement.
+
 ## Explicitly Deferred
 
 The current hosted surface still does not expose:
