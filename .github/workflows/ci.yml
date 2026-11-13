@@ -83,6 +83,27 @@ jobs:
             jq -er 'select(.reason == "compiler-artifact" and .target.name == "workflow_core" and .profile.test and .executable != null) | .executable')
           bash scripts/rehearse-signer-isolation.sh "$binary"
 
+      - name: Verify protected clock-input file custody on Linux
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=$(cargo test --locked -p workflow-core --lib --no-run --message-format=json |
+            jq -er 'select(.reason == "compiler-artifact" and .target.name == "workflow_core" and .profile.test and .executable != null) | .executable')
+          fixture=$(sudo -n mktemp -d /tmp/workflow-os-clock-custody.XXXXXXXX)
+          trap 'sudo -n rm -rf -- "$fixture"' EXIT
+          printf '1234' | sudo -n tee "$fixture/accepted" >/dev/null
+          sudo -n chmod 0444 "$fixture/accepted"
+          sudo -n ln -s accepted "$fixture/symlink"
+          sudo -n install -m 0444 "$fixture/accepted" "$fixture/hardlink"
+          sudo -n ln "$fixture/hardlink" "$fixture/hardlink-peer"
+          sudo -n install -m 0644 "$fixture/accepted" "$fixture/writable"
+          sudo -n install -d -m 0775 "$fixture/writable-parent"
+          sudo -n install -m 0444 "$fixture/accepted" "$fixture/writable-parent/input"
+          sudo -n chmod 0755 "$fixture"
+          test=protected_launch::unix::tests::protected_clock_input_custody
+          "$binary" --ignored --exact "$test" --list | grep -Fx "$test: test"
+          WORKFLOW_OS_CLOCK_CUSTODY_FIXTURE="$fixture" "$binary" --ignored --exact "$test"
+
       - name: Rust docs
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 

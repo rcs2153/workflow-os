@@ -227,6 +227,49 @@ mod tests {
         let expected = SpecContentHash::from_bytes(fs::read(path).expect("fixture bytes"));
         assert_eq!(executable_digest(file).expect("streaming digest"), expected);
     }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires root-owned fixtures and an unprivileged Linux reader"]
+    fn protected_clock_input_custody() {
+        assert!(!nix::unistd::geteuid().is_root());
+        let root = std::path::PathBuf::from(
+            std::env::var_os("WORKFLOW_OS_CLOCK_CUSTODY_FIXTURE").expect("fixture directory"),
+        );
+        let accepted = root.join("accepted");
+        assert_eq!(
+            bounded_bytes(
+                protected_file(&accepted, 0o444, true).expect("protected fixture"),
+                4,
+            )
+            .expect("read at the byte limit"),
+            b"1234",
+        );
+        assert_eq!(
+            bounded_bytes(
+                protected_file(&accepted, 0o444, true).expect("protected fixture"),
+                3,
+            )
+            .expect_err("size over the byte limit")
+            .code(),
+            "protected_launch.file.size_invalid",
+        );
+        assert_eq!(
+            protected_file(&accepted, 0o444, false)
+                .expect_err("sticky temp is rehearsal-only")
+                .code(),
+            "protected_launch.file.unprotected",
+        );
+        for name in ["symlink", "hardlink", "writable", "writable-parent/input"] {
+            assert_eq!(
+                protected_file(&root.join(name), 0o444, true)
+                    .expect_err(name)
+                    .code(),
+                "protected_launch.file.unprotected",
+                "{name}",
+            );
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
