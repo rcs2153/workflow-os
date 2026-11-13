@@ -2238,14 +2238,17 @@ impl HostedApiError {
                 workflow_core::WorkflowOsErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
             }
         };
-        let (code, message) = if status == StatusCode::INTERNAL_SERVER_ERROR {
-            ("hosted.internal".to_owned(), "hosted request failed")
-        } else {
-            (error.code().to_owned(), "hosted request is invalid")
+        let (code, message) = match (status, error.code()) {
+            (StatusCode::INTERNAL_SERVER_ERROR, _) => ("hosted.internal", "hosted request failed"),
+            (StatusCode::CONFLICT, "postgres_state.hosted_creation.prefix_conflict") => (
+                error.code(),
+                "Stored run history conflicts with this request. Stop retrying and inspect the original run events.",
+            ),
+            _ => (error.code(), "hosted request is invalid"),
         };
         Self {
             status,
-            code,
+            code: code.to_owned(),
             message,
         }
     }
@@ -3522,5 +3525,18 @@ mod tests {
         assert_eq!(hosted.message, "hosted request is invalid");
         assert!(!hosted.code.contains(secret));
         assert!(!hosted.message.contains(secret));
+    }
+
+    #[test]
+    fn hosted_creation_prefix_conflict_points_to_original_events() {
+        let code = "postgres_state.hosted_creation.prefix_conflict";
+        let error = WorkflowOsError::invalid_state(code, "private stored event details");
+        let hosted = HostedApiError::from_core(&error);
+        assert_eq!(hosted.status, StatusCode::CONFLICT);
+        assert_eq!(hosted.code, code);
+        assert_eq!(
+            hosted.message,
+            "Stored run history conflicts with this request. Stop retrying and inspect the original run events."
+        );
     }
 }
