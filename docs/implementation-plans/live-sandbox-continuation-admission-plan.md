@@ -2750,6 +2750,13 @@ read a suspend-aware clock, authenticate the epoch, or change the existing
 live-authority denial. Protected-host measurement and review remain required.
 Implementation run `run-1794550521545388000-2` used proof-backed approval.
 
+The offline model also requires a separately supplied current epoch. A
+restored sample and policy can still match each other, so that comparison
+alone cannot detect rollback. The model denies when the current epoch is
+missing or differs from the stored policy. This is synthetic input: it
+does not establish external epoch custody or detect a real VM restore.
+Implementation run `run-1794551479113642000-2` used proof-backed approval.
+
 #### Stopped Pilot Designation
 
 The maintainer confirmed a separate disposable Ubuntu ARM64 VM for the
