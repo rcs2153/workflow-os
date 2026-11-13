@@ -221,6 +221,14 @@ database observation time, not raw events or an operator decision. The
 existing conflict response still stops creation. Other invalid histories
 remain fail-closed and are not classified by this observation path.
 
+Core storage accepts investigation and administrative abandonment against
+an exact conflict observation. Decisions and their current pointer are
+written atomically outside the run history; replacing a decision requires
+its current identity. Exact replay returns the original historical record,
+not a claim that it is still current. The trusted caller must authenticate
+and authorize the actor. There is no hosted write route or effect
+confirmation in this slice; continue to use the operator runbook.
+
 The runtime slice must bind an authenticated, authorized operator decision to
 the original run, immutable request and exact observed history revision.
 Persist the decision separately from workflow events, with decision time,

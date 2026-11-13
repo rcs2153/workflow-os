@@ -3124,6 +3124,118 @@ fn prove_hosted_creation_prefix_reconciliation(backend: &PostgresStateBackend, c
         "postgres_state.hosted_creation.prefix_conflict"
     );
     assert_eq!(find_observation(&mut client), observation);
+    prove_hosted_conflict_disposition(
+        backend,
+        &reopened,
+        &expected,
+        &conflicting,
+        observed_revision,
+        expected_revision,
+    );
+}
+
+fn prove_hosted_conflict_disposition(
+    backend: &PostgresStateBackend,
+    reopened: &PostgresStateBackend,
+    expected: &[WorkflowRunEvent],
+    conflicting: &WorkflowRunEvent,
+    observed_revision: SpecContentHash,
+    expected_revision: SpecContentHash,
+) {
+    use workflow_core::{HostedConflictDispositionKind, HostedConflictDispositionRequest};
+    let run_id = &expected[0].run_id;
+    let actor = ActorId::new("user/incident-reviewer").expect("actor");
+    let mut decision = HostedConflictDispositionRequest {
+        run_id: run_id.clone(),
+        decision_id: IdempotencyKey::new("investigate-prefix-conflict").expect("decision id"),
+        observed_history_revision: observed_revision,
+        expected_prefix_revision: expected_revision,
+        supersedes: None,
+        disposition: HostedConflictDispositionKind::InvestigationRequired,
+        reason: "The legacy actor differs from the immutable request.".to_owned(),
+        owner: actor.clone(),
+        evidence_event_ids: vec![conflicting.event_id.clone()],
+    };
+    let mut wrong_evidence = decision.clone();
+    wrong_evidence.evidence_event_ids = vec![expected[0].event_id.clone()];
+    assert_eq!(
+        backend
+            .record_hosted_conflict_disposition(&actor, &wrong_evidence)
+            .expect_err("unobserved evidence must fail")
+            .code(),
+        "hosted.conflict_disposition.evidence_mismatch"
+    );
+    let first = backend
+        .record_hosted_conflict_disposition(&actor, &decision)
+        .expect("record disposition");
+    assert_eq!(
+        reopened
+            .record_hosted_conflict_disposition(&actor, &decision)
+            .expect("replay disposition"),
+        first
+    );
+    let original = decision.clone();
+    let other_actor = ActorId::new("user/other-reviewer").expect("actor");
+    assert_eq!(
+        reopened
+            .record_hosted_conflict_disposition(&other_actor, &original)
+            .expect_err("another actor cannot replay the decision")
+            .code(),
+        "hosted.conflict_disposition.replay_conflict"
+    );
+    "Different decision content.".clone_into(&mut decision.reason);
+    assert_eq!(
+        reopened
+            .record_hosted_conflict_disposition(&actor, &decision)
+            .expect_err("changed replay must fail")
+            .code(),
+        "hosted.conflict_disposition.replay_conflict"
+    );
+    decision.decision_id = IdempotencyKey::new("abandon-prefix-conflict").expect("replacement id");
+    decision.disposition = HostedConflictDispositionKind::AbandonedWithoutRedispatch;
+    assert_eq!(
+        reopened
+            .record_hosted_conflict_disposition(&actor, &decision)
+            .expect_err("unlinked replacement must fail")
+            .code(),
+        "hosted.conflict_disposition.predecessor_stale"
+    );
+    decision.supersedes = Some(original.decision_id.clone());
+    let mut competing = decision.clone();
+    competing.decision_id =
+        IdempotencyKey::new("competing-prefix-disposition").expect("decision id");
+    let (replacement, contender) = std::thread::scope(|scope| {
+        let barrier = Arc::new(Barrier::new(2));
+        let other_barrier = Arc::clone(&barrier);
+        let actor = &actor;
+        let replacement_decision = &decision;
+        let task = scope.spawn(move || {
+            other_barrier.wait();
+            backend.record_hosted_conflict_disposition(actor, replacement_decision)
+        });
+        barrier.wait();
+        let contender = reopened.record_hosted_conflict_disposition(actor, &competing);
+        (task.join().expect("concurrent decision"), contender)
+    });
+    assert_ne!(replacement.is_ok(), contender.is_ok());
+    let current = replacement.or(contender).expect("one linked replacement");
+    assert_eq!(
+        current.request.supersedes,
+        Some(original.decision_id.clone())
+    );
+    assert_eq!(
+        backend
+            .record_hosted_conflict_disposition(&actor, &original)
+            .expect("replay prior decision"),
+        first
+    );
+    assert_eq!(
+        reopened
+            .reconcile_hosted_creation_prefix(expected)
+            .expect_err("disposition grants no recovery authority")
+            .code(),
+        "postgres_state.hosted_creation.prefix_conflict"
+    );
     assert!(reopened
         .load_snapshot(run_id)
         .expect("read snapshot")
@@ -3132,7 +3244,25 @@ fn prove_hosted_creation_prefix_reconciliation(backend: &PostgresStateBackend, c
         backend
             .read_events(&expected[0].run_id)
             .expect("read conflicting prefix"),
-        vec![conflicting]
+        vec![conflicting.clone()]
+    );
+    let appended = event(
+        conflicting,
+        2,
+        "late-validation",
+        WorkflowRunEventKind::RunValidated,
+    );
+    backend
+        .append_event(&appended)
+        .expect("append newer history");
+    decision.decision_id = IdempotencyKey::new("stale-prefix-disposition").expect("decision id");
+    decision.supersedes = Some(current.request.decision_id);
+    assert_eq!(
+        reopened
+            .record_hosted_conflict_disposition(&actor, &decision)
+            .expect_err("new decision cannot cite stale history")
+            .code(),
+        "hosted.conflict_disposition.history_stale"
     );
 }
 
