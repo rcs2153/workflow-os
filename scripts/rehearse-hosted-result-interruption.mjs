@@ -305,6 +305,93 @@ async function rehearseConflictOperator(body, api) {
   console.log("hosted_conflict_operator: passed; separate access and stable decision replay after API restart without run writes");
 }
 
+async function rehearseLegacyMissingSchedule() {
+  const runId = "run-legacy-missing-schedule";
+  const body = {
+    run_id: runId, workflow_id: "hosted/recovery-proof",
+    bundle_id: "bundle-legacy-missing-schedule", bundle_version: "v1",
+    created_at: new Date().toISOString(), correlation_id: "correlation-legacy-missing-schedule",
+    idempotency_key: "legacy-missing-schedule-create", sensitivity: "internal", redaction_required: true,
+  };
+  const path = `/api/v0alpha1/runs/${runId}`;
+  const route = `/api/v0alpha1/operator/runs/${runId}/creation-conflicts`;
+  // Keep the real request reservation, bundle, and invocation policy event,
+  // but stop the atomic dispatch before it can publish work.
+  sql(`CREATE FUNCTION public.wos_legacy_dispatch_fault() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.run_id = '${runId}' AND NEW.payload::jsonb #>> '{kind,kind}' = 'SkillInvocationRequested' THEN
+        RAISE EXCEPTION 'fixture dispatch failure';
+      END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER wos_legacy_dispatch_fault BEFORE INSERT ON workflow_os.events
+      FOR EACH ROW EXECUTE FUNCTION public.wos_legacy_dispatch_fault();`);
+  try {
+    const interrupted = await request("/api/v0alpha1/runs", body);
+    assert.equal(interrupted.status, 409);
+    assert.equal((await interrupted.json()).code, "postgres_state.backend.unavailable");
+  } finally {
+    sql("DROP TRIGGER wos_legacy_dispatch_fault ON workflow_os.events; DROP FUNCTION public.wos_legacy_dispatch_fault()");
+  }
+
+  const initial = await request(`${path}/events`);
+  assert.equal(initial.status, 200);
+  const { events } = await initial.json();
+  const schedule = events.at(-2);
+  const policy = events.at(-1);
+  assert.equal(schedule.kind.kind, "StepScheduled");
+  assert.equal(policy.kind.kind, "PolicyDecisionRecorded");
+  assert.equal(policy.sequence_number, schedule.sequence_number + 1);
+  // Model the legacy writer that recorded policy at the missing schedule slot.
+  sql(`BEGIN;
+    DELETE FROM workflow_os.events WHERE run_id='${runId}' AND sequence_number=${schedule.sequence_number};
+    UPDATE workflow_os.events SET sequence_number=${schedule.sequence_number},
+      payload=jsonb_set(payload::jsonb, '{sequence_number}', to_jsonb(${schedule.sequence_number}))::text
+      WHERE run_id='${runId}' AND sequence_number=${policy.sequence_number};
+    COMMIT;`);
+  async function verifyConflict() {
+    const result = await request("/api/v0alpha1/runs", body);
+    assert.equal(result.status, 409);
+    assert.equal((await result.json()).code, "postgres_state.hosted_creation.prefix_conflict");
+  }
+  await verifyConflict();
+  const inspected = await request(`${path}/events`);
+  assert.equal(inspected.status, 200);
+  const history = await inspected.json();
+  assert.deepEqual(history.events, [...events.slice(0, -2), { ...policy, sequence_number: schedule.sequence_number }]);
+  const observationsResponse = await request(route, undefined, operatorAuth);
+  assert.equal(observationsResponse.status, 200);
+  const observations = await observationsResponse.json();
+  assert.equal(observations.length, 1);
+  const [observation] = observations;
+  assert.equal(observation.first_mismatched_sequence, schedule.sequence_number);
+  assert.equal(observation.observed_history_revision, history.history_revision);
+
+  const executionState = () => sql(`SELECT family, key1, key2, revision, payload FROM workflow_os.records
+    WHERE family NOT IN ('hosted_conflict_disposition', 'hosted_conflict_disposition_head')
+    ORDER BY family, key1, key2`);
+  const before = executionState();
+  const decision = await request(route, {
+    run_id: runId, decision_id: "investigate-missing-schedule",
+    observed_history_revision: observation.observed_history_revision,
+    expected_prefix_revision: observation.expected_prefix_revision,
+    supersedes: null, disposition: "investigation_required", reason: "Policy decision without a scheduled step",
+    owner: "user/conflict-operator", evidence_event_ids: [policy.event_id],
+  }, operatorAuth);
+  assert.equal(decision.status, 200);
+  assert.equal((await decision.json()).request.disposition, "investigation_required");
+  await verifyConflict();
+  assert.deepEqual(await (await request(`${path}/events`)).json(), history);
+  assert.equal((await request(`${path}/report`)).status, 404);
+  const idle = start(["--worker-once"], "service/legacy-schedule", "wos-legacy-schedule");
+  await finished(idle);
+  assert.equal(idle.exitCode, 0, outputs.get(idle));
+  assert.match(outputs.get(idle), /worker_outcome: idle/);
+  assert.equal(executionState(), before);
+  assert.equal(sql(`SELECT count(*) FROM workflow_os.records WHERE family='hosted_work_item' AND payload::jsonb ->> 'run_id'='${runId}'`), "0");
+  console.log("hosted_legacy_missing_schedule: passed; conflict disposition preserved history without dispatch");
+}
+
 async function rehearseInvalidHistoryInspection() {
   const path = "/api/v0alpha1/runs/run-invalid-legacy-history";
   // Seed an internally bound row that cannot begin a valid run.
@@ -390,6 +477,7 @@ try {
   await rehearseConcurrentCreates();
   await rehearseExactCreateRecovery("reservation");
   await rehearseConflictOperator(await rehearseExactCreateRecovery("prefix"), api);
+  await rehearseLegacyMissingSchedule();
   await rehearseInvalidHistoryInspection();
 } finally {
   for (const child of [...children]) {
