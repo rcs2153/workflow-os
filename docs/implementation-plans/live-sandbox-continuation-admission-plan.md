@@ -2788,6 +2788,36 @@ and independent review exist.
 Documentation run `run-1794554006235786000-2` used proof-backed approval.
 Source inspection and docs validation ran outside the preview handlers.
 
+#### Operator-Owned Generation Rehearsal
+
+Keep the current generation in operator-owned host state outside the guest
+and database restore boundary. Bind it to one reviewed launch, including
+the image, launcher, collector, verifier, and attachment configuration.
+The guest cannot write that state, allocate the next generation, or supply
+the verifier's expected value. A guest boot ID may corroborate a reboot,
+but does not replace the operator's generation or detect snapshot rollback.
+
+Retire the generation before an operator-controlled restart or restore and
+on loss of the trusted handoff. A new generation requires a new launch
+binding and a fresh observation; never relabel old observations. If the
+operator cannot observe or prevent a lifecycle transition, that mode is
+ineligible for fresh authority. Restart of the operator process must not
+make a retired generation current again. A host rollback is outside this
+rehearsal's trust boundary and must remain unqualified.
+
+For the offline rehearsal, keep one observation and its matching guest
+policy fixed. Verify that the current host generation first matches, then
+retire it and reject the same observation against a new generation. Repeat
+with a missing host handoff and a replay of the old guest-side state. The
+verifier must not fall back to the sample's own generation or a cached
+value after handoff loss. Then capture a new synthetic observation and
+prove the new generation succeeds without rewriting historical evidence.
+Record which transitions were actual and which were simulated. No
+provider access, production clock qualification, or live admission is
+authorized by this contract.
+
+Planning run `run-1794563053625520000-2` used proof-backed approval.
+
 #### Deadline Measurement Checklist
 
 Record the exact applicable values for each decision. These source limits
