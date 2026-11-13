@@ -4958,6 +4958,29 @@ mod tests {
                 .expect("recover exact historical disposition"),
             expected
         );
+        time.epoch_id = ContinuityTrustedTimeEpochId::new("epoch/replacement-fixture")
+            .expect("replacement epoch");
+        super::super::continuity_store::persist_trusted_time(&connection, &time)
+            .expect("rotate the epoch in disposable state");
+        assert_eq!(
+            super::super::continuity_codec::load_snapshot(&connection)
+                .expect("read rotated state")
+                .trusted_time
+                .epoch_id,
+            time.epoch_id
+        );
+        assert_eq!(inspect().expect("inspect after epoch rotation"), expected);
+        assert_eq!(
+            reopened
+                .recover_installation_comment(
+                    &operation,
+                    action,
+                    |_| panic!("epoch rotation cannot require a new notification"),
+                    |_| panic!("epoch rotation cannot require a provider read"),
+                )
+                .expect("recover after epoch rotation"),
+            expected
+        );
         backend
             .revoke_live_sandbox_grant(admission.grant_id)
             .expect("revoke consumed grant");
