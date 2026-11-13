@@ -214,6 +214,13 @@ or a replacement for the original run. Until runtime persistence is accepted,
 record dispositions externally as described in the
 [operator runbook](../runtime/single-tenant-hosted-alpha.md#conflicting-creation-history).
 
+For a typed, grammar-valid history that diverges from the expected creation
+prefix, Core records one create-only observation per run, observed history
+revision and expected prefix revision. It records the first mismatch and
+database observation time, not raw events or an operator decision. The
+existing conflict response still stops creation. Other invalid histories
+remain fail-closed and are not classified by this observation path.
+
 The runtime slice must bind an authenticated, authorized operator decision to
 the original run, immutable request and exact observed history revision.
 Persist the decision separately from workflow events, with decision time,
