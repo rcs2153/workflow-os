@@ -668,10 +668,15 @@ pub fn hosted_router(state: HostedApiState) -> Router {
             get(read_execution_receipt),
         );
     if state.conflict_operator.is_some() {
-        router = router.route(
-            "/api/v0alpha1/operator/runs/:run_id/creation-conflicts",
-            get(read_creation_conflicts).post(record_conflict_disposition),
-        );
+        router = router
+            .route(
+                "/api/v0alpha1/operator/runs/:run_id/creation-conflicts",
+                get(read_creation_conflicts).post(record_conflict_disposition),
+            )
+            .route(
+                "/api/v0alpha1/operator/runs/:run_id/creation-conflicts/current-decision",
+                get(read_current_conflict_disposition),
+            );
     }
     router
         .layer(DefaultBodyLimit::max(MAX_API_BODY_BYTES))
@@ -705,6 +710,38 @@ async fn read_creation_conflicts(
     .map_err(|_| HostedApiError::internal())?
     .map_err(|error| HostedApiError::from_core(&error))?;
     Ok(Json(observations))
+}
+
+#[derive(Serialize)]
+struct CurrentConflictDispositionResponse {
+    decision: HostedConflictDispositionRecord,
+    current_history_revision: SpecContentHash,
+}
+
+async fn read_current_conflict_disposition(
+    State(state): State<HostedApiState>,
+    headers: HeaderMap,
+    Path(run_id): Path<String>,
+) -> Result<Json<CurrentConflictDispositionResponse>, HostedApiError> {
+    state
+        .conflict_operator
+        .as_ref()
+        .ok_or_else(HostedApiError::not_found)?
+        .authorize(&headers)?;
+    let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
+    let (decision, current_history_revision) = tokio::task::spawn_blocking(move || {
+        state
+            .backend
+            .read_current_hosted_conflict_disposition(&run_id)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?
+    .ok_or_else(HostedApiError::not_found)?;
+    Ok(Json(CurrentConflictDispositionResponse {
+        decision,
+        current_history_revision,
+    }))
 }
 
 async fn record_conflict_disposition(

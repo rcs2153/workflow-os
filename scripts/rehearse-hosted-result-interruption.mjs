@@ -234,6 +234,7 @@ async function rehearseExactCreateRecovery(stage) {
 async function rehearseConflictOperator(body, api) {
   const runPath = `/api/v0alpha1/runs/${body.run_id}`;
   const route = `/api/v0alpha1/operator/runs/${body.run_id}/creation-conflicts`;
+  const currentRoute = `${route}/current-decision`;
   sql(`UPDATE workflow_os.events SET payload = jsonb_set(payload::jsonb, '{actor}', '"user/legacy-actor"')::text
        WHERE run_id = '${body.run_id}' AND sequence_number = 1`);
   async function verifyConflict() {
@@ -243,6 +244,8 @@ async function rehearseConflictOperator(body, api) {
   }
   await verifyConflict();
   assert.equal((await request(route)).status, 401);
+  assert.equal((await request(currentRoute)).status, 401);
+  assert.equal((await request(currentRoute, undefined, operatorAuth)).status, 404);
   assert.equal((await request(runPath, undefined, operatorAuth)).status, 401);
   const response = await request(route, undefined, operatorAuth);
   assert.equal(response.status, 200);
@@ -274,6 +277,11 @@ async function rehearseConflictOperator(body, api) {
   await finished(api);
   assert.equal(api.exitCode, 0, outputs.get(api));
   await startRehearsalApi("wos-result-api-replacement");
+  const current = await request(currentRoute, undefined, operatorAuth);
+  assert.equal(current.status, 200);
+  assert.deepEqual(await current.json(), {
+    decision: recorded, current_history_revision: before.history_revision,
+  });
   const replay = await request(route, requestBody, operatorAuth);
   assert.equal(replay.status, 200);
   assert.deepEqual(await replay.json(), recorded);
@@ -282,6 +290,18 @@ async function rehearseConflictOperator(body, api) {
   assert.deepEqual(await (await request(`${runPath}/events`)).json(), before);
   assert.equal(readExecutionRecords(), executionRecords);
   assert.equal(sql(`SELECT count(*) FROM workflow_os.records WHERE family='hosted_conflict_disposition' AND key1='${body.run_id}'`), "1");
+  // Simulate a different history after review without changing the decision.
+  sql(`UPDATE workflow_os.events SET payload = jsonb_set(payload::jsonb, '{actor}', '"user/new-legacy-actor"')::text
+       WHERE run_id = '${body.run_id}' AND sequence_number = 1`);
+  const changed = await request(currentRoute, undefined, operatorAuth);
+  assert.equal(changed.status, 200);
+  const updated = await changed.json();
+  assert.deepEqual(updated.decision, recorded);
+  assert.notEqual(updated.current_history_revision, before.history_revision);
+  const updatedEvents = await (await request(`${runPath}/events`)).json();
+  assert.equal(updated.current_history_revision, updatedEvents.history_revision);
+  assert.equal(readExecutionRecords(), executionRecords);
+  console.log("hosted_conflict_current_decision: passed; predecessor recovered after restart and stale evidence stays visible");
   console.log("hosted_conflict_operator: passed; separate access and stable decision replay after API restart without run writes");
 }
 

@@ -838,6 +838,70 @@ impl PostgresStateBackend {
             .collect()
     }
 
+    /// Reads the current decision and observed history revision in one snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Rejects project-bound runs, invalid stored identities, and storage errors.
+    pub fn read_current_hosted_conflict_disposition(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Option<(HostedConflictDispositionRecord, SpecContentHash)>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        let mut tx = client
+            .build_transaction()
+            .isolation_level(IsolationLevel::RepeatableRead)
+            .read_only(true)
+            .start()
+            .map_err(|error| database_error("conflict_disposition_read_begin", &error))?;
+        if read_project_resource_binding_tx(
+            &mut tx,
+            HostedProjectResourceKind::Run,
+            run_id.as_str(),
+            false,
+        )?
+        .is_some()
+        {
+            return Err(state_error(
+                "hosted.resource.not_found",
+                "hosted resource was not found",
+            ));
+        }
+        let Some(head) = read_record_tx::<IdempotencyKey>(
+            &mut tx,
+            HOSTED_CONFLICT_DISPOSITION_HEAD,
+            run_id.as_str(),
+            "",
+            false,
+        )?
+        else {
+            return Ok(None);
+        };
+        let decision_id = head.value();
+        let record = read_record_tx::<HostedConflictDispositionRecord>(
+            &mut tx,
+            HOSTED_CONFLICT_DISPOSITION_FAMILY,
+            run_id.as_str(),
+            decision_id.as_str(),
+            false,
+        )?
+        .map(|value| value.into_parts().0)
+        .filter(|value| {
+            &value.request.run_id == run_id && &value.request.decision_id == decision_id
+        })
+        .ok_or_else(|| {
+            state_error(
+                "hosted.conflict_disposition.head_invalid",
+                "current decision does not match its stored pointer",
+            )
+        })?;
+        let events = read_events_client(&mut tx, run_id)?;
+        let revision = crate::hosted_event_history_revision(run_id, &events)?;
+        tx.commit()
+            .map_err(|error| database_error("conflict_disposition_read_commit", &error))?;
+        Ok(Some((record, revision)))
+    }
+
     /// Records or exactly replays an authorized operator's non-executing decision.
     ///
     /// This is a trusted storage API, not an authentication boundary.
@@ -5236,7 +5300,7 @@ fn read_events_tx(
 }
 
 fn read_events_client(
-    client: &mut Client,
+    client: &mut impl postgres::GenericClient,
     run_id: &WorkflowRunId,
 ) -> Result<Vec<WorkflowRunEvent>, WorkflowOsError> {
     let rows = client
