@@ -2694,6 +2694,53 @@ This update is scoped to docs run `run-1794386319492771000-2` and proof-backed
 `approval/run-1794386319492771000-2/planning-approved`. It does not authorize
 clock-source integration or live work.
 
+### Trusted-Time Pilot Qualification Contract
+
+The governed source review rechecked `lima-wos-pf`: `NTPSynchronized=no`,
+`systemd-timesyncd` active, no active chrony service, and the reviewed firewall
+digest unchanged. Keep that VM offline for synthetic and historical work.
+Do not repair its wall clock to convert its previous results into live evidence.
+
+Evaluate [NTS](https://www.rfc-editor.org/rfc/rfc8915.html) on a separate,
+explicitly designated pilot host. Prefer a host-owned synchronization service
+and a bounded, read-only observation path for Core over a new time protocol.
+NTS authenticates the selected source; it does not guarantee that source is
+correct or remove uncertainty from network delay. Review certificate-time
+bootstrap without allowing unauthenticated fallback for admission. A signed
+[RFC 3161 timestamp](https://www.rfc-editor.org/rfc/rfc3161.html) could bind a
+one-time challenge to an independent time reference, but does not by itself
+qualify the current execution clock or its behavior after suspend or restore.
+Do not introduce a timestamp relay for this pilot.
+
+Before any qualification run, record the exact host and operator, reference
+identity and trust roots, bootstrap and allowed network paths, protected
+local observation interface, independent reviewer, and the exact approval,
+grant, execution, signer, and observer deadline policy. None has been
+approved for a new host here. The first qualification rehearsal is
+no-dispatch, with no provider credentials or provider egress.
+
+| Requirement | Qualification evidence |
+| --- | --- |
+| Source and provenance | Bind the selected authenticated reference, host, observation interface, source configuration, and epoch. Deny a source substitution, unauthenticated fallback, synchronization loss, bootstrap-only sample, or unverifiable collection path. A synchronization flag alone is not sufficient. |
+| Interval and age | Derive the uncertainty from verified reference accuracy, path and clock error, and collection and projection to the decision point. For chrony, [tracking](https://chrony-project.org/doc/4.8/chronyc.html#tracking) bounds host error using system offset, root dispersion, and half the root delay, conditional on a correct reference. Record that assumption and any additional independently established bound. Do not accept a caller's zero uncertainty. |
+| Boundary enforcement | Use the tightest applicable interval, including not-before conditions, approval, grant, window, assertion or access expiry, and observation deadline. At each current-authority decision, require the full uncertainty interval inside that interval, with the upper bound strictly before exclusive expiry. Include age and elapsed handoff time, and recheck after waits or callbacks. Test both sides of each boundary, equal expiry, an interval straddling expiry, and stale or unavailable observations. |
+| Suspend, rollback, restart and restore | Use suspend-aware elapsed time for sample age, not wall-clock deltas. On Linux, [`CLOCK_BOOTTIME`](https://man7.org/linux/man-pages/man2/clock_gettime.2.html) includes system suspend; it does not prove continuity across a restored VM image. Require a reviewed epoch outside rollbackable state, fresh source qualification after lifecycle change, and denial on an unknown generation. Test rollback, resume and restore without reusing a grant or silently rebinding a window. |
+| Historical disposition | Read already consumed attempts and unknown effects without a new grant or current clock. Prove that loss of qualification creates no new send, exchange, or success proof and that historical inspection still works without provider contact. |
+
+The pilot must set numeric age, uncertainty and remaining-time budgets from
+its shortest allowed lifetime and measured collection latency. Do not pick
+global tolerances from a fixture or from the signer's maximum assertion
+lifetime. Reject the candidate if it cannot meet those budgets with isolation
+intact. These are acceptance criteria, not an implementation decision or a
+claim of trusted time. The current guard stays closed.
+
+Review run `run-1794392678677450000-2` closed with 39 events, one
+proof-backed approval
+`approval/run-1794392678677450000-2/review-scope-approved`, and no retries
+or escalations. Standards review and read-only host inspection were executor
+work outside preview handlers. No configuration, source, or provider state
+changed, and no independent acceptance was recorded.
+
 ### Designated VM Framed Notification Result
 
 [PR #915](https://github.com/rcs2153/workflow-os/pull/915) merged at
