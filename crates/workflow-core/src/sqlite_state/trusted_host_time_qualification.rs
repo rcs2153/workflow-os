@@ -28,6 +28,8 @@ struct Policy {
 
 #[derive(Debug, PartialEq, Eq)]
 enum Denial {
+    EpochUnavailable,
+    EpochMismatch,
     DomainMismatch,
     FutureSample,
     StaleSample,
@@ -37,6 +39,21 @@ enum Denial {
 }
 
 fn qualify(sample: Sample, decision_tick: u64, policy: Policy) -> Result<(u64, u64), Denial> {
+    qualify_at_epoch(sample, decision_tick, policy, Some(DOMAIN.epoch))
+}
+
+fn qualify_at_epoch(
+    sample: Sample,
+    decision_tick: u64,
+    policy: Policy,
+    external_epoch: Option<&str>,
+) -> Result<(u64, u64), Denial> {
+    let epoch = external_epoch
+        .filter(|epoch| !epoch.is_empty())
+        .ok_or(Denial::EpochUnavailable)?;
+    if policy.domain.epoch != epoch {
+        return Err(Denial::EpochMismatch);
+    }
     if sample.domain != policy.domain {
         return Err(Denial::DomainMismatch);
     }
@@ -89,6 +106,25 @@ const POLICY: Policy = Policy {
     not_before_ms: 100,
     expires_ms: 120,
 };
+
+#[test]
+fn refuses_joint_rollback_even_when_sample_and_policy_agree() {
+    assert_eq!(qualify(SAMPLE, 40, POLICY), Ok((108, 116)));
+    assert_eq!(
+        qualify_at_epoch(SAMPLE, 40, POLICY, Some("fixture/post-restore")),
+        Err(Denial::EpochMismatch)
+    );
+}
+
+#[test]
+fn refuses_missing_external_epoch_even_when_sample_and_policy_agree() {
+    for external_epoch in [None, Some("")] {
+        assert_eq!(
+            qualify_at_epoch(SAMPLE, 40, POLICY, external_epoch),
+            Err(Denial::EpochUnavailable)
+        );
+    }
+}
 
 #[test]
 fn projects_the_full_interval_at_the_maximum_sample_age() {
