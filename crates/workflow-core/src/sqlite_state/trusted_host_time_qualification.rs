@@ -42,7 +42,7 @@ enum Denial {
     OutsideWindow,
 }
 
-const MAX_OBSERVATION_BYTES: u64 = 256;
+const MAX_OBSERVATION_BYTES: u16 = 256;
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -63,10 +63,10 @@ fn assess_read_only(
 ) -> Result<(u64, u64), Denial> {
     let mut bytes = Vec::new();
     input
-        .take(MAX_OBSERVATION_BYTES + 1)
+        .take(u64::from(MAX_OBSERVATION_BYTES) + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| Denial::ObservationUnavailable)?;
-    if bytes.len() as u64 > MAX_OBSERVATION_BYTES {
+    if bytes.len() > usize::from(MAX_OBSERVATION_BYTES) {
         return Err(Denial::InvalidObservation);
     }
     let frame: FixtureObservation =
@@ -163,8 +163,15 @@ const POLICY: Policy = Policy {
 const OBSERVATION: &[u8] = br#"{"source":"fixture/source","provenance":"fixture/provenance","epoch":"fixture/epoch","captured_tick":30,"lower_utc_ms":100,"upper_utc_ms":104}"#;
 
 #[test]
-fn reads_a_fixture_without_changing_its_bytes() {
+fn reads_a_fixture_without_changing_its_bytes() -> std::io::Result<()> {
     use std::io::Write;
+
+    struct RemoveFixture(std::path::PathBuf);
+    impl Drop for RemoveFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
 
     let path = std::env::temp_dir().join(format!(
         "workflow-os-time-observation-{}-{}.json",
@@ -176,44 +183,40 @@ fn reads_a_fixture_without_changing_its_bytes() {
     let mut writer = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&path)
-        .expect("create isolated fixture");
-    struct RemoveFixture(std::path::PathBuf);
-    impl Drop for RemoveFixture {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.0);
-        }
-    }
+        .open(&path)?;
     let fixture = RemoveFixture(path);
-    writer.write_all(OBSERVATION).expect("write fixture");
+    writer.write_all(OBSERVATION)?;
     drop(writer);
-    let reader = std::fs::File::open(&fixture.0).expect("open read-only fixture");
+    let reader = std::fs::File::open(&fixture.0)?;
     assert_eq!(
         assess_read_only(reader, 40, || Some(DOMAIN.epoch), POLICY),
         Ok((108, 116))
     );
-    assert_eq!(
-        std::fs::read(&fixture.0).expect("fixture unchanged"),
-        OBSERVATION
-    );
+    assert_eq!(std::fs::read(&fixture.0)?, OBSERVATION);
+    Ok(())
 }
 
 #[test]
 fn rejects_incomplete_oversized_and_trailing_observation_data() {
     let mut padded = OBSERVATION.to_vec();
-    padded.resize(MAX_OBSERVATION_BYTES as usize + 1, b' ');
+    padded.resize(usize::from(MAX_OBSERVATION_BYTES) + 1, b' ');
     let mut trailing = OBSERVATION.to_vec();
     trailing.extend_from_slice(b"{}");
     for input in [&OBSERVATION[..OBSERVATION.len() - 1], &padded, &trailing] {
+        let mut requested_epoch = false;
         assert_eq!(
             assess_read_only(
                 input,
                 40,
-                || panic!("invalid input cannot request an epoch"),
+                || {
+                    requested_epoch = true;
+                    None
+                },
                 POLICY
             ),
             Err(Denial::InvalidObservation)
         );
+        assert!(!requested_epoch);
     }
 }
 
