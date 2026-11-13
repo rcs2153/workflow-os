@@ -60,6 +60,16 @@ async function finished(child) {
   await Promise.race([once(child, "exit"), sleep(45000, undefined, { ref: false }).then(() => { throw new Error("worker did not exit"); })]);
 }
 
+async function startRehearsalApi(application) {
+  const api = start([], "user/result-rehearsal", application);
+  await until(async () => {
+    assert.equal(api.exitCode, null, `API exited: ${outputs.get(api)}`);
+    assert.equal(api.signalCode, null, `API stopped: ${outputs.get(api)}`);
+    try { return (await request("/health/ready")).ok; } catch { return false; }
+  }, "API readiness", 120000);
+  return api;
+}
+
 async function rehearseConcurrentCreates() {
   const count = 25;
   const retryable = new Set(["immutable_bundle", "creation_prefix", "dispatch", "rehydrate"]
@@ -221,7 +231,7 @@ async function rehearseExactCreateRecovery(stage) {
   return body;
 }
 
-async function rehearseConflictOperator(body) {
+async function rehearseConflictOperator(body, api) {
   const runPath = `/api/v0alpha1/runs/${body.run_id}`;
   const route = `/api/v0alpha1/operator/runs/${body.run_id}/creation-conflicts`;
   sql(`UPDATE workflow_os.events SET payload = jsonb_set(payload::jsonb, '{actor}', '"user/legacy-actor"')::text
@@ -240,6 +250,12 @@ async function rehearseConflictOperator(body) {
   assert.equal(observations.length, 1);
   const [observation] = observations;
   const before = await (await request(`${runPath}/events`)).json();
+  // The database is disposable and there are no workers running during this comparison.
+  const readExecutionRecords = () => sql(`SELECT family, key1, key2, revision, payload
+    FROM workflow_os.records
+    WHERE family NOT IN ('hosted_conflict_disposition', 'hosted_conflict_disposition_head')
+    ORDER BY family, key1, key2`);
+  const executionRecords = readExecutionRecords();
   assert.equal(observation.observed_history_revision, before.history_revision);
   const requestBody = {
     run_id: body.run_id, decision_id: "fixture-investigation",
@@ -254,14 +270,19 @@ async function rehearseConflictOperator(body) {
   assert.equal(decision.status, 200);
   const recorded = await decision.json();
   assert.equal(recorded.actor, "user/conflict-operator");
+  assert.equal(api.kill("SIGINT"), true);
+  await finished(api);
+  assert.equal(api.exitCode, 0, outputs.get(api));
+  await startRehearsalApi("wos-result-api-replacement");
   const replay = await request(route, requestBody, operatorAuth);
   assert.equal(replay.status, 200);
   assert.deepEqual(await replay.json(), recorded);
   assert.equal((await request(route, { ...requestBody, reason: "Changed reasoning" }, operatorAuth)).status, 409);
   await verifyConflict();
   assert.deepEqual(await (await request(`${runPath}/events`)).json(), before);
+  assert.equal(readExecutionRecords(), executionRecords);
   assert.equal(sql(`SELECT count(*) FROM workflow_os.records WHERE family='hosted_conflict_disposition' AND key1='${body.run_id}'`), "1");
-  console.log("hosted_conflict_operator: passed; separate access and stable decision replay without run writes");
+  console.log("hosted_conflict_operator: passed; separate access and stable decision replay after API restart without run writes");
 }
 
 async function rehearseInvalidHistoryInspection() {
@@ -298,11 +319,7 @@ async function rehearseInvalidHistoryInspection() {
 
 assert.equal(sql("SELECT count(*) FROM pg_namespace WHERE nspname='workflow_os'"), "0", "database must not contain Workflow OS state");
 try {
-  const api = start([], "user/result-rehearsal", "wos-result-api");
-  await until(async () => {
-    assert.equal(api.exitCode, null, `API exited: ${outputs.get(api)}`);
-    try { return (await request("/health/ready")).ok; } catch { return false; }
-  }, "API readiness", 120000);
+  const api = await startRehearsalApi("wos-result-api");
   sql(`CREATE FUNCTION public.wos_result_fault() RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
       IF NEW.payload::jsonb #>> '{kind,kind}' = 'SkillInvocationSucceeded' THEN
@@ -352,7 +369,7 @@ try {
   console.log("hosted_result_interruption: passed; durable reconciliation, no repeated invocation or fabricated report");
   await rehearseConcurrentCreates();
   await rehearseExactCreateRecovery("reservation");
-  await rehearseConflictOperator(await rehearseExactCreateRecovery("prefix"));
+  await rehearseConflictOperator(await rehearseExactCreateRecovery("prefix"), api);
   await rehearseInvalidHistoryInspection();
 } finally {
   for (const child of [...children]) {
