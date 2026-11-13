@@ -385,7 +385,31 @@ Trusted time remains an open live-admission gate; the offline VM remains
 valid for tests that do not authorize fresh work from its wall clock.
 The [time qualification review](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#trusted-time-pilot-qualification-contract)
 retains that isolation and specifies the evidence needed from a separate
-pilot host and authenticated reference. No host or reference is enrolled.
+pilot host and authenticated reference. A disposable pilot is staged but
+stopped; neither the host nor the candidate reference is qualified.
+The [no-uplink reboot result](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#vfkit-no-uplink-reboot-result)
+establishes one in-guest reboot with controlled probes on the sole attachment,
+not production egress or graceful teardown. The
+[generation rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#operator-owned-generation-rehearsal)
+records synthetic process replacement and replay. Linux CI separately
+proved [elapsed clock comparability](https://github.com/rcs2153/workflow-os/pull/933),
+[unprivileged write denial](https://github.com/rcs2153/workflow-os/pull/939),
+and [generation rechecks](https://github.com/rcs2153/workflow-os/pull/940).
+None proves real snapshot custody or an atomic live authority decision.
+
+The next time-qualification milestone is an **intended-host no-dispatch
+measurement**. First review the exact launch with the operator-owned
+preboot egress boundary, collector and verifier custody, externally held
+generation, reference bootstrap, and independent reviewer. Keep the staged
+Lima configuration stopped unless its egress boundary is verified; the
+offline VFKit result does not clear it. Then, under separate scoped
+authorization, record the exact decision deadlines and measure against
+the [deadline checklist](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#deadline-measurement-checklist).
+Use a positive control followed by generation loss or drift, staleness,
+and the expiry boundary. Do not use another component fixture as a
+substitute for this host evidence. No provider egress, live grant, or
+dispatch is authorized by this queue entry.
+
 The [designated VM framed notification rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#designated-vm-framed-notification-result)
 then used the exact merged worker to attest one synthetic notification and
 recover the fixture effect without resending. This verifies the private
