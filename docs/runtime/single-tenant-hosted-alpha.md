@@ -191,6 +191,12 @@ recovery objectives, connection pooling, or production disaster recovery.
 
 ### Conflicting Creation History
 
+HTTP 409 with `hosted.run_create.reservation_retry_exhausted` means the
+no-write create endpoint exhausted its bounded retries while reserving the
+request. Retry the unchanged HTTP request with its original idempotency key
+and run identity. This response does not acknowledge queued work or prove
+that another submission of the same request did not succeed.
+
 HTTP 409 with `postgres_state.hosted_creation.prefix_conflict` means the
 stored events do not match the expected creation prefix. This is not a
 transient contention error. The conflicting retry does not rewrite history,
