@@ -999,11 +999,11 @@ pub use high_assurance_approval::{
     HighAssuranceRequesterApproverRule,
 };
 pub use hosted::{
-    invoke_hosted_execution_provider, HostedCatalogEntryId, HostedExecutionAttempt,
-    HostedExecutionAttemptPosture, HostedExecutionAttemptStatus, HostedExecutionAttestation,
-    HostedExecutionBudget, HostedExecutionCleanupPosture, HostedExecutionControlPosture,
-    HostedExecutionEnforcementMode, HostedExecutionErrorCategory, HostedExecutionId,
-    HostedExecutionInvocationError, HostedExecutionObservationSummary,
+    hosted_event_history_revision, invoke_hosted_execution_provider, HostedCatalogEntryId,
+    HostedExecutionAttempt, HostedExecutionAttemptPosture, HostedExecutionAttemptStatus,
+    HostedExecutionAttestation, HostedExecutionBudget, HostedExecutionCleanupPosture,
+    HostedExecutionControlPosture, HostedExecutionEnforcementMode, HostedExecutionErrorCategory,
+    HostedExecutionId, HostedExecutionInvocationError, HostedExecutionObservationSummary,
     HostedExecutionPolicyBinding, HostedExecutionPolicyId, HostedExecutionPolicyRevision,
     HostedExecutionProvider, HostedExecutionProviderId, HostedExecutionProviderVersion,
     HostedExecutionReceipt, HostedExecutionReference, HostedExecutionReferenceKind,

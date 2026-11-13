@@ -180,6 +180,10 @@ async function rehearseExactCreateRecovery(stage) {
   const recovered = await request("/api/v0alpha1/runs", body);
   assert.equal(recovered.status, 201);
   assert.equal((await recovered.json()).snapshot.identity.run_id, body.run_id);
+  const queuedHistoryResponse = await request(`${path}/events?limit=1`);
+  assert.equal(queuedHistoryResponse.status, 200);
+  const queuedHistory = await queuedHistoryResponse.json();
+  assert.match(queuedHistory.history_revision, /^[a-f0-9]{64}$/);
   const worker = start(["--worker-once"], "service/http-prefix-recovery", "wos-http-prefix-recovery");
   await finished(worker);
   assert.equal(worker.exitCode, 0, outputs.get(worker));
@@ -191,6 +195,14 @@ async function rehearseExactCreateRecovery(stage) {
   }
   const events = await read("/events?limit=50");
   assert.equal(events.has_more, false);
+  assert.match(events.history_revision, /^[a-f0-9]{64}$/);
+  assert.notEqual(events.history_revision, queuedHistory.history_revision);
+  const firstPage = await read("/events?limit=1");
+  assert.equal(firstPage.has_more, true);
+  assert.equal(firstPage.history_revision, events.history_revision);
+  const nextPage = await read(`/events?limit=1&after_sequence=${firstPage.events[0].sequence_number}`);
+  assert.equal(nextPage.history_revision, events.history_revision);
+  assert.deepEqual(nextPage.events[0], events.events[1]);
   for (const kind of ["RunCreated", "SkillInvocationStarted", "SkillInvocationSucceeded", "RunCompleted"]) {
     assert.equal(events.events.filter(event => event.kind.kind === kind).length, 1, kind);
   }

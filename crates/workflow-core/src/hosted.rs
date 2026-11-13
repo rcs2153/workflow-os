@@ -22,6 +22,44 @@ const REFERENCE_MAX_COUNT: usize = 256;
 const MAX_TIMEOUT_SECONDS: u64 = 86_400;
 const MAX_OUTPUT_BYTES: u64 = 64 * 1024 * 1024;
 
+/// Commits to one run's ordered event history without rehydrating the run.
+///
+/// The versioned encoding covers every typed event field, including fields
+/// ignored during legacy prefix matching. A revision is evidence of observed
+/// content, not an assertion that the history is valid or authorized.
+///
+/// # Errors
+///
+/// Rejects unrelated or unordered events and serialization failure.
+pub fn hosted_event_history_revision(
+    run_id: &WorkflowRunId,
+    events: &[WorkflowRunEvent],
+) -> Result<SpecContentHash, WorkflowOsError> {
+    let mut hash = Sha256::new();
+    hash.update(b"workflow-os.hosted-event-history.v1\0");
+    hash.update(run_id.as_str().as_bytes());
+    hash.update([0]);
+    let mut last_sequence = 0;
+    for event in events {
+        if &event.run_id != run_id || event.sequence_number.get() <= last_sequence {
+            return Err(WorkflowOsError::invalid_state(
+                "hosted.event_history.identity_invalid",
+                "hosted event history contains unrelated or unordered events",
+            ));
+        }
+        last_sequence = event.sequence_number.get();
+        let encoded = serde_json::to_vec(event).map_err(|_| {
+            WorkflowOsError::invalid_state(
+                "hosted.event_history.encoding_failed",
+                "hosted event history could not be encoded",
+            )
+        })?;
+        hash.update((encoded.len() as u64).to_be_bytes());
+        hash.update(encoded);
+    }
+    SpecContentHash::new(format!("{:x}", hash.finalize()))
+}
+
 macro_rules! hosted_id {
     ($name:ident, $label:literal, $code:literal) => {
         #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -3351,7 +3389,7 @@ mod tests {
         .unwrap_or_else(|error| panic!("{error}"))
     }
 
-    fn dispatch_run() -> WorkflowRun {
+    fn dispatch_events() -> [WorkflowRunEvent; 4] {
         let request = request();
         let binding: crate::ImmutableRunBundleBinding = serde_json::from_value(serde_json::json!({
             "bundle_id": request.bundle_id().as_str(),
@@ -3395,7 +3433,7 @@ mod tests {
             idempotency_key: None,
             kind,
         };
-        WorkflowRun::rehydrate(&[
+        [
             created.clone(),
             event(2, "validated", WorkflowRunEventKind::RunValidated),
             event(3, "started", WorkflowRunEventKind::RunStarted),
@@ -3406,8 +3444,31 @@ mod tests {
                     step_id: request.step_id().clone(),
                 },
             ),
-        ])
-        .unwrap_or_else(|error| panic!("run: {error}"))
+        ]
+    }
+
+    fn dispatch_run() -> WorkflowRun {
+        WorkflowRun::rehydrate(&dispatch_events()).unwrap_or_else(|error| panic!("run: {error}"))
+    }
+
+    #[test]
+    fn hosted_history_revision_binds_even_legacy_event_fields() {
+        let mut events = dispatch_events();
+        let run_id = events[0].run_id.clone();
+        let original = hosted_event_history_revision(&run_id, &events).expect("history revision");
+        let shorter =
+            hosted_event_history_revision(&run_id, &events[..3]).expect("shorter revision");
+        assert_ne!(original, shorter);
+        events[0].timestamp = timestamp("2026-07-29T00:00:01Z");
+        assert_ne!(
+            original,
+            hosted_event_history_revision(&run_id, &events).expect("changed revision")
+        );
+        events.swap(0, 1);
+        assert!(hosted_event_history_revision(&run_id, &events).is_err());
+        events.swap(0, 1);
+        let other_run = WorkflowRunId::new("run-hosted-unrelated").expect("run identity");
+        assert!(hosted_event_history_revision(&other_run, &events).is_err());
     }
 
     fn work_item() -> HostedWorkItem {

@@ -33,22 +33,23 @@ use subtle::ConstantTimeEq;
 use workflow_core::{
     compose_authenticated_project_approval_route,
     decide_hosted_dispatch_approval_with_presentation, execute_with_hosted_no_write_dispatch,
-    invoke_hosted_execution_provider, load_project, ActorId, ApprovalDecisionKind,
-    ApprovalPresentationRecord, ApprovalPresentationRecordStore, ApprovalReferenceId,
-    ApprovalStore, CorrelationId, EventLogStore, HostedAuthorityRegistryRevision,
-    HostedCatalogEntryId, HostedExecutionAttemptPosture, HostedExecutionAttemptStatus,
-    HostedExecutionBudget, HostedExecutionErrorCategory, HostedExecutionId,
-    HostedExecutionInvocationError, HostedExecutionPolicyBinding, HostedExecutionPolicyId,
-    HostedExecutionProvider, HostedExecutionProviderId, HostedExecutionProviderVersion,
-    HostedExecutionReceipt, HostedExecutionReference, HostedExecutionReferenceKind,
-    HostedExecutionRequest, HostedExecutionStatus, HostedNoWriteDispatchInputs,
-    HostedPrincipalBinding, HostedPrincipalRegistry as CoreHostedPrincipalRegistry,
-    HostedProjectCapability, HostedProjectCatalogVersion, HostedProjectResourceBinding,
-    HostedProjectResourceBindingStatus, HostedProjectResourceKind, HostedProjectScope,
-    HostedTerminalReportArtifact, HostedTerminalResultProjection, HostedUnreceiptedOutcome,
-    HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus,
-    IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite, ImmutableRunBundleId,
-    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, LocalApprovalDecisionRequest,
+    hosted_event_history_revision, invoke_hosted_execution_provider, load_project, ActorId,
+    ApprovalDecisionKind, ApprovalPresentationRecord, ApprovalPresentationRecordStore,
+    ApprovalReferenceId, ApprovalStore, CorrelationId, EventLogStore,
+    HostedAuthorityRegistryRevision, HostedCatalogEntryId, HostedExecutionAttemptPosture,
+    HostedExecutionAttemptStatus, HostedExecutionBudget, HostedExecutionErrorCategory,
+    HostedExecutionId, HostedExecutionInvocationError, HostedExecutionPolicyBinding,
+    HostedExecutionPolicyId, HostedExecutionProvider, HostedExecutionProviderId,
+    HostedExecutionProviderVersion, HostedExecutionReceipt, HostedExecutionReference,
+    HostedExecutionReferenceKind, HostedExecutionRequest, HostedExecutionStatus,
+    HostedNoWriteDispatchInputs, HostedPrincipalBinding,
+    HostedPrincipalRegistry as CoreHostedPrincipalRegistry, HostedProjectCapability,
+    HostedProjectCatalogVersion, HostedProjectResourceBinding, HostedProjectResourceBindingStatus,
+    HostedProjectResourceKind, HostedProjectScope, HostedTerminalReportArtifact,
+    HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
+    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
+    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
+    ImmutableRunBundleVersion, LocalApprovalDecisionRequest,
     LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
     LocalCancellationRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
@@ -1029,6 +1030,7 @@ async fn collaborative_read_run_events(
     Ok(Json(EventPageResponse {
         events: selected,
         has_more,
+        history_revision: None,
     }))
 }
 
@@ -1698,6 +1700,8 @@ const fn default_event_page_limit() -> usize {
 struct EventPageResponse {
     events: Vec<WorkflowRunEvent>,
     has_more: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    history_revision: Option<SpecContentHash>,
 }
 
 async fn read_run_events(
@@ -1712,9 +1716,15 @@ async fn read_run_events(
     }
     let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
     let backend = state.backend.clone();
-    let events = tokio::task::spawn_blocking(move || {
+    let (events, history_revision) = tokio::task::spawn_blocking(move || {
         require_legacy_unbound_resource(&backend, HostedProjectResourceKind::Run, run_id.as_str())?;
-        backend.read_events(&run_id)
+        let events = backend.read_events(&run_id)?;
+        let history_revision = if events.is_empty() {
+            None
+        } else {
+            Some(hosted_event_history_revision(&run_id, &events)?)
+        };
+        Ok((events, history_revision))
     })
     .await
     .map_err(|_| HostedApiError::internal())?
@@ -1729,6 +1739,7 @@ async fn read_run_events(
     Ok(Json(EventPageResponse {
         events: selected,
         has_more,
+        history_revision,
     }))
 }
 

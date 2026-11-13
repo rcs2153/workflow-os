@@ -211,6 +211,10 @@ had no effects.
    `GET /api/v0alpha1/runs/{run_id}/events`. If the run projection cannot
    load, inspect the recorded events directly through the events endpoint.
    Follow `has_more` using the last event's sequence as `after_sequence`.
+   Each page for a nonempty single-tenant history includes a
+   `history_revision` for the full observed event stream. If it changes
+   between pages, restart inspection from the first page. A matching
+   revision does not validate the history or grant authority.
 3. Escalate the original request and observed history to the operator for
    reconciliation. A missing report or incomplete history is not a
    clean failure. Do not edit stored events, assume the operation never
