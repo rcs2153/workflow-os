@@ -153,7 +153,11 @@ async function rehearseExactCreateRecovery() {
     assert.equal(rejected.status, 409);
     assert.equal((await rejected.json()).code, "executor.hosted_no_write.creation_prefix_retry_exhausted");
     assert.equal(sql("SELECT count(*) FROM workflow_os.events WHERE run_id='run-http-prefix-recovery'"), "0");
-    assert.equal((await request(`${path}/report`)).status, 404);
+    const report = await request(`${path}/report`);
+    assert.equal(report.status, 409);
+    assert.equal((await report.json()).code, "runtime.events.empty");
+    assert.equal(sql("SELECT count(*) FROM workflow_os.records WHERE family='work_report' AND key2='run-http-prefix-recovery'"), "0");
+    assert.equal(sql("SELECT count(*) FROM workflow_os.records WHERE family='hosted_work_item' AND payload::jsonb ->> 'run_id' = 'run-http-prefix-recovery'"), "0");
   } finally {
     sql("DROP TRIGGER wos_prefix_fault ON workflow_os.events; DROP FUNCTION public.wos_prefix_fault()");
   }
