@@ -226,8 +226,9 @@ an exact conflict observation. Decisions and their current pointer are
 written atomically outside the run history; replacing a decision requires
 its current identity. Exact replay returns the original historical record,
 not a claim that it is still current. The trusted caller must authenticate
-and authorize the actor. There is no hosted write route or effect
-confirmation in this slice; continue to use the operator runbook.
+and authorize the actor. The opt-in single-tenant operator API provides that
+boundary using a distinct deployment credential and actor. It does not
+confirm effects; continue to use the operator runbook for external evidence.
 
 The runtime slice must bind an authenticated, authorized operator decision to
 the original run, immutable request and exact observed history revision.

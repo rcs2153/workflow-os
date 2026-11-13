@@ -12,6 +12,7 @@ accessSync(binary, constants.X_OK);
 const port = process.env.WORKFLOW_OS_RESULT_REHEARSAL_PORT ?? "18579";
 const base = `http://127.0.0.1:${port}`;
 const auth = "disposable-result-rehearsal-only";
+const operatorAuth = "disposable-conflict-operator-only";
 const children = new Set();
 const outputs = new Map();
 function sql(query) {
@@ -27,6 +28,8 @@ function start(args, actor, application) {
     WORKFLOW_OS_HOSTED_DATABASE_URL: url.toString(),
     WORKFLOW_OS_HOSTED_ACTOR: actor,
     WORKFLOW_OS_HOSTED_TOKEN: auth,
+    WORKFLOW_OS_HOSTED_CONFLICT_OPERATOR_TOKEN: operatorAuth,
+    WORKFLOW_OS_HOSTED_CONFLICT_OPERATOR_ACTOR: "user/conflict-operator",
     WORKFLOW_OS_HOSTED_BIND: `127.0.0.1:${port}`,
     WORKFLOW_OS_HOSTED_PROJECT_ROOT: `${process.cwd()}/deploy/hosted-alpha/project`,
   }, stdio: ["ignore", "pipe", "pipe"] });
@@ -46,9 +49,9 @@ async function until(check, label, timeout = 45000) {
   }
   throw new Error(`Timed out: ${label}`);
 }
-async function request(path, body) {
+async function request(path, body, identity = auth) {
   return fetch(`${base}${path}`, {
-    headers: { Authorization: `Bearer ${auth}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${identity}`, "Content-Type": "application/json" },
     ...(body ? { method: "POST", body: JSON.stringify(body) } : {}),
   });
 }
@@ -215,6 +218,50 @@ async function rehearseExactCreateRecovery(stage) {
   assert.deepEqual(await read("/events?limit=50"), events);
   assert.deepEqual(await read("/report"), report);
   console.log(`hosted_http_exact_retry: passed; 409 ${stage} exhaustion recovered once`);
+  return body;
+}
+
+async function rehearseConflictOperator(body) {
+  const runPath = `/api/v0alpha1/runs/${body.run_id}`;
+  const route = `/api/v0alpha1/operator/runs/${body.run_id}/creation-conflicts`;
+  sql(`UPDATE workflow_os.events SET payload = jsonb_set(payload::jsonb, '{actor}', '"user/legacy-actor"')::text
+       WHERE run_id = '${body.run_id}' AND sequence_number = 1`);
+  async function verifyConflict() {
+    const response = await request("/api/v0alpha1/runs", body);
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "postgres_state.hosted_creation.prefix_conflict");
+  }
+  await verifyConflict();
+  assert.equal((await request(route)).status, 401);
+  assert.equal((await request(runPath, undefined, operatorAuth)).status, 401);
+  const response = await request(route, undefined, operatorAuth);
+  assert.equal(response.status, 200);
+  const observations = await response.json();
+  assert.equal(observations.length, 1);
+  const [observation] = observations;
+  const before = await (await request(`${runPath}/events`)).json();
+  assert.equal(observation.observed_history_revision, before.history_revision);
+  const requestBody = {
+    run_id: body.run_id, decision_id: "fixture-investigation",
+    observed_history_revision: observation.observed_history_revision,
+    expected_prefix_revision: observation.expected_prefix_revision,
+    supersedes: null, disposition: "investigation_required", reason: "Legacy actor mismatch",
+    owner: "user/conflict-operator", evidence_event_ids: [before.events[0].event_id],
+  };
+  assert.equal((await request(route, requestBody)).status, 401);
+  assert.equal((await request(route, { ...requestBody, run_id: "run-result-interruption" }, operatorAuth)).status, 400);
+  const decision = await request(route, requestBody, operatorAuth);
+  assert.equal(decision.status, 200);
+  const recorded = await decision.json();
+  assert.equal(recorded.actor, "user/conflict-operator");
+  const replay = await request(route, requestBody, operatorAuth);
+  assert.equal(replay.status, 200);
+  assert.deepEqual(await replay.json(), recorded);
+  assert.equal((await request(route, { ...requestBody, reason: "Changed reasoning" }, operatorAuth)).status, 409);
+  await verifyConflict();
+  assert.deepEqual(await (await request(`${runPath}/events`)).json(), before);
+  assert.equal(sql(`SELECT count(*) FROM workflow_os.records WHERE family='hosted_conflict_disposition' AND key1='${body.run_id}'`), "1");
+  console.log("hosted_conflict_operator: passed; separate access and stable decision replay without run writes");
 }
 
 async function rehearseInvalidHistoryInspection() {
@@ -305,7 +352,7 @@ try {
   console.log("hosted_result_interruption: passed; durable reconciliation, no repeated invocation or fabricated report");
   await rehearseConcurrentCreates();
   await rehearseExactCreateRecovery("reservation");
-  await rehearseExactCreateRecovery("prefix");
+  await rehearseConflictOperator(await rehearseExactCreateRecovery("prefix"));
   await rehearseInvalidHistoryInspection();
 } finally {
   for (const child of [...children]) {

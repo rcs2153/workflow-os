@@ -65,6 +65,10 @@ use workflow_core::{
     WorkReportArtifactMetadata, WorkReportArtifactStore, WorkReportId, WorkReportStatus,
     WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunStatus,
 };
+use workflow_core::{
+    HostedConflictDispositionRecord, HostedConflictDispositionRequest,
+    HostedCreationConflictObservation,
+};
 
 const MAX_API_BODY_BYTES: usize = 64 * 1024;
 const MAX_EVENT_PAGE_SIZE: usize = 100;
@@ -147,6 +151,7 @@ impl fmt::Debug for HostedApiAuth {
 pub struct HostedApiState {
     backend: PostgresStateBackend,
     auth: HostedApiAuth,
+    conflict_operator: Option<HostedApiAuth>,
     build_id: String,
     project_root: PathBuf,
 }
@@ -591,9 +596,31 @@ impl HostedApiState {
         Ok(Self {
             backend,
             auth,
+            conflict_operator: None,
             build_id,
             project_root,
         })
+    }
+
+    /// Enables conflict disposition for a separate deployment-bound operator.
+    ///
+    /// # Errors
+    ///
+    /// Rejects reuse of the ordinary API credential or actor.
+    pub fn with_conflict_operator(
+        mut self,
+        operator: HostedApiAuth,
+    ) -> Result<Self, WorkflowOsError> {
+        if bool::from(self.auth.token_digest.0.ct_eq(&operator.token_digest.0))
+            || self.auth.actor == operator.actor
+        {
+            return Err(WorkflowOsError::security(
+                "hosted.conflict_operator.configuration.invalid",
+                "conflict operator requires separate credentials and identity",
+            ));
+        }
+        self.conflict_operator = Some(operator);
+        Ok(self)
     }
 }
 
@@ -611,7 +638,7 @@ impl fmt::Debug for HostedApiState {
 
 /// Builds the single-tenant hosted alpha router.
 pub fn hosted_router(state: HostedApiState) -> Router {
-    Router::new()
+    let mut router = Router::new()
         .route("/health/live", get(liveness))
         .route("/health/ready", get(readiness))
         .route("/version", get(version))
@@ -639,9 +666,71 @@ pub fn hosted_router(state: HostedApiState) -> Router {
         .route(
             "/api/v0alpha1/work-items/:work_item_id/executions/:execution_id",
             get(read_execution_receipt),
-        )
+        );
+    if state.conflict_operator.is_some() {
+        router = router.route(
+            "/api/v0alpha1/operator/runs/:run_id/creation-conflicts",
+            get(read_creation_conflicts).post(record_conflict_disposition),
+        );
+    }
+    router
         .layer(DefaultBodyLimit::max(MAX_API_BODY_BYTES))
         .with_state(state)
+}
+
+async fn read_creation_conflicts(
+    State(state): State<HostedApiState>,
+    headers: HeaderMap,
+    Path(run_id): Path<String>,
+) -> Result<Json<Vec<HostedCreationConflictObservation>>, HostedApiError> {
+    state
+        .conflict_operator
+        .as_ref()
+        .ok_or_else(HostedApiError::not_found)?
+        .authorize(&headers)?;
+    let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
+    let observations = tokio::task::spawn_blocking(move || {
+        require_legacy_unbound_resource(
+            &state.backend,
+            HostedProjectResourceKind::Run,
+            run_id.as_str(),
+        )?;
+        let events = state.backend.inspect_hosted_event_history(&run_id)?;
+        let revision = hosted_event_history_revision(&run_id, &events)?;
+        state
+            .backend
+            .read_hosted_creation_conflicts(&run_id, &revision)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
+    Ok(Json(observations))
+}
+
+async fn record_conflict_disposition(
+    State(state): State<HostedApiState>,
+    headers: HeaderMap,
+    Path(run_id): Path<String>,
+    Json(request): Json<HostedConflictDispositionRequest>,
+) -> Result<Json<HostedConflictDispositionRecord>, HostedApiError> {
+    let actor = state
+        .conflict_operator
+        .as_ref()
+        .ok_or_else(HostedApiError::not_found)?
+        .authorize(&headers)?
+        .clone();
+    if request.run_id.as_str() != run_id {
+        return Err(HostedApiError::bad_request());
+    }
+    let record = tokio::task::spawn_blocking(move || {
+        state
+            .backend
+            .record_hosted_conflict_disposition(&actor, &request)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
+    Ok(Json(record))
 }
 
 /// Builds the project-scoped collaborative beta router.
@@ -3373,6 +3462,42 @@ mod tests {
 
     fn request() -> HostedExecutionRequest {
         request_with_side_effects(Vec::new())
+    }
+
+    #[tokio::test]
+    async fn conflict_operator_routes_require_separate_opt_in() {
+        let baseline = state();
+        let route = "/api/v0alpha1/operator/runs/run-test/creation-conflicts";
+        let absent = hosted_router(baseline.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(route)
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(absent.status(), StatusCode::NOT_FOUND);
+
+        let operator = HostedApiAuth::new(
+            HostedAuthTokenDigest::from_token("test-operator-value").expect("digest"),
+            ActorId::new("user/conflict-operator-test").expect("actor"),
+        );
+        let shared = HostedApiAuth::new(baseline.auth.token_digest.clone(), operator.actor.clone());
+        assert!(baseline.clone().with_conflict_operator(shared).is_err());
+        let enabled = baseline
+            .with_conflict_operator(operator)
+            .expect("operator setup");
+        let response = hosted_router(enabled)
+            .oneshot(
+                Request::builder()
+                    .uri(route)
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
