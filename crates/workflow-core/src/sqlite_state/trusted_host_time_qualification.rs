@@ -214,12 +214,31 @@ fn linux_boottime_is_comparable_across_processes() -> Result<(), Box<dyn std::er
 #[allow(clippy::expect_used)]
 fn protected_observation_qualifies_only_inside_its_epoch_and_window() {
     use crate::protected_launch::unix::{bounded_bytes, protected_file};
+    use std::fs::OpenOptions;
+    use std::io::ErrorKind;
 
     assert!(!nix::unistd::geteuid().is_root());
     let root = std::path::PathBuf::from(
         std::env::var_os("WORKFLOW_OS_CLOCK_CUSTODY_FIXTURE").expect("fixture directory"),
     );
     let path = root.join("observation.json");
+    assert_eq!(
+        OpenOptions::new()
+            .write(true)
+            .open(root.join("generation"))
+            .expect_err("verifier must not open the active generation for writing")
+            .kind(),
+        ErrorKind::PermissionDenied,
+    );
+    assert_eq!(
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(root.join("verifier-replacement"))
+            .expect_err("verifier must not stage a replacement in the operator directory")
+            .kind(),
+        ErrorKind::PermissionDenied,
+    );
     let read_generation = |name| {
         let file = protected_file(&root.join(name), 0o444, true).ok()?;
         let value = String::from_utf8(bounded_bytes(file, 64).ok()?).ok()?;
