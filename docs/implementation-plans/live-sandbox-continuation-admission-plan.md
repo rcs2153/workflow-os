@@ -3032,6 +3032,37 @@ no retries or escalations. Artifact checks, boot, peer handling, teardown
 and documentation were executor work; no separate WorkReport was created.
 Documentation run `run-1794549741740709000-2` rechecked digests and logs.
 
+#### VFKit No-Uplink Reboot Result
+
+The follow-up kept one VFKit process and one inherited Unix datagram
+attachment with NAT disabled and no uplink. Two distinct Linux boot IDs
+and a single reboot request in the serial log establish an in-guest reboot,
+not a second cold launch. The controlled init required exactly one
+non-loopback interface and no IPv4 or IPv6 default route on each boot.
+The allowed probe passed and the denied probe received no reply on both
+boots. The local peer counted two allowed ARP requests, two ordinary echo
+requests, five denied ARP requests and twelve other drops. It responded
+to the first reboot trigger and withheld the second.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Combined initramfs | `bd938a806f2438861f4eef29e34305521feb979b9db7c6cbcffaba727c335b75` |
+| Scratch harness | `ed6d1fea69a4bc77afb730407e254bc3e589cad344ff58fddb022088bc48251e` |
+| Serial log | `587bca75781f64f825a0b7e069ee82aa071d3de682b478b668bd9f037eef97f3` |
+| Launcher log | `4334e4ed040477876acfe8497264fd42db02d2e5560f9326b7b7c8d1557187a7` |
+
+The launcher needed SIGKILL after the bounded teardown grace period and
+was reaped. Both Lima instances remained stopped and their configuration
+digests were unchanged. This verifies only the synthetic no-uplink fixture
+through one reboot. It does not establish graceful teardown, an
+operator-owned egress filter with an uplink, an external generation, or
+trusted time. The stopped pilot is still not admitted.
+
+Implementation run `run-1794561128607988000-2` closed with 39 events, one
+proof-backed approval, and no retries or escalations. Artifact checks,
+the reboot trial, and teardown ran outside the preview handlers.
+Documentation run `run-1794561282409705000-2` rechecked the logs and digests.
+
 Review run `run-1794392678677450000-2` closed with 39 events, one
 proof-backed approval
 `approval/run-1794392678677450000-2/review-scope-approved`, and no retries
