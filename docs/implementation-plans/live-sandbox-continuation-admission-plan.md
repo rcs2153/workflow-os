@@ -2910,6 +2910,48 @@ source contact, live admission, or claim independent acceptance.
 Documentation run `run-1794548503410626000-2` used proof-backed approval;
 digest rechecks, edits, and docs validation ran outside preview handlers.
 
+#### VFKit No-Uplink Guest Result
+
+The disposable guest used Alpine 3.24.4 ARM64 netboot artifacts. The
+archive matched Alpine's published SHA-256; no independent GPG verification
+was performed. The derived raw ARM64 kernel SHA-256 was
+`a2cecb9b6fdbd83e87bd43c8040de67300d5b8dde1fc50c34714faa272888f17`.
+The first boot (`run-1794549407107739000-2`) reached the controlled init,
+which exited before readiness with no observed frames. Its exact failing
+command was not established. The diagnostic rerun did not overwrite those
+logs.
+
+In `run-1794549590449854000-2`, the pinned VFKit v0.6.4 binary booted two
+fresh diskless guests. Both launcher logs report one inherited Unix
+datagram attachment with NAT disabled. Both guests reported only loopback
+and the expected `eth0`, with IPv4 and IPv6 link-local routes and no default
+route. The host peer had no uplink and did not forward frames.
+
+| Boot | Combined initramfs SHA-256 | Host peer observation |
+| --- | --- | --- |
+| Diagnostic | `e00db1878d74cb8246bf52b8da748177eadbb6d0e58b2e490ed208cdfe820eaf` | One allowed ARP and echo, three denied ARP requests, five other drops. |
+| Peer retirement | `e676e42d6df0f6b7a00c66b54dbcccb4245340a45024f7352852108a0a14ece4` | One allowed ARP and echo, two denied ARP requests, five other drops. After the host closed the sole peer, the previously successful address produced no reply. |
+
+The diagnostic and retirement serial logs hashed to
+`132b66798dbbd4c087871fa8feeef4f167735796a59ef10a51818d423ca15976`
+and `ac4887e2f9b10d282d576543a423f0a63032d70a2624e51baba1e063ca95cc1e`
+respectively. Frame counts were emitted by the local harness; no general
+host packet capture or independent attestation was collected. Both
+launchers needed SIGKILL after the bounded termination grace period and
+were reaped; a separate process check found neither still running.
+
+This verifies the controlled synthetic fixture across cold boots only. It
+does not verify an in-guest reboot, graceful teardown, a production egress
+filter, trusted time, or live admission. Keep the no-uplink posture until
+an operator-owned default-deny boundary has been reviewed and separately
+authorized. Neither Lima instance was changed; no provider or public time
+source was contacted.
+
+The diagnostic run closed with 39 events, one proof-backed approval and
+no retries or escalations. Artifact checks, boot, peer handling, teardown
+and documentation were executor work; no separate WorkReport was created.
+Documentation run `run-1794549741740709000-2` rechecked digests and logs.
+
 Review run `run-1794392678677450000-2` closed with 39 events, one
 proof-backed approval
 `approval/run-1794392678677450000-2/review-scope-approved`, and no retries
