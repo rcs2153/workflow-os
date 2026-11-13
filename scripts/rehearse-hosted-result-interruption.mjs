@@ -61,6 +61,7 @@ async function rehearseConcurrentCreates() {
   const count = 25;
   const retryable = new Set(["immutable_bundle", "creation_prefix", "dispatch", "rehydrate"]
     .map(stage => `executor.hosted_no_write.${stage}_retry_exhausted`));
+  retryable.add("hosted.run_create.reservation_retry_exhausted");
   const bodies = Array.from({ length: count }, (_, index) => ({
     run_id: `run-http-contention-${index}`, workflow_id: "hosted/recovery-proof",
     bundle_id: `bundle-http-contention-${index}`, bundle_version: "v1",
@@ -131,35 +132,49 @@ async function rehearseConcurrentCreates() {
   console.log(`hosted_http_contention: ${count} distinct terminal runs and reports; ${retries} exact retries; no queued work remained`);
 }
 
-async function rehearseExactCreateRecovery() {
+async function rehearseExactCreateRecovery(stage) {
+  const runId = `run-http-${stage}-recovery`;
   const body = {
-    run_id: "run-http-prefix-recovery", workflow_id: "hosted/recovery-proof",
-    bundle_id: "bundle-http-prefix-recovery", bundle_version: "v1",
-    created_at: new Date().toISOString(), correlation_id: "correlation-http-prefix-recovery",
-    idempotency_key: "http-prefix-recovery-create", sensitivity: "internal", redaction_required: true,
+    run_id: runId, workflow_id: "hosted/recovery-proof",
+    bundle_id: `bundle-http-${stage}-recovery`, bundle_version: "v1",
+    created_at: new Date().toISOString(), correlation_id: `correlation-http-${stage}-recovery`,
+    idempotency_key: `http-${stage}-recovery-create`, sensitivity: "internal", redaction_required: true,
   };
   const path = `/api/v0alpha1/runs/${body.run_id}`;
-  sql(`CREATE FUNCTION public.wos_prefix_fault() RETURNS trigger LANGUAGE plpgsql AS $$
+  const reservation = stage === "reservation";
+  const table = reservation ? "idempotency" : "events";
+  const predicate = reservation ? `NEW.key = '${body.idempotency_key}'` : `NEW.run_id = '${runId}'`;
+  sql(`CREATE SEQUENCE public.wos_create_fault_attempts;
+    CREATE FUNCTION public.wos_create_fault() RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
-      IF NEW.run_id = 'run-http-prefix-recovery' THEN
+      IF ${predicate} THEN
+        PERFORM nextval('public.wos_create_fault_attempts');
         RAISE EXCEPTION 'fixture serialization failure' USING ERRCODE = '40001';
       END IF;
       RETURN NEW;
     END $$;
-    CREATE TRIGGER wos_prefix_fault BEFORE INSERT ON workflow_os.events
-      FOR EACH ROW EXECUTE FUNCTION public.wos_prefix_fault();`);
+    CREATE TRIGGER wos_create_fault BEFORE INSERT ON workflow_os.${table}
+      FOR EACH ROW EXECUTE FUNCTION public.wos_create_fault();`);
   try {
     const rejected = await request("/api/v0alpha1/runs", body);
     assert.equal(rejected.status, 409);
-    assert.equal((await rejected.json()).code, "executor.hosted_no_write.creation_prefix_retry_exhausted");
-    assert.equal(sql("SELECT count(*) FROM workflow_os.events WHERE run_id='run-http-prefix-recovery'"), "0");
+    assert.equal((await rejected.json()).code, reservation
+      ? "hosted.run_create.reservation_retry_exhausted"
+      : "executor.hosted_no_write.creation_prefix_retry_exhausted");
+    if (reservation) {
+      assert.equal(sql("SELECT last_value FROM public.wos_create_fault_attempts"), "8");
+      assert.equal(sql(`SELECT count(*) FROM workflow_os.idempotency WHERE key='${body.idempotency_key}'`), "0");
+    }
+    assert.equal(sql(`SELECT count(*) FROM workflow_os.events WHERE run_id='${runId}'`), "0");
     const report = await request(`${path}/report`);
     assert.equal(report.status, 409);
     assert.equal((await report.json()).code, "runtime.events.empty");
-    assert.equal(sql("SELECT count(*) FROM workflow_os.records WHERE family='work_report' AND key2='run-http-prefix-recovery'"), "0");
-    assert.equal(sql("SELECT count(*) FROM workflow_os.records WHERE family='hosted_work_item' AND payload::jsonb ->> 'run_id' = 'run-http-prefix-recovery'"), "0");
+    assert.equal(sql(`SELECT count(*) FROM workflow_os.records WHERE family='work_report' AND key2='${runId}'`), "0");
+    assert.equal(sql(`SELECT count(*) FROM workflow_os.records WHERE family='hosted_work_item' AND payload::jsonb ->> 'run_id' = '${runId}'`), "0");
   } finally {
-    sql("DROP TRIGGER wos_prefix_fault ON workflow_os.events; DROP FUNCTION public.wos_prefix_fault()");
+    sql(`DROP TRIGGER wos_create_fault ON workflow_os.${table};
+      DROP FUNCTION public.wos_create_fault();
+      DROP SEQUENCE public.wos_create_fault_attempts;`);
   }
   const recovered = await request("/api/v0alpha1/runs", body);
   assert.equal(recovered.status, 201);
@@ -186,7 +201,7 @@ async function rehearseExactCreateRecovery() {
   assert.equal((await replay.json()).snapshot.status, "completed");
   assert.deepEqual(await read("/events?limit=50"), events);
   assert.deepEqual(await read("/report"), report);
-  console.log("hosted_http_exact_retry: passed; 409 prefix exhaustion recovered once");
+  console.log(`hosted_http_exact_retry: passed; 409 ${stage} exhaustion recovered once`);
 }
 
 assert.equal(sql("SELECT count(*) FROM pg_namespace WHERE nspname='workflow_os'"), "0", "database must not contain Workflow OS state");
@@ -244,7 +259,8 @@ try {
   assert.equal(sql("SELECT count(*) FROM workflow_os.events WHERE payload::jsonb #>> '{kind,kind}' IN ('SkillInvocationSucceeded','RunCompleted')"), "0");
   console.log("hosted_result_interruption: passed; durable reconciliation, no repeated invocation or fabricated report");
   await rehearseConcurrentCreates();
-  await rehearseExactCreateRecovery();
+  await rehearseExactCreateRecovery("reservation");
+  await rehearseExactCreateRecovery("prefix");
 } finally {
   for (const child of [...children]) {
     child.kill("SIGKILL");

@@ -1624,7 +1624,9 @@ async fn create_run(
             HostedProjectResourceKind::Run,
             request.run_id.as_str(),
         )?;
-        reserve_hosted_mutation(&backend, &request.idempotency_key, "run-create", &request)?;
+        reserve_hosted_create(&request.run_id, || {
+            reserve_hosted_mutation(&backend, &request.idempotency_key, "run-create", &request)
+        })?;
         let registry = LocalSkillRegistry::new();
         let executor = LocalExecutor::new(&backend, &registry);
         let execution = LocalExecutionRequest {
@@ -1869,6 +1871,31 @@ async fn cancel_run(
     .map_err(|_| HostedApiError::internal())?
     .map_err(|error| HostedApiError::from_core(&error))?;
     Ok(Json(result))
+}
+
+const HOSTED_CREATE_RESERVATION_RETRY_EXHAUSTED: &str =
+    "hosted.run_create.reservation_retry_exhausted";
+
+fn reserve_hosted_create(
+    run_id: &WorkflowRunId,
+    mut reserve: impl FnMut() -> Result<(), WorkflowOsError>,
+) -> Result<(), WorkflowOsError> {
+    const ATTEMPTS: usize = 8;
+    let salt = run_id.as_str().bytes().map(u64::from).sum::<u64>() % 7;
+    for attempt in 0..ATTEMPTS {
+        match reserve() {
+            Err(error) if error.code() == "postgres_state.transaction.retryable" => {
+                if attempt + 1 < ATTEMPTS {
+                    std::thread::sleep(Duration::from_millis((1 << attempt) + salt));
+                }
+            }
+            result => return result,
+        }
+    }
+    Err(WorkflowOsError::invalid_state(
+        HOSTED_CREATE_RESERVATION_RETRY_EXHAUSTED,
+        "hosted create reservation exhausted its bounded retry budget",
+    ))
 }
 
 fn reserve_hosted_mutation<T: Serialize>(
@@ -2240,6 +2267,10 @@ impl HostedApiError {
         };
         let (code, message) = match (status, error.code()) {
             (StatusCode::INTERNAL_SERVER_ERROR, _) => ("hosted.internal", "hosted request failed"),
+            (StatusCode::CONFLICT, HOSTED_CREATE_RESERVATION_RETRY_EXHAUSTED) => (
+                error.code(),
+                "Run creation could not reserve the request. Retry the unchanged request with its original idempotency key.",
+            ),
             (StatusCode::CONFLICT, "postgres_state.hosted_creation.prefix_conflict") => (
                 error.code(),
                 "Stored run history conflicts with this request. Stop retrying and inspect the original run events.",
@@ -3525,6 +3556,37 @@ mod tests {
         assert_eq!(hosted.message, "hosted request is invalid");
         assert!(!hosted.code.contains(secret));
         assert!(!hosted.message.contains(secret));
+    }
+
+    #[test]
+    fn hosted_create_reservation_retries_only_transaction_conflicts() {
+        let run_id = WorkflowRunId::new("run-test").expect("valid run identity");
+        let mut attempts = 0;
+        reserve_hosted_create(&run_id, || {
+            attempts += 1;
+            if attempts == 1 {
+                Err(WorkflowOsError::invalid_state(
+                    "postgres_state.transaction.retryable",
+                    "transient contention",
+                ))
+            } else {
+                Ok(())
+            }
+        })
+        .expect("second attempt succeeds");
+        assert_eq!(attempts, 2);
+
+        attempts = 0;
+        let error = reserve_hosted_create(&run_id, || {
+            attempts += 1;
+            Err(WorkflowOsError::invalid_state(
+                "hosted.mutation.idempotency.conflict",
+                "changed request",
+            ))
+        })
+        .expect_err("changed request must fail closed");
+        assert_eq!(error.code(), "hosted.mutation.idempotency.conflict");
+        assert_eq!(attempts, 1);
     }
 
     #[test]
