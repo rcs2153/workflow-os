@@ -5923,6 +5923,97 @@ fn run_minimal_local_workflow() {
 }
 
 #[test]
+fn next_action_recovers_ordinary_wait_without_creating_a_presentation() {
+    let project = TestProject::new("next-action-wait-no-proof");
+    project.write_valid_project(true, false);
+    let missing = workflow_os(&project, &["next-action", "missing-run"]);
+    assert!(!missing.status.success());
+    assert!(!project.state_root().exists());
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let run = run_id(&waiting);
+    let before = run_events(&project, &run);
+    let preview = workflow_os(&project, &["--json", "next-action", &run]);
+    assert!(preview.status.success(), "{}", stderr(&preview));
+    let card: serde_json::Value = serde_json::from_slice(&preview.stdout).expect("waiting card");
+    assert_eq!(card["mode"], "waiting_approval_preview");
+    assert_eq!(card["status"], "waiting_for_approval");
+    assert_eq!(card["approval_subject"], "step");
+    assert_eq!(card["presentation_posture"], "not_recorded");
+    assert!(card["approval_handoff"].is_null());
+    assert_eq!(card["execution_authorized"], false);
+    assert_eq!(run_events(&project, &run), before);
+    assert_eq!(
+        LocalStateBackend::for_inspection(project.state_root())
+            .list_approval_presentation_records(&WorkflowRunId::new(run).expect("run"))
+            .expect("presentation records"),
+        [] as [workflow_core::ApprovalPresentationRecord; 0]
+    );
+}
+
+fn assert_waiting_approval_card(
+    project: &TestProject,
+    run: &str,
+    expected_id: &str,
+    subject: &str,
+) -> serde_json::Value {
+    let before = run_events(project, run);
+    let preview = workflow_os(project, &["--json", "next-action", run]);
+    assert!(preview.status.success(), "{}", stderr(&preview));
+    let card: serde_json::Value = serde_json::from_slice(&preview.stdout).expect("waiting card");
+    assert_eq!(card["run_id"], run);
+    assert_eq!(card["approval_id"], expected_id);
+    assert_eq!(card["approval_subject"], subject);
+    assert_eq!(card["presentation_posture"], "recorded_not_revalidated");
+    assert!(card["approval_handoff"]["approved_scope"].is_string());
+    assert!(card["approval_handoff"].get("next_action").is_none());
+    assert_eq!(card["execution_authorized"], false);
+    assert!(card.get("allowed_next_action").is_none());
+    assert_eq!(run_events(project, run), before);
+    card["approval_handoff"]["presentation_id"].clone()
+}
+
+#[test]
+fn next_action_does_not_choose_between_two_saved_approval_presentations() {
+    let project = TestProject::new("next-action-ambiguous-proof");
+    project.write_valid_project(true, false);
+    project.remove_workflow_approval_requirement();
+    project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let run = run_id(&waiting);
+    let typed_run = WorkflowRunId::new(&run).expect("run");
+    let backend = LocalStateBackend::for_inspection(project.state_root());
+    let original = backend
+        .list_approval_presentation_records(&typed_run)
+        .expect("presentations");
+    assert_eq!(original.len(), 1);
+    let mut record = serde_json::to_value(&original[0]).expect("serialize fixture presentation");
+    record["presentation_id"] = serde_json::json!("presentation/second-review");
+    let second = serde_json::from_value(record).expect("valid distinct presentation record");
+    backend
+        .write_approval_presentation_record(&second)
+        .expect("record second presentation");
+    let events = run_events(&project, &run);
+
+    let preview = workflow_os(&project, &["--json", "next-action", &run]);
+    assert!(preview.status.success(), "{}", stderr(&preview));
+    let card: serde_json::Value = serde_json::from_slice(&preview.stdout).expect("waiting card");
+    assert_eq!(card["presentation_posture"], "ambiguous");
+    assert!(card["approval_handoff"].is_null());
+    assert_eq!(card["execution_authorized"], false);
+    assert_eq!(run_events(&project, &run), events);
+    assert_eq!(
+        backend
+            .list_approval_presentation_records(&typed_run)
+            .expect("presentations")
+            .len(),
+        2
+    );
+}
+
+#[test]
 fn next_action_preview_rejects_terminal_run_without_mutating_events() {
     let project = TestProject::new("next-action-terminal");
     project.write_valid_project(false, false);
@@ -6374,6 +6465,7 @@ fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn authoritative_governance_selected_approval_envelope_preserves_json_routes_and_receipt() {
     let project = TestProject::new("authoritative-selected-approval-envelope");
     project.write_valid_project(true, false);
@@ -6393,6 +6485,8 @@ fn authoritative_governance_selected_approval_envelope_preserves_json_routes_and
         .as_str()
         .expect("governance approval id")
         .to_owned();
+    let aggregate_presentation =
+        assert_waiting_approval_card(&project, &run_id, &governance_approval_id, "aggregate");
 
     let governance_approved = workflow_os(
         &project,
@@ -6430,6 +6524,9 @@ fn authoritative_governance_selected_approval_envelope_preserves_json_routes_and
         .as_str()
         .expect("authored approval id")
         .to_owned();
+    let step_presentation =
+        assert_waiting_approval_card(&project, &run_id, &workflow_approval_id, "step");
+    assert_ne!(aggregate_presentation, step_presentation);
 
     let workflow_approved = workflow_os(
         &project,
