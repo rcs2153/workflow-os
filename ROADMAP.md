@@ -6710,6 +6710,14 @@ Agent executes. Workflow OS governs.
 
 This is a P0 adoption/docs layer, not nested harness runtime behavior. The scaffold command creates or updates `AGENTS.md` and `.workflow-os/agent-harness-prompt.md` only. The scaffold is an orientation layer for humans and agents: useful for declaring conventions, expectations, and structure, but not itself an enforcement layer.
 
+The [Downstream Governance Posture Contract](docs/implementation-plans/agent-harness-hook-integration-plan.md#downstream-governance-posture-contract)
+makes cooperative governance and authoritative **Observe** the default only
+after explicit repository initialization. Installing the binary or importing
+an SDK does not initialize a repository. **Enforce** and **Strict** are
+explicit future postures whose claims must be proven at the declared boundary.
+The contract defines adoption and inspection acceptance gates, not a new
+initiative or a change to the Active Delivery Queue.
+
 Hard side-effect checkpoint enforcement is a P0 product unlock. The intended production shape is that irreversible or customer-visible tools such as Slack sends, GitHub writes, Jira updates, deploy steps, and other adapter mutations are routed through deterministic hooks or adapter boundaries that can fail closed before the side effect happens. Workflow OS should define the governed contract, required evidence, approval or draft-only posture, event/audit record, and final report disclosure; the hook or adapter boundary should provide the mechanical block at the point of execution. Today this is not broadly implemented: Workflow OS has narrow explicit hook/checkpoint and side-effect/report primitives, but it does not yet provide production `PreToolUse`-style enforcement for arbitrary external tools, automatic workflow-declared hook configuration, runtime hook configuration, or hard blocking of external Slack/GitHub/Jira tool calls unless those calls are explicitly routed through implemented Workflow OS boundaries.
 
 The future hook layer should provide deterministic, named checkpoints that a harness or agent invokes before or after important work phases. The hook contract model is implemented as vocabulary and validation only, and the in-memory invocation helper model is implemented as documented in [Agent Harness Hook Runtime Invocation Plan](docs/implementation-plans/agent-harness-hook-runtime-invocation-plan.md). Hook audit/event semantics planning is documented in [Agent Harness Hook Audit/Event Semantics Plan](docs/implementation-plans/agent-harness-hook-audit-event-semantics-plan.md), and the hook audit record core model is implemented as model-only vocabulary and validation.
@@ -7040,7 +7048,9 @@ current P0 work. The proof must span independently implemented harnesses and
 distinct compute substrates, enforce current authority at admission, and
 reconcile a bounded real effect without blind retry. Observe, Enforce, and
 Strict describe deployment guarantees within a declared boundary, not
-governance decisions or current product capabilities. An optional delegator
+governance decisions. The [downstream posture contract](docs/implementation-plans/agent-harness-hook-integration-plan.md#downstream-governance-posture-contract)
+distinguishes today's cooperative Observe scaffold from future Enforce and
+Strict guarantees. An optional delegator
 harness is deferred until governed replacement is proven. This section does
 not modify the Active Delivery Queue or authorize implementation.
 
