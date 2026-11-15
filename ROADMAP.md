@@ -893,6 +893,11 @@ classifies the cancelled duplicate macOS run as a P2 process defect and
 requires an idempotent exact-source dispatch path before any future candidate
 dispatch. See the [independent assurance
 report](docs/concepts/0.4.0-preview.1_HARDENED_CANDIDATE_INDEPENDENT_ASSURANCE.md).
+The repo-local native candidate dispatch helper records a durable per-target,
+exact-source claim before a send and uses read-only GitHub inventory to
+reconcile an uncertain response. Fixture tests verify its no-resend behavior;
+focused review and a separately scoped decision are required before live use.
+See the [release checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#native-candidate-dispatch-and-recovery).
 The next release-admission lane is a new governed publication decision against
 this exact pair. Comparative benchmark work, provider mutation, tags, releases,
 asset promotion, registry publication, and announcement remain outside the
