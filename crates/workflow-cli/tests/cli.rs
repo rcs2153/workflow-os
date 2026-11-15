@@ -1328,7 +1328,7 @@ fn init_repo_governance_positive_flag_preserves_closed_authoritative_execution()
     let first_run = workflow_os(&project, &["first-run", "--verbose"]);
     assert!(first_run.status.success(), "{}", stderr(&first_run));
     let first_run_out = stdout(&first_run);
-    assert!(first_run_out.contains("authoritative_execution: declared_supported_enforced"));
+    assert!(first_run_out.contains("authoritative_execution: configured_for_eligible_runs"));
     assert!(first_run_out.contains("authoritative_execution_profile: observe_and_report"));
     assert!(first_run_out
         .contains("authoritative_execution_local_check_profile: workflow_os_project_validation"));
@@ -1361,6 +1361,21 @@ fn init_repo_governance_can_explicitly_select_legacy_scaffold() {
     let validate = workflow_os(&project, &["validate"]);
     assert!(validate.status.success(), "{}", stderr(&validate));
     assert!(stdout(&validate).contains("Project is valid."));
+    let first_run = workflow_os(&project, &["first-run"]);
+    assert!(first_run.status.success(), "{}", stderr(&first_run));
+    assert!(stdout(&first_run).contains("project_validation_path: not_configured"));
+    let json = workflow_os(&project, &["--json", "first-run"]);
+    assert!(json.status.success(), "{}", stderr(&json));
+    let value: serde_json::Value = serde_json::from_slice(&json.stdout).expect("legacy posture");
+    assert_eq!(value["authoritative_execution"]["declared"], false);
+    assert_eq!(value["authoritative_execution"]["supported"], false);
+    assert_eq!(value["authoritative_execution"]["enforced"], false);
+    assert!(value["authoritative_execution"]["enforcement_scope"].is_null());
+    assert_eq!(
+        value["authoritative_execution"]["local_check_ran_in_this_command"],
+        false
+    );
+    assert!(!project.state_root().exists());
 }
 
 #[test]
@@ -5893,7 +5908,12 @@ fn first_run_discloses_authoritative_execution_activation_in_verbose_and_json_ou
     let verbose = workflow_os(&project, &["first-run", "--verbose"]);
     assert!(verbose.status.success(), "{}", stderr(&verbose));
     let verbose_out = stdout(&verbose);
-    assert!(verbose_out.contains("authoritative_execution: declared_supported_enforced"));
+    assert!(verbose_out.contains("project_validation_path: configured_not_run"));
+    assert!(verbose_out.contains("profile_posture_scope: first_run_analysis_only"));
+    assert!(verbose_out.contains("authoritative_execution: configured_for_eligible_runs"));
+    assert!(verbose_out
+        .contains("authoritative_execution_scope: eligible_governed_project_validation_only"));
+    assert!(verbose_out.contains("repository_enforcement: not_established_by_this_inspection"));
     assert!(verbose_out.contains("authoritative_execution_profile: observe_and_report"));
     assert!(verbose_out
         .contains("authoritative_execution_local_check_profile: workflow_os_project_validation"));
@@ -5905,6 +5925,22 @@ fn first_run_discloses_authoritative_execution_activation_in_verbose_and_json_ou
     assert_eq!(value["authoritative_execution"]["declared"], true);
     assert_eq!(value["authoritative_execution"]["supported"], true);
     assert_eq!(value["authoritative_execution"]["enforced"], true);
+    assert_eq!(value["profile_posture_scope"], "first_run_analysis_only");
+    assert_eq!(value["project_validation_path"], "configured_not_run");
+    assert_eq!(
+        value["repository_enforcement"],
+        "not_established_by_this_inspection"
+    );
+    assert_eq!(
+        value["authoritative_execution"]["enforcement_scope"],
+        "eligible_governed_project_validation_only"
+    );
+    assert_eq!(
+        value["authoritative_execution"]["local_check_ran_in_this_command"],
+        false
+    );
+    assert_eq!(value["checks"], "skipped");
+    assert!(!project.state_root().exists());
     assert_eq!(
         value["authoritative_execution"]["local_check_profile"],
         "workflow_os_project_validation"

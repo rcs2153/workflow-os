@@ -113,10 +113,12 @@ first-run WorkReport creation, distinct proof-bound aggregate and step
 approvals, fail-closed denial, the first-run SQLite migration fix, and native
 Python wheel/interprocess recovery. It did not independently reproduce hosted
 Docker/PostgreSQL deployment or run live provider mutations; the macOS Rust
-test-linker limitation did not prevent the wheel/SDK tests. Follow separately
-with **P2** boundary-specific first-run enforcement wording and **P3** honest
-`unchanged` reporting for idempotent scaffold output. Neither is implemented
-by this recovery slice.
+test-linker limitation did not prevent the wheel/SDK tests. The separate **P2**
+first-run wording correction distinguishes analysis-only disclosure, the
+configured eligible project-validation path, and whether a check ran. Existing
+JSON fields are retained with explicit scope metadata; no enforcement behavior
+changes. **P3** honest `unchanged` reporting for idempotent scaffold output
+remains separate.
 
 After the complete protected-host and cross-harness continuity exit gate,
 the first strategic planning phase is the **Authority Continuation Architecture

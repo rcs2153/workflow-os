@@ -9071,12 +9071,28 @@ fn unique_ownership_issue_codes(
         .collect()
 }
 
+const FIRST_RUN_PROFILE_SCOPE: &str = "first_run_analysis_only";
+const FIRST_RUN_PROJECT_VALIDATION_SCOPE: &str = "eligible_governed_project_validation_only";
+const FIRST_RUN_REPOSITORY_ENFORCEMENT: &str = "not_established_by_this_inspection";
+
+fn first_run_project_validation_posture(context: &FirstRunReportReadyContext) -> &'static str {
+    if context.authoritative_execution.is_some() {
+        "configured_not_run"
+    } else {
+        "not_configured"
+    }
+}
+
 fn print_first_run_text(context: &FirstRunReportReadyContext, verbose: bool) {
     println!("Workflow OS first-run summary");
     println!("status: ready_for_review");
     println!("what_happened: validated a bounded governance envelope without starting a run");
     println!(
         "what_was_not_done: no workflow run, runtime state, artifacts, local checks, or external writes were created"
+    );
+    println!(
+        "project_validation_path: {}",
+        first_run_project_validation_posture(context)
     );
     println!("what_matters_now:");
     println!("  - review the governance findings before treating the repo as configured");
@@ -9145,9 +9161,12 @@ fn print_first_run_verbose_text(context: &FirstRunReportReadyContext) {
         "profile_posture: {}",
         context.governance_posture.profile.posture_label()
     );
+    println!("profile_posture_scope: {FIRST_RUN_PROFILE_SCOPE}");
+    println!("repository_enforcement: {FIRST_RUN_REPOSITORY_ENFORCEMENT}");
     match context.authoritative_execution {
         Some(configuration) => {
-            println!("authoritative_execution: declared_supported_enforced");
+            println!("authoritative_execution: configured_for_eligible_runs");
+            println!("authoritative_execution_scope: {FIRST_RUN_PROJECT_VALIDATION_SCOPE}");
             println!(
                 "authoritative_execution_profile: {}",
                 configuration.profile().label()
@@ -11192,17 +11211,10 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
     let safe_repo_metadata = safe_repo_metadata_json(&context.repo_metadata);
     let proportional_governance_assessments =
         first_run_proportional_governance_json(&context.proportional_governance_assessments);
-    let authoritative_execution = match context.authoritative_execution {
-        Some(configuration) => format!(
-            "{{\"declared\":true,\"supported\":true,\"enforced\":true,\"profile\":\"{}\",\"local_check_profile\":\"workflow_os_project_validation\"}}",
-            configuration.profile().label()
-        ),
-        None => {
-            "{\"declared\":false,\"supported\":false,\"enforced\":false}".to_owned()
-        }
-    };
+    let authoritative_execution =
+        first_run_authoritative_execution_json(context.authoritative_execution);
     format!(
-        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"safe_repo_metadata\":{},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"authoritative_execution\":{},\"proportional_governance_assessments\":{},\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"workflow_discovery_recommendations\":{},\"recommendation_next_actions\":{},\"recommendations\":[{}]}}",
+        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"safe_repo_metadata\":{},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"profile_posture_scope\":\"{FIRST_RUN_PROFILE_SCOPE}\",\"repository_enforcement\":\"{FIRST_RUN_REPOSITORY_ENFORCEMENT}\",\"project_validation_path\":\"{}\",\"authoritative_execution\":{},\"proportional_governance_assessments\":{},\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"workflow_discovery_recommendations\":{},\"recommendation_next_actions\":{},\"recommendations\":[{}]}}",
         context.scaffold_present,
         context.git_present,
         context.workflow_count,
@@ -11217,6 +11229,7 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         context.handoff_notes.len(),
         context.governance_posture.profile.profile_label(),
         context.governance_posture.profile.posture_label(),
+        first_run_project_validation_posture(context),
         authoritative_execution,
         proportional_governance_assessments,
         context.governance_posture.ownership.label(),
@@ -11252,6 +11265,29 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         recommendation_next_actions,
         recommendations
     )
+}
+
+fn first_run_authoritative_execution_json(
+    configuration: Option<AuthoritativeExecutionConfiguration>,
+) -> serde_json::Value {
+    match configuration {
+        Some(configuration) => serde_json::json!({
+            "declared": true,
+            "supported": true,
+            "enforced": true,
+            "enforcement_scope": FIRST_RUN_PROJECT_VALIDATION_SCOPE,
+            "profile": configuration.profile().label(),
+            "local_check_profile": "workflow_os_project_validation",
+            "local_check_ran_in_this_command": false,
+        }),
+        None => serde_json::json!({
+            "declared": false,
+            "supported": false,
+            "enforced": false,
+            "enforcement_scope": null,
+            "local_check_ran_in_this_command": false,
+        }),
+    }
 }
 
 fn first_run_proportional_governance_json(
