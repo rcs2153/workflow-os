@@ -901,10 +901,18 @@ The first focused review denied live use: historical inventory verified the
 legacy duplicate macOS runs and the single Linux run, but a synthetic reply-ID
 disagreement was lost on restart. The correction preserves the known reply
 before inventory reconciliation; an unmatched or absent reply cannot be
-reported as a match. Focused recheck is still required.
+reported as a match. The focused maintainer recheck of [PR #969](https://github.com/rcs2153/workflow-os/pull/969)
+at `eb675dee` accepts that bounded correction. Five separate synthetic
+processes sharing one private directory recorded one send, two mismatch
+denials, one matching replay, and one inventory-only result. All 40 targeted
+tests passed, the merged tree matches the terminal-green reviewed head, and
+the historical Linux lookup remained inventory-only. This is not independent
+release assurance or evidence of a live send. Recheck `dg/review` run
+`run-1794745022595414000-2` used proof-backed approval.
 See the [release checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#native-candidate-dispatch-and-recovery).
-The next release-admission lane is a new governed publication decision against
-this exact pair. Comparative benchmark work, provider mutation, tags, releases,
+The active SQLite preemption still requires exact patched-source validation,
+a separately governed two-target rebuild, and independent assurance before a
+new publication decision. Comparative benchmark work, unrelated provider mutations, tags, releases,
 asset promotion, registry publication, and announcement remain outside the
 assurance evidence update.
 The governed publication decision admits the hardened macOS and Linux pair for
