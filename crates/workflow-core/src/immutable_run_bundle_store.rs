@@ -19,10 +19,10 @@ use crate::{
 
 const DEFINITION_RECORDS_DIR: &str = "definition-records";
 const LOCAL_CHECK_DECLARATION_SET_RECORDS_DIR: &str = "local-check-declaration-set-records";
-const GOVERNANCE_ASSESSMENT_BINDINGS_DIR: &str = "governance-assessment-bindings";
-const LOCAL_CHECK_EVIDENCE_ASSURANCE_PROJECTIONS_DIR: &str =
+pub(crate) const GOVERNANCE_ASSESSMENT_BINDINGS_DIR: &str = "governance-assessment-bindings";
+pub(crate) const LOCAL_CHECK_EVIDENCE_ASSURANCE_PROJECTIONS_DIR: &str =
     "local-check-evidence-assurance-projections";
-const MANIFESTS_DIR: &str = "manifests";
+pub(crate) const MANIFESTS_DIR: &str = "manifests";
 
 #[derive(Serialize, Deserialize)]
 struct StoredManifestEnvelope {
@@ -869,6 +869,47 @@ impl LocalImmutableRunBundleStore {
     ) -> PathBuf {
         self.local_check_evidence_assurance_projection_run_dir(run_id)
             .join(encoded_id_file_name(result_id.as_str()))
+    }
+
+    pub(crate) fn validates_retained_migration_record(
+        &self,
+        directory: &str,
+        path: &Path,
+        bytes: &[u8],
+    ) -> bool {
+        let matches_bundle =
+            |run_id: &WorkflowRunId, binding: &crate::ImmutableRunBundleBinding| {
+                self.read_bundle(run_id, binding.bundle_id())
+                    .is_ok_and(|bundle| bundle.manifest().run_binding() == *binding)
+            };
+        match directory {
+            MANIFESTS_DIR => {
+                serde_json::from_slice::<StoredManifestEnvelope>(bytes).is_ok_and(|record| {
+                    let manifest = &record.manifest;
+                    path == self.manifest_path(manifest.run_id())
+                        && self.read_envelope_records(&record).is_ok()
+                        && self
+                            .read_envelope_local_check_declaration_set_records(&record)
+                            .is_ok()
+                })
+            }
+            GOVERNANCE_ASSESSMENT_BINDINGS_DIR => {
+                serde_json::from_slice::<GovernanceAssessmentBinding>(bytes).is_ok_and(|record| {
+                    path == self.governance_assessment_binding_path(record.run_id())
+                        && matches_bundle(record.run_id(), record.immutable_run_bundle())
+                })
+            }
+            LOCAL_CHECK_EVIDENCE_ASSURANCE_PROJECTIONS_DIR => {
+                serde_json::from_slice::<StoredLocalCheckAssurance>(bytes).is_ok_and(|record| {
+                    let projection = record.0;
+                    path == self.local_check_evidence_assurance_projection_path(
+                        projection.run_id(),
+                        projection.result_id(),
+                    ) && matches_bundle(projection.run_id(), projection.immutable_run_bundle())
+                })
+            }
+            _ => false,
+        }
     }
 }
 

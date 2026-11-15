@@ -110,6 +110,15 @@ bundles. The first migration must preserve that companion directory and report
 it as retained filesystem state. Activation must fail if the runtime would lose
 access to required bundle records.
 
+For the default scaffold's first-run report path, the inventory recognizes
+run-addressed manifests and governance bindings plus run/result-addressed
+local-check assurance projections. It validates their storage identity and
+bundle links before committing their exact paths and bytes to the source
+fingerprint. Report artifacts and run events migrate; the immutable bundle and
+assurance proof remain in the preserved filesystem source. Marking verified
+staging ready does not point the CLI at SQLite or enable SQLite-only first-run
+inspection or replay. Keep the original source for those operations.
+
 The aggregate `StateBackend` also omits some newer specialized store traits.
 Migration cannot assume that implementing `StateBackend` proves complete state
 coverage.
