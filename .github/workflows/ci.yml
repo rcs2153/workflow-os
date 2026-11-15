@@ -78,7 +78,7 @@ jobs:
       - name: Rust tests
         env:
           WORKFLOW_OS_LOCAL_EXECUTOR_TEST_CLI: ${{ github.workspace }}/target/debug/workflow-os
-        run: cargo test --workspace
+        run: cargo test --locked --workspace --all-targets --all-features
 
       - name: Rehearse private signer isolation under separate Linux identities
         shell: bash
