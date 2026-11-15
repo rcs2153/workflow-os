@@ -146,6 +146,10 @@ cross-harness delegation, or independent check attestation.
 - Persist approval presentation evidence and reject missing, stale, ambiguous,
   or mismatched proof where required.
 - Project a bounded read-only `next-action` from current durable state.
+  A single pending approval returns its request identity and the matching
+  saved handoff, if available. This is review context, not a new presentation
+  or a freshness check; the normal approval flow still validates current
+  authority. Missing or ambiguous saved presentations grant nothing.
 - Model execution windows, executor yields, typed waits, resume directives,
   attempts, and outcomes.
 - Provide SQLite atomic continuity operations and reviewed trusted-host private

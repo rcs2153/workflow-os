@@ -168,7 +168,19 @@ fn repository_metadata_fixture_completes_through_public_cli_without_network() {
     assert!(waiting_output.contains("A WorkReport artifact, live transport"));
     let run_id = run_id(&waiting);
     let approval_id = approval_id(&waiting);
-    assert_fixture_next_action_rejects_non_running(&project, &state, &run_id);
+    let inspect_before = workflow_os(&project, &state, &["inspect", &run_id]);
+    let waiting_card = workflow_os(&project, &state, &["next-action", &run_id]);
+    assert!(waiting_card.status.success(), "{}", stderr(&waiting_card));
+    let text = stdout(&waiting_card);
+    assert!(text.contains("mode: waiting_approval_preview"));
+    assert!(text.contains(&format!("approval_id: {approval_id}")));
+    assert!(text.contains("presentation_posture: recorded_not_revalidated"));
+    assert!(text.contains("approval_handoff:"));
+    assert!(text.contains("execution_authorized: false"));
+    assert!(text.contains("live_transport: disabled"));
+    assert!(!text.contains("workflow-os approve"));
+    let inspect_after = workflow_os(&project, &state, &["inspect", &run_id]);
+    assert_eq!(stdout(&inspect_before), stdout(&inspect_after));
 
     let approved = workflow_os(
         &project,

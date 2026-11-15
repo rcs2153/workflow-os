@@ -98,6 +98,26 @@ independent fresh-clone audit. See the
 [release checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#3-required-validation).
 This preemption does not reorder unrelated product work or admit a pilot.
 
+**P1 local continuity: cold recovery at a waiting approval.** The independent
+clean-checkout evaluation of `13be3bb7` found that a replacement process could
+inspect a waiting run, but `next-action` rejected it rather than recovering
+the current approval handoff. Recover the exact pending request and its
+saved, identity-matched review context without granting, refreshing, or
+re-presenting proof. Keep the terminal reject posture and existing execution
+admission checks. This is a local UX correction, not a hosted or cross-harness
+acceptance result.
+
+The same evaluation found a strong bounded local pilot, not unconditional v1.
+It confirmed managed guidance preservation and byte-idempotence, quiet
+first-run WorkReport creation, distinct proof-bound aggregate and step
+approvals, fail-closed denial, the first-run SQLite migration fix, and native
+Python wheel/interprocess recovery. It did not independently reproduce hosted
+Docker/PostgreSQL deployment or run live provider mutations; the macOS Rust
+test-linker limitation did not prevent the wheel/SDK tests. Follow separately
+with **P2** boundary-specific first-run enforcement wording and **P3** honest
+`unchanged` reporting for idempotent scaffold output. Neither is implemented
+by this recovery slice.
+
 After the complete protected-host and cross-harness continuity exit gate,
 the first strategic planning phase is the **Authority Continuation Architecture
 Decision**, unless a higher-severity correctness issue preempts it. The

@@ -27,11 +27,12 @@ use workflow_core::{
     reassess_selected_project_validation_governance_with_resolved_context,
     review_workflow_catalog_repair_proposal, review_workflow_draft_for_promotion,
     route_selected_project_validation_governance_with_resolved_context_reference,
-    validate_loaded_project, validate_project_bundle, ActorId, AdapterOperationMode,
-    AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, ApprovalDecisionKind,
-    ApprovalPresentationChannel, ApprovalPresentationId, ApprovalPresentationRecord,
-    ApprovalPresentationRecordDefinition, ApprovalPresentationRecordStore,
-    ApprovalPresentationSensitiveActionPosture, ApprovalPresentationSensitivity,
+    validate_approval_presentation_for_request, validate_loaded_project, validate_project_bundle,
+    ActorId, AdapterOperationMode, AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord,
+    ApprovalDecisionKind, ApprovalPresentationChannel, ApprovalPresentationId,
+    ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
+    ApprovalPresentationRecordStore, ApprovalPresentationSensitiveActionPosture,
+    ApprovalPresentationSensitivity, ApprovalPresentationValidationInput,
     AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeExecutionConfiguration,
     AuthoritativeGovernanceArtifactPersistenceInput,
     AuthoritativeGovernanceArtifactPersistenceResult, AuthoritativeGovernanceArtifactPosture,
@@ -2903,13 +2904,14 @@ fn status_from_backend<B: StateBackend>(
 
 fn next_action_command(invocation: &Invocation, run_id: &str) -> Result<(), WorkflowOsError> {
     let run_id = WorkflowRunId::new(run_id)?;
-    if github_repository_metadata_database_path(invocation).is_file() {
-        let backend = github_repository_metadata_backend(invocation)?;
+    let database = github_repository_metadata_database_path(invocation);
+    if database.is_file() {
+        let backend = SqliteStateBackend::open_same_actor_fixture_read_only(database)?;
         if !backend.read_events(&run_id)?.is_empty() {
             return next_action_from_sources(invocation, &backend, &backend, &run_id, true);
         }
     }
-    let backend = local_backend(invocation)?;
+    let backend = LocalStateBackend::for_inspection(invocation.state_dir());
     let bundle_store = authoritative_immutable_bundle_store(invocation);
     next_action_from_sources(invocation, &backend, &bundle_store, &run_id, false)
 }
@@ -2926,6 +2928,9 @@ where
     S: ImmutableRunBundleStore,
 {
     let run = backend.rehydrate_run(run_id)?;
+    if run.snapshot.status == WorkflowRunStatus::WaitingForApproval {
+        return print_waiting_approval_next_action(invocation, backend, &run, provider_fixture);
+    }
     let binding = run
         .snapshot
         .identity
@@ -2959,6 +2964,136 @@ where
         }
     }
     Ok(())
+}
+
+fn print_waiting_approval_next_action(
+    invocation: &Invocation,
+    backend: &impl ApprovalPresentationRecordStore,
+    run: &WorkflowRun,
+    provider_fixture: bool,
+) -> Result<(), WorkflowOsError> {
+    let run_id = &run.snapshot.identity.run_id;
+    let mut pending = run
+        .snapshot
+        .approval_requests
+        .iter()
+        .filter(|request| request.decision.is_none());
+    let request = pending
+        .next()
+        .filter(|_| pending.next().is_none())
+        .ok_or_else(|| {
+            WorkflowOsError::new(
+                WorkflowOsErrorKind::InvalidState,
+                "cli.next_action.approval_request_ambiguous",
+                "waiting run must have exactly one undecided approval request",
+            )
+        })?;
+    request.validate_subject()?;
+    let records =
+        backend.list_approval_presentation_records_for_approval(run_id, &request.approval_id)?;
+    let (presentation_posture, presentation) = match records.as_slice() {
+        [] => ("not_recorded", None),
+        [record] => {
+            if backend
+                .read_approval_presentation_record(record.presentation_id())?
+                .as_ref()
+                != Some(record)
+            {
+                return Err(WorkflowOsError::new(
+                    WorkflowOsErrorKind::InvalidState,
+                    "cli.next_action.approval_presentation_inconsistent",
+                    "saved approval presentation does not match its indexed record",
+                ));
+            }
+            validate_approval_presentation_for_request(ApprovalPresentationValidationInput {
+                presentation: record,
+                approval_request: request,
+            })?;
+            ("recorded_not_revalidated", Some(record))
+        }
+        _ => ("ambiguous", None),
+    };
+    let next_action = if presentation.is_some() {
+        "Review the saved handoff with the responsible approver before using the normal approval flow."
+    } else {
+        "Ask the responsible approver to recover the exact handoff; do not infer permission from the approval ID."
+    };
+    let step = request.step_id.as_ref().map(workflow_core::StepId::as_str);
+    let subject = if step.is_some() { "step" } else { "aggregate" };
+    let handoff = presentation.map(saved_approval_handoff_json);
+    if invocation.json {
+        let result = serde_json::json!({
+            "mode": "waiting_approval_preview",
+            "run_id": run_id,
+            "status": "waiting_for_approval",
+            "approval_id": request.approval_id,
+            "approval_subject": subject,
+            "step_id": step,
+            "presentation_posture": presentation_posture,
+            "approval_handoff": handoff,
+            "execution_authorized": false,
+            "next_action": next_action,
+            "inspect_args": ["inspect", run_id.as_str()],
+        })
+        .to_string();
+        if provider_fixture {
+            println!("{}", append_github_repository_metadata_json_fields(&result));
+        } else {
+            println!("{result}");
+        }
+    } else {
+        println!("mode: waiting_approval_preview");
+        println!("status: WaitingForApproval");
+        println!("run_id: {run_id}");
+        println!("approval_id: {}", terminal_escape(&request.approval_id));
+        println!("approval_subject: {subject}");
+        if let Some(step) = step {
+            println!("step_id: {}", terminal_escape(step));
+        }
+        println!("presentation_posture: {presentation_posture}");
+        if let Some(serde_json::Value::Object(fields)) = handoff {
+            print_saved_approval_handoff(fields);
+        }
+        println!("execution_authorized: false");
+        println!("next_action: {next_action}");
+        println!("inspect: workflow-os inspect {run_id}");
+        if provider_fixture {
+            println!("provider_operation: github.repository.metadata");
+            println!("provider_mode: fixture");
+            println!("live_transport: disabled");
+        }
+    }
+    Ok(())
+}
+
+fn saved_approval_handoff_json(record: &ApprovalPresentationRecord) -> serde_json::Value {
+    serde_json::json!({
+        "presentation_id": record.presentation_id(),
+        "presentation_content_hash": record.content_hash(),
+        "requested_action": record.requested_action(),
+        "work_summary": record.work_summary(),
+        "approved_scope": record.approved_scope(),
+        "strict_non_goals": record.strict_non_goals(),
+        "expected_touched_surfaces": record.expected_touched_surfaces(),
+        "validation_required": record.validation_expectations(),
+        "why_now": record.why_now(),
+    })
+}
+
+fn print_saved_approval_handoff(fields: serde_json::Map<String, serde_json::Value>) {
+    println!("approval_handoff:");
+    for (key, value) in fields {
+        let text = match value {
+            serde_json::Value::String(value) => value,
+            serde_json::Value::Array(values) => values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>()
+                .join("; "),
+            _ => continue,
+        };
+        println!("  {key}: {}", terminal_escape(&text));
+    }
 }
 
 fn render_next_action_json(brief: &GovernedContinuationBrief) -> Result<String, WorkflowOsError> {
@@ -13599,6 +13734,7 @@ fn print_help() {
     println!(
         "      preview the bounded current continuation without consuming it or changing run state"
     );
+    println!("      recover a pending approval handoff without deciding or re-presenting it");
     println!("  approve <run-id> <approval-id> [--deny] [--actor <actor>] [--reason <reason>]");
     println!("  inspect <run-id>");
     println!("  doctor");
