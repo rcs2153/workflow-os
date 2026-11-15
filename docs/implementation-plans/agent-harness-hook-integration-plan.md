@@ -69,6 +69,99 @@ The future hook layer should:
 
 The scaffold is useful but advisory. Hooks are the future integration boundary where governance becomes less brittle.
 
+### Downstream Governance Posture Contract
+
+After explicit repository initialization, cooperative governance and
+authoritative observation are default-on; hard enforcement is explicit,
+progressively stronger, and claimed only when technically proven.
+**Agent executes. Workflow OS governs.**
+
+Installing the binary or importing an SDK must not mutate a repository.
+Explicit `init-repo-governance` defaults to the authoritative
+`observe_and_report` project-validation scaffold. Preserve existing unmanaged
+`AGENTS.md` text and append or update only the managed block by default;
+generate `.workflow-os/agent-harness-prompt.md` as orientation. The explicit
+`--no-authoritative-governance` legacy path omits that authoritative
+scaffold; disclose the reduced guarantee rather than labeling it Observe.
+`init-agent-harness` remains documentation-only and does not establish a
+runnable project or enforcement boundary. See the
+[quickstart](../user-guide/agent-harness-quickstart.md).
+
+| Posture | Boundary and claim |
+| --- | --- |
+| **Observe** | Default after explicit repo initialization. Cooperative harnesses can discover managed instructions, project validation, declared checkpoints, and available durable governance and report paths. Bypass remains possible; files alone do not prove participation. |
+| **Enforce** (future) | Explicit per repository, workflow, or policy. A versioned governed hook or gateway produces proof at consequential checkpoints. Missing, stale, skipped, or mismatched participation is detected and handled under declared policy. Claims cover only the integrated action boundary; direct paths may remain. |
+| **Strict** (future) | Explicit deployment opt-in. Remove or mediate ambient reusable credentials and unrestricted consequential tool and egress paths outside agent control. Cells and gateways re-resolve current authority; they cannot mint, widen, renew, or serialize executable authority. Only Strict may claim technical non-bypassability, only at the tested boundary. It is not a default; deployment, recovery, revocation, and operational guarantees must first be implemented and accepted. |
+
+Existing selected `BeforeReport` and `BeforeSkillInvocation` checks do not
+establish either future deployment posture. The
+[reference enforcement plane](durable-authority-continuation-profile-plan.md#phase-3a-reference-enforcement-plane)
+owns the task-cell and gateway proof.
+
+#### Posture Inspection
+
+Have the architecture review choose the smallest stable public projection in
+`first-run`, `doctor`, or another bounded inspection surface. Candidate facts
+are: instructions installed; harness prompt installed; authoritative project
+validation configured; harness acknowledgement observed or unknown; governed
+hook configured and invocation observed as separate facts; gateway enforcement
+configured; and strict credential and egress boundaries verified separately.
+Show the effective posture for the scoped boundary (Observe, Enforce, Strict,
+legacy, or unknown), with evidence or an explicit unknown where needed.
+
+Do not infer acknowledgement from file presence, invocation from config,
+enforcement from audit events, or strictness from sandbox presence. No new
+public field names or commands are committed by this plan.
+
+#### Hook Progression
+
+1. Managed prose orientation.
+2. Deterministic, named checkpoint contract.
+3. Harness acknowledgement or registration.
+4. Versioned, proof-producing hook invocation.
+5. Policy-bound behavior for missing, stale, skipped, or mismatched hooks.
+6. Consequential-tool mediation through a governed integration.
+7. Strict credential and egress controls outside executor control.
+8. Recovery, revocation, replacement-executor, and post-effect ambiguity proof.
+
+This is a dependency sequence, not an Active Delivery Queue reorder. Hooks
+must not silently enable arbitrary commands, provider calls, approvals,
+local checks, writes, recursive agents, or higher autonomy.
+
+#### Cold-Contributor Acceptance
+
+Maintain one repeatable scenario in a real repository with existing contributor
+instructions:
+
+1. Explicitly initialize Workflow OS and verify unmanaged guidance survives.
+2. Start a fresh supported harness and observe it discovering the managed policy.
+3. Present the contributor with the concrete task, scope, non-goals, and
+   validation expectations; record the approval decision durably.
+4. Complete useful work through ordinary executor tooling; retain what was
+   approved and what occurred in the run and report.
+5. Have a fresh reviewer reconstruct the approval and outcome, and classify
+   the tested boundary as cooperative Observe, integrated Enforce, or Strict.
+
+A real external contribution provides bounded field evidence that a cold
+contributor followed repository instructions, reviewed a scoped approval, and
+completed useful work. It does not establish non-bypassability or satisfy the
+full scenario. Do not identify or quote the contributor or publish screenshots
+without consent.
+
+#### Test And Claim Gates
+
+- Verify unmanaged guidance preservation, idempotent managed-block updates,
+  explicit initialization before setup mutation, and legacy opt-out disclosure.
+- Verify that ignored prose is not reported as enforcement and that configured
+  but never invoked hooks remain distinguishable from invocation proof.
+- Reject stale, wrong-run, or wrong-scope proof for required checkpoints.
+- Prevent Strict classification if direct credential or egress bypass exists.
+- Fail closed on revocation, expiry, or inability to resolve current authority
+  while disconnected; authenticate a replacement and re-resolve its authority.
+- Preserve uncertainty after an effect but before acknowledgement without
+  enabling blind retry. Use the existing reference enforcement-plane recovery
+  tests rather than defining a separate execution mechanism.
+
 ## 5. Candidate Hook Checkpoints
 
 Initial candidate hook names:

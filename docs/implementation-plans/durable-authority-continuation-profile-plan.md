@@ -233,6 +233,15 @@ retains action identity, ambiguity, reconciliation and reporting posture.
 Cell observations are bound to the operation and distinguishable from
 provider evidence. Do not add a generic gateway, scheduler or sandbox.
 
+Apply the [Downstream Governance Posture Contract](agent-harness-hook-integration-plan.md#downstream-governance-posture-contract)
+when interpreting this proof. Observe is the cooperative adoption default
+after explicit repository initialization. Enforce is explicit for the
+integrated boundary; Strict additionally requires proof that the executor has
+no bypass through ambient credentials or an uncontrolled tool or egress path.
+Record these facts separately; neither hook configuration nor a cell's audit
+record proves enforcement or Strict. No deployment classification is earned
+by this plan alone.
+
 Exit: prove both the admitted path and denial when current authority cannot
 be resolved. Preregister expected results for stale policy, revocation during
 disconnection, expired or consumed leases, duplicate cells and replacement
