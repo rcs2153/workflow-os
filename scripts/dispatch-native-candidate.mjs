@@ -38,28 +38,68 @@ async function assertMain(api, sourceCommit) {
   }
 }
 
-async function claimOnce(stateDir, sourceCommit, target, workflow) {
+async function openPrivateDirectory(stateDir) {
   const directory = await open(stateDir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {
     const stat = await directory.stat();
     if (typeof process.getuid !== "function" || stat.uid !== process.getuid() || (stat.mode & 0o077)) {
       throw new Error("claim directory must be owned by the operator and private");
     }
-    let claim;
+    return directory;
+  } catch (error) {
+    await directory.close();
+    throw error;
+  }
+}
+
+async function createRecord(stateDir, name, record) {
+  const directory = await openPrivateDirectory(stateDir);
+  try {
+    let file;
     try {
-      claim = await open(join(stateDir, `dispatch-${target}-${sourceCommit}.json`), "wx", 0o600);
+      file = await open(join(stateDir, name), "wx", 0o600);
     } catch (error) {
       if (error.code === "EEXIST") return false;
       throw error;
     }
     try {
-      await claim.writeFile(JSON.stringify({ repository, ref: "main", workflow, sourceCommit, target }) + "\n");
-      await claim.sync();
+      await file.writeFile(JSON.stringify(record) + "\n");
+      await file.sync();
     } finally {
-      await claim.close();
+      await file.close();
     }
     await directory.sync();
     return true;
+  } finally {
+    await directory.close();
+  }
+}
+
+async function readReply(stateDir, name, sourceCommit, target) {
+  if (!stateDir) return null;
+  const directory = await openPrivateDirectory(stateDir);
+  try {
+    let file;
+    try {
+      file = await open(join(stateDir, name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    } catch (error) {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    }
+    try {
+      const stat = await file.stat();
+      if (!stat.isFile() || stat.uid !== process.getuid() || (stat.mode & 0o077) ||
+          stat.size < 1 || stat.size > 512) {
+        throw new Error("invalid persisted candidate reply");
+      }
+      const reply = JSON.parse(await file.readFile("utf8"));
+      if (reply?.sourceCommit !== sourceCommit || reply.target !== target || !isRunId(reply.runId)) {
+        throw new Error("invalid persisted candidate reply");
+      }
+      return reply.runId;
+    } finally {
+      await file.close();
+    }
   } finally {
     await directory.close();
   }
@@ -71,16 +111,30 @@ export async function candidateDispatch({ api, sourceCommit, target, stateDir, d
     throw new Error("exact source commit and native target required; dispatch also requires a private claim directory");
   }
   const route = `/actions/workflows/${workflow}`;
+  const key = `dispatch-${target}-${sourceCommit}`;
+  const replyFile = `${key}.reply.json`;
   const observed = (run, status) => ({ status, target, source_commit: sourceCommit,
     ...(run && { run_id: run.id, run_attempt: run.run_attempt }) });
-  const existing = await lookup(api, route, sourceCommit, target);
-  if (existing) return observed(existing, "existing_run_no_dispatch");
+  const reconcile = async () => {
+    const run = await lookup(api, route, sourceCommit, target);
+    const runId = await readReply(stateDir, replyFile, sourceCommit, target);
+    if (run && runId !== null && runId !== run.id) {
+      throw new Error("persisted dispatch reply and observed run disagree; operator reconciliation required");
+    }
+    if (run) return observed(run, runId === null ? "inventory_only_run_no_dispatch" : "dispatch_reply_matched");
+    if (runId !== null) {
+      return { ...observed(null, "dispatch_reply_pending_inventory"), reported_run_id: runId };
+    }
+    return null;
+  };
+  const existing = await reconcile();
+  if (existing) return existing;
   if (!dispatch) return observed(null, "not_observed");
 
   await assertMain(api, sourceCommit);
-  const won = await claimOnce(stateDir, sourceCommit, target, workflow);
-  const afterClaim = await lookup(api, route, sourceCommit, target);
-  if (afterClaim) return observed(afterClaim, "existing_run_no_dispatch");
+  const won = await createRecord(stateDir, `${key}.json`, { repository, ref: "main", workflow, sourceCommit, target });
+  const afterClaim = await reconcile();
+  if (afterClaim) return afterClaim;
   if (!won) return observed(null, "claim_present_reconcile_only");
   await assertMain(api, sourceCommit);
 
@@ -91,13 +145,12 @@ export async function candidateDispatch({ api, sourceCommit, target, stateDir, d
   } catch {
     // The request may have reached GitHub. Never release the claim or resend.
   }
-  const reconciled = await lookup(api, route, sourceCommit, target);
-  if (reconciled && (!isRunId(runId) || runId === reconciled.id)) {
-    return observed(reconciled, "run_observed_after_dispatch");
+  if (isRunId(runId)) {
+    if (!await createRecord(stateDir, replyFile, { sourceCommit, target, runId })) {
+      throw new Error("candidate reply already recorded; operator reconciliation required");
+    }
   }
-  if (reconciled) throw new Error("dispatch reply and observed run disagree; operator reconciliation required");
-  return { ...observed(null, "dispatch_unresolved_reconcile_only"),
-    ...(isRunId(runId) && { reported_run_id: runId }) };
+  return (await reconcile()) ?? observed(null, "dispatch_unresolved_reconcile_only");
 }
 
 export function githubApi(token, fetchRequest = fetch) {
