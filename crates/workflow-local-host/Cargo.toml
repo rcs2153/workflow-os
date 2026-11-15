@@ -19,7 +19,7 @@ sha2 = "0.10"
 workflow-core = { path = "../workflow-core", features = ["trusted-host-application-spi"] }
 
 [dev-dependencies]
-rusqlite = { version = "0.40.1", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 time = "0.3"
 
 [lints]

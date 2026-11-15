@@ -5,7 +5,7 @@ description = "Experimental in-process Python bindings for Workflow OS Core."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-rust-version = "1.83"
+rust-version.workspace = true
 publish = false
 
 [lib]

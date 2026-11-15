@@ -14,7 +14,7 @@ license = "Apache-2.0"
 repository = "https://github.com/rcs2153/workflow-os"
 homepage = "https://github.com/rcs2153/workflow-os"
 readme = "README.md"
-rust-version = "1.78"
+rust-version = "1.89"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

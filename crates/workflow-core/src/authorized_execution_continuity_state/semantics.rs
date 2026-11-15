@@ -275,9 +275,7 @@ pub(crate) fn continuation_disposition(
         && trusted_time.posture != TrustedTimePosture::Quarantined
         && trusted_time.epoch_id == window.trusted_time_epoch_id
         && observed_at.is_some_and(|now| {
-            trusted_time
-                .last_observed_at
-                .map_or(true, |last| now >= last)
+            trusted_time.last_observed_at.is_none_or(|last| now >= last)
                 && now >= window.trusted_time_watermark
                 && now < window.expires_at
         });

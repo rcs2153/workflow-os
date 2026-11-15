@@ -1581,10 +1581,10 @@ fn resolve_lock_dependency(
         .keys()
         .filter(|key| {
             key.name == name
-                && version.map_or(true, |expected| key.version == expected)
+                && version.is_none_or(|expected| key.version == expected)
                 && source
                     .as_deref()
-                    .map_or(true, |expected| key.source.as_deref() == Some(expected))
+                    .is_none_or(|expected| key.source.as_deref() == Some(expected))
         })
         .cloned()
         .collect::<Vec<_>>();

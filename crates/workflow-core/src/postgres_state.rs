@@ -1081,7 +1081,7 @@ impl PostgresStateBackend {
                 read_record_tx::<WorkflowRunSnapshot>(tx, "snapshot", run_id.as_str(), "", true)?;
             if prior
                 .as_ref()
-                .map_or(true, |record| record.value() != &run.snapshot)
+                .is_none_or(|record| record.value() != &run.snapshot)
             {
                 put_record(
                     tx,

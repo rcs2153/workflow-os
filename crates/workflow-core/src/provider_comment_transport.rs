@@ -217,9 +217,9 @@ impl StoredGitHubCommentObservation {
         &self.reservation == reservation
             && comment_observation_context(expected).as_ref() == Some(&self.context)
             && self.observed_at >= expected.not_before
-            && !expected
+            && expected
                 .known_comment_id
-                .is_some_and(|id| id != self.comment_id)
+                .is_none_or(|id| id == self.comment_id)
     }
 
     pub(crate) const fn comment_id(&self) -> NonZeroU64 {

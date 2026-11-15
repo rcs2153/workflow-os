@@ -394,7 +394,7 @@ impl CollaborativeIdentityAuthorityRevisionCandidate {
                 && grant.effective_at() <= evaluated_at
                 && grant
                     .expires_at()
-                    .map_or(true, |expiry| expiry > evaluated_at)
+                    .is_none_or(|expiry| expiry > evaluated_at)
                 && !self.revocations.iter().any(|revocation| {
                     revocation.grant_id() == grant.grant_id()
                         && revocation.grant_commitment() == grant.commitment()

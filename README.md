@@ -337,6 +337,10 @@ reference implementations, not defaults installed into downstream projects.
 
 ## Develop
 
+Building the locked Rust workspace, including native Python bindings, requires
+Rust 1.89 or newer. Native release packaging retains its separately pinned
+toolchain and bundles SQLite; it does not depend on the system SQLite version.
+
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings

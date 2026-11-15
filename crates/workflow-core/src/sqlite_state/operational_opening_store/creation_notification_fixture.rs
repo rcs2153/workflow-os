@@ -113,9 +113,9 @@ fn verify(
         && event.pull_request == comment.target.pull_request_number()
         && event.author == comment.author_id
         && event.body == marked
-        && !comment
+        && comment
             .known_comment_id
-            .is_some_and(|id| id != event.comment))
+            .is_none_or(|id| id == event.comment))
     .then_some(event.comment)
 }
 
