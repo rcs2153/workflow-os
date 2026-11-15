@@ -4668,6 +4668,17 @@ being closed. Use **Active Delivery Queue** above for execution order.
   verifier, domain pilots and open-profile engagement then follow in order.
   This is a strategic continuation, not a product rename, implemented
   standard, cross-domain federation or current production claim.
+- [Local Governed Comparative Evaluation](docs/implementation-plans/local-governed-comparative-evaluation-plan.md):
+  compare models and harnesses on identical real work under the same policy,
+  using isolated runs and locally retained evidence of task correctness,
+  authority handling, recovery and operational cost. Define the contract with
+  or adjacent to the Authority Continuation Architecture Decision; begin the
+  local paired-run milestone only after checkpoint/envelope and candidate
+  identity commitments stabilize. Consequential comparisons additionally need
+  the accepted sandbox and reconciliation boundary. Reuse cross-harness evidence
+  and measure future task-cell and distributed enforcement guarantees; Reasoning
+  Lineage is optional enrichment. This is planned capability, not an active
+  P0 reorder, launch gate, or grant of execution authority.
 - Composable Harness Contracts and typed governed handoffs.
 - Nested harness execution patterns after contract and authority boundaries.
 - Reasoning Lineage / Claim Graph after evidence, reports, and harness contracts.
