@@ -122,6 +122,13 @@ cross-harness delegation, or independent check attestation.
   `AGENTS.md` content by default.
 - Inspect allowlisted repository metadata through `first-run` without reading
   arbitrary source files or running repository commands.
+  A configured project-validation path is not an executed check. The verbose
+  profile posture describes analysis only, and authoritative execution applies
+  only to eligible governed project-validation runs. The preserved JSON
+  `authoritative_execution.enforced` field is path capability, not an observed
+  decision; use its `enforcement_scope` and
+  `local_check_ran_in_this_command` fields to distinguish those facts.
+  First-run inspection does not establish repository-wide enforcement.
 - Explain workflow recommendations and author inactive drafts.
 - Preflight, steward-review, promote, catalog, archive, and propose catalog
   repair through explicit CLI commands.
