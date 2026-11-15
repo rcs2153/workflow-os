@@ -7539,6 +7539,133 @@ fn state_migration_cli_stages_inactive_then_explicitly_activates() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
+fn first_run_report_survives_sqlite_migration_with_retained_assurance() {
+    let project = TestProject::new("first-run-report-migration");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let run = "first-report-migration";
+    let result = workflow_os(
+        &project,
+        &["first-run", "--write-report-artifact", "--run-id", run],
+    );
+    assert!(result.status.success(), "{}", stderr(&result));
+    let run_id = WorkflowRunId::new(run).expect("run ID");
+    let report_id = WorkReportId::new(format!("report/{run}")).expect("report ID");
+    let source = LocalStateBackend::for_inspection(project.state_root());
+    let events = source.read_events(&run_id).expect("source events");
+    let artifact = source
+        .read_work_report_artifact(&run_id, &report_id)
+        .expect("source artifact reads")
+        .expect("source artifact exists");
+    let inventory = source.inspect_migration_inventory().expect("inventory");
+    assert!(inventory.is_migration_compatible());
+    let fingerprint = inventory.source_fingerprint().expect("source fingerprint");
+    let assurance_dir = project
+        .state_root()
+        .join("immutable-run-bundles")
+        .join("local-check-evidence-assurance-projections");
+    let run_dir = fs::read_dir(assurance_dir)
+        .expect("assurance records")
+        .next()
+        .expect("run directory")
+        .expect("read run directory")
+        .path();
+    let projection = fs::read_dir(run_dir)
+        .expect("run projections")
+        .next()
+        .expect("projection")
+        .expect("read projection path")
+        .path();
+    let original = fs::read_to_string(&projection).expect("read retained proof");
+    let tampered = original.replace("\"unattested\"", "\"kernel_accepted_local_process\"");
+    assert_ne!(tampered, original);
+
+    let database = project.path().join("migrated.sqlite3");
+    let database_arg = database.to_str().expect("database arg");
+    let receipt = project.path().join("receipt.json");
+    let receipt_arg = receipt.to_str().expect("receipt arg");
+    let stage = || {
+        workflow_os(
+            &project,
+            &[
+                "state",
+                "migrate-sqlite",
+                "--destination",
+                database_arg,
+                "--receipt-output",
+                receipt_arg,
+                "--migration-id",
+                "migration/first-report",
+                "--destination-id",
+                "sqlite/first-report",
+                "--verified-by",
+                "user/cli-migration",
+                "--incompatible-older-writers-stopped",
+            ],
+        )
+    };
+    let assert_rejected = || {
+        let rejected = stage();
+        assert!(!rejected.status.success());
+        assert!(stderr(&rejected).contains("state.migration.source.incompatible"));
+        assert!(!database.exists());
+        assert!(!receipt.exists());
+    };
+    fs::write(&projection, tampered).expect("tamper disposable proof");
+    assert_rejected();
+    fs::write(&projection, &original).expect("restore exact proof");
+
+    let misplaced = projection.with_file_name("6f746865722d726573756c74.json");
+    fs::rename(&projection, &misplaced).expect("move proof to wrong result address");
+    assert_rejected();
+    fs::rename(&misplaced, &projection).expect("restore exact result address");
+
+    let staged = stage();
+    assert!(staged.status.success(), "{}", stderr(&staged));
+    assert!(stdout(&staged).contains("migration_status: verified_inactive"));
+    assert!(SqliteStateBackend::open(&database).is_err());
+    let activated = workflow_os(
+        &project,
+        &[
+            "state",
+            "activate-sqlite",
+            "--destination",
+            database_arg,
+            "--receipt",
+            receipt_arg,
+        ],
+    );
+    assert!(activated.status.success(), "{}", stderr(&activated));
+    let destination = SqliteStateBackend::open(&database).expect("activated SQLite");
+    assert_eq!(
+        destination
+            .read_events(&run_id)
+            .expect("destination events"),
+        events
+    );
+    assert_eq!(
+        destination
+            .read_work_report_artifact(&run_id, &report_id)
+            .expect("destination artifact reads"),
+        Some(artifact)
+    );
+    assert_eq!(
+        fs::read_to_string(&projection).expect("retained proof"),
+        original
+    );
+    let inspection = workflow_os(&project, &["inspect", run]);
+    assert!(inspection.status.success(), "{}", stderr(&inspection));
+    assert_eq!(
+        source
+            .inspect_migration_inventory()
+            .expect("retained inventory")
+            .source_fingerprint(),
+        Some(fingerprint)
+    );
+}
+
+#[test]
 fn state_upgrade_sqlite_is_explicit_and_never_creates_a_missing_database() {
     let project = TestProject::new("state-upgrade-ready");
     let database = project.path().join("ready.sqlite3");

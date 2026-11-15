@@ -360,10 +360,13 @@ fn dangling_side_effect_index_blocks_inventory_without_exposing_identity() {
 fn immutable_bundle_files_are_retained_as_bounded_companion_state() {
     let fixture = Fixture::new("bundle");
     let backend = fixture.backend();
-    let manifests = fixture.root.join("immutable-run-bundles").join("manifests");
-    fs::create_dir_all(&manifests).expect("manifests directory");
+    let definitions = fixture
+        .root
+        .join("immutable-run-bundles")
+        .join("definition-records");
+    fs::create_dir_all(&definitions).expect("definitions directory");
     fs::write(
-        manifests.join(format!("{}.json", hash("bundle"))),
+        definitions.join(format!("{}.json", hash("bundle"))),
         br#"{"bundle":"opaque-companion"}"#,
     )
     .expect("bundle");

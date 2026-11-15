@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-11-06.
+Status date: 2026-11-14.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -194,6 +194,25 @@ The [independent rerun](docs/implementation-plans/hosted-partial-run-creation-re
 remains open. These results do not authorize pilot admission or establish
 that a provider effect occurred.
 See the [contention recurrence report](docs/concepts/HOSTED_ADMISSION_CONTENTION_RECURRENCE_REPORT.md).
+
+**Parallel local correctness lane: first-run WorkReport migration.** While
+the [independent hosted rerun](https://github.com/rcs2153/workflow-os/issues/959)
+is pending, complete one local filesystem-to-SQLite compatibility correction.
+On `1ddd2b1d`, a disposable Git repository initialized with the default
+scaffold persisted one real first-run WorkReport, but `state migrate-sqlite`
+exited nonzero with `state.migration.source.incompatible`. All source-file
+digests stayed unchanged; no destination or receipt was created. The run
+produces a previously unrecognized assurance directory and run-encoded paths
+that were incorrectly classified as fixed-width content hashes.
+
+The [migration correction](docs/implementation-plans/filesystem-to-sqlite-state-migration-plan.md#4-current-state-boundary)
+validates these companion records and fingerprints their exact paths and
+bytes. The CLI regression verifies unchanged source evidence, identical
+destination reports and run events after explicit activation, and rejection
+of corrupt or misaddressed assurance records before creating a destination.
+Bundle and assurance records stay on the filesystem; this is not SQLite-only
+first-run replay. No hosted pilot admission, protected-host boot, or provider
+dispatch follows from this parallel lane. The ordered P0 queue is unchanged.
 
 The ordered queue is:
 

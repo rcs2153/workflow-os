@@ -10,20 +10,21 @@ use super::{
     encode_key, read_json, ApprovalPresentationIdRecord, EventIdRecord, IdempotencyResult,
     LocalStateBackend, LocalStateIssueSeverity, LockLease, ProjectStateRecord, SideEffectIdRecord,
 };
+use crate::immutable_run_bundle_store::{
+    GOVERNANCE_ASSESSMENT_BINDINGS_DIR, LOCAL_CHECK_EVIDENCE_ASSURANCE_PROJECTIONS_DIR,
+    MANIFESTS_DIR,
+};
 use crate::{
     AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, ApprovalPresentationRecord,
-    ApprovalRequest, PolicyAuditRecord, SideEffectRecord, StateMigrationCompatibilityFinding,
-    StateMigrationDigest, StateMigrationFindingCode, StateMigrationFindingSeverity,
-    StateMigrationInventory, StateMigrationRecordCount, StateMigrationRecordFamily,
-    WorkReportArtifactRecord, WorkflowOsError, WorkflowRunEvent, WorkflowRunSnapshot,
+    ApprovalRequest, LocalImmutableRunBundleStore, PolicyAuditRecord, SideEffectRecord,
+    StateMigrationCompatibilityFinding, StateMigrationDigest, StateMigrationFindingCode,
+    StateMigrationFindingSeverity, StateMigrationInventory, StateMigrationRecordCount,
+    StateMigrationRecordFamily, WorkReportArtifactRecord, WorkflowOsError, WorkflowRunEvent,
+    WorkflowRunSnapshot,
 };
 
-const IMMUTABLE_BUNDLE_DIRS: [&str; 4] = [
-    "definition-records",
-    "local-check-declaration-set-records",
-    "governance-assessment-bindings",
-    "manifests",
-];
+const IMMUTABLE_BUNDLE_CONTENT_DIRS: [&str; 2] =
+    ["definition-records", "local-check-declaration-set-records"];
 
 #[derive(Clone)]
 struct FamilyAccumulator {
@@ -552,6 +553,9 @@ impl LocalStateBackend {
             family_accumulator(accumulators, family).invalidate();
             return;
         };
+        let store = LocalImmutableRunBundleStore::new(&root);
+        let initial_findings = findings.len();
+        let mut records = Vec::new();
         for entry in entries {
             let Some(name) = file_name(&entry) else {
                 family_accumulator(accumulators, family).invalidate();
@@ -563,7 +567,13 @@ impl LocalStateBackend {
                 );
                 continue;
             };
-            if !IMMUTABLE_BUNDLE_DIRS.contains(&name.as_str()) {
+            let content_addressed = IMMUTABLE_BUNDLE_CONTENT_DIRS.contains(&name.as_str());
+            let partitioned = name == LOCAL_CHECK_EVIDENCE_ASSURANCE_PROJECTIONS_DIR;
+            if !content_addressed
+                && !partitioned
+                && name != MANIFESTS_DIR
+                && name != GOVERNANCE_ASSESSMENT_BINDINGS_DIR
+            {
                 classify_unknown_entry(&entry, findings);
                 continue;
             }
@@ -571,10 +581,27 @@ impl LocalStateBackend {
                 family_accumulator(accumulators, family).invalidate();
                 continue;
             }
-            let paths = flat_json_paths(&entry, family, findings, accumulators);
+            let Some(children) = directory_entries(&entry, findings, Some(family)) else {
+                family_accumulator(accumulators, family).invalidate();
+                continue;
+            };
+            let mut paths = Vec::new();
+            if partitioned {
+                for child in children {
+                    if let Some(files) = directory_entries(&child, findings, Some(family)) {
+                        paths.extend(files);
+                    }
+                }
+            } else {
+                paths = children;
+            }
             for path in paths {
                 let accumulator = family_accumulator(accumulators, family);
                 accumulator.discovered();
+                if !is_regular_file(&path, findings, Some(family)) {
+                    accumulator.invalidate();
+                    continue;
+                }
                 let Some(file_name) = file_name(&path) else {
                     malformed_address(accumulator, findings, family);
                     continue;
@@ -583,17 +610,35 @@ impl LocalStateBackend {
                     malformed_address(accumulator, findings, family);
                     continue;
                 };
-                if !is_hash(stem) {
+                if content_addressed && !is_hash(stem) {
                     malformed_address(accumulator, findings, family);
                     continue;
                 }
-                match fs::read(&path) {
-                    Ok(bytes) => {
-                        accumulator.update_opaque(&format!("{name}/{file_name}"), bytes.as_slice());
-                    }
-                    Err(_) => invalid_record(accumulator, findings, family),
-                }
+                records.push((name.clone(), path, content_addressed));
             }
+        }
+        let accumulator = family_accumulator(accumulators, family);
+        // Check file types before following references between companion records.
+        if findings.len() != initial_findings {
+            accumulator.invalidate();
+            return;
+        }
+        for (name, path, content_addressed) in records {
+            let Ok(bytes) = fs::read(&path) else {
+                invalid_record(accumulator, findings, family);
+                continue;
+            };
+            if !content_addressed
+                && !store.validates_retained_migration_record(&name, &path, &bytes)
+            {
+                invalid_record(accumulator, findings, family);
+                continue;
+            }
+            let Ok(address) = path.strip_prefix(&root) else {
+                malformed_address(accumulator, findings, family);
+                continue;
+            };
+            accumulator.update_opaque(&address.to_string_lossy(), &bytes);
         }
     }
 
