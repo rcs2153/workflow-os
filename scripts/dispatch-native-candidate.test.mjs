@@ -48,9 +48,9 @@ test("persists the exact claim before dispatch and observes the matching run", a
     return { workflow_run_id: row.id };
   } });
   assert.deepEqual(await f.run({ stateDir, dispatch: true }), {
-    status: "run_observed_after_dispatch", target, source_commit: sourceCommit, run_id: 123, run_attempt: 1,
+    status: "dispatch_reply_matched", target, source_commit: sourceCommit, run_id: 123, run_attempt: 1,
   });
-  assert.equal((await f.run({ stateDir, dispatch: true })).status, "existing_run_no_dispatch");
+  assert.equal((await f.run({ stateDir, dispatch: true })).status, "dispatch_reply_matched");
   assert.equal(f.count(), 1);
 });
 
@@ -70,8 +70,36 @@ test("competing callers send once even when the first response is lost and no ru
 
 test("reconciles an accepted dispatch with a lost reply without resending", async (t) => {
   const f = fixture({ send: (runs) => { runs.push(row); throw new Error("reply lost"); } });
-  assert.equal((await f.run({ stateDir: await state(t), dispatch: true })).run_id, 123);
+  const attempt = await f.run({ stateDir: await state(t), dispatch: true });
+  assert.equal(attempt.run_id, 123);
+  assert.equal(attempt.status, "inventory_only_run_no_dispatch");
   assert.equal(f.count(), 1);
+});
+
+test("a persisted reply survives replacement and rejects a different observed ID", async (t) => {
+  const stateDir = await state(t);
+  const f = fixture({ send: () => ({ workflow_run_id: row.id }) });
+  const pending = await f.run({ stateDir, dispatch: true });
+  assert.equal(pending.status, "dispatch_reply_pending_inventory");
+  assert.equal(pending.reported_run_id, row.id);
+  const wrong = fixture({ runs: [{ ...row, id: 124 }] });
+  await assert.rejects(wrong.run({ stateDir }), /persisted dispatch reply and observed run disagree/);
+  await assert.rejects(wrong.run({ stateDir, dispatch: true }), /persisted dispatch reply and observed run disagree/);
+  assert.equal(wrong.count(), 0);
+  const replacement = fixture({ runs: [row] });
+  assert.equal((await replacement.run({ stateDir })).status, "dispatch_reply_matched");
+  assert.equal(replacement.count(), 0);
+});
+
+test("a torn or misaddressed reply fails closed even when inventory contains one run", async (t) => {
+  const stateDir = await state(t);
+  const path = join(stateDir, `dispatch-${target}-${sourceCommit}.reply.json`);
+  const f = fixture({ runs: [row] });
+  for (const receipt of ["", JSON.stringify({ sourceCommit, target: "x86_64-unknown-linux-musl", runId: row.id })]) {
+    await writeFile(path, receipt, { mode: 0o600 });
+    await assert.rejects(f.run({ stateDir }), /invalid persisted candidate reply/);
+  }
+  assert.equal(f.count(), 0);
 });
 
 test("a torn claim never reopens the dispatch window", async (t) => {
@@ -88,12 +116,12 @@ test("non-exact commits and unsupported targets never reach the transport", asyn
   await assert.rejects(candidateDispatch({ api, sourceCommit, target: "custom.yml" }), /native target/);
 });
 
-test("read-only lookup does not dispatch and any already-bound run prevents a dispatch", async () => {
+test("read-only lookup does not dispatch and any already-bound run prevents a dispatch", async (t) => {
   const f = fixture({ runs: [row] });
   const empty = fixture();
   assert.equal((await empty.run()).status, "not_observed");
   assert.equal(empty.count(), 0);
-  assert.equal((await f.run({ stateDir: "/unused", dispatch: true })).status, "existing_run_no_dispatch");
+  assert.equal((await f.run({ stateDir: await state(t), dispatch: true })).status, "inventory_only_run_no_dispatch");
   assert.equal(f.count(), 0);
 });
 

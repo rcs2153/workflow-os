@@ -897,6 +897,11 @@ The repo-local native candidate dispatch helper records a durable per-target,
 exact-source claim before a send and uses read-only GitHub inventory to
 reconcile an uncertain response. Fixture tests verify its no-resend behavior;
 focused review and a separately scoped decision are required before live use.
+The first focused review denied live use: historical inventory verified the
+legacy duplicate macOS runs and the single Linux run, but a synthetic reply-ID
+disagreement was lost on restart. The correction preserves the known reply
+before inventory reconciliation; an unmatched or absent reply cannot be
+reported as a match. Focused recheck is still required.
 See the [release checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#native-candidate-dispatch-and-recovery).
 The next release-admission lane is a new governed publication decision against
 this exact pair. Comparative benchmark work, provider mutation, tags, releases,
