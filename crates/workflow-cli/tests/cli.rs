@@ -1029,6 +1029,67 @@ fn init_agent_harness_creates_scaffold_files() {
 }
 
 #[test]
+fn init_agent_harness_reports_unchanged_targets_without_rewriting_them() {
+    assert_scaffold_repeat_is_noop("init-agent-harness");
+}
+
+#[test]
+fn init_repo_governance_reports_unchanged_targets_without_rewriting_them() {
+    assert_scaffold_repeat_is_noop("init-repo-governance");
+}
+
+fn assert_scaffold_repeat_is_noop(command: &str) {
+    let project = TestProject::new(command);
+    project.write("AGENTS.md", "Keep this repository guidance.\n");
+    let initial = workflow_os(&project, &[command]);
+    assert!(initial.status.success(), "{}", stderr(&initial));
+    let initial_stdout = stdout(&initial);
+    let targets: Vec<_> = initial_stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix("created_or_updated: "))
+        .collect();
+    assert!(targets.contains(&"AGENTS.md"));
+    assert!(targets.contains(&".workflow-os/agent-harness-prompt.md"));
+    if command == "init-repo-governance" {
+        assert!(targets.contains(&"workflow-os.yml"));
+    }
+
+    let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+    for target in &targets {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(project.path().join(target))
+            .expect("open generated file")
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .expect("set sentinel modification time");
+    }
+    for args in [[command, "--dry-run"].as_slice(), [command].as_slice()] {
+        let repeat = workflow_os(&project, args);
+        assert!(repeat.status.success(), "{}", stderr(&repeat));
+        let output = stdout(&repeat);
+        assert!(!output.contains("created_or_updated: "));
+        assert!(!output.contains("would_write: "));
+        assert!(!output.contains("managed_agent_guidance: "));
+        assert_eq!(
+            output
+                .lines()
+                .filter_map(|line| line.strip_prefix("unchanged: "))
+                .collect::<Vec<_>>(),
+            targets,
+        );
+        for target in &targets {
+            let path = project.path().join(target);
+            let actual = fs::metadata(path)
+                .expect("generated file still exists")
+                .modified()
+                .expect("generated file has a modification time");
+            assert_eq!(actual, modified, "{target} was rewritten");
+        }
+        assert!(!project.state_root().exists());
+    }
+}
+
+#[test]
 fn init_agent_harness_unmanaged_agents_file_is_preserved_without_force() {
     let project = TestProject::new("agent-harness-unmanaged");
     project.write(
@@ -1135,6 +1196,8 @@ old prompt
     let output = workflow_os(&project, &["init-agent-harness", "--agent", "codex"]);
 
     assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("updated_managed_agent_guidance: AGENTS.md"));
+    assert!(stdout(&output).contains("created_or_updated: AGENTS.md"));
     let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
     assert!(agents.contains("Keep this line."));
     assert!(agents.contains("Keep this footer."));

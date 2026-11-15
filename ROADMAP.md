@@ -117,8 +117,8 @@ test-linker limitation did not prevent the wheel/SDK tests. The separate **P2**
 first-run wording correction distinguishes analysis-only disclosure, the
 configured eligible project-validation path, and whether a check ran. Existing
 JSON fields are retained with explicit scope metadata; no enforcement behavior
-changes. **P3** honest `unchanged` reporting for idempotent scaffold output
-remains separate.
+changes. The separate **P3** scaffold correction reports byte-identical
+targets as `unchanged` in dry runs and live runs without rewriting them.
 
 After the complete protected-host and cross-harness continuity exit gate,
 the first strategic planning phase is the **Authority Continuation Architecture

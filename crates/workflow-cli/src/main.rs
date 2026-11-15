@@ -3812,21 +3812,24 @@ fn init_agent_harness_command(
         ".workflow-os/agent-harness-prompt.md",
     )?;
 
+    let planned = [
+        (agents_path, "AGENTS.md", agents_content),
+        (
+            prompt_path,
+            ".workflow-os/agent-harness-prompt.md",
+            prompt_content,
+        ),
+    ];
     if dry_run {
         println!("dry_run: true");
-        println!("would_write: AGENTS.md");
-        println!("would_write: .workflow-os/agent-harness-prompt.md");
-        print_agent_harness_preservation_notice(&agents_path, force, true);
-        return Ok(());
     }
-
-    print_agent_harness_preservation_notice(&agents_path, force, false);
-    write_scaffold_file(&agents_path, &agents_content)?;
-    write_scaffold_file(&prompt_path, &prompt_content)?;
-    println!("created_or_updated: AGENTS.md");
-    println!("created_or_updated: .workflow-os/agent-harness-prompt.md");
-    println!("mode: documentation scaffold only");
-    println!("next_step: paste .workflow-os/agent-harness-prompt.md into your coding agent");
+    for (path, label, content) in planned {
+        apply_scaffold_target(&path, label, &content, force, dry_run)?;
+    }
+    if !dry_run {
+        println!("mode: documentation scaffold only");
+        println!("next_step: paste .workflow-os/agent-harness-prompt.md into your coding agent");
+    }
     Ok(())
 }
 
@@ -3856,26 +3859,15 @@ fn init_repo_governance_command(
 
     if dry_run {
         println!("dry_run: true");
-        for (path, relative_path, _) in &planned {
-            println!("would_write: {relative_path}");
-            if *relative_path == "AGENTS.md" {
-                print_agent_harness_preservation_notice(path, force, true);
-            }
-        }
-        println!("mode: existing repo governance scaffold only");
-        print_scaffold_authoritative_governance_posture(authoritative_governance);
-        return Ok(());
     }
-
     for (path, relative_path, content) in planned {
-        if relative_path == "AGENTS.md" {
-            print_agent_harness_preservation_notice(&path, force, false);
-        }
-        write_scaffold_file(&path, &content)?;
-        println!("created_or_updated: {relative_path}");
+        apply_scaffold_target(&path, relative_path, &content, force, dry_run)?;
     }
     println!("mode: existing repo governance scaffold only");
     print_scaffold_authoritative_governance_posture(authoritative_governance);
+    if dry_run {
+        return Ok(());
+    }
     println!("next_step: workflow-os validate");
     println!("next_step: workflow-os first-run");
     println!(
@@ -12070,6 +12062,34 @@ fn scaffold_file_content(
         "cli.init_agent_harness.unmanaged_file",
         format!("{label} has unmanaged content; rerun with --force to replace it"),
     ))
+}
+
+fn apply_scaffold_target(
+    path: &Path,
+    label: &str,
+    content: &str,
+    force: bool,
+    dry_run: bool,
+) -> Result<(), WorkflowOsError> {
+    if fs::metadata(path).is_ok_and(|metadata| {
+        metadata.is_file()
+            && metadata.len() == content.len() as u64
+            && fs::read(path).is_ok_and(|existing| existing == content.as_bytes())
+    }) {
+        println!("unchanged: {label}");
+        return Ok(());
+    }
+    if dry_run {
+        println!("would_write: {label}");
+    }
+    if label == "AGENTS.md" {
+        print_agent_harness_preservation_notice(path, force, dry_run);
+    }
+    if !dry_run {
+        write_scaffold_file(path, content)?;
+        println!("created_or_updated: {label}");
+    }
+    Ok(())
 }
 
 fn write_scaffold_file(path: &Path, content: &str) -> Result<(), WorkflowOsError> {
