@@ -1693,9 +1693,9 @@ impl SqliteStateBackend {
             && time.provenance_commitment() == &trusted_time.provenance_commitment
             && time.epoch_id() == &trusted_time.epoch_id
             && time.observed_at() >= durable.committed_at
-            && !trusted_time
+            && trusted_time
                 .last_observed_at
-                .is_some_and(|watermark| time.observed_at() < watermark)
+                .is_none_or(|watermark| time.observed_at() >= watermark)
             && time.observed_at() < deadline;
         if !current_time
             || !current_comment_execution(tx, &state, &durable, action, time, deadline)?
@@ -3094,11 +3094,11 @@ fn installation_disposition(
     effect: &crate::SideEffectId,
 ) -> Result<InstallationCommentRecoveryPosture, WorkflowOsError> {
     if !comment_proof_source_matches(admission, LiveCommentProofKind::InstallationCreation)
-        || !admission
+        || admission
             .witness
             .as_ref()
             .and_then(|witness| witness.creation_deadline)
-            .is_some_and(|deadline| admission.committed_at < deadline)
+            .is_none_or(|deadline| admission.committed_at >= deadline)
     {
         return Err(not_dispatchable());
     }
@@ -3222,9 +3222,9 @@ fn verify_live_comment_proof(
     };
     if !comment_proof_source_matches(admission, kind)
         || effect.lifecycle_state() != SideEffectLifecycleState::Completed
-        || !effect
+        || effect
             .outcome_reference()
-            .is_some_and(|outcome| outcome.kind() == SideEffectOutcomeReferenceKind::Outcome)
+            .is_none_or(|outcome| outcome.kind() != SideEffectOutcomeReferenceKind::Outcome)
         || event.sequence_number <= admission_event.sequence_number()
         || Some(event.timestamp) != effect.updated_at()
         || !key_matches

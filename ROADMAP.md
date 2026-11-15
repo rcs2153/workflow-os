@@ -86,6 +86,18 @@ phase` language does not supersede the active queue.
 
 ### Active Delivery Queue
 
+**P0 publication preemption: bundled SQLite and RustSec freshness.**
+[RUSTSEC-2026-0459](https://rustsec.org/advisories/RUSTSEC-2026-0459.html)
+affects the previous bundled SQLite lockfile. This is a Medium, conditional
+local disclosure: a less-trusted writer must control state files opened by
+the process. It is not evidence of remote execution or exposure on a
+trusted state root. Use patched bundled SQLite and enforce a seven-day
+advisory-feed age limit in required CI. Keep publication and reuse of prior
+native candidates blocked pending the exact-source release matrix and an
+independent fresh-clone audit. See the
+[release checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#3-required-validation).
+This preemption does not reorder unrelated product work or admit a pilot.
+
 After the complete protected-host and cross-harness continuity exit gate,
 the first strategic planning phase is the **Authority Continuation Architecture
 Decision**, unless a higher-severity correctness issue preempts it. The

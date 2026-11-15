@@ -1973,7 +1973,7 @@ fn validate_governance_assessment(
     if input
         .current_governance_assessment
         .runtime_fact_snapshot_binding()
-        .map_or(true, |binding| binding.evaluated_at() != input.attempted_at)
+        .is_none_or(|binding| binding.evaluated_at() != input.attempted_at)
     {
         return Err(draft_pr_error!(
             "governance.reassessment_stale",

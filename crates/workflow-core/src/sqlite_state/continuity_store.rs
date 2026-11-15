@@ -1706,7 +1706,7 @@ impl SqliteStateBackend {
             && state
                 .trusted_time
                 .last_observed_at
-                .map_or(true, |prior| observation.observed_at() >= prior)
+                .is_none_or(|prior| observation.observed_at() >= prior)
             && observation.observed_at() >= window.trusted_time_watermark
             && observation.observed_at() < window.expires_at
             && window.state == AuthoritativeWindowState::Executing
@@ -1759,7 +1759,7 @@ impl AuthorizedExecutionAttemptDispatchValidator for SqliteStateBackend {
                 && state
                     .trusted_time
                     .last_observed_at
-                    .map_or(true, |prior| observation.observed_at() >= prior)
+                    .is_none_or(|prior| observation.observed_at() >= prior)
                 && observation.observed_at() < window.expires_at
                 && window.state == AuthoritativeWindowState::Executing
                 && window.workflow_id == expected.workflow_id

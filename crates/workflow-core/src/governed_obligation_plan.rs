@@ -451,7 +451,7 @@ pub(crate) fn extract_governed_obligation_plan(
                                 .skill_ref
                                 .version
                                 .as_ref()
-                                .map_or(true, |version| &skill.version == version)
+                                .is_none_or(|version| &skill.version == version)
                     })
             })
             .ok_or_else(|| composition_error("source_closure_incomplete"))?;

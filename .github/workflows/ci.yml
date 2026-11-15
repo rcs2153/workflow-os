@@ -59,6 +59,11 @@ jobs:
       - name: Rust formatting
         run: cargo fmt --all --check
 
+      - name: Check declared Rust minimum
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          cargo +1.89.0 check --locked --workspace --all-targets --all-features
+
       - name: Rust clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -381,20 +386,15 @@ jobs:
   security:
     name: Dependency And Security
     runs-on: ubuntu-latest
-    env:
-      # RustSec main currently contains malformed placeholder advisory data at
-      # e11d6b3. Keep the audit fail-closed against the immediately preceding
-      # valid database revision until upstream repairs the database.
-      RUSTSEC_ADVISORY_DB_REVISION: 309ad29d8fe448bf986019e05d47b9e0e29a2218
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Checkout pinned RustSec advisory database
+      - name: Checkout current RustSec advisory database
         uses: actions/checkout@v4
         with:
           repository: RustSec/advisory-db
-          ref: ${{ env.RUSTSEC_ADVISORY_DB_REVISION }}
+          ref: main
           path: .rustsec-advisory-db
           persist-credentials: false
 
@@ -409,7 +409,8 @@ jobs:
 
       - name: Rust dependency audit
         run: |
-          test "$(git -C .rustsec-advisory-db rev-parse HEAD)" = "${RUSTSEC_ADVISORY_DB_REVISION}"
+          node --test scripts/check-rustsec-freshness.test.mjs
+          node scripts/check-rustsec-freshness.mjs .rustsec-advisory-db
           cargo install cargo-audit --version 0.22.2 --locked
           cargo audit \
             --db .rustsec-advisory-db \

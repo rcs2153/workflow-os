@@ -1756,7 +1756,7 @@ fn github_repository_metadata_fixture_step(
                 .skill_ref
                 .version
                 .as_ref()
-                .map_or(true, |version| &candidate.definition.version == version)
+                .is_none_or(|version| &candidate.definition.version == version)
     }) else {
         return Ok(None);
     };
@@ -6507,9 +6507,7 @@ fn collect_promotion_preflight_field_blockers(
             .owner
             .maintainer
             .as_ref()
-            .map_or(true, |maintainer| {
-                is_placeholder_owner_value(maintainer.as_str())
-            })
+            .is_none_or(|maintainer| is_placeholder_owner_value(maintainer.as_str()))
     {
         blockers.insert("owner_posture_incomplete".to_owned());
     }
@@ -6517,7 +6515,7 @@ fn collect_promotion_preflight_field_blockers(
         .owner
         .escalation_contact
         .as_ref()
-        .map_or(true, |contact| is_placeholder_owner_value(contact.as_str()))
+        .is_none_or(|contact| is_placeholder_owner_value(contact.as_str()))
     {
         blockers.insert("escalation_posture_incomplete".to_owned());
     }
@@ -6543,9 +6541,7 @@ fn owner_review_summary(definition: &WorkflowDefinition) -> String {
             .owner
             .maintainer
             .as_ref()
-            .map_or(true, |maintainer| {
-                is_placeholder_owner_value(maintainer.as_str())
-            })
+            .is_none_or(|maintainer| is_placeholder_owner_value(maintainer.as_str()))
     {
         "owner_posture_incomplete".to_owned()
     } else {
@@ -6558,7 +6554,7 @@ fn escalation_review_summary(definition: &WorkflowDefinition) -> String {
         .owner
         .escalation_contact
         .as_ref()
-        .map_or(true, |contact| is_placeholder_owner_value(contact.as_str()))
+        .is_none_or(|contact| is_placeholder_owner_value(contact.as_str()))
     {
         "escalation_posture_incomplete".to_owned()
     } else {
@@ -6603,7 +6599,7 @@ fn evidence_report_review_summary(definition: &WorkflowDefinition) -> String {
 }
 
 fn option_str_missing_or_placeholder(value: Option<&str>) -> bool {
-    value.map_or(true, is_placeholder_owner_value)
+    value.is_none_or(is_placeholder_owner_value)
 }
 
 fn is_placeholder_owner_value(value: &str) -> bool {
@@ -13255,7 +13251,7 @@ fn parse_synthetic_recovery_inspection(args: &[String]) -> Result<Command, Workf
     let mut run_id = None;
     let mut operation_id = None;
     let mut side_effect_id = None;
-    for pair in args.chunks_exact(2) {
+    for pair in args.as_chunks::<2>().0 {
         let slot = match pair[0].as_str() {
             "--run-id" => &mut run_id,
             "--operation-id" => &mut operation_id,

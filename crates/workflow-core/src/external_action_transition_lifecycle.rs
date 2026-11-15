@@ -343,7 +343,7 @@ impl ExternalActionWaitResolutionProof {
         if status == AuthorizedExecutionWaitStatus::Expired
             && wait
                 .deadline()
-                .map_or(true, |deadline| resolved_at < deadline)
+                .is_none_or(|deadline| resolved_at < deadline)
         {
             return Err(lifecycle_error(
                 "wait_resolution.expiry_invalid",

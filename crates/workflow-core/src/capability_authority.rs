@@ -1724,15 +1724,13 @@ pub(crate) fn grant_matches_execution_scope(
         && scope.workflow_id() == workflow_id
         && scope
             .run_id()
-            .map_or(true, |scope_run_id| scope_run_id == run_id)
+            .is_none_or(|scope_run_id| scope_run_id == run_id)
         && scope
             .step_id()
-            .map_or(true, |scope_step_id| scope_step_id == step_id)
+            .is_none_or(|scope_step_id| scope_step_id == step_id)
         && scope
             .harness_contract_id()
-            .map_or(true, |scope_harness_id| {
-                Some(scope_harness_id) == harness_contract_id
-            })
+            .is_none_or(|scope_harness_id| Some(scope_harness_id) == harness_contract_id)
 }
 
 fn grant_specificity(grant: &CapabilityGrant) -> u8 {

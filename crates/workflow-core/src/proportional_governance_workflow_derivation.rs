@@ -204,7 +204,7 @@ fn resolve_skill<'a>(
             step.skill_ref
                 .version
                 .as_ref()
-                .map_or(true, |version| &skill.definition.version == version)
+                .is_none_or(|version| &skill.definition.version == version)
         })
         .collect::<Vec<_>>();
     let [skill] = matches.as_slice() else {

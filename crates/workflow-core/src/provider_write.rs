@@ -5747,7 +5747,7 @@ pub fn reconcile_github_pr_comment_provider_write(
     let local_transition_state = input
         .local_transition
         .map(|transition| transition.record().lifecycle_state());
-    let local_transition_matches_record = input.local_transition.map_or(true, |transition| {
+    let local_transition_matches_record = input.local_transition.is_none_or(|transition| {
         transition.record().side_effect_id() == input.attempted_record.side_effect_id()
     });
 

@@ -14171,7 +14171,7 @@ fn validate_trusted_host_three_step_attempt(
                 );
             let executor_matches = current_executor_commitment
                 .as_ref()
-                .map_or(true, |expected| dispatch.executor_commitment() == expected);
+                .is_none_or(|expected| dispatch.executor_commitment() == expected);
             (dispatch.invocation_commitment() == &invocation_commitment
                 && executor_matches
                 && invocation_request_event.sequence_number < event.sequence_number)

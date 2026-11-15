@@ -526,7 +526,7 @@ fn validate_relationships(state: &ReferenceContinuityState) -> Result<(), Workfl
             .get(&yield_record.attempt_id)
             .ok_or_else(corrupt)?;
         if yield_record.wait_ids.iter().any(|id| {
-            state.waits.get(id).map_or(true, |wait| {
+            state.waits.get(id).is_none_or(|wait| {
                 wait.window_id != attempt.window_id
                     || wait.generation_id != yield_record.generation_id
             })
