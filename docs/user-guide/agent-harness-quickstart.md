@@ -298,6 +298,10 @@ The command is documented in [Agent Harness CLI Scaffold Plan](../implementation
 
 This helper is not the existing-repo governance scaffold. It does not create `workflow-os.yml`, workflows, policies, skills, or a runnable Workflow OS project for a normal repository. Use `workflow-os init-repo-governance` for the current minimal in-repo project scaffold.
 
+Both commands report byte-identical targets as `unchanged` and leave them
+untouched. A dry run lists only pending changes as `would_write`; a live run
+reports actual file writes as `created_or_updated`.
+
 ## Future Hook Layer
 
 The scaffold is a human/agent orientation layer: useful for declaring conventions, expectations, and structure, but not itself an enforcement layer.
