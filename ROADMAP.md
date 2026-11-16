@@ -918,9 +918,12 @@ error before artifact upload. Both workflows now derive the expected package
 root from the locked release version and target instead of piping archive
 listing into an early-closing reader. The old pair is incomplete; do not
 combine its macOS artifact with a Linux build from a different source.
-The active SQLite preemption still requires exact patched-source validation,
-a separately governed two-target rebuild, and independent assurance before a
-new publication decision. Comparative benchmark work, unrelated provider mutations, tags, releases,
+The corrected pair at `e3c0a3ad` passed exact-source validation and a
+separately governed rebuild, one matched attempt per target. Maintainer
+verification is recorded in the [corrected transfer evidence](docs/concepts/0.4.0-preview.1_SCOPED_CANDIDATE_TRANSFER_REPORT.md#corrected-patched-native-pair).
+The SQLite preemption still blocks publication pending independent source
+and artifact assurance and a new governed admission decision. Comparative
+benchmark work, unrelated provider mutations, tags, releases,
 asset promotion, registry publication, and announcement remain outside the
 assurance evidence update.
 The governed publication decision admits the hardened macOS and Linux pair for
