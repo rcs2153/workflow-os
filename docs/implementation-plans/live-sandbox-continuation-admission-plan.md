@@ -3187,6 +3187,35 @@ collector and verifier custody, externally held generation, authenticated
 reference bootstrap, independent review, and the separately authorized
 deadline measurement. Live admission remains denied.
 
+#### Offline Preboot Filter Lifecycle
+
+The serial-only outer Linux guest verified 61 pinned Alpine archives
+offline, loaded nftables from the matching kernel module tree, and
+installed a synthetic TAP policy before the KVM guest started. The
+allowed and denied destinations were assigned to the same TAP, so the
+outer filter counters distinguished actual drops from missing routes.
+There was no external network interface or provider contact.
+
+| Governed run | Bounded result | Primary serial SHA-256 |
+| --- | --- | --- |
+| `run-1794814208508780000-2` | Preboot rules were active and counters started at zero. The outer filter counted three IPv4 accepts, two IPv6 accepts and one same-subnet drop per protocol. | `418e966fb6e93a5c70aeaeaf7c0c92ebef8b137a2fc90cfa2c7f3e855d7013f1` |
+| `run-1794814348344761000-2` | A stateless loaded-rules digest excluded packet counters. With the approved TAP restored, the actual launcher refused restart under changed or missing rules. Restoring the rules matched the digest without an additional launch. | `38783d5ac6c3221bc2ea368cd4d89aecee747d42f399cb688e5d929779a5d629` |
+| `run-1794814462659176000-2` | With QEMU still running, the outer operator confirmed the sole TAP was down before deleting the policy. The inner guest lost both working paths, shut down and was not restarted. | `46f64169a17d1bab8f66c95db65b4cc470754d43035ea81aa9c691b201dfa0b5` |
+
+Each phase closed with 39 events and one proof-backed delegated approval.
+Package verification, guest launch, filter operations and evidence capture
+were performed outside preview handlers. These digests identify
+operator-local traces, not distributed fixtures or independent acceptance.
+
+The test of withdrawal was ordered: detach first, then delete the policy.
+It did not exercise unsolicited rule changes with the link up or prove an
+atomic check-and-launch boundary. The connected design must bind the
+sole attachment, external filter and preboot capture to the exact launch,
+separate boundary ownership from the executor, and deny unauthorized
+destinations without relying on the inner guest. Source bootstrap, clock
+custody and deadline measurement remain open. Keep both staged Lima
+instances stopped and live admission denied.
+
 ### Designated VM Framed Notification Result
 
 [PR #915](https://github.com/rcs2153/workflow-os/pull/915) merged at

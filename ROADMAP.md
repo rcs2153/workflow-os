@@ -500,6 +500,10 @@ management namespace separation on the candidate Mac. It does not
 qualify the intended host, the egress boundary with an uplink, or the
 trusted reference; the no-dispatch measurement remains the next
 qualification milestone.
+The [offline preboot filter follow-up](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#offline-preboot-filter-lifecycle)
+then verified same-subnet nftables drops, restart refusal on policy
+drift or loss, and ordered link cutoff before policy withdrawal. These
+are offline operator rehearsal results, not connected egress evidence.
 
 The [designated VM framed notification rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#designated-vm-framed-notification-result)
 then used the exact merged worker to attest one synthetic notification and
