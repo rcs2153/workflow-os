@@ -494,6 +494,13 @@ and the expiry boundary. Do not use another component fixture as a
 substitute for this host evidence. No provider egress, live grant, or
 dispatch is authorized by this queue entry.
 
+The [offline nested Linux containment rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#offline-nested-linux-containment-rehearsal)
+proved KVM-only boot, guarded dual-stack TAP recovery, and synthetic
+management namespace separation on the candidate Mac. It does not
+qualify the intended host, the egress boundary with an uplink, or the
+trusted reference; the no-dispatch measurement remains the next
+qualification milestone.
+
 The [designated VM framed notification rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#designated-vm-framed-notification-result)
 then used the exact merged worker to attest one synthetic notification and
 recover the fixture effect without resending. This verifies the private
