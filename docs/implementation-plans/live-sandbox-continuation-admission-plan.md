@@ -3156,6 +3156,37 @@ or escalations. Standards review and read-only host inspection were executor
 work outside preview handlers. No configuration, source, or provider state
 changed, and no independent acceptance was recorded.
 
+#### Offline Nested Linux Containment Rehearsal
+
+The candidate Mac ran a disposable serial-only VFKit outer Linux guest
+using pinned launcher and boot inputs. The outer guest had no external
+network device, verified the offline Alpine QEMU package set, and
+required KVM for the inner boot without an emulation fallback. Neither
+staged Lima VM was used. No provider or real time reference was contacted.
+
+| Governed run | Bounded result | Primary serial SHA-256 |
+| --- | --- | --- |
+| `run-1794812231389786000-2` | KVM-only inner guest booted with loopback only; QEMU and VFKit shut down cleanly. | `68ff216368579f208c2a1413e58662c7689ac8378298d91448d063a7cdb50c2c` |
+| `run-1794812754612591000-2` | Inner IPv4 and IPv6 controls passed across two distinct boots. The launch guard refused down, changed, address-incomplete and absent boundaries; launch two required restoring both approved address bindings. | `c0e29795aa281ed5bd8a76d329d7e331efc1c481d24f968d24d8c4063872f7e3` |
+| `run-1794812930590318000-2` | Synthetic IPv4 and IPv6 management addresses answered in their separate Linux namespace before and after the trial, not from the protected guest. Management packet counters stayed unchanged during the inner run while its TAP controls passed. | `a099f4394d437a9915d8d2b47668e0d73efae009672c4a837d581abad8f7f641` |
+
+The first restoration attempt is preserved as a failed IPv6 control:
+link and MAC restoration alone did not restore the IPv6 address. The
+corrected guard checked both address bindings before launching. The
+trials tested serialized boundary changes. They do not establish an
+atomic check-and-launch boundary under concurrent mutation, a deployed
+management service, or firewall enforcement with an actual uplink.
+The serial digests identify operator-local traces, not distributed
+fixtures or independent acceptance.
+
+Each listed phase closed with 39 events and one proof-backed delegated
+approval. Artifact verification, launches, traffic probes, and evidence
+capture were executor work outside the preview handlers. The intended
+host qualification still needs the exact operator-owned preboot policy,
+collector and verifier custody, externally held generation, authenticated
+reference bootstrap, independent review, and the separately authorized
+deadline measurement. Live admission remains denied.
+
 ### Designated VM Framed Notification Result
 
 [PR #915](https://github.com/rcs2153/workflow-os/pull/915) merged at
