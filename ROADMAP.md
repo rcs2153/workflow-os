@@ -504,6 +504,9 @@ The [offline preboot filter follow-up](docs/implementation-plans/live-sandbox-co
 then verified same-subnet nftables drops, restart refusal on policy
 drift or loss, and ordered link cutoff before policy withdrawal. These
 are offline operator rehearsal results, not connected egress evidence.
+The [dedicated operator custody rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#offline-dedicated-operator-custody)
+verified a separate non-login capture identity and executor denials on
+the same offline launch. Connected ownership and review remain open.
 
 The [designated VM framed notification rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#designated-vm-framed-notification-result)
 then used the exact merged worker to attest one synthetic notification and

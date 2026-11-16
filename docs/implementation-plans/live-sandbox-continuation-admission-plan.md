@@ -3216,6 +3216,27 @@ destinations without relying on the inner guest. Source bootstrap, clock
 custody and deadline measurement remain open. Keep both staged Lima
 instances stopped and live admission denied.
 
+#### Offline Dedicated Operator Custody
+
+The disposable serial-only outer Linux VM provisioned non-login
+`wos-boundary` (UID/GID 19001) and `wos-executor` (UID/GID 19002).
+The root supervisor controlled KVM and nftables; `wos-boundary` owned
+the capture, not unrestricted firewall privileges. No macOS user or
+staged Lima configuration was changed.
+
+| Governed run | Bounded result | Primary serial SHA-256 |
+| --- | --- | --- |
+| `run-1794817486045289000-2` | Dedicated identities were provisioned. The executor could not read or overwrite the operator capture, change the test network interface, or open KVM. | `438bba4eb3ee9a90bfcbee94081ff8225409503e0fbd7fa9c452d0b9a8817b56` |
+| `run-1794817621506711000-2` | The working offline launch recorded real preboot and post-probe nftables counts under the boundary identity. Executor capture reads, writes, nftables table creation and KVM access were denied; drifted and missing policy still prevented restart. | `8a62c17d3e5d0b090d7a3cf21aaf2c9f9d04aa8e7774004b87151187104b2ee9` |
+
+Both phases closed with proof-backed delegated approval and 39 events.
+Account provisioning, launches and custody assertions ran outside
+preview handlers. This is an observed privilege boundary in the offline
+candidate; it does not verify connected operator custody, privileged
+supervisor deployment, concurrent mutation handling, or independent
+acceptance. The exact connected manifest and no-dispatch measurement
+remain required; no external egress or live admission is authorized.
+
 ### Designated VM Framed Notification Result
 
 [PR #915](https://github.com/rcs2153/workflow-os/pull/915) merged at
