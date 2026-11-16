@@ -84,6 +84,13 @@ The lane records and historical phase evidence below preserve accepted
 boundaries and explain how the project arrived here; their embedded `next
 phase` language does not supersede the active queue.
 
+| Stage | Status |
+| --- | --- |
+| Now | **Blocked on intended-host evidence.** Identify a verified isolated host and have the exact stopped launch and preboot capture plan independently reviewed. See the [active gate](#active-delivery-queue). |
+| Next | Complete the [finite cross-harness proof](#cross-harness-exit-criteria), then make a scoped v1 decision. |
+| Later | Authority Continuation Architecture, portable proofs, comparative evaluation, reasoning lineage, and [broader runtime and provider work](#later-strategic-capabilities). |
+| Closed | [Hosted partial-run recovery](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_FINAL_ACCEPTANCE.md), [public positioning](https://github.com/rcs2153/workflow-os/pull/907), and the [four independently reverified local fixes](#closed-evaluation-findings). These do not admit hosted production, live dispatch, or publication. |
+
 ### Closed Evaluation Findings
 
 The November 16 independent clean-checkout evaluation at
@@ -119,23 +126,69 @@ It is not a vulnerability finding or a claim of hardened YAML parsing.
 
 ### Active Delivery Queue
 
-**P0 publication gate remains open.** The SQLite code and CI correction is
-closed, but `publication_authorized` remains `false`. The recorded corrected
-native pair at `e3c0a3ad` is bounded evidence, not a candidate for newer source.
-Any candidate proposed for publication must bind the exact proposed source,
-native artifacts and their verification, and independent release assurance.
-External release transitions require a separately scoped authorization.
-See the [release checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#3-required-validation).
-This gate does not reorder unrelated product work or admit a hosted pilot.
+This queue incorporates the independent roadmap review of `05d9f0fb` and the
+verified fixes reconciled in [#980](https://github.com/rcs2153/workflow-os/pull/980).
+It is the only forward-looking product delivery sequence.
 
-After the complete protected-host and cross-harness continuity exit gate,
-the first strategic planning phase is the **Authority Continuation Architecture
-Decision**, unless a higher-severity correctness issue preempts it. The
-[durable authority continuation and proof-carrying work plan](docs/implementation-plans/durable-authority-continuation-profile-plan.md)
-defines that dependency, not a parallel delivery queue. Its architecture,
-portable profiles, cryptographic proof, external identity/transport integration
-and independent verification are future work. Recording this direction does
-not preempt the active P0 hosted, protected-host or continuation phases.
+| Item | Status and exact remaining gate | Decision authority | Evidence | Updated | Exit |
+| --- | --- | --- | --- | --- | --- |
+| P0 cross-harness authoritative continuation | **Blocked at intended-host qualification.** Bind a verified isolated host, operator and capture custody to the stopped launch, review its exact manifest independently, then measure no-dispatch behavior under a separate scoped decision. | Host operator supplies and owns the boundary evidence; independent reviewer assesses it; delegated maintainer records the governed decision. A live sandbox action needs its own exact-target grant. | [Zero-egress preboot evidence](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#zero-egress-preboot-payload) and [milestone plan](docs/implementation-plans/cross-harness-authoritative-continuation-milestone-plan.md) | 2026-11-16 | All [exit criteria](#cross-harness-exit-criteria) are evidenced on the declared boundary, including independent reconstruction. |
+| Scoped v1 decision | **Queued, not declared.** Review the completed proof and decide whether the local kernel plus one supported consequential handoff is the v1 contract. | Maintainer and release decision authority, informed by independent evidence. | [Current Product Contract](docs/user-guide/current-product-contract.md) and [closed local evaluation](#closed-evaluation-findings) | 2026-11-16 | Record the supported contract and enter release hardening, or name the remaining non-negotiable criteria before adding work. |
+
+#### Cross-Harness Exit Criteria
+
+Use Codex to start and Claude Desktop as the distinct replacement principal.
+Both use the same kernel-owned durable run through public surfaces, not direct
+store access or conversation authority. The sole consequential effect is one
+GitHub PR comment on an explicitly approved disposable target.
+
+1. Verify the exact intended-host preboot/NAT boundary and outside capture on
+   an isolated host. The Unix-socket result does not qualify NAT.
+2. Bind the authenticated time reference and bootstrap, generation outside
+   guest rollback, collector/verifier custody, and protected ingress posture.
+3. Pass the [no-dispatch deadline controls](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#deadline-measurement-checklist):
+   a positive control and fail-closed generation loss or drift, stale
+   observation, and expiry. No provider egress or credentials in this phase.
+4. Separately authorize one exact disposable target and bounded effect, with
+   immutable request, evidence requirements, execution window and effect key.
+5. Demonstrate authenticated distinct-principal delegation; interrupt before
+   dispatch and recover the permitted next action from the public boundary.
+6. Observe one accepted effect at the pinned provider boundary. Interrupt
+   after provider acceptance and before durable kernel acknowledgement.
+7. Recover the same run and effect without a resend, stale authority reuse,
+   or fabricated success; verify the negative controls in the milestone plan.
+8. Obtain independent reconstruction of who approved what, how delegation
+   held, and why the provider record demonstrates one effect. Record custom
+   integration work, recovery turns, lookups, latency, and tokens.
+
+This is the finite milestone contract; the linked plans define verification
+details. Add a rehearsal only if a named criterion fails or a documented
+new threat invalidates its evidence. Fixture results stay fixture results.
+The list grants no boot, provider dispatch, or broader product authority.
+
+After the scoped v1 decision, revisit the
+[Authority Continuation Architecture Decision](docs/implementation-plans/durable-authority-continuation-profile-plan.md).
+Portable proof-carrying envelopes, comparative harness evaluation, reasoning
+lineage, OpenShell expansion, broader writes, nested harnesses, and production
+hosting are later work, not implied by this proof.
+
+### Separate Release Lane
+
+| Item | Status and exact remaining gate | Decision authority | Evidence | Updated | Exit |
+| --- | --- | --- | --- | --- | --- |
+| P0 preview publication | **Blocked.** Pin the exact proposed release source, produce its matching candidate pair, verify both artifacts and obtain independent source and artifact assurance, then bind a separate decision for every intended external publication transition. | Release maintainer owns the candidate; independent reviewer supplies assurance; publication requires explicit scoped release authority. | [Release checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#5-separate-publication-decision) and [release state](docs/release/0.4.0-preview.1_RELEASE_STATE.json) | 2026-11-16 | Exact source, artifacts and verification agree; only the explicitly authorized external transitions are executed and recorded. |
+
+`publication_authorized` remains `false`. The corrected native pair at
+`e3c0a3ad` is evidence for that source only. Neither the local v1-candidate
+assessment nor any hosted rehearsal authorizes publication or reuse for a
+newer source. Release execution is not the next product milestone.
+
+## Product Delivery Evidence And History
+
+The following records preserve evidence and prior decisions.
+Historical expressions such as “next” or “active” describe the state at
+the time of each record. They do not add work to the
+[Active Delivery Queue](#active-delivery-queue).
 
 Every item in this queue is evaluated against the primary product invariant:
 Workflow OS is a **continuity-of-authority kernel for agentic work**. The kernel
@@ -260,7 +313,7 @@ Bundle and assurance records stay on the filesystem; this is not SQLite-only
 first-run replay. No hosted pilot admission, protected-host boot, or provider
 dispatch follows from this parallel lane. The ordered P0 queue is unchanged.
 
-The ordered queue is:
+The original sequence, preserved here for historical context, was:
 
 1. independently reproduce and classify every early hosted creation boundary;
 2. implement one Core-owned, transactionally fenced recovery path that repairs
@@ -4798,8 +4851,8 @@ being closed. Use **Active Delivery Queue** above for execution order.
 
 The historical [Next Roadmap Sprint Plan](docs/implementation-plans/next-roadmap-sprint-plan.md)
 records an earlier hook-disclosure and local-check sprint. It is retained as phase
-evidence but is no longer the source of current sequencing. This section is the
-authoritative current queue.
+evidence but is no longer the source of current sequencing. Use the
+[Active Delivery Queue](#active-delivery-queue) above.
 
 Roadmap delivery now follows the
 [Roadmap Vertical-Slice Acceleration Plan](docs/implementation-plans/roadmap-vertical-slice-acceleration-plan.md).
