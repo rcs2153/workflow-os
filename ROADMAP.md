@@ -910,6 +910,14 @@ the historical Linux lookup remained inventory-only. This is not independent
 release assurance or evidence of a live send. Recheck `dg/review` run
 `run-1794745022595414000-2` used proof-backed approval.
 See the [release checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#native-candidate-dispatch-and-recovery).
+The first patched rebuild at `7a9f83f3` dispatched exactly once per target.
+[macOS](https://github.com/rcs2153/workflow-os/actions/runs/43810958901)
+passed archive and install verification. [Linux](https://github.com/rcs2153/workflow-os/actions/runs/43810963829)
+built and packaged but failed archive verification with a tar stdout write
+error before artifact upload. Both workflows now derive the expected package
+root from the locked release version and target instead of piping archive
+listing into an early-closing reader. The old pair is incomplete; do not
+combine its macOS artifact with a Linux build from a different source.
 The active SQLite preemption still requires exact patched-source validation,
 a separately governed two-target rebuild, and independent assurance before a
 new publication decision. Comparative benchmark work, unrelated provider mutations, tags, releases,

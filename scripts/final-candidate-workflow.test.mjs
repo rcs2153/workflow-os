@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 const linuxWorkflowPath = resolve(import.meta.dirname, "../.github/workflows/final-candidate-linux.yml");
@@ -67,12 +69,53 @@ test("macOS candidate workflow requires native arm64 execution and macOS evidenc
   assert.match(macosWorkflow, /TARGET: aarch64-apple-darwin/);
   assert.match(macosWorkflow, /workflow-os-v0\.4\.0-preview\.1-macos-/);
   assert.match(macosWorkflow, /shasum -a 256 --check/);
-  assert.match(macosWorkflow, /workflow-os-v\$\{version\}-\$\{TARGET\}\.tar\.gz/);
   assert.match(macosWorkflow, /Mach-O 64-bit executable arm64/);
   assert.match(macosWorkflow, /binary_sha256: process\.env\.BINARY_SHA256/);
   assert.match(macosWorkflow, /binary_shape: process\.env\.BINARY_SHAPE/);
   assert.match(macosWorkflow, /native_machine: process\.env\.NATIVE_MACHINE/);
   assert.match(macosWorkflow, /workflow-os" --version/);
+});
+
+test("both native verifiers extract the expected package root under pipefail", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "candidate-archive-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const version = "0.4.0-preview.1";
+  writeFileSync(join(folder, "package.json"), JSON.stringify({ version }));
+
+  for (const [workflow, target] of [
+    [linuxWorkflow, "x86_64-unknown-linux-musl"],
+    [macosWorkflow, "aarch64-apple-darwin"],
+  ]) {
+    assert.doesNotMatch(workflow, /tar -t[^\n]*\|\s*head\b/);
+    const block = workflow.match(/^ {10}version="\$\(node -p[^\n]+\n(?: {10}[^\n]+\n)*? {10}test -f "\$\{manifest\}"/m);
+    assert.ok(block, "expected the workflow's archive extraction block");
+    const expected = `workflow-os-v${version}-${target}`;
+    const archiveName = `${expected}.tar.gz`;
+    const archivePath = join(folder, archiveName);
+
+    const pack = (root) => {
+      const dir = join(folder, root);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "PACKAGE-MANIFEST.json"), "{}");
+      const result = spawnSync("tar", ["-czf", archivePath, "-C", folder, root], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    };
+    const verify = (name) => spawnSync("bash", ["-e", "-o", "pipefail", "-c", block[0]], {
+      cwd: folder,
+      env: { ...process.env, TMPDIR: folder, TARGET: target, archive: archivePath, archive_name: name },
+      encoding: "utf8",
+    });
+    pack(expected);
+    const valid = verify(archiveName);
+    assert.equal(valid.status, 0, valid.stderr);
+    assert.equal(verify("wrong-name.tar.gz").status, 1);
+    pack("wrong-root");
+    assert.equal(verify(archiveName).status, 1);
+    writeFileSync(archivePath, "not an archive");
+    const malformed = verify(archiveName);
+    assert.ok(malformed.status > 0);
+    assert.notEqual(malformed.stderr, "");
+  }
 });
 
 test("Linux candidate workflow remains native musl and separately named", () => {
