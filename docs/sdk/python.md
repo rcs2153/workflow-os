@@ -36,7 +36,12 @@ python packages/sdk-python/examples/agent.py \
 ```
 
 Copy the resulting `run_id`, then use `review RUN_ID`, `resume RUN_ID`, and
-`inspect RUN_ID` with the same project and state directory. The wrapper is now:
+`inspect RUN_ID` with the same project and state directory. By default the
+example shows a run summary with status and the next step when known. Add
+`--json` after `start`, `resume RUN_ID`, or `inspect RUN_ID` for the full
+structured SDK result, including the snapshot and events. The interactive
+`review` command always displays the complete approval card before taking
+a human decision. The wrapper is now:
 
 ```python
 from workflow_os import WorkflowOS

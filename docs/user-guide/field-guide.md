@@ -1,6 +1,8 @@
 # Workflow OS Field Guide
 
-This field guide rewrites the earlier-stage Workflow OS field guide for the current repository. The original guide remains useful as strategic source material, but it was created before the current implementation and is not current product documentation.
+> **Historical RC1 operating-model guide.** For current capabilities, limits,
+> and runnable examples, use the [Current Product Contract](current-product-contract.md)
+> and [User Guide](README.md).
 
 This document is for RC1 internal evaluation. It explains the operating model, current capabilities, and current limits of Workflow OS without claiming production readiness.
 
@@ -26,7 +28,8 @@ Recommended reading path:
 
 1. Read [Current Truth](#current-truth) first so the implementation boundary is clear.
 2. Read [Executive Thesis](#executive-thesis) to understand why Workflow OS exists.
-3. Use the [RC1 Evaluation Guide](rc1-evaluation-guide.md) for copy/paste evaluation commands.
+3. Use the [User Guide](README.md) for current evaluation commands or the
+   [RC1 Evaluation Guide](rc1-evaluation-guide.md) for historical context.
 4. Use the [Workbook](workbook.md) to qualify and design candidate workflows before writing specs.
 5. Review [Security and Governance](#security-and-governance) before testing anything with sensitive data or external systems.
 6. Review [Known Limitations](../release/V0_KNOWN_LIMITATIONS.md) before making readiness claims.
@@ -314,7 +317,8 @@ Concrete failure signals include:
 
 ## Evaluation Paths
 
-Use the [RC1 evaluation guide](rc1-evaluation-guide.md) for exact commands.
+This sequence describes the historical RC1 evaluation. Use the
+[User Guide](README.md) for current commands.
 
 Recommended sequence:
 

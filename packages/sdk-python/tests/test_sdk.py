@@ -250,6 +250,40 @@ print(json.dumps({'status': run.status, 'approval_id': run.approval_id}))
         reopened = json.loads(process.stdout)
         self.assertEqual(reopened, {"status": run.status, "approval_id": run.approval_id})
 
+    def test_fixture_example_summarizes_runs_and_preserves_review_and_json(self):
+        def invoke(*args, response=None):
+            return subprocess.run(
+                [sys.executable, str(ROOT / "packages/sdk-python/examples/agent.py"),
+                 "--project", str(self.project), "--state", str(self.state), *args],
+                check=True, text=True, capture_output=True, input=response, timeout=30,
+            ).stdout
+
+        waiting = dict(line.split(": ", 1) for line in invoke("start").splitlines())
+        run_id = waiting["run_id"]
+        self.assertEqual(waiting["status"], "waiting_for_approval")
+        self.assertEqual(waiting["next_action"], f"review {run_id} for a human decision")
+        self.assertNotIn("events", waiting)
+        expected = self.client.status(run_id)
+        self.assertEqual(waiting["approval_id"], expected.approval_id)
+
+        reviewed = invoke("review", run_id, response="approve\nReviewed fixture scope\n")
+        presentation, end = json.JSONDecoder().raw_decode(reviewed)
+        self.assertEqual(presentation, expected.presentation)
+        self.assertIn("Human decision", reviewed[end:])
+        self.assertIn(f"next_action: resume {run_id}", reviewed[end:])
+
+        self.assertIn("status: completed", invoke("resume", run_id))
+        inspected = invoke("inspect", run_id)
+        self.assertIn("next_action: none (terminal)", inspected)
+        self.assertNotIn("events", inspected)
+        full = json.loads(invoke("inspect", run_id, "--json"))
+        self.assertEqual(full["run_id"], run_id)
+        self.assertEqual(full["status"], "completed")
+        self.assertTrue(full["events"])
+        self.assertEqual(full["snapshot"], self.client.inspect(run_id).snapshot)
+        self.assertEqual(json.loads(invoke("resume", run_id, "--json"))["status"], "completed")
+        self.assertTrue(json.loads(invoke("start", "--json"))["presentation"])
+
     @unittest.skipUnless(os.environ.get("WORKFLOW_OS_TEST_CLI"), "set WORKFLOW_OS_TEST_CLI for CLI/native parity")
     def test_cli_and_native_fixture_state_interoperate(self):
         cli = os.environ["WORKFLOW_OS_TEST_CLI"]

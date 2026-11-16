@@ -1,6 +1,11 @@
 # RC1 Internal Evaluation Guide
 
-This guide explains how to evaluate the current Workflow OS build safely.
+> **Historical guide: RC1 internal evaluation (May 2026).** This page
+> originated at `a1de00f4` and has received later maintenance edits. Its
+> capability lists describe the RC1 evaluation scope, not today's build.
+> For current capabilities and runnable examples, start with the
+> [Current Product Contract](current-product-contract.md) and
+> [User Guide](README.md).
 
 RC1 internal evaluation is not production readiness. It is a controlled evaluation of the local kernel preview, the vertical-slice example, Phase 2 fixture-backed read-only adapters, and scoped adapter telemetry mapping.
 

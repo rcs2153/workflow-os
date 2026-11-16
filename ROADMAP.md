@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-11-14.
+Status date: 2026-11-16.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -84,41 +84,49 @@ The lane records and historical phase evidence below preserve accepted
 boundaries and explain how the project arrived here; their embedded `next
 phase` language does not supersede the active queue.
 
+### Closed Evaluation Findings
+
+The November 16 independent clean-checkout evaluation at
+[`d6dccf1c`](https://github.com/rcs2153/workflow-os/commit/d6dccf1c3b596a5a7fb952d873aa3242ca7bb7e8)
+reverified these corrections. They are not forward work:
+
+- **P0, SQLite and advisory freshness:** [#963](https://github.com/rcs2153/workflow-os/pull/963)
+  (`16d3497d`) patched the bundled SQLite code affected by
+  [RUSTSEC-2026-0459](https://rustsec.org/advisories/RUSTSEC-2026-0459.html)
+  and added a seven-day RustSec freshness limit to required CI. The fresh
+  audit reported no vulnerabilities.
+- **P1, waiting approval recovery:** [#964](https://github.com/rcs2153/workflow-os/pull/964)
+  (`881b07c2`) lets a replacement process recover the exact pending approval
+  and saved review context without granting approval or refreshing proof.
+- **P2, first-run wording:** [#965](https://github.com/rcs2153/workflow-os/pull/965)
+  (`cf891d7e`) distinguishes analysis, eligible configured validation, and a
+  check that actually ran. No enforcement behavior changed.
+- **P3, unchanged scaffold:** [#966](https://github.com/rcs2153/workflow-os/pull/966)
+  (`2ed9299a`) reports byte-identical targets as `unchanged` without rewriting
+  them in a dry or live rerun.
+
+The evaluator judged the **bounded local kernel a v1 candidate** based on
+onboarding, proof-bound approval and denial, cold recovery, WorkReports,
+filesystem-to-SQLite migration, and native Python wheel and process handoff.
+That judgment supports a bounded local pilot, not unconditional v1. The
+evaluation did not independently reproduce hosted Docker/PostgreSQL operation
+or exercise live provider writes or packaged cross-harness continuity.
+
+The remaining RustSec maintenance warning, `RUSTSEC-2024-0449`, is tracked
+under [`YAML-001`](#v0-local-kernel-preview-release-hygiene) and
+[accepted only for trusted local project files through this preview](docs/security/DEPENDENCIES.md).
+It is not a vulnerability finding or a claim of hardened YAML parsing.
+
 ### Active Delivery Queue
 
-**P0 publication preemption: bundled SQLite and RustSec freshness.**
-[RUSTSEC-2026-0459](https://rustsec.org/advisories/RUSTSEC-2026-0459.html)
-affects the previous bundled SQLite lockfile. This is a Medium, conditional
-local disclosure: a less-trusted writer must control state files opened by
-the process. It is not evidence of remote execution or exposure on a
-trusted state root. Use patched bundled SQLite and enforce a seven-day
-advisory-feed age limit in required CI. Keep publication and reuse of prior
-native candidates blocked pending the exact-source release matrix and an
-independent fresh-clone audit. See the
-[release checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#3-required-validation).
-This preemption does not reorder unrelated product work or admit a pilot.
-
-**P1 local continuity: cold recovery at a waiting approval.** The independent
-clean-checkout evaluation of `13be3bb7` found that a replacement process could
-inspect a waiting run, but `next-action` rejected it rather than recovering
-the current approval handoff. Recover the exact pending request and its
-saved, identity-matched review context without granting, refreshing, or
-re-presenting proof. Keep the terminal reject posture and existing execution
-admission checks. This is a local UX correction, not a hosted or cross-harness
-acceptance result.
-
-The same evaluation found a strong bounded local pilot, not unconditional v1.
-It confirmed managed guidance preservation and byte-idempotence, quiet
-first-run WorkReport creation, distinct proof-bound aggregate and step
-approvals, fail-closed denial, the first-run SQLite migration fix, and native
-Python wheel/interprocess recovery. It did not independently reproduce hosted
-Docker/PostgreSQL deployment or run live provider mutations; the macOS Rust
-test-linker limitation did not prevent the wheel/SDK tests. The separate **P2**
-first-run wording correction distinguishes analysis-only disclosure, the
-configured eligible project-validation path, and whether a check ran. Existing
-JSON fields are retained with explicit scope metadata; no enforcement behavior
-changes. The separate **P3** scaffold correction reports byte-identical
-targets as `unchanged` in dry runs and live runs without rewriting them.
+**P0 publication gate remains open.** The SQLite code and CI correction is
+closed, but `publication_authorized` remains `false`. The recorded corrected
+native pair at `e3c0a3ad` is bounded evidence, not a candidate for newer source.
+Any candidate proposed for publication must bind the exact proposed source,
+native artifacts and their verification, and independent release assurance.
+External release transitions require a separately scoped authorization.
+See the [release checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#3-required-validation).
+This gate does not reorder unrelated product work or admit a hosted pilot.
 
 After the complete protected-host and cross-harness continuity exit gate,
 the first strategic planning phase is the **Authority Continuation Architecture
