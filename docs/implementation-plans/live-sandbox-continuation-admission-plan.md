@@ -3237,6 +3237,37 @@ supervisor deployment, concurrent mutation handling, or independent
 acceptance. The exact connected manifest and no-dispatch measurement
 remain required; no external egress or live admission is authorized.
 
+#### Zero-Egress Preboot Payload
+
+The reviewed initramfs refused a missing NIC before loading the policy.
+With the pinned MAC attached only to an isolated Unix datagram peer,
+the supervisor kept the NIC down, verified the package set, loaded the
+dual-stack default-deny policy and recorded zero-valued preboot counters
+under `wos-boundary`. The external peer observed zero frames and no inner
+guest was launched. Both boots shut down cleanly.
+
+| Evidence | SHA-256 |
+| --- | --- |
+| Supervisor initramfs | `0e2e160718d9e3b999e44ba7a6ed2fb7699f9ea07c32f3cbb5d7f55f912ab91d` |
+| Missing NIC trace | `6527dd2afeee4be4a74b23d7b50ba4c318e4e0d39baede16750df5dad76c0aed` |
+| Isolated NIC trace | `64ef81583c775be194794c44b8a382adf2d13fd9371003f8c14d9f6b50a0c1d2` |
+| Operator-local portable review kit | `c741b9f5ae519e56718b98bbac76630193978a801e796dc79b82f2bfde499586` |
+
+The portable kit contained no activation command. A clean extraction
+verified 15 members and passed all four read-only checker tests.
+The checker verified artifact integrity but refused on the current Mac:
+IPv4 and IPv6 default routes were present, and external isolation and
+preboot capture had not been demonstrated. An absent default route alone
+would not demonstrate isolation.
+
+Runs `run-1794818864768905000-2`, `run-1794819306865340000-2` and
+`run-1794819400754584000-2` closed with proof-backed delegated approvals.
+Boots, packaging and checks ran outside the preview handlers. The kit
+was not published. The socket result is not a VFKit NAT result or
+independent acceptance. Review the exact proposed trial, verify host
+isolation and capture independently before backend start, and keep source
+contact and live admission disabled.
+
 ### Designated VM Framed Notification Result
 
 [PR #915](https://github.com/rcs2153/workflow-os/pull/915) merged at
