@@ -11331,8 +11331,18 @@ mod tests {
         assert!(
             outcomes.iter().all(|outcome| match outcome {
                 Ok(TrustedHostScheduleOnceOutcome::Reinvoked(outcome)) => {
-                    outcome.execution.stop_reason == TrustedHostRedispatchStopReason::Terminal
-                        && outcome.execution.executor_entries <= 1
+                    use crate::sqlite_state::trusted_host_time_window_caller::TrustedHostTimeWindowWakeStatus;
+                    use TrustedHostRedispatchStopReason::{Blocked, Terminal};
+
+                    // The contender can observe the winner before its terminal commit.
+                    outcome.wake_status != TrustedHostTimeWindowWakeStatus::SecurityRejected
+                        && matches!(
+                            (
+                                outcome.execution.executor_entries,
+                                outcome.execution.stop_reason
+                            ),
+                            (0, Blocked | Terminal) | (1, Terminal)
+                        )
                 }
                 Err(error) => matches!(
                     error.code(),
@@ -11351,8 +11361,10 @@ mod tests {
                 .iter()
                 .map(|outcome| match outcome {
                     Ok(TrustedHostScheduleOnceOutcome::Reinvoked(outcome)) => format!(
-                        "reinvoked: {:?}, entries: {}",
-                        outcome.execution.stop_reason, outcome.execution.executor_entries
+                        "reinvoked: {:?}, entries: {}, wake: {:?}",
+                        outcome.execution.stop_reason,
+                        outcome.execution.executor_entries,
+                        outcome.wake_status
                     ),
                     Ok(TrustedHostScheduleOnceOutcome::Canceled) => "canceled".to_owned(),
                     Ok(TrustedHostScheduleOnceOutcome::NotYetEligible { .. }) =>
