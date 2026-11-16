@@ -94,13 +94,14 @@ jobs:
           checksum_file="${archive}.sha256"
           (cd "${archive_dir}" && shasum -a 256 --check "${archive_name}.sha256")
 
+          version="$(node -p 'require("./package.json").version')"
+          package_name="workflow-os-v${version}-${TARGET}"
+          test "${archive_name}" = "${package_name}.tar.gz"
           candidate_root="$(mktemp -d)"
-          package_name="$(tar -tzf "${archive}" | head -n 1 | sed 's:/$::')"
           tar -xzf "${archive}" -C "${candidate_root}"
           package_root="${candidate_root}/${package_name}"
           manifest="${package_root}/PACKAGE-MANIFEST.json"
-          version="$(node -p 'require("./package.json").version')"
-          test "${archive_name}" = "workflow-os-v${version}-${TARGET}.tar.gz"
+          test -f "${manifest}"
 
           MANIFEST="${manifest}" node -e '
             const { readFileSync } = require("node:fs");

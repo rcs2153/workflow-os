@@ -100,12 +100,14 @@ jobs:
           checksum_file="${archive}.sha256"
           (cd "${archive_dir}" && sha256sum --check "${archive_name}.sha256")
 
+          version="$(node -p 'require("./package.json").version')"
+          package_name="workflow-os-v${version}-${TARGET}"
+          test "${archive_name}" = "${package_name}.tar.gz"
           candidate_root="$(mktemp -d)"
-          package_name="$(tar -tzf "${archive}" | head -n 1 | sed 's:/$::')"
           tar -xzf "${archive}" -C "${candidate_root}"
           package_root="${candidate_root}/${package_name}"
           manifest="${package_root}/PACKAGE-MANIFEST.json"
-          version="$(node -p 'require("./package.json").version')"
+          test -f "${manifest}"
 
           test "$(jq -r '.schema_version' "${manifest}")" = "workflowos.dev/release-package/v1"
           test "$(jq -r '.posture' "${manifest}")" = "final_candidate"
