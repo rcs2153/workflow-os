@@ -283,3 +283,43 @@ assertions. Keep any deviation open with its observed diagnostic rather
 than declaring a pass from CI alone. Record the evaluator and verdict
 separately from the maintainer evidence. No production access, repair,
 redispatch, or pilot admission follows from this rerun.
+
+#### Accepted Independent Rehearsal Evidence
+
+The [issue #959 report](https://github.com/rcs2153/workflow-os/issues/959#issuecomment-6902533744)
+records a pass at `6eed202c0b8ab350d60544adef09a3b98515da5e`.
+Elias de Faria commissioned a fresh Codex session that did not implement
+or operate the earlier hosted recovery rehearsals. He disclosed his separate
+Python SDK contribution. This is independently operated, agent-executed
+rehearsal evidence, not a human security audit.
+
+The evaluator used a clean clone, a newly initialized disposable PostgreSQL
+14.22 database, and no inherited live provider configuration. The locked
+hosted build and unchanged rehearsal both exited zero on arm64 macOS, Node
+22.22.1, and Rust 1.96.1.
+
+- The contention case finished 25 distinct runs and reports with zero outer
+  exact retries and no queued work. Forced reservation and creation-prefix
+  HTTP 409 cases each recovered once on exact retry.
+- An interrupted invocation remained in reconciliation without repeated
+  invocation or fabricated report. Operator disposition replayed after API
+  restart without execution writes. Stale evidence remained inspectable.
+- The modeled missing-schedule prefix preserved its original conflict and
+  execution history. Report lookup returned HTTP 404, no work was queued,
+  the worker stayed idle, and one non-executing disposition was recorded.
+  Grammar-invalid history remained inspectable; misbound identity failed closed.
+
+The evaluator's initial Rust 1.90 build failed with `E0658` in the historical
+`libsqlite3-sys 0.38.1`; switching to Rust 1.96.1 required no source or
+lockfile edits. A different loopback port was used, and PostgreSQL and Node
+versions differ from CI. The [published CI](https://github.com/rcs2153/workflow-os/actions/runs/43458851877/job/132000087966)
+corroborates the result but does not replace the independent rehearsal.
+Worker replacement and API restart were exercised, not a separate database
+restart or restore. The legacy history was a modeled fixture, not a
+production database.
+
+The bounded independent rehearsal requirement is satisfied. Protected-host
+and pilot admission gates remain open; this result authorizes no deployment,
+real-run repair, redispatch, or provider writes. Maintainer acceptance used
+`dg/review` run `run-1794806950061597000-2` and proof
+`presentation/bb3cefc13d0cded0`.
