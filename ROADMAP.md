@@ -507,6 +507,9 @@ are offline operator rehearsal results, not connected egress evidence.
 The [dedicated operator custody rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#offline-dedicated-operator-custody)
 verified a separate non-login capture identity and executor denials on
 the same offline launch. Connected ownership and review remain open.
+The [zero-egress preboot evidence](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#zero-egress-preboot-payload)
+pins the socket-backed supervisor and local review kit. The NAT backend
+still needs an independently reviewed trial on a verified isolated host.
 
 The [designated VM framed notification rehearsal](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#designated-vm-framed-notification-result)
 then used the exact merged worker to attest one synthetic notification and
