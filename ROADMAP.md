@@ -225,13 +225,17 @@ in the missing schedule slot is a distinct, readable prefix conflict.
 verified that an operator disposition preserves its original conflict and
 history, creates no report or work item, and leaves the worker idle.
 The [independent rerun](docs/implementation-plans/hosted-partial-run-creation-recovery-plan.md#independent-pilot-rerun)
-remains open. These results do not authorize pilot admission or establish
-that a provider effect occurred.
+passed on pinned `6eed202c`. A fresh evaluator session commissioned by
+Elias de Faria confirmed the no-write recovery and modeled legacy conflict
+disposition against disposable PostgreSQL 14.22. This closes the independent
+rehearsal requirement only. It does not authorize pilot admission or
+establish that a provider effect occurred.
 See the [contention recurrence report](docs/concepts/HOSTED_ADMISSION_CONTENTION_RECURRENCE_REPORT.md).
 
 **Parallel local correctness lane: first-run WorkReport migration.** While
 the [independent hosted rerun](https://github.com/rcs2153/workflow-os/issues/959)
-is pending, complete one local filesystem-to-SQLite compatibility correction.
+was pending, the local lane completed one filesystem-to-SQLite compatibility
+correction.
 On `1ddd2b1d`, a disposable Git repository initialized with the default
 scaffold persisted one real first-run WorkReport, but `state migrate-sqlite`
 exited nonzero with `state.migration.source.incompatible`. All source-file
