@@ -140,9 +140,12 @@ It is the only forward-looking product delivery sequence.
 The user selected an attended same-Mac isolation path rather than requiring
 another machine. The [power-control result](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#same-mac-power-and-capture-controls)
 demonstrates observed restoration only. The original PKTAP capture exceeded its
-requested snapshot bound; the corrected native capture is staged and tested
-but not live-validated. Exact host qualification and independent review remain
-open. This does not add a new milestone or authorize VM activation.
+requested snapshot bound; the corrected native capture now passed one attended
+live control with the exact 14-byte Ethernet-header bound. A stopped supervisor
+candidate passed launcher-death and cleanup tests using harmless processes,
+not a VM. Root staging, composed host/capture qualification and independent
+exact-trial review remain open. This does not add a new milestone or authorize
+VM activation.
 
 Use Codex to start and Claude Desktop as the distinct replacement principal.
 Both use the same kernel-owned durable run through public surfaces, not direct
