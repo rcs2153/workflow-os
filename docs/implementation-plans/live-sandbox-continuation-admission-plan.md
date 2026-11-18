@@ -3268,6 +3268,66 @@ independent acceptance. Review the exact proposed trial, verify host
 isolation and capture independently before backend start, and keep source
 contact and live admission disabled.
 
+#### Same-Mac Power And Capture Controls
+
+On November 18 the user selected temporary isolation of the current Mac.
+This is an alternative way to obtain the existing intended-host evidence,
+not permission to bypass independent review or redefine isolation.
+
+The first root trial refused before disconnect because macOS nohup could
+not detach from the administrator session's console. The corrected helper
+uses an explicitly hangup-ignoring child. Its six tests include child
+survival after a non-terminal parent exits. The independent watchdog repeats
+restoration while the parent can still act, avoiding a single-shot
+restore-before-delayed-disconnect race. The successful helper SHA-256 is
+`38a39c87c8b573e07dcb4e0111ff16758110afe421750606adfa8a76578e066a`.
+
+The actual power control returned exit 0: the watchdog armed before Wi-Fi Off
+at 09:05:47 UTC, the parent requested restoration at 09:05:50, and the separate
+watchdog requested restoration at 09:05:56. Final Wi-Fi and en0 link state
+were On/active with the default route restored and no helper left running.
+This observes one successful control, not a real-time recovery guarantee
+or a privileged parent-death test.
+
+A separate bounded off-window capture control also returned exit 0. It
+reported Wi-Fi Off at 09:13:56 UTC, capture ready, parent restoration at
+09:13:59, and watchdog restoration at 09:14:05. The off-window snapshot
+showed Wi-Fi, AWDL, Ethernet and Thunderbolt inactive. Tunnel interfaces
+remained listed, and scutil still reported en0 Reachable. Those stale
+reachability and route entries cannot alone establish a working path.
+
+PKTAP wrote 41 text records but raised the requested one-byte snapshot to
+524288 bytes. The helper wrote neither a raw packet file nor a payload dump;
+nevertheless, its acquisition bound was not honored. The count alone does
+not establish loopback traffic, attempted output or physical egress.
+Aggregate classification of the protected local log remains unperformed
+because its diagnostic authentication request was unanswered.
+
+The staged correction explicitly requests non-promiscuous en0 EN10MB capture
+with a 14-byte Ethernet-header snapshot and rejects unknown, duplicate,
+oversized or raised-snapshot status and PKTAP fallback. All 12 synthetic tests
+passed. Its SHA-256 is
+`b8017560ec9456af335b333be405a62d0477079f87955880c23fb96c7adac789`.
+The combined saved-log read and live candidate request was not authenticated
+and was cancelled before execution. These tests are not live capture evidence.
+
+| Governed run | Result |
+| --- | --- |
+| `run-1794992690553283000-2` | Watchdog launch correction and actual power control |
+| `run-1794992831022784000-2` | Actual off-window capture; snapshot override disclosed |
+| `run-1794993307703646000-2` | Read-only classification/design review; saved-log access incomplete |
+| `run-1794993769140976000-2` | Native capture candidate and 12 synthetic checks |
+| `run-1794993846833190000-2` | Combined candidate request; authentication incomplete, no trial |
+
+All used proof-backed delegated approvals. Shell operations, native
+authentication, installations, power changes, captures, edits and tests
+were outside the kernel's preview handlers. Terminal dogfood events do not
+independently attest those host operations. Protected artifacts and network
+metadata remain operator-local, not repository fixtures. No guest, NAT backend,
+time reference, provider call, live grant or publication was authorized or
+performed. The next existing gate remains exact host/capture verification
+and independent acceptance before any VM trial.
+
 ### Designated VM Framed Notification Result
 
 [PR #915](https://github.com/rcs2153/workflow-os/pull/915) merged at

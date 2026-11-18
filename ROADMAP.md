@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-11-16.
+Status date: 2026-11-18.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -136,6 +136,13 @@ It is the only forward-looking product delivery sequence.
 | Scoped v1 decision | **Queued, not declared.** Review the completed proof and decide whether the local kernel plus one supported consequential handoff is the v1 contract. | Maintainer and release decision authority, informed by independent evidence. | [Current Product Contract](docs/user-guide/current-product-contract.md) and [closed local evaluation](#closed-evaluation-findings) | 2026-11-16 | Record the supported contract and enter release hardening, or name the remaining non-negotiable criteria before adding work. |
 
 #### Cross-Harness Exit Criteria
+
+The user selected an attended same-Mac isolation path rather than requiring
+another machine. The [power-control result](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#same-mac-power-and-capture-controls)
+demonstrates observed restoration only. The original PKTAP capture exceeded its
+requested snapshot bound; the corrected native capture is staged and tested
+but not live-validated. Exact host qualification and independent review remain
+open. This does not add a new milestone or authorize VM activation.
 
 Use Codex to start and Claude Desktop as the distinct replacement principal.
 Both use the same kernel-owned durable run through public surfaces, not direct
