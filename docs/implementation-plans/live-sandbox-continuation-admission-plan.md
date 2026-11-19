@@ -3300,16 +3300,45 @@ PKTAP wrote 41 text records but raised the requested one-byte snapshot to
 524288 bytes. The helper wrote neither a raw packet file nor a payload dump;
 nevertheless, its acquisition bound was not honored. The count alone does
 not establish loopback traffic, attempted output or physical egress.
-Aggregate classification of the protected local log remains unperformed
-because its diagnostic authentication request was unanswered.
+The later authenticated read classified those records as 36 lo0 and five
+en0 matches, with none unclassified. Interface labels do not establish
+physical delivery. The excessive acquisition bound remains a failed control.
 
 The staged correction explicitly requests non-promiscuous en0 EN10MB capture
 with a 14-byte Ethernet-header snapshot and rejects unknown, duplicate,
 oversized or raised-snapshot status and PKTAP fallback. All 12 synthetic tests
 passed. Its SHA-256 is
 `b8017560ec9456af335b333be405a62d0477079f87955880c23fb96c7adac789`.
-The combined saved-log read and live candidate request was not authenticated
-and was cancelled before execution. These tests are not live capture evidence.
+The first combined request was cancelled without authentication. A later
+attended authenticated trial returned exit 0: Wi-Fi Off at 23:45:18 UTC,
+capture-ready status with exactly EN10MB and a 14-byte snapshot, capture stop
+before parent restoration at 23:45:23, and separate watchdog restoration at
+23:45:27. It produced two en0 header records. Final Wi-Fi/link/default-route
+state was restored and no helper or capture process remained. This is live
+component-control evidence, not a VM, internal-NAT or over-the-air proof.
+
+A private stopped integrated candidate subsequently added explicit owned
+process-group cleanup, capture-loss/deadline abort, and guest-stop-before-
+capture-stop-before-reconnect ordering. A repeated harmless-process test
+exposed OS permission denial during cleanup; the correction treats it as
+unconfirmed termination and retains isolation. Thirteen tests and twenty
+native harmless-process cleanup repetitions passed after that correction.
+
+The next stopped revision verifies six artifact hashes, the exact unique
+artifact set, fixed command arrays and the bounded guest window. Its
+read-only staging-directory check rejects unsafe paths and non-root-owned
+directories. Seventeen tests passed; five additional launcher-death trials
+killed the launcher while a detached supervisor stopped its two harmless
+children and recorded synthetic restoration. No network or VM command ran
+in those tests. The inactive manifest SHA-256 is
+`0908a7c6d03ad628bc191c0ce9f0edfc73e9bc96a5f22999b2a75bd8a320e980`.
+
+This supervisor is rehearsal-only, not a redundant recovery service or live
+host entry point. Supervisor death may leave isolation in place for attended
+operator recovery. Root-owned input/output staging, real lifecycle
+composition, positive observation attribution and independent exact-trial
+acceptance remain open. CLI activation is explicitly denied. These results
+must not be used to satisfy the intended-host gate or authorize a VM boot.
 
 | Governed run | Result |
 | --- | --- |
@@ -3318,6 +3347,12 @@ and was cancelled before execution. These tests are not live capture evidence.
 | `run-1794993307703646000-2` | Read-only classification/design review; saved-log access incomplete |
 | `run-1794993769140976000-2` | Native capture candidate and 12 synthetic checks |
 | `run-1794993846833190000-2` | Combined candidate request; authentication incomplete, no trial |
+| `run-1795045475265194000-2` | Attended native capture control and saved-log classification |
+| `run-1795045621146075000-2` | Host-readiness review; not admitted for boot |
+| `run-1795045729331669000-2` | Stopped integrated candidate; eleven initial lifecycle tests |
+| `run-1795046020901022000-2` | Focused review; repeated process cleanup exposed permission denial |
+| `run-1795046077434552000-2` | Fail-closed permission-denial fix and native process repetitions |
+| `run-1795046156506286000-2` | Stopped detached supervisor and exact command-surface checks |
 
 All used proof-backed delegated approvals. Shell operations, native
 authentication, installations, power changes, captures, edits and tests
