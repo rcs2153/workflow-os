@@ -15,7 +15,7 @@ Workflow OS v0 is a public governed-execution and continuity preview built on a 
 - Timeout policies are parsed and represented, but there is no background timeout scheduler.
 - No active timeout scheduler exists.
 - Escalation and continuation have selected explicit operator and authoritative-context paths, but there is no autonomous production scheduler that resolves every wait, timeout, or escalation.
-- The self-governance dogfood project governs planning/docs work only. It can exercise the docs check only through explicit `DocsCheckLocalHandler` registration; it does not execute arbitrary build commands or repository edits.
+- The repo-local dogfood project has planning/docs, implementation, review, blocker, PR, release and selected other phase workflows. The phase runner coordinates governance; agents or humans perform edits, git/PR operations and most checks outside kernel handlers. Explicit `DocsCheckLocalHandler` registration can exercise a real docs check, but ordinary mock-backed dogfood completion is not evidence that engineering work ran inside the kernel. No arbitrary build or edit handler is enabled by this helper.
 - Self-governed validation/check execution is limited to explicit local check handlers; true default registration, CLI exposure, workflow schema activation, and broad build/test command execution are not implemented.
 
 ## Integrations
@@ -58,13 +58,13 @@ Workflow OS v0 is a public governed-execution and continuity preview built on a 
 ## Evidence And Work Reports
 
 - `EvidenceReference` is implemented as a core model with selected adapter telemetry, diagnostic, and schema-version diagnostic attachment paths.
-- EvidenceReference persistence, CLI rendering, examples, approval attachment, and broad automatic attachment remain unimplemented.
+- Selected report-artifact paths persist evidence references and expose bounded citation/assurance posture through `inspect`. This does not provide universal evidence attachment, rendering or approval linkage across every workflow path; consult the [current product contract](../user-guide/current-product-contract.md) for the supported boundaries.
 - `WorkReportContract` and `WorkReport` core models are implemented.
 - Explicit in-memory terminal local report generation, runtime result exposure, and executor-integrated report-bearing local execution APIs are implemented.
 - Explicit local work report artifact storage is implemented through `WorkReportArtifactStore`.
 - Automatic runtime report generation for every run is not implemented.
 - Automatic report artifact writing for every executor path is not implemented; selected opt-in paths do not create a universal runtime guarantee.
-- CLI report rendering/export and report schemas are not implemented.
+- `inspect` projects bounded stored-report sections, citation counts and local-check references on selected paths. General CLI report export and a universal report-rendering contract remain unavailable; this is not a promise of report generation for every run.
 - Approval-resume and cancellation report-bearing APIs are not implemented.
 
 ## Security And Governance

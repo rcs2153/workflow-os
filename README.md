@@ -58,10 +58,15 @@ identities, evaluator-written wiring, and a simulated ambiguous target. It is
 not packaged interoperability, authenticated cross-harness delegation, or a
 production execution-framework integration.
 
-The current source tree is preparing **Workflow OS `0.4.0-preview.1` - Governed
-Authority and Repository Adoption Preview**. It is useful today for local
+The current source tree is preparing **Workflow OS `0.4.0-preview.1` - Continuity
+of Authority Developer Preview**. It is useful today for local
 governed workflows and engineering evaluation. It is not yet a production
 enterprise control plane.
+
+The [release scope](docs/release/0.4.0-preview.1_RELEASE_SCOPE_DECISION.md)
+targets local repository onboarding, real governed validation and reporting,
+approval boundaries and safe replay. Advanced hosted, provider and cross-harness
+paths remain experimental and separately gated. The preview is not yet published.
 
 ## See The Kernel Work
 

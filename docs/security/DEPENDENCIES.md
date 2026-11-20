@@ -19,14 +19,21 @@ Workflow OS keeps dependencies intentionally small until the local-first kernel 
   revision and disables database fetching during the scan so the audit result
   is reproducible and cannot silently consume different advisory data.
 
-The advisory database is temporarily pinned in `.github/workflows/ci.yml` to
-`309ad29d8fe448bf986019e05d47b9e0e29a2218`. RustSec database commit
-`e11d6b330dd033a9ed7476de71029cfb8f2d1095` introduced a placeholder advisory
-whose declared package does not match its directory, causing `cargo-audit` to
-fail before scanning `Cargo.lock`. The pin is the immediately preceding valid
-revision. It does not ignore advisories or permit audit failure. Advance the
-pin only after the candidate database revision loads successfully and the
-full dependency audit passes.
+Required CI checks out official `RustSec/advisory-db` `main` separately,
+reports its exact resolved SHA and age, then audits those bytes with
+`cargo-audit 0.22.2 --no-fetch`. `scripts/check-rustsec-freshness.mjs` rejects
+missing or malformed commit metadata, future dates and revisions more than
+seven days old. A green run is a point-in-time scan, not perpetual assurance.
+Current-source release admission needs a fresh audit; older CI is not a
+substitute. npm dependencies are audited with `npm audit --audit-level=moderate`.
+
+No exceptional advisory pin is active. A future upstream parsing incident
+requires a reviewed owner, reason, exact official revision, remediation link
+and explicit expiry within seven days. The pin must obey the same freshness
+limit and fail at expiry; it must not waive advisories or audit failures.
+See the [release feed policy](../release/0.4.0-preview.1_RELEASE_CHECKLIST.md#rustsec-feed-policy).
+The trusted-local-file `serde_yaml`/`unsafe-libyaml` maintenance exception above
+does not accept new vulnerabilities or claim safe malicious-spec parsing.
 
 ## Review Requirements
 
