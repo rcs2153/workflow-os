@@ -3335,9 +3335,11 @@ in those tests. The inactive manifest SHA-256 is
 
 This supervisor is rehearsal-only, not a redundant recovery service or live
 host entry point. Supervisor death may leave isolation in place for attended
-operator recovery. Root-owned input/output staging, real lifecycle
-composition, positive observation attribution and independent exact-trial
-acceptance remain open. CLI activation is explicitly denied. These results
+operator recovery. At that revision, root-owned input/output staging, real
+lifecycle composition, positive observation attribution and independent
+exact-trial acceptance remained open. The later inactive custody result is
+recorded below; it does not establish composed runtime behavior. CLI
+activation is explicitly denied. These results
 must not be used to satisfy the intended-host gate or authorize a VM boot.
 
 | Governed run | Result |
@@ -3362,6 +3364,80 @@ metadata remain operator-local, not repository fixtures. No guest, NAT backend,
 time reference, provider call, live grant or publication was authorized or
 performed. The next existing gate remains exact host/capture verification
 and independent acceptance before any VM trial.
+
+#### Inactive No-Uplink Bootstrap Staging
+
+The subsequent trust-layer review rejected treating an en0 capture or an
+upstream forwarding counter as a complete attributable view of built-in NAT.
+The corrected stopped candidate is configured to boot the outer Linux boundary with
+one retained Unix datagram peer and **no connected network backend**. An
+observer exists before launch; any queued datagram, including an empty one,
+refuses without draining. A guest hold fragment bounds its wait and rechecks
+the declared NIC, policy and counters. Readiness remains a guest report, not
+an attestation or a grant to attach transport. The revised guest hold has not
+been executed. This does not qualify NAT or replace the outside-inner-guest
+Linux filter with a custom packet relay.
+
+Owner-conducted review found that the first offline wrapper accepted caller
+hashes and launched from mutable paths. The stopped correction consumes an
+exact manifest, requires protected root custody and fixed artifact modes, and
+rejects code imported from outside the protected stage. The standalone copier
+imports standard library only, validates every artifact before writes and
+emits an explicitly inactive receipt. Neither the copier nor its receipt is
+a Core authorization verifier. Root, macOS and the attended operator remain
+trusted; this is not protection from hostile host root.
+
+The final offline sweep passed 43 bootstrap/custody/copier tests and 45 existing
+process-ownership/staging tests. These 88 tests include mocked custody paths,
+three historical defect reproductions and a harmless real descriptor-passing
+child. They are not 88 VM or connected-host tests. An inspect-only source
+archive contains 20 regular members, each checked against its source. Images
+are omitted and pinned by digest; the archive is not a runnable distribution.
+
+On November 19, after an earlier unanswered authentication request was
+cancelled without creating a stage, the attended native copy returned exit 0.
+A fresh root-owned `0700` directory contains seven pinned runtime artifacts:
+VFKit is `0500`; the other six are `0400`. A separate owner-operated read-only
+command returned exit 0 and confirmed every artifact's bytes, UID 0, single
+link and fixed mode. It imported no staged runtime code and started no VM.
+
+| Identity | SHA-256 |
+| --- | --- |
+| Exact seven-artifact candidate manifest | `9be1ed9feefd4a9606fe3b1bc2d4fb3c97de2147f554329b19d151f6bbb34987` |
+| Copy-only helper | `e7899854cb35acbcd4034ce313d99132b5a7566821b5ac6b9e77cda62b9c8261` |
+| Persisted inactive custody receipt | `a72ed8d7a8648689ccecbe75a75a703452c708c37f465cbeb98ae43a1d90b65c` |
+| Revised guest initramfs | `1a90bba2a7353b20ef87aeda56755e39ac1b58a1798ae08d2e9ea10616afe01a` |
+| Inspect-only source archive | `58067ae835698cc2c3cced39df9b1ec20b95592670dd834c82899155f05c9653` |
+
+The source archive predates successful root staging; its claim matrix is a
+historical pre-copy snapshot. The receipt remains `activation_allowed=false`,
+`transport_connected=false`, `handoff_granted=false`, with no independent
+decision. Private paths and artifacts remain operator-local. These hashes
+identify records; they are not signatures or independent attestations.
+
+| Governed run | Result |
+| --- | --- |
+| `run-1795054917828627000-2` | Stopped no-uplink bootstrap and refusal candidate |
+| `run-1795055594387575000-2` | Review exposed mutable-path and caller-hash limits |
+| `run-1795055667783550000-2` | Exact-manifest and custody refusal correction |
+| `run-1795055924119824000-2` | Standalone copy-only recipe and unprivileged preparation |
+| `run-1795056125166617000-2` | Owner-conducted exact copy-only review |
+| `run-1795056192562276000-2` | Unanswered native request cancelled; no stage created |
+| `run-1795056648095884000-2` | Inspect-only review packet and 88-test sweep |
+| `run-1795151415539850000-2` | Attended protected copy and separate read-only verification |
+
+Each phase used a proof-backed delegated approval. The native copy phase
+closed with 39 events and one approval, not an independent host receipt from
+the kernel. File edits, packaging, tests, native authentication, copying and
+verification were executor work outside the mock preview handlers.
+
+**Remaining gate:** independently review the exact stopped launch, protected
+custody, outside-peer observation and bounded measurement scope before any VM
+trial. Successful staged-runtime admission, guest hold execution, connected
+transport, attributable observation, protected time/generation and live-effect
+admission remain unproven. Do not turn an inactive copy receipt into launch
+authority, treat the socket as NAT evidence, or advance an unrelated roadmap
+lane while the active gate remains unmet.
 
 ### Designated VM Framed Notification Result
 
