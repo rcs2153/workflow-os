@@ -86,8 +86,8 @@ phase` language does not supersede the active queue.
 
 | Stage | Status |
 | --- | --- |
-| Now | **Blocked on intended-host evidence.** Identify a verified isolated host and have the exact stopped launch and preboot capture plan independently reviewed. See the [active gate](#active-delivery-queue). |
-| Next | Complete the [finite cross-harness proof](#cross-harness-exit-criteria), then make a scoped v1 decision. |
+| Now | Review and close the blockers for the [bounded local developer preview](docs/release/0.4.0-preview.1_RELEASE_SCOPE_DECISION.md), then freeze and independently verify its exact native candidate pair. Publication remains unauthorized. |
+| Next | Separately admit and quietly release that local preview, then return to the [finite cross-harness proof](#cross-harness-exit-criteria) and scoped v1 decision. The intended-host gate remains unmet for that proof. |
 | Later | Authority Continuation Architecture, portable proofs, comparative evaluation, reasoning lineage, and [broader runtime and provider work](#later-strategic-capabilities). |
 | Closed | [Hosted partial-run recovery](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_FINAL_ACCEPTANCE.md), [public positioning](https://github.com/rcs2153/workflow-os/pull/907), and the [four independently reverified local fixes](#closed-evaluation-findings). These do not admit hosted production, live dispatch, or publication. |
 
@@ -130,12 +130,24 @@ This queue incorporates the independent roadmap review of `05d9f0fb` and the
 verified fixes reconciled in [#980](https://github.com/rcs2153/workflow-os/pull/980).
 It is the only forward-looking product delivery sequence.
 
+On November 19 the user explicitly approved prioritizing the bounded local
+developer preview. The [release-scope decision](docs/release/0.4.0-preview.1_RELEASE_SCOPE_DECISION.md)
+separates its supported-path release gates from advanced cross-harness evidence.
+This is an explicit authority transition, not a second queue or an inference
+from historical lane notes. Shared-code, installer and default-path defects
+still block the preview; VM review, host qualification and v1 gates are not waived.
+
 | Item | Status and exact remaining gate | Decision authority | Evidence | Updated | Exit |
 | --- | --- | --- | --- | --- | --- |
+| P0 bounded local `0.4.0-preview.1` developer preview | **Scope reviewed; release not admitted.** The focused inventory and DOC-1/DOC-2 corrections are prepared. Merge the limited documentation change only after exact-head green CI, then freeze a clean source, produce and independently evaluate both native candidates. Do not repeat completed corrections after merge. Quiet publication and announcement require separate decisions. | User-approved scope; delegated maintainer governs preparation; independent reviewer supplies exact-pair assurance; release authority separately admits and authorizes external transitions. | [Release scope and blocker matrix](docs/release/0.4.0-preview.1_RELEASE_SCOPE_DECISION.md) and [current-scope checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#current-local-preview-acceptance) | 2026-11-19 | Exact-source macOS/Linux golden path, local authority/recovery and installation evidence accepted; scoped publication completed without broader claims. |
 | P0 cross-harness authoritative continuation | **Blocked at intended-host qualification.** Bind a verified isolated host, operator and capture custody to the stopped launch, review its exact manifest independently, then measure no-dispatch behavior under a separate scoped decision. | Host operator supplies and owns the boundary evidence; independent reviewer assesses it; delegated maintainer records the governed decision. A live sandbox action needs its own exact-target grant. | [Zero-egress preboot evidence](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#zero-egress-preboot-payload) and [milestone plan](docs/implementation-plans/cross-harness-authoritative-continuation-milestone-plan.md) | 2026-11-16 | All [exit criteria](#cross-harness-exit-criteria) are evidenced on the declared boundary, including independent reconstruction. |
 | Scoped v1 decision | **Queued, not declared.** Review the completed proof and decide whether the local kernel plus one supported consequential handoff is the v1 contract. | Maintainer and release decision authority, informed by independent evidence. | [Current Product Contract](docs/user-guide/current-product-contract.md) and [closed local evaluation](#closed-evaluation-findings) | 2026-11-16 | Record the supported contract and enter release hardening, or name the remaining non-negotiable criteria before adding work. |
 
 #### Cross-Harness Exit Criteria
+
+This milestone follows the local developer-preview lane above. Its independent
+review and execution requirements remain unchanged; no local-preview release
+decision is authority to boot, connect transport or perform its live effect.
 
 The user selected an attended same-Mac isolation path rather than requiring
 another machine. The [power-control result](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#same-mac-power-and-capture-controls)

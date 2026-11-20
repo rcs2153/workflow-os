@@ -98,6 +98,10 @@ cross-harness delegation, or independent check attestation.
 ## Maturity
 
 - **Release preparation identity:** `0.4.0-preview.1`.
+- **Release title:** Continuity of Authority Developer Preview.
+- **Next release scope:** bounded local onboarding, governed validation/report
+  output, approval/denial and durable recovery/replay; see the
+  [scope decision](../release/0.4.0-preview.1_RELEASE_SCOPE_DECISION.md).
 - **Repository maturity:** active governed-execution and continuity preview.
 - **Strongest supported posture:** local governed execution and evaluation.
 - **Hosted posture:** reviewed single-tenant, no-write alpha; not production or
@@ -110,8 +114,12 @@ cross-harness delegation, or independent check attestation.
   review, validator-assurance minimum and wire hardening, exact-source
   re-candidating, and independent release/security assurance are closed for
   their documented boundaries. The separate publication decision, the
-  assurance review's disclosed P2 follow-ups, and the repository's other active
-  P0 lanes still block publication, v1, and broader product claims.
+  assurance review's disclosed P2 follow-ups, and fresh exact-source local
+  acceptance remain subject to the release-scope applicability review.
+  Publication is still unauthorized. Advanced VM/live cross-harness evidence
+  is not by itself a prerequisite for this bounded local preview; any shared
+  kernel, packaged-command, installer or default-path defect still blocks it.
+  Experimental execution and broader/v1 claims retain their own unmet gates.
 
 ## Implemented Product Surfaces
 
