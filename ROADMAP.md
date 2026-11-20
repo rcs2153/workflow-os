@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-11-18.
+Status date: 2026-11-19.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -143,9 +143,12 @@ demonstrates observed restoration only. The original PKTAP capture exceeded its
 requested snapshot bound; the corrected native capture now passed one attended
 live control with the exact 14-byte Ethernet-header bound. A stopped supervisor
 candidate passed launcher-death and cleanup tests using harmless processes,
-not a VM. Root staging, composed host/capture qualification and independent
-exact-trial review remain open. This does not add a new milestone or authorize
-VM activation.
+not a VM. On November 19 an inactive seven-artifact no-uplink candidate was
+copied into protected root custody and separately rehashed by an
+owner-operated read-only command. This is not independent reviewer acceptance.
+See the [staging result](docs/implementation-plans/live-sandbox-continuation-admission-plan.md#inactive-no-uplink-bootstrap-staging).
+Composed host/capture qualification and independent exact-trial review remain
+open. This does not add a new milestone or authorize VM activation.
 
 Use Codex to start and Claude Desktop as the distinct replacement principal.
 Both use the same kernel-owned durable run through public surfaces, not direct
