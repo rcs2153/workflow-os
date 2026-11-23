@@ -88,7 +88,8 @@ phase` language does not supersede the active queue.
 | --- | --- |
 | Now | Fix the two [preview adoption blockers](docs/implementation-plans/0.4.0-preview.1-readmission-after-fresh-evaluation.md), then freeze and independently verify a new exact native candidate pair. Publication remains unauthorized. |
 | Next | Separately admit and quietly release that local preview, then return to the [finite cross-harness proof](#cross-harness-exit-criteria) and scoped v1 decision. The intended-host gate remains unmet for that proof. |
-| Later | Authority Continuation Architecture, portable proofs, comparative evaluation, reasoning lineage, and [broader runtime and provider work](#later-strategic-capabilities). |
+| After Scoped V1 Decision | [Authority Continuation Profile Phases 1–3](#post-v1-authority-continuation-tranche), then the first bounded cross-host proof. |
+| Later | Terminal proof, federation, comparative evaluation, reasoning lineage, and [broader runtime and provider work](#later-strategic-capabilities). |
 | Closed | [Hosted partial-run recovery](docs/concepts/HOSTED_PARTIAL_RUN_CREATION_FINAL_ACCEPTANCE.md), [public positioning](https://github.com/rcs2153/workflow-os/pull/907), and the [four independently reverified local fixes](#closed-evaluation-findings). These do not admit hosted production, live dispatch, or publication. |
 
 ### Closed Evaluation Findings
@@ -200,11 +201,24 @@ details. Add a rehearsal only if a named criterion fails or a documented
 new threat invalidates its evidence. Fixture results stay fixture results.
 The list grants no boot, provider dispatch, or broader product authority.
 
-After the scoped v1 decision, revisit the
-[Authority Continuation Architecture Decision](docs/implementation-plans/durable-authority-continuation-profile-plan.md).
-Portable proof-carrying envelopes, comparative harness evaluation, reasoning
-lineage, OpenShell expansion, broader writes, nested harnesses, and production
-hosting are later work, not implied by this proof.
+#### Post-V1 Authority Continuation Tranche
+
+The preview, finite cross-harness proof, and scoped v1 decision above retain
+their order and gates. After a positive scoped v1 decision, the next delivery
+tranche is [Authority Continuation Profile Phases 1–3](docs/implementation-plans/durable-authority-continuation-profile-plan.md):
+the ADR and threat model, a canonical non-bearer envelope, then one identity
+and one A2A or MCP transport profile. Complete the Phase 3A reference enforcement
+boundary as needed for Phase 4, the first bounded consequential cross-host
+proof. Phase 5 terminal provenance and verification follow. This orders the
+existing plan; it does not add a second initiative or authorize implementation
+before prerequisites are met.
+
+Durable execution, signed histories, and multi-hop identity already exist in
+adjacent products. The hypothesis this tranche tests is whether an independently
+authenticated replacement can re-resolve current work authority and safely
+reconcile an exact effect across different execution stacks. Comparative
+evaluation, reasoning lineage, OpenShell expansion, broad writes, federation,
+nested harnesses, and production hosting remain later work.
 
 ### Separate Release Lane
 

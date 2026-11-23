@@ -4,19 +4,19 @@
 [![Release](https://img.shields.io/github/v/release/rcs2153/workflow-os?include_prereleases)](https://github.com/rcs2153/workflow-os/releases)
 [![License](https://img.shields.io/github/license/rcs2153/workflow-os)](LICENSE)
 
-Workflow OS is an open-source, local-first governance kernel for AI agents.
-It provides shared state and authority beneath agent harnesses, the tools that
-run agents. Agents plan, code, and call tools; Workflow OS governs supported
-actions by binding the exact scope, policy, approvals, evidence, and recorded
-side effects to a durable run.
+Workflow OS is an open-source, local-first continuity-of-authority kernel for
+agentic work. When the original agent, process, or conversation disappears,
+Workflow OS preserves what was authorized, what happened, and what another
+authorized executor may lawfully do next on supported paths. It sits beneath
+the tools that execute the work.
 
 ```text
 Agent executes. Workflow OS governs.
 ```
 
-An authorized replacement executor can use that record to find out what
-happened and what it may do next, without treating missing acknowledgement
-as permission to retry. We call that **continuity of authority**.
+Missing acknowledgement is not permission to retry. Evidence, events,
+WorkReports, and receipts are proof of the kernel's decisions and recorded
+outcomes. They do not grant permission by themselves.
 
 Agents can already write code, call tools, and change external systems. Most
 systems preserve context, traces, or task state. Workflow OS preserves whether
@@ -50,23 +50,22 @@ Evidence references, events, audit records, SideEffects, and WorkReports verify
 and expose those bindings; they are proof surfaces of the control function,
 not the product category by themselves.
 
-An evaluator-authored Codex-to-LangGraph integration has demonstrated the
-intended cross-harness shape: one harness started governed work, another
-resumed it without transcript authority, and a fresh reviewer reconstructed
-the decision from the shared kernel record. That evidence used synthetic
-identities, evaluator-written wiring, and a simulated ambiguous target. It is
-not packaged interoperability, authenticated cross-harness delegation, or a
-production execution-framework integration.
+## Evidence And Status
 
-The current source tree is preparing **Workflow OS `0.4.0-preview.1` - Continuity
-of Authority Developer Preview**. It is useful today for local
-governed workflows and engineering evaluation. It is not yet a production
-enterprise control plane.
+| Status | What it means |
+| --- | --- |
+| Demonstrated | In an evaluator-built Codex-to-LangGraph handoff, the second harness resumed without transcript authority, denial and authority drift stopped the bounded effect, and a reviewer reconstructed the outcome. The setup used synthetic identities and a simulated ambiguous target. |
+| Current preview scope | Local repo onboarding, governed workflows and approvals, durable state, local validation and WorkReports, and explicit recovery and replay. The [`0.4.0-preview.1` release](docs/release/0.4.0-preview.1_RELEASE_SCOPE_DECISION.md) is in preparation, not published. |
+| Next bounded proof | [Codex to Claude Desktop](ROADMAP.md#cross-harness-exit-criteria), as distinct authenticated principals, with one authorized disposable effect and reconciliation after interruption without resending. Not yet accepted. |
+| Not shipped | Plug-and-play cross-harness interoperability, cross-domain delegation or federation, production hosting, general provider writes, or production nested harnesses. |
 
-The [release scope](docs/release/0.4.0-preview.1_RELEASE_SCOPE_DECISION.md)
-targets local repository onboarding, real governed validation and reporting,
-approval boundaries and safe replay. Advanced hosted, provider and cross-harness
-paths remain experimental and separately gated. The preview is not yet published.
+In three paired scenarios with actual Codex compaction, both recovery paths
+made all nine decisions correctly. Providing the current kernel checkpoint
+used 83,857 gross tokens versus 167,470 for lookup-based recovery (49.93%
+fewer). An earlier four-case comparison used 72,407 versus 108,770 (33.43%
+fewer) and avoided two evidence lookups. These small-sample measurements have
+different cache conditions and do not establish universal or billed savings.
+The primary result was correct recovery without recreating permission from chat.
 
 ## See The Kernel Work
 
@@ -132,18 +131,11 @@ completion claims make that continuity inspectable.
 ## How It Works
 
 ```text
-workflow + policy + authority + evidence requirements
-                         |
-                         v
-                  Workflow OS kernel
-                         |
-       validate -> authorize -> record -> reconcile
-                         |
-                         v
-             agent / handler / adapter / sandbox
-                         |
-                         v
-        events + evidence references + WorkReport
+person / agent / harness
+  -> Workflow OS: intent, current authority, durable state and admission
+  -> executor or enforcement substrate
+  -> provider effect (where supported)
+  -> Workflow OS: observation, reconciliation and proof
 ```
 
 For each material action, Workflow OS:
@@ -161,7 +153,21 @@ agent remains free to explore inside the authorized envelope. The kernel
 governs the boundaries where work consumes authority, changes durable state,
 invokes a capability, creates a side effect, or claims completion.
 
+The [planned continuation profile](docs/implementation-plans/durable-authority-continuation-profile-plan.md)
+requires a replacement to authenticate independently and the kernel to
+re-resolve authority against current facts and the exact operation. A signed
+record can prove history, not grant a new effect. A transcript, summary, old
+approval, portable envelope, or reusable provider credential is not a handoff
+of authority.
+
 ## Why Workflow OS
+
+Memory and traces preserve context; workflow engines preserve execution
+progress; sandboxes constrain runtime access. Workflow OS preserves current
+work authority and effect truth across replacement. These layers can compose
+with substrates such as [Temporal](https://docs.temporal.io/durable-execution)
+and [OpenShell](https://docs.nvidia.com/openshell/about/architecture); neither is
+a bundled dependency or a shipped interoperability claim.
 
 Most agent infrastructure governs one layer of the problem:
 

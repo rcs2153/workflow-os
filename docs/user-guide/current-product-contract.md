@@ -6,7 +6,7 @@ roadmap and not only the last packaged preview release.
 
 ## Product In One Sentence
 
-Workflow OS is an open-source continuity-of-authority kernel for agentic work.
+Workflow OS is an open-source, local-first continuity-of-authority kernel for agentic work.
 It provides shared governance across people, agents, processes, and execution
 frameworks. It converts ephemeral conversation and execution context into a
 durable, policy-governed run whose authority, execution state, evidence, and
@@ -36,6 +36,15 @@ determines the next action a current authorized executor may lawfully take
 without reconstructing permission from conversation history. Evidence and
 reports verify and expose these bindings. They do not replace them, and
 Workflow OS is not primarily an audit logger or report generator.
+
+In the [planned portable profile](../implementation-plans/durable-authority-continuation-profile-plan.md),
+a replacement authenticates independently. The kernel re-resolves current
+delegation, policy, required evidence and checks, time and execution window,
+exact action, target and request, effect identity and reconciliation posture.
+A transcript, historical approval, signed envelope, or reusable provider
+credential cannot carry authority into a new effect. A missing acknowledgement
+calls for reconciliation, not permission to resend. This broader trust-domain
+contract is planned, not a capability of the local preview.
 
 ## Core Product Value: Continuity Of Authority
 
@@ -110,16 +119,12 @@ cross-harness delegation, or independent check attestation.
   general provider-write product.
 - **Primary audience today:** maintainers, infrastructure engineers, security
   engineers, and teams evaluating governed agent work.
-- **Release blockers:** all three continuity gates and the private cross-gate
-  review, validator-assurance minimum and wire hardening, exact-source
-  re-candidating, and independent release/security assurance are closed for
-  their documented boundaries. The separate publication decision, the
-  assurance review's disclosed P2 follow-ups, and fresh exact-source local
-  acceptance remain subject to the release-scope applicability review.
-  Publication is still unauthorized. Advanced VM/live cross-harness evidence
-  is not by itself a prerequisite for this bounded local preview; any shared
-  kernel, packaged-command, installer or default-path defect still blocks it.
-  Experimental execution and broader/v1 claims retain their own unmet gates.
+- **Release blockers:** the old pair is ineligible. The [readmission plan](../implementation-plans/0.4.0-preview.1-readmission-after-fresh-evaluation.md)
+  gates a patched replacement pair on binary onboarding and executable
+  approval handoffs, exact-source validation, and fresh acceptance.
+  Publication is still unauthorized and separate. The finite
+  [cross-harness proof](../../ROADMAP.md#cross-harness-exit-criteria) gates the
+  scoped v1 decision, not the local preview by itself.
 
 ## Implemented Product Surfaces
 
