@@ -6317,6 +6317,136 @@ fn run_verbose_rejects_non_authoritative_execution() {
     assert!(!project.state_root().exists());
 }
 
+fn printed_demo_approval_args(text: &str) -> Vec<&str> {
+    text.lines()
+        .find_map(|line| line.strip_prefix("  next_action: workflow-os "))
+        .expect("printed approval continuation")
+        .split_whitespace()
+        .map(|arg| match arg {
+            "user/<approver>" => "user/tester",
+            "<bounded-reason>" => "reviewed-demo",
+            _ => arg,
+        })
+        .collect()
+}
+
+fn assert_demo_terminal_replay(
+    invoke: impl Fn(&[&str]) -> Output,
+    state: &LocalStateBackend,
+    id: &WorkflowRunId,
+) {
+    assert_eq!(
+        state
+            .rehydrate_run(id)
+            .expect("completed run")
+            .snapshot
+            .status,
+        WorkflowRunStatus::Completed
+    );
+    let events = state.read_events(id).expect("completed events");
+    let replay = invoke(&[
+        "--mock-all-local-skills",
+        "run",
+        "local/first-run-governance",
+        "--run-id",
+        id.as_str(),
+    ]);
+    assert!(replay.status.success(), "{}", stderr(&replay));
+    assert_eq!(state.read_events(id).expect("replayed events"), events);
+}
+
+#[test]
+fn scaffolded_demo_uses_printed_approval_commands_in_fresh_processes() {
+    for deny_gate in [None, Some(0), Some(1)] {
+        let project = TestProject::new("demo-copy-safe-approval");
+        let invoke = |args: &[&str]| {
+            Command::new(env!("CARGO_BIN_EXE_workflow-os"))
+                .current_dir(project.path())
+                .args(args)
+                .output()
+                .expect("workflow-os runs in a fresh process")
+        };
+        let init = invoke(&["init-repo-governance", "--agent", "codex"]);
+        assert!(init.status.success(), "{}", stderr(&init));
+        let mut output = invoke(&[
+            "--mock-all-local-skills",
+            "run",
+            "local/first-run-governance",
+        ]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let id = WorkflowRunId::new(run_id(&output)).expect("run id");
+        let state = LocalStateBackend::for_inspection(project.state_root());
+
+        for gate in 0..2 {
+            let approval = approval_id(&output);
+            let text = stdout(&output);
+            let args = printed_demo_approval_args(&text);
+            assert_eq!(
+                args,
+                [
+                    "--mock-all-local-skills",
+                    "approve",
+                    id.as_str(),
+                    &approval,
+                    "--actor",
+                    "user/tester",
+                    "--reason",
+                    "reviewed-demo",
+                ]
+            );
+            assert_eq!(
+                state
+                    .list_approval_presentation_records_for_approval(&id, &approval)
+                    .expect("approval presentations")
+                    .len(),
+                1
+            );
+            if gate == 0 {
+                let before = state.read_events(&id).expect("waiting events");
+                let mismatch = invoke(&args[1..]);
+                assert!(!mismatch.status.success());
+                assert!(stderr(&mismatch).contains(
+                    "executor.selected_project_validation.current_bundle_handlers_mismatch"
+                ));
+                assert_eq!(state.read_events(&id).expect("unchanged events"), before);
+            }
+            if deny_gate == Some(gate) {
+                let mut deny_args = args;
+                deny_args.push("--deny");
+                let denied = invoke(&deny_args);
+                assert!(
+                    stdout(&denied).contains("decision: denied"),
+                    "{}",
+                    stderr(&denied)
+                );
+                assert_eq!(
+                    state
+                        .rehydrate_run(&id)
+                        .expect("denied run")
+                        .snapshot
+                        .status,
+                    WorkflowRunStatus::Failed
+                );
+                assert!(!state.read_events(&id).expect("denied events").iter().any(
+                    |event| matches!(event.kind, WorkflowRunEventKind::SkillInvocationStarted(_))
+                ));
+                break;
+            }
+            output = invoke(&args);
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                stdout(&output),
+                stderr(&output)
+            );
+            assert!(stdout(&output).contains("decision: granted"));
+        }
+        if deny_gate.is_none() {
+            assert_demo_terminal_replay(&invoke, &state, &id);
+        }
+    }
+}
+
 #[test]
 fn project_declaration_activates_authoritative_approval_resume_without_flag() {
     let project = TestProject::new("declared-authoritative-approval");
