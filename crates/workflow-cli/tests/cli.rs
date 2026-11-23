@@ -6442,7 +6442,7 @@ fn scaffolded_demo_uses_printed_approval_commands_in_fresh_processes() {
             assert!(stdout(&output).contains("decision: granted"));
         }
         if deny_gate.is_none() {
-            assert_demo_terminal_replay(&invoke, &state, &id);
+            assert_demo_terminal_replay(invoke, &state, &id);
         }
     }
 }
