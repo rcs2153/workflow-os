@@ -58,7 +58,27 @@ status: WaitingForApproval
 approval_id: approval/run-.../rec
 ```
 
-Check status:
+## Recover From A New Process
+
+After the workflow returns a waiting status, leave that terminal. From a fresh
+shell at the same repository root, use the same project and state directory and
+read the saved run before deciding what to do. The run ID is an identifier, not
+permission. Do not issue another `run` to recover this one.
+
+Check the durable next-action preview:
+
+```sh
+target/debug/workflow-os \
+  --project-dir examples/vertical-slice-approval \
+  next-action <run-id>
+```
+
+This read-only preview reports the pending approval and does not grant
+execution. The ordinary example does not persist a detailed approval
+presentation, so the authorized operator must recover and review the exact
+scope through their normal approval process.
+
+Check the persisted status:
 
 ```sh
 target/debug/workflow-os \
@@ -86,6 +106,9 @@ target/debug/workflow-os \
 ```
 
 The event history includes `RunCreated`, `PolicyDecisionRecorded`, `ApprovalRequested`, `ApprovalGranted`, `RunResumed`, `SkillInvocationStarted`, `SkillInvocationSucceeded`, and `RunCompleted`.
+
+This is a local, same-project process handoff with a mock skill, not a proof of
+independently authenticated cross-harness delegation or external reconciliation.
 
 ## Local State
 

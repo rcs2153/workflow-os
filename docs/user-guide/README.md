@@ -1,10 +1,10 @@
 # Workflow OS User Guide
 
 These guides cover the current Workflow OS `0.4.0-preview.1` preparation
-identity on `main`. Workflow OS is an open-source governance kernel that gives
-agent harnesses shared state for supported governed work. It records which
-procedure and approvals applied, what happened, and what another authorized
-executor may do next. This continuity of authority is available through
+identity on `main`. Workflow OS is an open-source, local-first
+continuity-of-authority kernel for agentic work. It binds procedure authority,
+invocation authority, and execution truth so an authorized replacement can
+recover what remains permissible without reconstructing it from chat. This is available through
 documented paths in the local preview, not a production enterprise control
 plane or packaged cross-harness runtime.
 
@@ -41,7 +41,7 @@ with current behavior.
 4. [First-run CLI guide](../cli/first-run.md): repository posture,
    recommendations, and governed report artifacts.
 5. [Vertical-slice example](../../examples/vertical-slice-approval/README.md):
-   approval, resume, persistence, and event inspection.
+   approval, recovery in a fresh process, persistence, and event inspection.
 
 ## Design And Evaluation Guides
 

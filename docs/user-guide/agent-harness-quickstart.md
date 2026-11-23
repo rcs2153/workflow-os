@@ -10,6 +10,15 @@ Agent executes. Workflow OS governs.
 
 Workflow OS is not just YAML to hand-author and test. The YAML specs are the governed contract that an agent should operate inside. The kernel provides validation, durable run state, policy gates, approval checkpoints, auditability, and report posture while the agent performs repository work under those boundaries.
 
+Use the CLI to enter the supported governance boundary; the harness owns
+execution and the kernel owns admission, authority, durable state and recovery.
+When a process is replaced, recover the existing run from that state before
+deciding whether to wait, request approval, inspect or reconcile. Do not recover
+permission from a prompt summary or start a second run merely because the first
+executor is gone. Try the [local process replacement example](../../examples/vertical-slice-approval/README.md#recover-from-a-new-process).
+The [experimental native Python SDK](../../packages/sdk-python/README.md) is
+available in source for supported Python bindings; this guide uses the CLI.
+
 You do not need the Workflow OS repository's `dg/*` dogfood workflows in your own project. They are internal benchmark workflows for building Workflow OS itself. New and existing repos should start from the scaffold and first-run path below.
 
 The agent keeps its speed and flexibility. Workflow OS makes the work inspectable. The kernel should not force the agent to model every internal reasoning edge; it should present the steps, gates, stops, approvals, evidence requirements, side-effect disclosures, validation/check obligations, handoffs, and reports that make autonomous work reviewable.
