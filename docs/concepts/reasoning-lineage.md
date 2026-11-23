@@ -10,6 +10,87 @@ Reasoning Lineage is not the workflow runtime. The workflow runtime answers how 
 
 The concept is inspired by the Magellan idea of a typed, persistent, auditable reasoning graph, but Workflow OS should not import a full Magellan implementation wholesale. Workflow OS must adapt any claim graph concept to its own product boundary: a declarative, local-first, policy-gated, auditable workflow kernel.
 
+### Governed Artifact Identity
+
+Every governed artifact should eventually have a portable, immutable,
+content-addressed identity: workflow and procedure revisions, policy bundles,
+task specifications and implementation plans, handler contracts, approval
+handoffs, evidence collections, execution inputs, reports, and outputs.
+Identity, history, and authority answer different questions:
+
+- **Artifact identity:** what exact object was governed? Canonicalize according
+  to an explicit artifact kind, schema and canonicalization version. Commit to
+  the canonical bytes with a named digest algorithm and bind the digest to an
+  immutable revision and portable identifier. Prefer established canonicalization
+  and envelope standards. Distinguish semantic documents from opaque outputs,
+  for which the original bytes are the representation to commit to.
+- **Execution-history integrity:** what did the runtime record, and can that
+  history be verified under its trust roots? Dapr provides durable execution
+  and replay. Its [preview workflow history signing](https://docs.dapr.io/developing-applications/building-blocks/workflow/workflow-history-signing/)
+  can detect history tampering when configured. A runtime record does not by
+  itself prove a target-side effect or a current authorization.
+- **Continuing authority:** may this principal perform this exact action now?
+  Workflow OS must re-resolve current policy, delegation, revocation, expiry,
+  scope, audience, resource, and side-effect identity before dispatch or
+  resume. Neither a content match nor a valid signature grants authority.
+
+For example, bind approval to `workflow://acme/deploy-production@3.2.1`
+and `sha256:<canonical-content-digest>`. If the separate `current` alias
+advances to `3.2.2`, the prior approval does not migrate or make continued
+use of `3.2.1` lawful without a current authority check.
+
+Bind approvals, delegations, runs, reports, and side effects directly or
+through verified immutable manifests. Preserve typed provenance links from
+task to procedure, policy, approval, execution, evidence, and output. Approval
+handoffs and execution inputs commit to what is known before action; later
+evidence and reports cite those commitments without retroactively changing
+them. A replacement or independent verifier resolves required identifiers
+through configured, access-controlled storage and verifies the retrieved
+objects. A digest is a commitment, not data recovery, and does not grant
+access or require sensitive payloads to be embedded in audit events.
+
+**Acceptance:**
+
+- Changing any governed semantic field changes its digest. Equivalent
+  canonical representations produce the same digest across supported SDKs.
+  Cross-language fixtures cover canonicalization, digest generation and
+  rejection of unsupported versions and ambiguous inputs.
+- Moving an alias cannot transfer approval. A run cannot substitute a
+  procedure, policy, task, handler, or other committed input after approval.
+- A replacement can retrieve and verify every exact governed input from
+  portable identifiers and commitments through a configured resolver, without
+  using chat history, mutable names, or the original machine.
+- Reports identify the committed procedure, policy, approval, evidence, and
+  output. An independent verifier can check those links without the original
+  agent, conversation, machine, or execution framework; provider-specific
+  history verification is disclosed as a separate evidence boundary.
+- Missing required artifacts, digest mismatches, unsupported canonicalization
+  versions, revocation, wrong audience, and expired authority fail closed
+  before new action. Historical verification does not renew authorization.
+- One bounded integration test governs a Dapr-executed operation, preserving
+  exact artifact identity and Workflow OS authority across handoff or replay,
+  while separately checking runtime history and observed effects. An optional
+  [Metric Protocol demonstration](METRIC_PROTOCOL_LEARNINGS_FOR_WORKFLOW_OS.md#future-metric-proof-composition)
+  uses one independently hardened metric definition as the governed object.
+
+**Dependencies and order:** First build on accepted immutable run inputs,
+evidence/report references, current-authority continuation, and effect
+reconciliation. In a separately approved local slice, define commitments and
+resolver contracts, evaluate standards and OCI-compatible distribution, and
+pass conformance before binding one governed flow and exercising replacement
+and independent verification. Then test Dapr interoperability without making
+Dapr required. The optional metric demo follows the companion trust review.
+
+**Non-goals:** No general-purpose registry now; no replacement for Git, OCI,
+Dapr, or existing state stores; no duplicate Dapr identity, event chaining,
+actor placement, or durable execution; and no generic distributed runtime.
+Reuse only Metric Protocol's content-addressing, immutable revision, portable
+identifier, federation, and independent-verification concepts. Do not import
+its current trust models or code, add a dependency, or adopt its envelope
+without security review. This is future architecture, not implementation
+authorization or a blocker for hosted reliability, reconciliation, authority
+continuation, or SDK work.
+
 ## 2. Why It Matters
 
 Workflow state, audit logs, and work reports are necessary but not sufficient.
