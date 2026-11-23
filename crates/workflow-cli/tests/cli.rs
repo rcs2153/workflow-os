@@ -751,9 +751,44 @@ fn help_explains_explicit_mock_local_skill_flag() {
     assert!(stdout(&output).contains("existing-repo governance scaffold"));
     assert!(stdout(&output).contains("first-run"));
     assert!(stdout(&output).contains("report-ready first-run context"));
-    assert!(
-        stdout(&output).contains("provider github-pr-comment continue-sandbox --request <path>")
-    );
+    assert!(stdout(&output).contains("workflow-os help operator"));
+    for command in [
+        "launch-preflight",
+        "continue-sandbox",
+        "fixture-authority",
+        "inspect-synthetic-recovery",
+    ] {
+        assert!(!stdout(&output).contains(command), "{command}");
+    }
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn operator_help_keeps_explicit_command_discovery_without_state_changes() {
+    let project = TestProject::new("operator-help");
+    for args in [
+        &["help", "operator"][..],
+        &["provider", "--help"],
+        &["author", "--help"],
+        &["state", "--help"],
+    ] {
+        let output = workflow_os(&project, args);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let text = stdout(&output);
+        for command in [
+            "launch-preflight",
+            "launch-peer-preflight",
+            "launch-recovery-preflight",
+            "provider github-pr-comment continue-sandbox --request <path>",
+            "inspect-synthetic-recovery",
+            "fixture-authority",
+            "author workflow preflight",
+            "state migrate-sqlite",
+        ] {
+            assert!(text.contains(command), "{command}");
+        }
+    }
+    assert!(!project.state_root().exists());
 }
 
 #[test]
@@ -6113,7 +6148,7 @@ fn next_action_does_not_choose_between_two_saved_approval_presentations() {
 }
 
 #[test]
-fn next_action_preview_rejects_terminal_run_without_mutating_events() {
+fn next_action_summarizes_terminal_run_without_mutating_events() {
     let project = TestProject::new("next-action-terminal");
     project.write_valid_project(false, false);
     project.add_authoritative_project_validation_check();
@@ -6133,15 +6168,76 @@ fn next_action_preview_rejects_terminal_run_without_mutating_events() {
     let events_before = run_events(&project, run_id);
 
     let preview = workflow_os(&project, &["next-action", run_id]);
-
-    assert!(!preview.status.success());
-    assert!(
-        stderr(&preview).contains("executor.governed_continuation.run.not_running"),
-        "{}",
-        stderr(&preview)
-    );
+    assert!(preview.status.success(), "{}", stderr(&preview));
+    assert!(stdout(&preview).contains("status: Completed"));
+    assert!(stdout(&preview).contains("next_action: none; run is terminal"));
+    assert!(stdout(&preview).contains("inspect: workflow-os inspect run-next-action-terminal"));
     assert_eq!(run_events(&project, run_id), events_before);
     assert!(!stdout(&preview).contains("allowed_next_action"));
+}
+
+#[test]
+fn next_action_summarizes_denied_local_run_as_failed_not_allowed() {
+    let project = TestProject::new("next-action-denied");
+    project.write_valid_project(true, false);
+    let run = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+    let id = run_id(&run);
+    let gate = approval_id(&run);
+    let denied = workflow_os(
+        &project,
+        &["approve", &id, &gate, "--deny", "--reason", "not approved"],
+    );
+    assert!(denied.status.success(), "{}", stderr(&denied));
+    let before = run_events(&project, &id);
+    let preview = workflow_os(&project, &["--json", "next-action", &id]);
+    assert!(preview.status.success(), "{}", stderr(&preview));
+    let value: serde_json::Value =
+        serde_json::from_slice(&preview.stdout).expect("terminal summary");
+    assert_eq!(value["mode"], "terminal_summary");
+    assert_eq!(value["status"], "failed");
+    assert_eq!(value["terminal"], true);
+    assert_eq!(value["execution_authorized"], false);
+    assert_eq!(value["next_action"], "none");
+    assert_eq!(value["status_args"], serde_json::json!(["status", id]));
+    assert_eq!(value["inspect_args"], serde_json::json!(["inspect", id]));
+    assert!(value.get("allowed_next_action").is_none());
+    assert_eq!(run_events(&project, &id), before);
+}
+
+#[test]
+fn next_action_rejects_terminal_run_with_missing_bound_bundle() {
+    let project = TestProject::new("next-action-terminal-missing-bundle");
+    project.write_valid_project(false, false);
+    project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
+    let id = "run-next-action-missing-bundle";
+    let run = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "run",
+            "local/main",
+            "--run-id",
+            id,
+        ],
+    );
+    assert!(run.status.success(), "{}", stderr(&run));
+    let before = run_events(&project, id);
+    fs::rename(
+        project.state_root().join("immutable-run-bundles"),
+        project.path().join("isolated-bundle"),
+    )
+    .expect("move the required bundle out of the test store");
+    let result = workflow_os(&project, &["next-action", id]);
+    assert!(!result.status.success());
+    assert!(
+        stderr(&result).contains("immutable_run_bundle"),
+        "{}",
+        stderr(&result)
+    );
+    assert_eq!(stdout(&result), "");
+    assert_eq!(run_events(&project, id), before);
 }
 
 #[test]

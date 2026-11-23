@@ -271,6 +271,10 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             print_help();
             Ok(())
         }
+        Command::OperatorHelp => {
+            print_operator_help();
+            Ok(())
+        }
     }
 }
 
@@ -2970,6 +2974,28 @@ where
     if run.snapshot.status == WorkflowRunStatus::WaitingForApproval {
         return print_waiting_approval_next_action(invocation, backend, &run, provider_fixture);
     }
+    if run.snapshot.status.is_terminal() {
+        let identity = &run.snapshot.identity;
+        if let Some(binding) = &identity.immutable_run_bundle {
+            let bundle = bundle_store.read_exact_bundle(run_id, binding.bundle_id())?;
+            let manifest = bundle.manifest();
+            if manifest.run_binding() != *binding
+                || manifest.run_id() != &identity.run_id
+                || manifest.workflow_id() != &identity.workflow_id
+                || manifest.workflow_version() != &identity.workflow_version
+                || manifest.schema_version() != &identity.schema_version
+                || manifest.workflow_content_hash() != &identity.spec_content_hash
+            {
+                return Err(WorkflowOsError::new(
+                    WorkflowOsErrorKind::InvalidState,
+                    "cli.next_action.immutable_bundle.mismatch",
+                    "stored bundle does not match the terminal run identity",
+                ));
+            }
+        }
+        print_terminal_next_action(invocation, run_id, run.snapshot.status, provider_fixture);
+        return Ok(());
+    }
     let binding = run
         .snapshot
         .identity
@@ -3003,6 +3029,45 @@ where
         }
     }
     Ok(())
+}
+
+fn print_terminal_next_action(
+    invocation: &Invocation,
+    run_id: &WorkflowRunId,
+    status: WorkflowRunStatus,
+    provider_fixture: bool,
+) {
+    if invocation.json {
+        let result = serde_json::json!({
+            "mode": "terminal_summary",
+            "run_id": run_id,
+            "status": workflow_run_status_label(status),
+            "terminal": true,
+            "execution_authorized": false,
+            "next_action": "none",
+            "status_args": ["status", run_id.as_str()],
+            "inspect_args": ["inspect", run_id.as_str()],
+        })
+        .to_string();
+        if provider_fixture {
+            println!("{}", append_github_repository_metadata_json_fields(&result));
+        } else {
+            println!("{result}");
+        }
+    } else {
+        println!("mode: terminal_summary");
+        println!("run_id: {run_id}");
+        println!("status: {status:?}");
+        println!("execution_authorized: false");
+        println!("next_action: none; run is terminal");
+        println!("status_command: workflow-os status {run_id}");
+        println!("inspect: workflow-os inspect {run_id}");
+        if provider_fixture {
+            println!("provider_operation: github.repository.metadata");
+            println!("provider_mode: fixture");
+            println!("live_transport: disabled");
+        }
+    }
 }
 
 fn print_waiting_approval_next_action(
@@ -13069,6 +13134,7 @@ enum Command {
     },
     Version,
     Help,
+    OperatorHelp,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -13126,14 +13192,22 @@ impl AuthoritativeGovernanceScaffoldSelection {
     }
 }
 
+fn help_for_command(command: &str) -> Command {
+    match command {
+        "author" | "provider" | "state" => Command::OperatorHelp,
+        _ => Command::Help,
+    }
+}
+
 fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
     let Some(command) = args.first().map(String::as_str) else {
         return Ok(Command::Help);
     };
     if command_help_requested(args) && is_helpable_command(command) {
-        return Ok(Command::Help);
+        return Ok(help_for_command(command));
     }
     match command {
+        "help" if args.get(1).is_some_and(|value| value == "operator") => Ok(Command::OperatorHelp),
         "help" => Ok(Command::Help),
         "version" => Ok(Command::Version),
         "validate" => Ok(Command::Validate),
@@ -13805,6 +13879,39 @@ fn version_command(invocation: &Invocation) {
 
 fn print_help() {
     println!("Workflow OS CLI");
+    println!();
+    println!(
+        "Usage: workflow-os [--project-dir <path>] [--state-dir <path>] [--json] [--mock-all-local-skills] <command>"
+    );
+    println!();
+    println!("Install: see README.md in the extracted native archive.");
+    println!();
+    println!("Local preview:");
+    println!("  version                        Show the installed version");
+    println!("  init-repo-governance [--dry-run]  Create the existing-repo governance scaffold");
+    println!("  init-agent-harness [--dry-run]    Create a documentation scaffold");
+    println!("  validate                       Check the project contract");
+    println!("  first-run [--verbose]           Show bounded report-ready first-run context");
+    println!("  first-run --write-report-artifact  Run the governed local report path");
+    println!("  run <workflow-id>               Start a declared workflow");
+    println!("  approve <run-id> <approval-id> [--deny] [--actor <actor>] [--reason <reason>]");
+    println!("  status <run-id>                 Show the current run status");
+    println!("  next-action <run-id>            Inspect the next action without consuming it or changing run state");
+    println!("  inspect <run-id>                Read durable run evidence");
+    println!(
+        "  author workflow                 Work with reviewed workflow drafts; see author --help"
+    );
+    println!("  doctor state                    Check local state health");
+    println!();
+    println!("Options:");
+    println!("  --json                  Emit experimental preview JSON where implemented");
+    println!("  --mock-all-local-skills  Register deterministic mock handlers for local/* skills");
+    println!();
+    println!("Full reference and experimental commands: workflow-os help operator");
+}
+
+fn print_operator_help() {
+    println!("Workflow OS CLI: full reference and experimental operator commands");
     println!();
     println!(
         "Usage: workflow-os [--project-dir <path>] [--state-dir <path>] [--json] [--mock-all-local-skills] <command>"
