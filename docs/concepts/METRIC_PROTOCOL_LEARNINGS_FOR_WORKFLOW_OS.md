@@ -92,6 +92,79 @@ The v0 kernel should remain local-first. A future team or company catalog should
 
 This should remain future work. Workflow OS should not add signing before identity, event semantics, approval controls, report artifacts, and store boundaries are stable.
 
+## Future Metric Proof Composition
+
+**Status:** optional domain pilot, not an integration or a release gate.
+Workflow OS and Metric Protocol remain separate products. Content commitments,
+signing, federation, and cross-language tooling are useful design inputs, not
+evidence of production organizational trust. The current Metric Protocol
+implementation is not an approved dependency or source of reusable crypto code.
+
+### Companion Trust-Model Investigation
+
+Hardening belongs in the companion project. Independent review must establish
+both of these trust rules before any library extraction or integration:
+
+- **Registry precedence:** derive assurance in the verifier from authenticated
+  issuer identity and configured policy. A submitted trust label is never an
+  input that can increase precedence. Conformance must prove that unsigned
+  material cannot gain priority over independently verified material.
+- **Organizational identity:** resolve issuer and authorized keys through an
+  explicitly configured trust anchor or authenticated registry. A key or key
+  identifier carried in an envelope does not establish an organizational
+  identity. Conformance must distinguish a valid signature from an authorized
+  signer and verify trust-registry binding and rejection under missing trust.
+
+Exit evidence also requires one interoperable Rust, Python, TypeScript and JSON
+Schema signature contract, cross-language canonicalization and rejection
+vectors, documented signing and verification semantics, key rotation and
+revocation, validity windows, replay and audience binding, and protection of
+history where the threat model requires it. Require consistently green
+scheduled conformance CI, a protected main branch, and independent acceptance
+of the corrected trust paths. Until then, describe signatures as experimental
+provenance, not production organizational trust.
+
+Only after that review, consider a small shared library for generic envelopes,
+canonicalization, verification and conformance vectors. Evaluate
+[DSSE](https://github.com/dsse-lf/dsse) and
+[in-toto attestations](https://github.com/in-toto/attestation/tree/main/spec)
+before inventing a format. Reuse is an option, not a prerequisite or a decision
+to share identity policy, storage, registry semantics, or cryptographic code.
+
+### One Bounded Domain Milestone
+
+After the applicable Workflow OS authority-continuation, effect reconciliation
+and proof-verification boundaries are accepted, and the companion trust review
+passes, separately scope one publish or consume operation on an isolated
+registry and one immutable metric definition. Start with a disposable target.
+
+1. Workflow OS admits or denies the principal's exact operation under its
+   current policy and records the approval and delegation, if required.
+2. Metric Protocol identifies and verifies the exact metric definition against
+   configured trust; it does not authorize the operation.
+3. Dapr or another execution runtime performs the admitted operation and
+   returns bounded observation for reconciliation.
+4. An independent verifier reconstructs who approved the operation, which
+   definition digest was used, which authority was valid when it ran, and
+   what the target observed.
+
+Acceptance requires one verified approved result, rejection after authority
+or definition drift, and safe recovery of an ambiguous effect without treating
+missing acknowledgement as permission to resend. The proof binds the exact
+actor, policy and workflow revision, scope, audience, resource, definition
+digest, execution window, operation/effect identity, and observation. Separately
+prove that a valid historical attestation cannot grant a new operation after
+revocation, expiry, changed scope or audience, or resource/effect substitution.
+Signatures attest to history; any replacement must independently resolve
+current authority before acting.
+
+**Sequencing and non-goals:** keep the companion investigation and optional
+pilot off the critical path for hosted reliability, authority continuation,
+reconciliation, lineage, and SDK ergonomics. No project merge, current
+dependency, code import, registry hosting, federation rollout, production
+trust claim, new provider authority, or release admission follows from this
+note. A future pilot needs its own scope and approval.
+
 ## Workflow OS Adjustments
 
 The review suggests the following roadmap emphasis:

@@ -6672,6 +6672,18 @@ Governance strictness profiles and enterprise stewardship are planned in [Govern
 
 Cross-project architecture review notes are captured in [Metric Protocol Learnings For Workflow OS](docs/concepts/METRIC_PROTOCOL_LEARNINGS_FOR_WORKFLOW_OS.md). The review reinforces stable identity, content-addressed contracts, conformance suites, machine-readable agent safety disclosures, local-first/federation-ready store posture, and deferred signed provenance. It does not authorize a hosted registry, cryptographic signing, MCP server, write-capable adapters, or workflow schema changes.
 
+**Later, optional metric proof composition.** Keep Metric Protocol as a
+separate domain protocol, not a current Workflow OS dependency. The
+[companion trust investigation and bounded pilot](docs/concepts/METRIC_PROTOCOL_LEARNINGS_FOR_WORKFLOW_OS.md#future-metric-proof-composition)
+require verifier-derived registry precedence and independently anchored
+organizational identity before evaluating a shared proof library or
+integration. Once those checks and the applicable Workflow OS continuation,
+reconciliation and proof boundaries pass, test one isolated metric operation:
+Workflow OS governs it, Metric Protocol verifies the exact definition, an
+execution runtime performs it, and a separate verifier reconstructs the
+decision and observed effect. This is not in the Active Delivery Queue or a
+prerequisite for the preview, v1, hosted reliability, lineage, or SDK work.
+
 ## Governance Without Brittle Orchestration
 
 Workflow OS is not designed to enumerate every internal agent reasoning step, tool transition, or execution edge. Agent execution remains probabilistic, adaptive, and fast. Workflow OS governs the work around that execution.
