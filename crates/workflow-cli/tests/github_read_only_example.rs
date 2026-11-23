@@ -107,7 +107,7 @@ fn assert_no_provider_entry(project: &Path, state: &Path, run_id: &str) {
     assert!(!output.contains("adapter_telemetry:"));
 }
 
-fn assert_fixture_next_action_rejects_non_running(project: &Path, state: &Path, run_id: &str) {
+fn assert_fixture_next_action_summarizes_terminal(project: &Path, state: &Path, run_id: &str) {
     let inspect_before = workflow_os(project, state, &["inspect", run_id]);
     assert!(
         inspect_before.status.success(),
@@ -115,9 +115,19 @@ fn assert_fixture_next_action_rejects_non_running(project: &Path, state: &Path, 
         stderr(&inspect_before)
     );
     let next_action = workflow_os(project, state, &["next-action", run_id]);
-    assert!(!next_action.status.success());
-    assert!(stderr(&next_action).contains("executor.governed_continuation.run.not_running"));
-    assert!(!stderr(&next_action).contains("runtime.events.empty"));
+    assert!(next_action.status.success(), "{}", stderr(&next_action));
+    let text = stdout(&next_action);
+    assert!(text.contains("status: Completed"));
+    assert!(text.contains("next_action: none; run is terminal"));
+    assert!(text.contains("provider_mode: fixture"));
+    let json = workflow_os(project, state, &["--json", "next-action", run_id]);
+    assert!(json.status.success(), "{}", stderr(&json));
+    let value: serde_json::Value = serde_json::from_slice(&json.stdout).expect("terminal summary");
+    assert_eq!(value["status"], "completed");
+    assert_eq!(value["execution_authorized"], false);
+    assert_eq!(value["provider_operation"], "github.repository.metadata");
+    assert_eq!(value["live_transport"], "disabled");
+    assert!(value.get("allowed_next_action").is_none());
     let inspect_after = workflow_os(project, state, &["inspect", run_id]);
     assert_eq!(stdout(&inspect_after), stdout(&inspect_before));
 }
@@ -212,7 +222,7 @@ fn repository_metadata_fixture_completes_through_public_cli_without_network() {
     assert!(completed.status.success(), "{}", stderr(&completed));
     assert!(stdout(&completed).contains("status: Completed"));
     assert!(stdout(&completed).contains("provider_posture: completed"));
-    assert_fixture_next_action_rejects_non_running(&project, &state, &run_id);
+    assert_fixture_next_action_summarizes_terminal(&project, &state, &run_id);
 
     let status = workflow_os(&project, &state, &["status", &run_id]);
     assert!(status.status.success(), "{}", stderr(&status));
