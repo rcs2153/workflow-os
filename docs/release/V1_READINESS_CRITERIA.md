@@ -18,6 +18,13 @@ preserve lawful authority and continuation.
 
 ## Required Contracts
 
+The [finite Codex-to-Claude proof](../../ROADMAP.md#cross-harness-exit-criteria)
+informs the scoped v1 decision alongside supported local behavior. It is not a
+claim of arbitrary cross-host replacement, federation, or broad provider
+execution. The [next profile tranche](../../ROADMAP.md#post-v1-authority-continuation-tranche)
+tests portability after that decision; it is not shipped or silently promoted
+to a v1 promise.
+
 ### 1. Authority Integrity
 
 For every supported v1 action path:

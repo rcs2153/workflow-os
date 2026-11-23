@@ -2,7 +2,7 @@
   "name": "workflow-os",
   "version": "0.4.0-preview.1",
   "private": true,
-  "description": "Open-source governance kernel for AI agents that preserves scoped authority, execution evidence, and the next lawful action.",
+  "description": "Open-source, local-first continuity-of-authority kernel for agentic work: scoped authority, execution truth, and safe continuation.",
   "license": "Apache-2.0",
   "workspaces": [
     "packages/*"
