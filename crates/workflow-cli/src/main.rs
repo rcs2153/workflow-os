@@ -2344,6 +2344,34 @@ fn authoritative_cli_error(code: &str, message: &str) -> WorkflowOsError {
     )
 }
 
+fn existing_authoritative_approval_presentation(
+    backend: &LocalStateBackend,
+    run_id: &WorkflowRunId,
+    approval: &workflow_core::ApprovalRequest,
+) -> Result<Option<ApprovalPresentationRecord>, WorkflowOsError> {
+    let existing =
+        backend.list_approval_presentation_records_for_approval(run_id, &approval.approval_id)?;
+    match existing.as_slice() {
+        [] => Ok(None),
+        [record]
+            if backend
+                .read_approval_presentation_record(record.presentation_id())?
+                .as_ref()
+                == Some(record) =>
+        {
+            validate_approval_presentation_for_request(ApprovalPresentationValidationInput {
+                presentation: record,
+                approval_request: approval,
+            })?;
+            Ok(Some(record.clone()))
+        }
+        _ => Err(authoritative_cli_error(
+            "approval_presentation_inconsistent",
+            "waiting approval has ambiguous or inconsistent presentation records",
+        )),
+    }
+}
+
 fn persist_authoritative_governance_approval_presentation(
     invocation: &Invocation,
     backend: &LocalStateBackend,
@@ -2355,6 +2383,13 @@ fn persist_authoritative_governance_approval_presentation(
             "authoritative governance could not resolve the waiting approval request",
         )
     })?;
+    if let Some(record) = existing_authoritative_approval_presentation(
+        backend,
+        &run.snapshot.identity.run_id,
+        approval,
+    )? {
+        return Ok(record);
+    }
     let aggregate = approval.governance_approval_binding.is_some();
     let (requested_action, work_summary, approved_scope, why_now) = if aggregate {
         (
@@ -2380,8 +2415,13 @@ fn persist_authoritative_governance_approval_presentation(
     let validation_expectations = vec![
         "The canonical workflow-os project validation check must pass again at approval decision time.".to_owned(),
     ];
+    let handler_option = if invocation.mock_all_local_skills {
+        " --mock-all-local-skills"
+    } else {
+        ""
+    };
     let next_action = format!(
-        "workflow-os approve {} {} --actor user/<approver> --reason <bounded-reason>",
+        "workflow-os{handler_option} approve {} {} --actor user/<approver> --reason <bounded-reason>",
         run.snapshot.identity.run_id, approval.approval_id
     );
     let channel = ApprovalPresentationChannel::Terminal;
@@ -2431,7 +2471,6 @@ fn persist_authoritative_governance_approval_presentation(
         sensitivity,
     })?;
     backend.write_approval_presentation_record(&record)?;
-    let _ = invocation;
     Ok(record)
 }
 
