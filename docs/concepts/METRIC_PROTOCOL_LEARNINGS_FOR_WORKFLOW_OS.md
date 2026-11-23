@@ -137,6 +137,8 @@ After the applicable Workflow OS authority-continuation, effect reconciliation
 and proof-verification boundaries are accepted, and the companion trust review
 passes, separately scope one publish or consume operation on an isolated
 registry and one immutable metric definition. Start with a disposable target.
+Use the runtime-neutral [governed artifact identity contract](reasoning-lineage.md#governed-artifact-identity)
+for the exact domain object. This demo does not define or gate that contract.
 
 1. Workflow OS admits or denies the principal's exact operation under its
    current policy and records the approval and delegation, if required.

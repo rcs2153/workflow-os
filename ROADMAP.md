@@ -7258,6 +7258,23 @@ reconciliation evidence.
 
 This milestone should treat reasoning lineage as supporting structure for governed work, not as the primary workflow runtime. Workflow OS must remain a declarative workflow kernel with durable state, policy gates, approvals, auditability, observability, and adapter boundaries.
 
+### Content-Addressed Governed Artifact Identity
+
+[Governed artifact identity](docs/concepts/reasoning-lineage.md#governed-artifact-identity)
+is a future lineage and proof foundation. Bind authorization to exact immutable
+revisions and digests, never to floating aliases. Artifact identity answers
+what was governed; runtime history integrity answers what the execution system
+recorded; Workflow OS resolves whether the exact action is authorized now.
+Runtime history does not replace independent observation of an external effect.
+
+Build on immutable run inputs, EvidenceReference and WorkReport contracts,
+current-authority resolution, and effect reconciliation. Scope a local
+conformance and continuation slice first, then a bounded Dapr interoperability
+test. The optional hardened Metric Protocol domain demonstration follows its
+own trust review. No runtime, registry, or Metric Protocol dependency is
+required. This does not enter the Active Delivery Queue or delay hosted
+reliability, reconciliation, authority continuation, or SDK work.
+
 ### Decision Deliberation And Alternative-Path Lineage
 
 Reasoning Lineage must eventually preserve more than the selected outcome. At
