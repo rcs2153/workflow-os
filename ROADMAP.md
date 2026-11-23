@@ -137,6 +137,15 @@ This is an explicit authority transition, not a second queue or an inference
 from historical lane notes. Shared-code, installer and default-path defects
 still block the preview; VM review, host qualification and v1 gates are not waived.
 
+Engineering validation starts on infrastructure the maintainer can provision:
+disposable local fixtures and services first, then an isolated VM or managed
+runner when a different OS or architecture is required. Run these tests without
+waiting for an outside reviewer. Record the actual environment, operator, inputs,
+results and limits. A missing reviewer or platform blocks only the named
+acceptance decision that needs that evidence; it does not block testing or
+unrelated otherwise-authorized engineering, and it does not reorder this queue.
+See the [release evidence rules](docs/release/0.4.0-preview.1_RELEASE_SCOPE_DECISION.md#engineering-tests-and-release-assurance).
+
 | Item | Status and exact remaining gate | Decision authority | Evidence | Updated | Exit |
 | --- | --- | --- | --- | --- | --- |
 | P0 bounded local `0.4.0-preview.1` developer preview | **Old pair ineligible; release not admitted.** PR #991 fixed a dependency advisory after source `cbab786b`. Fix binary onboarding and executable approval-demo handoff before freezing replacement source. Implement or explicitly disposition focused help and terminal `next-action` before admission. Then rebuild both native packages from one patched exact commit and obtain native Linux and cold attended first-use evidence. Do not repeat DOC-1/DOC-2 or relabel old evidence. Publication and announcement remain separately gated. | Delegated maintainer owns implementation and evidence collection; role-separated reviewer assesses named release claims; release authority separately admits and authorizes external transitions. | [Readmission plan](docs/implementation-plans/0.4.0-preview.1-readmission-after-fresh-evaluation.md), [current checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#current-local-preview-acceptance), and [historical verified pair](docs/concepts/0.4.0-preview.1_SCOPED_CANDIDATE_TRANSFER_REPORT.md#current-local-preview-pair) | 2026-11-22 | Replacement pair passes both P1 gates, exact-source macOS/Linux golden paths, assurance and cold trial; scoped publication completed without broader claims. |
