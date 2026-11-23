@@ -137,6 +137,15 @@ This is an explicit authority transition, not a second queue or an inference
 from historical lane notes. Shared-code, installer and default-path defects
 still block the preview; VM review, host qualification and v1 gates are not waived.
 
+Engineering validation starts on infrastructure the maintainer can provision:
+disposable local fixtures and services first, then an isolated VM or managed
+runner when a different OS or architecture is required. Run these tests without
+waiting for an outside reviewer. Record the actual environment, operator, inputs,
+results and limits. A missing reviewer or platform blocks only the named
+acceptance decision that needs that evidence; it does not block testing or
+unrelated otherwise-authorized engineering, and it does not reorder this queue.
+See the [release evidence rules](docs/release/0.4.0-preview.1_RELEASE_SCOPE_DECISION.md#engineering-tests-and-release-assurance).
+
 | Item | Status and exact remaining gate | Decision authority | Evidence | Updated | Exit |
 | --- | --- | --- | --- | --- | --- |
 | P0 bounded local `0.4.0-preview.1` developer preview | **Exact pair and separate-agent audit reviewed; release not admitted.** DOC-1/DOC-2 merged in #986. Source `cbab786b` and workflow revisions frozen; all 13 exact-source checks passed. Pair verification is recorded in #987. Separate agent freshly verified both artifacts, tested bounded macOS paths and repeated the official-feed advisory scan with zero vulnerabilities; shared-host, maintenance and index limits disclosed. Next: Linux-native exact-byte user-path and human-usability evidence under #974, then remaining acceptance and a separate admission decision. Do not repeat completed corrections or rebuild solely for evidence-only commits. Quiet publication and announcement remain separately gated. | User-approved scope; delegated maintainer governs preparation; role-separated reviewer supplies bounded observations, not invented external-human assurance; release authority separately admits and authorizes external transitions. | [Release scope](docs/release/0.4.0-preview.1_RELEASE_SCOPE_DECISION.md), [current checklist](docs/release/0.4.0-preview.1_RELEASE_CHECKLIST.md#current-local-preview-acceptance), [verified pair](docs/concepts/0.4.0-preview.1_SCOPED_CANDIDATE_TRANSFER_REPORT.md#current-local-preview-pair) and [separate-agent review](docs/concepts/0.4.0-preview.1_SEPARATE_AGENT_REVIEW.md) | 2026-11-21 | Exact-source macOS/Linux golden path, local authority/recovery and installation evidence accepted; scoped publication completed without broader claims. |
