@@ -179,6 +179,16 @@ echo "local .workflow-os state was not removed"
 `;
 }
 
+function packageReadme(projectDir, manifest) {
+  const replacements = {
+    VERSION: manifest.version,
+    TARGET: manifest.target,
+    SOURCE: `https://github.com/rcs2153/workflow-os/blob/${manifest.source_commit}`,
+  };
+  return readFileSync(join(projectDir, "scripts/release-package-readme.md"), "utf8")
+    .replace(/@(VERSION|TARGET|SOURCE)@/g, (_, key) => replacements[key]);
+}
+
 function verifyNativeBinary(binaryPath, target, version) {
   const targetContract = supportedTargets.get(target);
   if (!targetContract) {
@@ -255,7 +265,7 @@ export function packageRelease({
   const archive = deterministicTarGzip(rootName, [
     { path: "LICENSE", mode: 0o644, content: readFileSync(join(projectDir, "LICENSE")) },
     { path: "PACKAGE-MANIFEST.json", mode: 0o644, content: `${JSON.stringify(manifest, null, 2)}\n` },
-    { path: "README.md", mode: 0o644, content: readFileSync(join(projectDir, "README.md")) },
+    { path: "README.md", mode: 0o644, content: packageReadme(projectDir, manifest) },
     { path: "install.sh", mode: 0o755, content: installScript(version) },
     { path: "uninstall.sh", mode: 0o755, content: uninstallScript(version) },
     { path: "workflow-os", mode: 0o755, content: binary },

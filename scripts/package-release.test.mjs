@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readlinkSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -74,7 +75,11 @@ function writeReleaseIdentityProject(projectDir) {
     ].join("\n"),
   );
   writeFileSync(join(projectDir, "LICENSE"), readFileSync(join(sourceProjectDir, "LICENSE")));
-  writeFileSync(join(projectDir, "README.md"), "# Workflow OS release fixture\n");
+  mkdirSync(join(projectDir, "scripts"));
+  writeFileSync(
+    join(projectDir, "scripts/release-package-readme.md"),
+    readFileSync(join(sourceProjectDir, "scripts/release-package-readme.md")),
+  );
 }
 
 function nativeFixture(binaryVersion = version) {
@@ -217,6 +222,32 @@ test("archive installs, refuses overwrite, and uninstalls only the binary", () =
   execFileSync(join(root, "uninstall.sh"), { env: { ...process.env, WORKFLOW_OS_INSTALL_DIR: installDir } });
   assert.equal(existsSync(join(installDir, "workflow-os")), false);
   assert.equal(readFileSync(join(stateDir, "state"), "utf8"), "preserve\n");
+});
+
+test("extracted README uses the binary and every link is local or pinned to source", () => {
+  const { directory, binaryPath } = provisionalFixture();
+  const result = packageProvisional(join(directory, "output"), binaryPath);
+  execFileSync("tar", ["-xzf", result.archivePath, "-C", directory]);
+  const root = join(directory, `workflow-os-v${version}-aarch64-apple-darwin`);
+  const readme = readFileSync(join(root, "README.md"), "utf8");
+  assert.ok(readme.startsWith(`# Workflow OS ${version}\n`));
+  assert.match(readme, /\.\/install\.sh\nexport PATH="\$HOME\/\.local\/bin:\$PATH"\nworkflow-os --version/);
+  assert.match(readme, /WORKFLOW_OS_INSTALL_DIR/);
+  assert.match(readme, /workflow-os validate\nworkflow-os first-run\n/);
+  assert.match(readme, /\.\/uninstall\.sh/);
+  assert.doesNotMatch(readme, /git clone|cargo build|npm install|@[A-Z]+@/);
+
+  const pinnedPrefix = `https://github.com/rcs2153/workflow-os/blob/${provisionalSourceCommit}/`;
+  const links = [...readme.matchAll(/\]\(([^)]+)\)/g)].map((match) => match[1]);
+  assert.equal(links.length, 12);
+  for (const link of links) {
+    if (link === "LICENSE" || link === "PACKAGE-MANIFEST.json") {
+      assert.equal(statSync(join(root, link)).isFile(), true);
+    } else {
+      assert.ok(link.startsWith(pinnedPrefix), link);
+      assert.equal(statSync(join(sourceProjectDir, link.slice(pinnedPrefix.length))).isFile(), true);
+    }
+  }
 });
 
 test("installer rejects dangling destination symlinks without writing outside the install directory", () => {
